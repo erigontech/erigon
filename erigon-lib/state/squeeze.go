@@ -267,7 +267,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 				select {
 				case <-logEvery.C:
 					ac.a.logger.Info("[squeeze_migration]", "file", cf.decompressor.FileName(), "k", fmt.Sprintf("%x", k),
-						"progress", fmt.Sprintf("%d/%d", common.PrettyCounter(ki), common.PrettyCounter(cf.decompressor.Count())))
+						"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(ki), common.PrettyCounter(cf.decompressor.Count())))
 				default:
 				}
 			}
