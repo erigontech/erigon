@@ -30,20 +30,13 @@ by default.
     - [Config Files TOML](#config-files-toml)
     - [Beacon Chain (Consensus Layer)](#beacon-chain-consensus-layer)
     - [Caplin](#caplin)
-        - [Caplin's Usage.](#caplins-usage)
+        - [Caplin's Usage](#caplins-usage)
     - [Multiple Instances / One Machine](#multiple-instances--one-machine)
     - [Dev Chain](#dev-chain)
 - [Key features](#key-features)
-    - [More Efficient State Storage](#more-efficient-state-storage)
     - [Faster Initial Sync](#faster-initial-sync)
+    - [More Efficient State Storage](#more-efficient-state-storage)
     - [JSON-RPC daemon](#json-rpc-daemon)
-        - [**For remote DB**](#for-remote-db)
-        - [**gRPC ports**](#grpc-ports)
-    - [Run all components by docker-compose](#run-all-components-by-docker-compose)
-        - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
-        - [Environment Variables](#environment-variables)
-        - [Check: Permissions](#check-permissions)
-        - [Run](#run)
     - [Grafana dashboard](#grafana-dashboard)
 - [FAQ](#faq)
     - [How much RAM do I need](#how-much-ram-do-i-need)
@@ -54,22 +47,28 @@ by default.
         - [`shared` ports](#shared-ports)
         - [`other` ports](#other-ports)
         - [Hetzner expecting strict firewall rules](#hetzner-expecting-strict-firewall-rules)
-    - [How to run erigon as a separate user? (e.g. as a
-      `systemd` daemon)](#how-to-run-erigon-as-a-separate-user-eg-as-a-systemd-daemon)
+    - [Run erigon as a separate user - `systemd` example](#run-erigon-as-a-separate-user---systemd-example)
     - [How to get diagnostic for bug report?](#how-to-get-diagnostic-for-bug-report)
     - [How to run local devnet?](#how-to-run-local-devnet)
     - [Docker permissions error](#docker-permissions-error)
     - [How to run public RPC api](#how-to-run-public-rpc-api)
     - [Run RaspberyPI](#run-raspberypi)
+    - [Run all components by docker-compose](#run-all-components-by-docker-compose)
+        - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
+        - [Environment Variables](#environment-variables)
+        - [Check: Permissions](#check-permissions)
+        - [Run](#run)
     - [How to change db pagesize](#how-to-change-db-pagesize)
     - [Erigon3 perf tricks](#erigon3-perf-tricks)
     - [Windows](#windows)
 - [Getting in touch](#getting-in-touch)
     - [Erigon Discord Server](#erigon-discord-server)
+    - [Blog](#blog)
+    - [Twitter](#twitter)
     - [Reporting security issues/concerns](#reporting-security-issuesconcerns)
 - [Known issues](#known-issues)
     - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
-    - [Blocks Execution is slow on cloud-network-drives](#blocks-execution-is-slow-on-cloud-network-drives)
+    - [Cloud network drives](#cloud-network-drives)
     - [Filesystem's background features are expensive](#filesystems-background-features-are-expensive)
     - [Gnome Tracker can kill Erigon](#gnome-tracker-can-kill-erigon)
     - [the --mount option requires BuildKit error](#the---mount-option-requires-buildkit-error)
@@ -345,7 +344,7 @@ not suit how Erigon works. Erigon is designed to handle many blocks simultaneous
 efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the
 Engine API.
 
-#### Caplin's Usage.
+#### Caplin's Usage
 
 Caplin is be enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point
 on, an external Consensus Layer will not be need
@@ -381,9 +380,10 @@ Quote your path if it has spaces.
 Key features
 ============
 
-<code>🔬 See more
-detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It
-is being updated on recurring basis.</code>
+### Faster Initial Sync
+
+On good network bandwidth EthereumMainnet FullNode syncs in 3
+hours: [OtterSync](https://erigon.substack.com/p/erigon-3-alpha-2-introducing-blazingly) can sync
 
 ### More Efficient State Storage
 
@@ -396,162 +396,32 @@ DB. That reduces write amplification and DB inserts are orders of magnitude quic
 
 <code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon/blob/main/erigon-lib/etl/README.md).</code>
 
-**Plain state**.
+**Plain state**
 
 **Single accounts/state trie**. Erigon uses a single Merkle trie for both accounts and the storage.
 
-### Faster Initial Sync
-
-[OtterSync](https://erigon.substack.com/p/erigon-3-alpha-2-introducing-blazingly)
-
-<code>🔬 See more detailed explanation in the [Staged Sync Readme](/eth/stagedsync/README.md)</code>
-
-It uses the same network primitives and is compatible with regular go-ethereum nodes that are using full sync, you do
-not need any special sync capabilities for Erigon to sync.
-
-When reimagining the full sync, with focus on batching data together and minimize DB overwrites. That makes it possible
-to sync Ethereum mainnet in under 2 days if you have a fast enough network connection and an SSD drive.
-
-Examples of stages are:
-
-* Downloading headers;
-
-* Downloading block bodies;
-
-* Recovering senders' addresses;
-
-* Executing blocks;
-
-* Validating root hashes and building intermediate hashes for the state Merkle trie;
-
-* [...]
+<code> 🔬 [Staged Sync Readme](/eth/stagedsync/README.md)</code>
 
 ### JSON-RPC daemon
 
 Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can work inside Erigon and as
-independent process.
-
-To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
-
-Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or
-remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
-
-#### **For remote DB**
-
-This works regardless of whether RPC daemon is on the same computer with Erigon, or on a different one. They use TPC
-socket connection to pass data between them. To use this mode, run Erigon in one terminal window
+independent process on same Server (or another Server). Example
 
 ```sh
-make erigon
-./build/bin/erigon --private.api.addr=localhost:9090 --http=false
-make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
+make erigon rpcdaemon
+./build/bin/erigon --datadir=/my --http=false
+# To run RPCDaemon as separated process: use same `--datadir` as Erigon
+./build/bin/rpcdaemon --datadir=/my --http.api=eth,erigon,web3,net,debug,trace,txpool --ws
 ```
-
-#### **gRPC ports**
-
-`9090` erigon, `9091` sentry, `9092` consensus engine, `9093` torrent downloader, `9094` transactions pool
 
 Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go)
 , [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
 
-For a details on the implementation status of each
-command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
-
-### Run all components by docker-compose
-
-Docker allows for building and running Erigon via containers. This alleviates the need for installing build dependencies
-onto the host OS.
-
-#### Optional: Setup dedicated user
-
-User UID/GID need to be synchronized between the host OS and container so files are written with correct permission.
-
-You may wish to setup a dedicated user/group on the host OS, in which case the following `make` targets are available.
-
-```sh
-# create "erigon" user
-make user_linux
-# or
-make user_macos
-```
-
-#### Environment Variables
-
-There is a `.env.example` file in the root of the repo.
-
-* `DOCKER_UID` - The UID of the docker user
-* `DOCKER_GID` - The GID of the docker user
-* `XDG_DATA_HOME` - The data directory which will be mounted to the docker containers
-
-If not specified, the UID/GID will use the current user.
-
-A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory created by helper
-targets `make user_linux` or `make user_macos`.
-
-#### Check: Permissions
-
-In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker, which will be
-determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
-
-If a build or service startup is failing due to permissions, check that all the directories, UID, and GID controlled by
-these environment variables are correct.
-
-#### Run
-
-Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on port 9090, and grafana on port 3000.
-
-```sh
-#
-# Will mount ~/.local/share/erigon to /home/erigon/.local/share/erigon inside container
-#
-make docker-compose
-
-#
-# or
-#
-# if you want to use a custom data directory
-# or, if you want to use different uid/gid for a dedicated user
-#
-# To solve this, pass in the uid/gid parameters into the container.
-#
-# DOCKER_UID: the user id
-# DOCKER_GID: the group id
-# XDG_DATA_HOME: the data directory (default: ~/.local/share)
-#
-# Note: /preferred/data/folder must be read/writeable on host OS by user with UID/GID given
-#       if you followed above instructions
-#
-# Note: uid/gid syntax below will automatically use uid/gid of running user so this syntax
-#       is intended to be run via the dedicated user setup earlier
-#
-DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
-
-#
-# if you want to run the docker, but you are not logged in as the $ERIGON_USER
-# then you'll need to adjust the syntax above to grab the correct uid/gid
-#
-# To run the command via another user, use
-#
-ERIGON_USER=erigon
-sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${ERIGON_USER}) XDG_DATA_HOME=~${ERIGON_USER}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
-```
-
-Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
-and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
-See: https://github.com/erigontech/erigon/pull/2392/files
-
-If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix
-the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a
-non-root user for security reasons. For more information about how to do this, refer to
-[this article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
-
-Windows support for docker-compose is not ready yet. Please help us with .ps1 port.
+<code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
 
 ### Grafana dashboard
 
 `docker compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
-
 
 FAQ
 ================
@@ -643,7 +513,7 @@ RFC 922, Section 7
 Same
 in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068)
 
-### How to run erigon as a separate user? (e.g. as a `systemd` daemon)
+### Run erigon as a separate user - `systemd` example
 
 Running erigon from `build/bin` as a separate user might produce an error:
 
@@ -686,6 +556,94 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 ### Run RaspberyPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
+
+### Run all components by docker-compose
+
+Docker allows for building and running Erigon via containers. This alleviates the need for installing build dependencies
+onto the host OS.
+
+#### Optional: Setup dedicated user
+
+User UID/GID need to be synchronized between the host OS and container so files are written with correct permission.
+
+You may wish to setup a dedicated user/group on the host OS, in which case the following `make` targets are available.
+
+```sh
+# create "erigon" user
+make user_linux
+# or
+make user_macos
+```
+
+#### Environment Variables
+
+There is a `.env.example` file in the root of the repo.
+
+* `DOCKER_UID` - The UID of the docker user
+* `DOCKER_GID` - The GID of the docker user
+* `XDG_DATA_HOME` - The data directory which will be mounted to the docker containers
+
+If not specified, the UID/GID will use the current user.
+
+A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory created by helper
+targets `make user_linux` or `make user_macos`.
+
+#### Check: Permissions
+
+In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker, which will be
+determined by the `DOCKER_UID` and `DOCKER_GID` at build time.
+
+If a build or service startup is failing due to permissions, check that all the directories, UID, and GID controlled by
+these environment variables are correct.
+
+#### Run
+
+Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on port 9090, and grafana on port 3000.
+
+```sh
+#
+# Will mount ~/.local/share/erigon to /home/erigon/.local/share/erigon inside container
+#
+make docker-compose
+
+#
+# or
+#
+# if you want to use a custom data directory
+# or, if you want to use different uid/gid for a dedicated user
+#
+# To solve this, pass in the uid/gid parameters into the container.
+#
+# DOCKER_UID: the user id
+# DOCKER_GID: the group id
+# XDG_DATA_HOME: the data directory (default: ~/.local/share)
+#
+# Note: /preferred/data/folder must be read/writeable on host OS by user with UID/GID given
+#       if you followed above instructions
+#
+# Note: uid/gid syntax below will automatically use uid/gid of running user so this syntax
+#       is intended to be run via the dedicated user setup earlier
+#
+DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+
+#
+# if you want to run the docker, but you are not logged in as the $ERIGON_USER
+# then you'll need to adjust the syntax above to grab the correct uid/gid
+#
+# To run the command via another user, use
+#
+ERIGON_USER=erigon
+sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${ERIGON_USER}) XDG_DATA_HOME=~${ERIGON_USER}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+```
+
+Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
+and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
+See: https://github.com/erigontech/erigon/pull/2392/files
+
+If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix
+the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a
+non-root user for security reasons. For more information about how to do this, refer to
+[this article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
 
 ### How to change db pagesize
 
