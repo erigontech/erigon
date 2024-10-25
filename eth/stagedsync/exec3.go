@@ -693,6 +693,7 @@ func ExecV3(ctx context.Context,
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
 
+	receiptsHashResultCh := make(chan error)
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
 		// set shouldGenerateChangesets=true if we are at last n blocks from maxBlockNum. this is as a safety net in chains
@@ -791,8 +792,9 @@ Loop:
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
 		var usedGas, blobGasUsed uint64
-
+		var needToWaitForReceiptsHash bool
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
+
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
 				BlockNum:           blockNum,
@@ -809,6 +811,7 @@ Loop:
 				GetHashFn:          getHashFn,
 				EvmBlockContext:    blockContext,
 				Withdrawals:        b.Withdrawals(),
+				Requests:           b.Requests(),
 				PruneNonEssentials: pruneNonEssentials,
 
 				// use history reader instead of state reader to catch up to the tx where we left off
@@ -900,8 +903,21 @@ Loop:
 					}
 					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
 					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, isMining); err != nil {
-							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+						// This is an optimization to avoid running the post validation for every transaction in the block serially
+						// We only run it once for the last transaction in the block, this yields a +5% improvement in block processing time
+						if blockNum == maxBlockNum {
+							needToWaitForReceiptsHash = true
+							go func(usedGas, blobGasUsed uint64, checkReceipts bool, blockReceipts types.Receipts, header *types.Header, isMining bool) {
+								if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, blockReceipts, header, isMining); err != nil {
+									receiptsHashResultCh <- fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+								} else {
+									receiptsHashResultCh <- nil
+								}
+							}(usedGas, blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, isMining)
+						} else {
+							if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, isMining); err != nil {
+								return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
+							}
 						}
 					}
 					usedGas, blobGasUsed = 0, 0
@@ -962,6 +978,12 @@ Loop:
 			if _, err := doms.ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
+			if needToWaitForReceiptsHash {
+				err := <-receiptsHashResultCh
+				if err != nil {
+					return err
+				}
+			}
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
 			doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
@@ -972,7 +994,7 @@ Loop:
 			}
 			doms.SetChangesetAccumulator(nil)
 		}
-
+		needToWaitForReceiptsHash = false
 		mxExecBlocks.Add(1)
 
 		if offsetFromBlockBeginning > 0 {
@@ -1615,6 +1637,7 @@ func reconstituteStep(last bool,
 						GetHashFn:       getHashFn,
 						EvmBlockContext: blockContext,
 						Withdrawals:     b.Withdrawals(),
+						Requests:        b.Requests(),
 					}
 					if txIndex >= 0 && txIndex < len(txs) {
 						txTask.Tx = txs[txIndex]
