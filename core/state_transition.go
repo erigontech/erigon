@@ -410,7 +410,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			}
 
 			// 7. set authority code
-			st.state.SetCode(authority, types.AddressToDelegation(auth.Address))
+			if auth.Address == (libcommon.Address{}) {
+				st.state.SetCode(authority, nil)
+			} else {
+				st.state.SetCode(authority, types.AddressToDelegation(auth.Address))
+			}
 
 			// 8. increase the nonce of authority
 			st.state.SetNonce(authority, authorityNonce+1)
