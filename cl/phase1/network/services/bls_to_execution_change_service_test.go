@@ -46,8 +46,9 @@ type blsToExecutionChangeTestSuite struct {
 	syncedData     *mockSync.MockSyncedData
 	beaconCfg      *clparams.BeaconChainConfig
 
-	service   BLSToExecutionChangeService
-	mockFuncs *mockFuncs
+	service                BLSToExecutionChangeService
+	batchSignatureVerifier *MockBatchSignatureVerifierInterface
+	mockFuncs              *mockFuncs
 }
 
 func (t *blsToExecutionChangeTestSuite) SetupTest() {
@@ -58,10 +59,11 @@ func (t *blsToExecutionChangeTestSuite) SetupTest() {
 	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
 	t.emitters = beaconevents.NewEventEmitter()
 	t.beaconCfg = &clparams.BeaconChainConfig{}
-	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	//batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
 	batchCheckInterval = 1 * time.Millisecond
-	go batchSignatureVerifier.Start()
-	t.service = NewBLSToExecutionChangeService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, batchSignatureVerifier)
+	//go batchSignatureVerifier.Start()
+	t.batchSignatureVerifier = NewMockBatchSignatureVerifierInterface(t.gomockCtrl)
+	t.service = NewBLSToExecutionChangeService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, t.batchSignatureVerifier)
 	// mock global functions
 	t.mockFuncs = &mockFuncs{
 		ctrl: t.gomockCtrl,
@@ -176,7 +178,7 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				mockStateReader.EXPECT().GenesisValidatorsRoot().Return([32]byte{}).Times(1)
 				// bls verify
 				t.gomockCtrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).Times(1)
-				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
+				t.batchSignatureVerifier.EXPECT().AsyncVerifyBlsToExecutionChange(gomock.Any()).Return().Times(1)
 			},
 			msg:         mockMsg,
 			specificErr: ErrIgnore,
@@ -204,7 +206,9 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				copy(mockNewWc[1:], make([]byte, 11))
 				copy(mockNewWc[12:], mockMsg.SignedBLSToExecutionChange.Message.To[:])
 				mockStateMutator.EXPECT().SetWithdrawalCredentialForValidatorAtIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex), mockNewWc).Times(1)
-				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
+				t.batchSignatureVerifier.EXPECT().AsyncVerifyBlsToExecutionChange(gomock.Any()).DoAndReturn(func(data *AggregateVerificationData) {
+					data.F()
+				}).Times(1)
 			},
 			msg:         mockMsg,
 			specificErr: ErrIgnore,

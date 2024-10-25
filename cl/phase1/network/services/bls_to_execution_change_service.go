@@ -42,7 +42,7 @@ type blsToExecutionChangeService struct {
 	emitters               *beaconevents.EventEmitter
 	syncedDataManager      synced_data.SyncedData
 	beaconCfg              *clparams.BeaconChainConfig
-	batchSignatureVerifier *BatchSignatureVerifier
+	batchSignatureVerifier BatchSignatureVerifierInterface
 }
 
 func NewBLSToExecutionChangeService(
@@ -50,7 +50,7 @@ func NewBLSToExecutionChangeService(
 	emitters *beaconevents.EventEmitter,
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
-	batchSignatureVerifier *BatchSignatureVerifier,
+	batchSignatureVerifier BatchSignatureVerifierInterface,
 ) BLSToExecutionChangeService {
 	return &blsToExecutionChangeService{
 		operationsPool:         operationsPool,

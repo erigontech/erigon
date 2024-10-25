@@ -54,3 +54,11 @@ type BLSToExecutionChangeService Service[*cltypes.SignedBLSToExecutionChangeWith
 
 //go:generate mockgen -typed=true -destination=./mock_services/proposer_slashing_service_mock.go -package=mock_services . ProposerSlashingService
 type ProposerSlashingService Service[*cltypes.ProposerSlashing]
+
+//go:generate mockgen -typed=true -destination=./batch_signature_verifier_mock.go -package=services . BatchSignatureVerifierInterface
+type BatchSignatureVerifierInterface interface {
+	AsyncVerifyAttestation(data *AggregateVerificationData)
+	AsyncVerifyAggregateProof(data *AggregateVerificationData)
+	AsyncVerifyBlsToExecutionChange(data *AggregateVerificationData)
+	ImmediateVerification(data *AggregateVerificationData) error
+}
