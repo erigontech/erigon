@@ -60,7 +60,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if err != nil {
 		return err
 	}
-	s.headRoot.Store(blkRoot)
+	s.headRoot.Store(common.Hash(blkRoot))
 	curPtr, ok := s.headState.Load().(*state.CachingBeaconState)
 	if !ok {
 		// No head state yet
