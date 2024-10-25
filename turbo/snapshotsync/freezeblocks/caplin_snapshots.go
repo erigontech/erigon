@@ -86,9 +86,6 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 // slot       -> beacon_slot_segment_offset
 
 type CaplinSnapshots struct {
-	indicesReady  atomic.Bool
-	segmentsReady atomic.Bool
-
 	Salt uint32
 
 	dirtyLock sync.RWMutex                   // guards `dirty` field
@@ -313,14 +310,12 @@ Loop:
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
-	s.segmentsReady.Store(true)
 	return nil
 }
 
 func (s *CaplinSnapshots) recalcVisibleFiles() {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
-		s.indicesReady.Store(true)
 	}()
 
 	s.visibleLock.Lock()

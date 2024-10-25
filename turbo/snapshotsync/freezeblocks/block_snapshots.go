@@ -456,7 +456,6 @@ type segmentsRotx struct {
 }
 
 type RoSnapshots struct {
-	indicesReady  atomic.Bool
 	segmentsReady atomic.Bool
 
 	types []snaptype.Type //immutable
@@ -508,7 +507,6 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 func (s *RoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
 func (s *RoSnapshots) Dir() string                   { return s.dir }
 func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
-func (s *RoSnapshots) IndicesReady() bool            { return s.indicesReady.Load() }
 func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
 func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
@@ -587,7 +585,6 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 func (s *RoSnapshots) recalcVisibleFiles() {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
-		s.indicesReady.Store(true)
 	}()
 
 	s.visibleLock.Lock()
