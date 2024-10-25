@@ -1,6 +1,7 @@
 # Erigon
 
-Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**, Blog: **[erigon.substack.com](https://erigon.substack.com/)**, Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
+Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**, Blog: *
+*[erigon.substack.com](https://erigon.substack.com/)**, Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
@@ -11,6 +12,7 @@ by default.
 ![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
 <!--ts-->
+
 - [Erigon](#erigon)
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
@@ -27,31 +29,32 @@ by default.
     - [Config Files TOML](#config-files-toml)
     - [Beacon Chain (Consensus Layer)](#beacon-chain-consensus-layer)
     - [Caplin](#caplin)
-      - [Caplin's Usage.](#caplins-usage)
+        - [Caplin's Usage.](#caplins-usage)
     - [Multiple Instances / One Machine](#multiple-instances--one-machine)
     - [Dev Chain](#dev-chain)
 - [Key features](#key-features)
     - [More Efficient State Storage](#more-efficient-state-storage)
     - [Faster Initial Sync](#faster-initial-sync)
     - [JSON-RPC daemon](#json-rpc-daemon)
-      - [**For remote DB**](#for-remote-db)
-      - [**gRPC ports**](#grpc-ports)
+        - [**For remote DB**](#for-remote-db)
+        - [**gRPC ports**](#grpc-ports)
     - [Run all components by docker-compose](#run-all-components-by-docker-compose)
-      - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
-      - [Environment Variables](#environment-variables)
-      - [Check: Permissions](#check-permissions)
-      - [Run](#run)
+        - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
+        - [Environment Variables](#environment-variables)
+        - [Check: Permissions](#check-permissions)
+        - [Run](#run)
     - [Grafana dashboard](#grafana-dashboard)
 - [FAQ](#faq)
     - [How much RAM do I need](#how-much-ram-do-i-need)
     - [Default Ports and Firewalls](#default-ports-and-firewalls)
-      - [`erigon` ports](#erigon-ports)
-      - [`caplin` ports](#caplin-ports)
-      - [`beaconAPI` ports](#beaconapi-ports)
-      - [`shared` ports](#shared-ports)
-      - [`other` ports](#other-ports)
-      - [Hetzner expecting strict firewall rules](#hetzner-expecting-strict-firewall-rules)
-    - [How to run erigon as a separate user? (e.g. as a `systemd` daemon)](#how-to-run-erigon-as-a-separate-user-eg-as-a-systemd-daemon)
+        - [`erigon` ports](#erigon-ports)
+        - [`caplin` ports](#caplin-ports)
+        - [`beaconAPI` ports](#beaconapi-ports)
+        - [`shared` ports](#shared-ports)
+        - [`other` ports](#other-ports)
+        - [Hetzner expecting strict firewall rules](#hetzner-expecting-strict-firewall-rules)
+    - [How to run erigon as a separate user? (e.g. as a
+      `systemd` daemon)](#how-to-run-erigon-as-a-separate-user-eg-as-a-systemd-daemon)
     - [How to get diagnostic for bug report?](#how-to-get-diagnostic-for-bug-report)
     - [How to run local devnet?](#how-to-run-local-devnet)
     - [Docker permissions error](#docker-permissions-error)
@@ -88,8 +91,8 @@ architecture.
 - ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
-Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like gp3) - are high-latency not
-very good for Erigon.
+Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
+gp3): [Blocks Execution is slow on cloud-network-drives](#blocks-execution-is-slow-on-cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
@@ -258,7 +261,6 @@ your own implementation, security.
 How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
 Each service has own `./cmd/*/README.md` file.
 [Erigon Blog](https://erigon.substack.com/).
-
 
 ### Embedded Consensus Layer
 
@@ -688,7 +690,6 @@ https://github.com/mathMakesArt/Erigon-on-RPi-4
 
 [post](https://github.com/erigontech/erigon/blob/main/cmd/integration/Readme.md#copy-data-to-another-db)
 
-
 ### Erigon3 perf tricks
 
 - `--sync.loop.block.limit=10_000 --batchSize=2g` - likely will help for sync speed.
@@ -713,16 +714,16 @@ Windows users may run erigon in 3 possible ways:
   as `make` command so you have to run `.\wmake.ps1 [-target] <targetname>`. Example: `.\wmake.ps1 erigon` builds erigon
   executable. All binaries are placed in `.\build\bin\` subfolder. There are some requirements for a successful native
   build on windows :
-  * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
-    likely you already have it
-  * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.22
-  * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
-    following point)
-  * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
-    then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
-    to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`. Make sure
-    Windows System "Path" variable has:
-    C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
+    * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
+      likely you already have it
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.22
+    * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
+      following point)
+    * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
+      then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
+      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`. Make sure
+      Windows System "Path" variable has:
+      C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 
   **Important note about Anti-Viruses**
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's
@@ -745,7 +746,6 @@ Windows users may run erigon in 3 possible ways:
   limitations apply.
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network
   interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
-
 
 Getting in touch
 ================
@@ -785,23 +785,22 @@ Next tools show correct memory usage of Erigon:
   browser `localhost:3000`, credentials `admin/admin`)
 - `cat /proc/<PID>/smaps`
 
-  Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount
-  of
-  memory.
+Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount of
+memory.
 
-  **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one
-  of
-  main Erigon optimisations: "reduce Disk random access".
-  "Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
-  running
-  multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on same
-  Disk.
+**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
+main Erigon optimisations: "reduce Disk random access".
+"Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
+running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
+same Disk.
 
 ### Blocks Execution is slow on cloud-network-drives
 
 Please read https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
 non-batched way.
+Tricks: if you throw anough RAM and set env variable `ERIGON_SNAPSHOT_MADV_RND=false` - then Erigon will work
+good-enough on Cloud drives - in cost of higher IO.
 
 ### Filesystem's background features are expensive
 
