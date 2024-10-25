@@ -51,12 +51,13 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 
 		// a.squeezeCommitmentFile(ctx, domain)
 
-		filesToRemove = append(filesToRemove, tempFileCopy)
-		filesToRemove = append(filesToRemove, strings.ReplaceAll(to, ".kv", ".kv.torrent"))
-		filesToRemove = append(filesToRemove, strings.ReplaceAll(to, ".kv", ".bt"))
-		filesToRemove = append(filesToRemove, strings.ReplaceAll(to, ".kv", ".bt.torrent"))
-		filesToRemove = append(filesToRemove, strings.ReplaceAll(to, ".kv", ".kvei"))
-		filesToRemove = append(filesToRemove, strings.ReplaceAll(to, ".kv", ".kvei.torrent"))
+		filesToRemove = append(filesToRemove,
+			tempFileCopy,
+			strings.ReplaceAll(to, ".kv", ".kv.torrent"),
+			strings.ReplaceAll(to, ".kv", ".bt"),
+			strings.ReplaceAll(to, ".kv", ".bt.torrent"),
+			strings.ReplaceAll(to, ".kv", ".kvei"),
+			strings.ReplaceAll(to, ".kv", ".kvei.torrent"))
 
 		// _ = os.Remove(tempFileCopy)
 		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
