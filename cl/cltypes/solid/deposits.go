@@ -4,19 +4,47 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
-	_ ssz.EncodableSSZ = (*PendingDeposit)(nil)
-	_ ssz.HashableSSZ  = (*PendingDeposit)(nil)
+	_ EncodableHashableSSZ = (*DepositRequest)(nil)
+	_ EncodableHashableSSZ = (*PendingDeposit)(nil)
 )
 
 const (
 	SizePendingDeposit = length.Bytes48 + length.Hash + 8 + length.Bytes96 + 8
+	SizeDepositRequest = length.Bytes48 + length.Hash + 8 + length.Bytes96 + 8
 )
+
+type DepositRequest struct {
+	PubKey                common.Bytes48 `json:"pubkey"` // BLS public key
+	WithdrawalCredentials common.Hash    `json:"withdrawal_credentials"`
+	Amount                uint64         `json:"amount"`    // Gwei
+	Signature             common.Bytes96 `json:"signature"` // BLS signature
+	Index                 uint64         `json:"index"`     // validator index
+}
+
+func (p *DepositRequest) EncodingSizeSSZ() int {
+	return SizeDepositRequest
+}
+
+func (p *DepositRequest) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Index)
+}
+
+func (p *DepositRequest) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Index)
+}
+
+func (p *DepositRequest) Clone() clonable.Clonable {
+	return &DepositRequest{}
+}
+
+func (p *DepositRequest) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Index)
+}
 
 type PendingDeposit struct {
 	PubKey                common.Bytes48 // BLS public key
@@ -38,18 +66,10 @@ func (p *PendingDeposit) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Slot)
 }
 
-func (p PendingDeposit) Clone() clonable.Clonable {
+func (p *PendingDeposit) Clone() clonable.Clonable {
 	return &PendingDeposit{}
 }
 
 func (p *PendingDeposit) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Slot)
-}
-
-type DepositRequest struct {
-	PubKey                common.Bytes48 // BLS public key
-	WithdrawalCredentials common.Hash
-	Amount                uint64         // Gwei
-	Signature             common.Bytes96 // BLS signature
-	Index                 uint64
 }

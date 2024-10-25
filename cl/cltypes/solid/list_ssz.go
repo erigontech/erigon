@@ -25,12 +25,12 @@ import (
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
-type encodableHashableSSZ interface {
+type EncodableHashableSSZ interface {
 	ssz.EncodableSSZ
 	ssz.HashableSSZ
 }
 
-type ListSSZ[T encodableHashableSSZ] struct {
+type ListSSZ[T EncodableHashableSSZ] struct {
 	list []T
 
 	limit int
@@ -45,14 +45,14 @@ type ListSSZ[T encodableHashableSSZ] struct {
 	root libcommon.Hash
 }
 
-func NewDynamicListSSZ[T encodableHashableSSZ](limit int) *ListSSZ[T] {
+func NewDynamicListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:  make([]T, 0),
 		limit: limit,
 	}
 }
 
-func NewStaticListSSZ[T encodableHashableSSZ](limit int, bytesPerElement int) *ListSSZ[T] {
+func NewStaticListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:            make([]T, 0),
 		limit:           limit,
@@ -69,14 +69,14 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &l.list)
 }
 
-func NewDynamicListSSZFromList[T encodableHashableSSZ](list []T, limit int) *ListSSZ[T] {
+func NewDynamicListSSZFromList[T EncodableHashableSSZ](list []T, limit int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:  list,
 		limit: limit,
 	}
 }
 
-func NewStaticListSSZFromList[T encodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
+func NewStaticListSSZFromList[T EncodableHashableSSZ](list []T, limit int, bytesPerElement int) *ListSSZ[T] {
 	return &ListSSZ[T]{
 		list:            list,
 		limit:           limit,

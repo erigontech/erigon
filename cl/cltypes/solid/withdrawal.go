@@ -2,20 +2,47 @@ package solid
 
 import (
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
-	_ ssz.EncodableSSZ = (*PendingPartialWithdrawal)(nil)
-	_ ssz.HashableSSZ  = (*PendingPartialWithdrawal)(nil)
+	_ EncodableHashableSSZ = (*WithdrawalRequest)(nil)
+	_ EncodableHashableSSZ = (*PendingPartialWithdrawal)(nil)
 )
 
 const (
+	SizeWithdrawalRequest        = length.Addr + length.Bytes48 + 8
 	SizePendingPartialWithdrawal = 8 + 8 + 8
 )
+
+type WithdrawalRequest struct {
+	SourceAddress   common.Address `json:"source_address"`
+	ValidatorPubKey common.Bytes48 `json:"validator_pubkey"` // BLS public key
+	Amount          uint64         `json:"amount"`           // Gwei
+}
+
+func (p *WithdrawalRequest) EncodingSizeSSZ() int {
+	return SizeWithdrawalRequest
+}
+
+func (p *WithdrawalRequest) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, p.SourceAddress, p.ValidatorPubKey, p.Amount)
+}
+
+func (p *WithdrawalRequest) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
+}
+
+func (p *WithdrawalRequest) Clone() clonable.Clonable {
+	return &WithdrawalRequest{}
+}
+
+func (p *WithdrawalRequest) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(p.SourceAddress, p.ValidatorPubKey, p.Amount)
+}
 
 type PendingPartialWithdrawal struct {
 	Index             uint64 // validator index
@@ -35,16 +62,10 @@ func (p *PendingPartialWithdrawal) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, &p.Index, &p.Amount, &p.WithdrawableEpoch)
 }
 
-func (p PendingPartialWithdrawal) Clone() clonable.Clonable {
+func (p *PendingPartialWithdrawal) Clone() clonable.Clonable {
 	return &PendingPartialWithdrawal{}
 }
 
 func (p *PendingPartialWithdrawal) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(p.Index, p.Amount, p.WithdrawableEpoch)
-}
-
-type WithdrawalRequest struct {
-	SourceAddress   common.Address
-	ValidatorPubKey common.Bytes48 // BLS public key
-	Amount          uint64         // Gwei
 }
