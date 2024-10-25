@@ -2416,10 +2416,12 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 		if peerUrl, err := webPeerUrl(peer); err == nil {
 			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
 				rate := uint64(peer.DownloadRate())
+				upRaate := uint64(peer.UploadRate())
 				if !finished {
 					seed := diagnostics.SegmentPeer{
 						Url:          peerUrl.Host,
 						DownloadRate: rate,
+						UploadRate:   upRaate,
 						RemoteAddr:   peer.RemoteAddr.String(),
 						PeerId:       [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 						PiecesCount:  0,
@@ -2447,11 +2449,13 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 
 	for _, peer := range peersOfThisFile {
 		dr := uint64(peer.DownloadRate())
+		ur := uint64(peer.UploadRate())
 		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
 
 		segPeer := diagnostics.SegmentPeer{
 			Url:          url,
 			DownloadRate: dr,
+			UploadRate:   ur,
 			PiecesCount:  peer.PeerPieces().GetCardinality(),
 			RemoteAddr:   peer.RemoteAddr.String(),
 			PeerId:       peer.PeerID,
