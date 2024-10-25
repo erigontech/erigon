@@ -96,9 +96,50 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles(mergedAgg *AggregatorRoTx) erro
 		return nil
 	}
 
+	rng := RangesV3{
+		domain: [5]DomainRanges{
+			kv.AccountsDomain: {
+				name:    kv.AccountsDomain,
+				values:  MergeRange{true, 0, math.MaxUint64},
+				history: HistoryRanges{},
+				aggStep: a.StepSize(),
+			},
+			kv.StorageDomain: {
+				name:    kv.StorageDomain,
+				values:  MergeRange{true, 0, math.MaxUint64},
+				history: HistoryRanges{},
+				aggStep: a.StepSize(),
+			},
+		},
+		invertedIndex: [4]*MergeRange{},
+	}
+	sf, err := ac.staticFilesInRange(rng)
+	if err != nil {
+		return nil, err
+	}
+	ranges := make([]MergeRange, 0)
+	for fi, f := range sf.d[kv.AccountsDomain] {
+		ranges = append(ranges, MergeRange{
+			from: f.startTxNum,
+			to:   f.endTxNum,
+		})
+		log.Info("[squeeze_migration] see target files", "acc", len(mergedAccountFiles), "st", len(mergedStorageFiles), "com", len(mergedCommitFiles))
+	}
+
+	o
+	if len(ranges) == 0 {
+		return nil, errors.New("no account files found")
+	}
+
+
 	commitment := ac.d[kv.CommitmentDomain]
 	accounts := ac.d[kv.AccountsDomain]
 	storage := ac.d[kv.StorageDomain]
+
+	// commitment.lookupVisibleFileByItsRange(txFrom uint64, txTo uint64) //
+	// storage.lookupVisibleFileByItsRange(txFrom uint64, txTo uint64)
+	accounts.statelessIdxReader(i int)
+
 
 	// oh, again accessing domain.files directly, again and again..
 	mergedAccountFiles := mergedAgg.d[kv.AccountsDomain].d.dirtyFiles.Items()
