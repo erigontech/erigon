@@ -351,10 +351,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		webDownloadInfo:     map[string]webDownloadInfo{},
 		webDownloadSessions: map[string]*RCloneSession{},
 		downloading:         map[string]*downloadInfo{},
-		//webseedsDiscover:    discover,
-		webseedsDiscover:  false,
-		logPrefix:         "",
-		completedTorrents: make(map[string]completedTorrentInfo),
+		webseedsDiscover:    discover,
+		logPrefix:           "",
+		completedTorrents:   make(map[string]completedTorrentInfo),
 	}
 	d.webseeds.SetTorrent(d.torrentFS, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
@@ -1552,22 +1551,6 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 
 		downloadStarted := time.Now()
 
-		diagnostics.Send(diagnostics.TorrentStats{
-			TorrentName:             t.Name(),
-			TorrentHash:             t.InfoHash().HexString(),
-			TotalBytes:              t.Length(),
-			DownloadedBytes:         t.BytesCompleted(),
-			DownloadRate:            0,
-			UploadedBytes:           0,
-			UploadRate:              0,
-			TotalSeenPeers:          []int{},
-			Peers:                   []int{},
-			TotalPieces:             t.NumPieces(),
-			PiecesCompleted:         0,
-			PiecesPartialyCompleted: 0,
-			StartTime:               downloadStarted,
-		})
-
 		t.AllowDataDownload()
 
 		select {
@@ -1594,17 +1577,6 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 					TimeTook:    downloadTime.Seconds(),
 					AverageRate: uint64(float64(downloaded.Int64()) / downloadTime.Seconds()),
 				})
-
-				//clientConnStats := client.ConnStats()
-				/*fmt.Printf(
-					"average download rate for torrent: %s - %v/s total downloaded - %v total time taken %v\n",
-					t.Name(),
-					humanize.Bytes(uint64(float64(
-						downloaded.Int64(),
-					)/time.Since(downloadStarted).Seconds())),
-					humanize.Bytes(uint64(downloaded.Int64())),
-					time.Since(downloadStarted).Round(time.Second).String(),
-				)*/
 
 				d.logger.Debug("[snapshots] Downloaded from BitTorrent", "file", t.Name(),
 					"download-time", downloadTime.Round(time.Second).String(), "downloaded", common.ByteCount(uint64(downloaded.Int64())),
@@ -2105,25 +2077,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			logger.Log(verbosity, "[snapshots] bittorrent peers", rates...)
 		}
 
-		var completedPieces, partialPieces int
-		for _, r := range t.PieceStateRuns() {
-			if r.Complete {
-				completedPieces += r.Length
-			}
-			if r.Partial {
-				partialPieces += r.Length
-			}
-		}
-
 		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-			Name:                    torrentName,
-			TotalBytes:              uint64(tLen),
-			DownloadedBytes:         uint64(bytesCompleted),
-			Webseeds:                webseeds,
-			Peers:                   peers,
-			PiecesCount:             t.NumPieces(),
-			PiecesCompleted:         completedPieces,
-			PiecesPartialyCompleted: partialPieces,
+			Name:            torrentName,
+			TotalBytes:      uint64(tLen),
+			DownloadedBytes: uint64(bytesCompleted),
+			Webseeds:        webseeds,
+			Peers:           peers,
 		})
 
 		stats.Completed = stats.Completed && torrentComplete

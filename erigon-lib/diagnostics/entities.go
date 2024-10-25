@@ -96,15 +96,12 @@ type SnapshotDownloadStatistics struct {
 }
 
 type SegmentDownloadStatistics struct {
-	Name                    string                   `json:"name"`
-	TotalBytes              uint64                   `json:"totalBytes"`
-	DownloadedBytes         uint64                   `json:"downloadedBytes"`
-	Webseeds                []SegmentPeer            `json:"webseeds"`
-	Peers                   []SegmentPeer            `json:"peers"`
-	DownloadedStats         FileDownloadedStatistics `json:"downloadedStats"`
-	PiecesCount             int                      `json:"piecesCount"`
-	PiecesCompleted         int                      `json:"piecesCompleted"`
-	PiecesPartialyCompleted int                      `json:"piecesPartialyCompleted"`
+	Name            string                   `json:"name"`
+	TotalBytes      uint64                   `json:"totalBytes"`
+	DownloadedBytes uint64                   `json:"downloadedBytes"`
+	Webseeds        []SegmentPeer            `json:"webseeds"`
+	Peers           []SegmentPeer            `json:"peers"`
+	DownloadedStats FileDownloadedStatistics `json:"downloadedStats"`
 }
 
 type FileDownloadedStatistics struct {
@@ -352,17 +349,5 @@ func (ti HeadersProcessedUpdate) Type() Type {
 }
 
 func (ti SnapshotFillDBStageUpdate) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti TorrentStats) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti TorrentStatsUpdate) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti TorrentPeerStats) Type() Type {
 	return TypeOf(ti)
 }

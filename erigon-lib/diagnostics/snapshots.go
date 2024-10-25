@@ -41,10 +41,6 @@ func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 	d.runSegmentIndexingListener(rootCtx)
 	d.runFileDownloadedListener(rootCtx)
 	d.runFillDBListener(rootCtx)
-
-	d.runTorrentDownloaderListener(rootCtx)
-	d.runTorrentUpdateListener(rootCtx)
-	d.runTorrentPeersListener(rootCtx)
 }
 
 func (d *DiagnosticClient) runFillDBListener(rootCtx context.Context) {
