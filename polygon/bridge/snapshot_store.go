@@ -183,8 +183,8 @@ func (s *snapshotStore) LastProcessedEventId(ctx context.Context) (uint64, error
 	return lastEventId, nil
 }
 
-func (r *snapshotStore) EventLookup(ctx context.Context, txnHash libcommon.Hash) (uint64, bool, error) {
-	blockNum, ok, err := r.Store.EventLookup(ctx, txnHash)
+func (s *snapshotStore) EventTxnToBlockNum(ctx context.Context, txnHash libcommon.Hash) (uint64, bool, error) {
+	blockNum, ok, err := s.Store.EventTxnToBlockNum(ctx, txnHash)
 	if err != nil {
 		return 0, false, err
 	}
@@ -192,11 +192,11 @@ func (r *snapshotStore) EventLookup(ctx context.Context, txnHash libcommon.Hash)
 		return blockNum, ok, nil
 	}
 
-	tx := r.snapshots.ViewType(heimdall.Events)
+	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
 	segments := tx.VisibleSegments
 
-	blockNum, ok, err = r.borBlockByEventHash(txnHash, segments, nil)
+	blockNum, ok, err = s.borBlockByEventHash(txnHash, segments, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -294,7 +294,7 @@ func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	return result, nil
 }
 
-func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (blockNum uint64, ok bool, err error) {
+func (s *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (blockNum uint64, ok bool, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		idxBorTxnHash := sn.Src().Index()
@@ -324,20 +324,20 @@ func (r *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 	return
 }
 
-func (r *snapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
-	startEventId, _, err := r.BlockEventIdsRange(ctx, blockHeight)
+func (s *snapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
+	startEventId, _, err := s.BlockEventIdsRange(ctx, blockHeight)
 	if err != nil {
 		return 0, err
 	}
 	return startEventId, nil
 }
 
-func (r *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	startEventId, endEventId, err := r.BlockEventIdsRange(ctx, blockHeight)
+func (s *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+	startEventId, endEventId, err := s.BlockEventIdsRange(ctx, blockHeight)
 	if err != nil {
 		return nil, err
 	}
-	bytevals, err := r.Events(ctx, startEventId, endEventId+1)
+	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
 	if err != nil {
 		return nil, err
 	}
@@ -349,8 +349,8 @@ func (r *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, 
 }
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
-func (r *snapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	tx := r.snapshots.ViewType(heimdall.Events)
+func (s *snapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
 	segments := tx.VisibleSegments
 

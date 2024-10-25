@@ -54,13 +54,9 @@ func NewBridge(config Config) *Bridge {
 		eventFetcher:                 config.EventFetcher,
 		stateReceiverContractAddress: libcommon.HexToAddress(config.BorConfig.StateReceiverContract),
 		reader:                       NewReader(config.Store, config.Logger, config.BorConfig.StateReceiverContractAddress()),
-		transientErrors: []error{
-			heimdall.ErrBadGateway,
-			heimdall.ErrServiceUnavailable,
-			context.DeadlineExceeded,
-		},
-		fetchedEventsSignal:   make(chan struct{}),
-		processedBlocksSignal: make(chan struct{}),
+		transientErrors:              heimdall.TransientErrors,
+		fetchedEventsSignal:          make(chan struct{}),
+		processedBlocksSignal:        make(chan struct{}),
 	}
 }
 
@@ -90,30 +86,30 @@ type ready struct {
 	inited bool
 }
 
-func (me *ready) On() <-chan struct{} {
-	me.mu.Lock()
-	defer me.mu.Unlock()
-	me.init()
-	return me.on
+func (r *ready) On() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	return r.on
 }
 
-func (me *ready) init() {
-	if me.inited {
+func (r *ready) init() {
+	if r.inited {
 		return
 	}
-	me.on = make(chan struct{})
-	me.inited = true
+	r.on = make(chan struct{})
+	r.inited = true
 }
 
-func (me *ready) set() {
-	me.mu.Lock()
-	defer me.mu.Unlock()
-	me.init()
-	if me.state {
+func (r *ready) set() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	if r.state {
 		return
 	}
-	me.state = true
-	close(me.on)
+	r.state = true
+	close(r.on)
 }
 
 func (b *Bridge) Ready(ctx context.Context) <-chan error {

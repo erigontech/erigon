@@ -78,7 +78,7 @@ func (noopBridgeStore) LastFrozenEventId() uint64 {
 func (noopBridgeStore) LastFrozenEventBlockNum() uint64 {
 	return 0
 }
-func (noopBridgeStore) EventLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+func (noopBridgeStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
 	return 0, false, fmt.Errorf("noop")
 }
 func (noopBridgeStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {

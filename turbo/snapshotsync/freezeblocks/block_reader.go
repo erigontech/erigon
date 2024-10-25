@@ -1375,7 +1375,7 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Tx, txnHash common.
 		return 0, false, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
 	}
 
-	return txHandler.WithTx(tx).EventLookup(ctx, txnHash)
+	return txHandler.WithTx(tx).EventTxnToBlockNum(ctx, txnHash)
 }
 
 func (r *BlockReader) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {

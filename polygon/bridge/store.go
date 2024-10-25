@@ -20,7 +20,7 @@ type Store interface {
 	LastFrozenEventId() uint64
 	LastFrozenEventBlockNum() uint64
 
-	EventLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+	EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
 	Events(ctx context.Context, start, end uint64) ([][]byte, error)
 	BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, err error) // [start,end)
 

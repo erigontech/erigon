@@ -60,7 +60,7 @@ func (e *executionClient) Prepare(ctx context.Context) error {
 	}
 
 	if !ready.Ready {
-		return fmt.Errorf("excecution client no ready")
+		return fmt.Errorf("excecution client not ready")
 	}
 
 	return nil

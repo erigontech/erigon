@@ -98,7 +98,7 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 }
 
 func (r *Reader) EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
-	return r.store.EventLookup(ctx, borTxHash)
+	return r.store.EventTxnToBlockNum(ctx, borTxHash)
 }
 
 func (r *Reader) Close() {

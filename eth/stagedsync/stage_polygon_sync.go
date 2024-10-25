@@ -1104,7 +1104,7 @@ func (s polygonSyncStageBridgeStore) BlockEventIdsRange(context.Context, uint64)
 	panic("polygonSyncStageBridgeStore.BlockEventIdsRange not supported")
 }
 
-func (s polygonSyncStageBridgeStore) EventLookup(context.Context, common.Hash) (uint64, bool, error) {
+func (s polygonSyncStageBridgeStore) EventTxnToBlockNum(context.Context, common.Hash) (uint64, bool, error) {
 	// used in RPCs
 	// astrid stage integration intends to use the bridge only for scrapping,
 	// not for reading which remains the same in RPCs (via BlockReader)

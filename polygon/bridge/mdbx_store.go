@@ -174,14 +174,14 @@ func (s *mdbxStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNu
 	return tx.Commit()
 }
 
-func (s *mdbxStore) EventLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+func (s *mdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, false, err
 	}
 	defer tx.Rollback()
 
-	return txStore{tx}.EventLookup(ctx, borTxHash)
+	return txStore{tx}.EventTxnToBlockNum(ctx, borTxHash)
 }
 
 // LastEventIdWithinWindow gets the last event id where event.Id >= fromId and event.Time < toTime.
@@ -460,7 +460,7 @@ func (s txStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum m
 	return nil
 }
 
-func (s txStore) EventLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+func (s txStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
 	var blockNum uint64
 
 	v, err := s.tx.GetOne(kv.BorTxLookup, borTxHash.Bytes())

@@ -72,21 +72,22 @@ func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store,
 	return newService(borConfig, client, store, logger)
 }
 
+var TransientErrors = []error{
+	ErrBadGateway,
+	ErrServiceUnavailable,
+	context.DeadlineExceeded,
+}
+
 func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store, logger log.Logger) *service {
 	checkpointFetcher := newCheckpointFetcher(client, logger)
 	milestoneFetcher := newMilestoneFetcher(client, logger)
 	spanFetcher := newSpanFetcher(client, logger)
-	commonTransientErrors := []error{
-		ErrBadGateway,
-		ErrServiceUnavailable,
-		context.DeadlineExceeded,
-	}
 
 	checkpointScraper := newScraper(
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
-		commonTransientErrors,
+		TransientErrors,
 		logger,
 	)
 
@@ -95,7 +96,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store,
 	// has been already pruned. Additionally, we've been observing this error happening sporadically for the
 	// latest milestone.
 	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
-	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, commonTransientErrors...)
+	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, TransientErrors...)
 	milestoneScraper := newScraper(
 		store.Milestones(),
 		milestoneFetcher,
@@ -108,7 +109,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store,
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
-		commonTransientErrors,
+		TransientErrors,
 		logger,
 	)
 
@@ -267,30 +268,30 @@ type ready struct {
 	inited bool
 }
 
-func (me *ready) On() <-chan struct{} {
-	me.mu.Lock()
-	defer me.mu.Unlock()
-	me.init()
-	return me.on
+func (r *ready) On() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	return r.on
 }
 
-func (me *ready) init() {
-	if me.inited {
+func (r *ready) init() {
+	if r.inited {
 		return
 	}
-	me.on = make(chan struct{})
-	me.inited = true
+	r.on = make(chan struct{})
+	r.inited = true
 }
 
-func (me *ready) set() {
-	me.mu.Lock()
-	defer me.mu.Unlock()
-	me.init()
-	if me.state {
+func (r *ready) set() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	if r.state {
 		return
 	}
-	me.state = true
-	close(me.on)
+	r.state = true
+	close(r.on)
 }
 
 func (s *service) Ready(ctx context.Context) <-chan error {
