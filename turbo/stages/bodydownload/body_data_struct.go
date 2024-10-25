@@ -12,8 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// BodyHashes is to be used for the mapping between TxHash, UncleHash, WithdrawalsHash, and RequestRoot to the block header
-type BodyHashes [4 * length.Hash]byte
+// BodyHashes is to be used for the mapping between TxHash, UncleHash, and WithdrawalsHash to the block header
+type BodyHashes [3 * length.Hash]byte
 
 const MaxBodiesInRequest = 1024
 
@@ -22,7 +22,6 @@ type Delivery struct {
 	txs             [][][]byte
 	uncles          [][]*types.Header
 	withdrawals     []types.Withdrawals
-	requests        []types.FlatRequests
 	lenOfP2PMessage uint64
 }
 
