@@ -1,7 +1,8 @@
 # Erigon
 
-Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**, Blog: *
-*[erigon.substack.com](https://erigon.substack.com/)**, Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
+Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
+Blog: **[erigon.substack.com](https://erigon.substack.com/)**
+Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
@@ -753,8 +754,15 @@ Getting in touch
 ### Erigon Discord Server
 
 The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me`
-with
-your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
+with your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
+
+### Blog
+
+**[erigon.substack.com](https://erigon.substack.com/)**
+
+### Twitter
+
+[x.com/ErigonEth](https://x.com/ErigonEth)
 
 ### Reporting security issues/concerns
 
@@ -794,9 +802,10 @@ main Erigon optimisations: "reduce Disk random access".
 running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
 same Disk.
 
-### Blocks Execution is slow on cloud-network-drives
+### Cloud network drives
 
-Please read https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
+(Like gp3)
+You may read: https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
 non-batched way.
 Tricks: if you throw anough RAM and set env variable `ERIGON_SNAPSHOT_MADV_RND=false` - then Erigon will work
