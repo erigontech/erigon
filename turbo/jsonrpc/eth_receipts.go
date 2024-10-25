@@ -415,25 +415,27 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	var blockNum, txNum uint64
 	var ok bool
 
-	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, nil
-	}
-	txNum, ok, err = api.txnNumLookup(ctx, tx, txnHash)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, nil
-	}
-
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
+
+	txNum, ok, err = api.txnNumLookup(ctx, tx, txnHash)
+	if err != nil {
+		return nil, err
+	}
+	if !ok && chainConfig.Bor == nil {
+		return nil, nil
+	}
+
+	ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, txNum)
+	if err != nil {
+		return nil, err
+	}
+	if !ok && chainConfig.Bor == nil {
+		return nil, nil
+	}
+
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
 		if api.bridgeReader != nil {
