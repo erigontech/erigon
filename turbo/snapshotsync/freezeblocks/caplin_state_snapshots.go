@@ -644,7 +644,7 @@ func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {
 
 	var buf []byte
 
-	seg, ok := view.VisibleSegment(slot, tbl)
+	seg, ok := view.VisibleSegment(slot, strings.ToLower(tbl))
 	if !ok {
 		return nil, nil
 	}
