@@ -40,6 +40,7 @@ func GetValFnTxAndSnapshot(tx kv.Tx, snapshot *freezeblocks.CaplinStateSnapshots
 			if err != nil {
 				return nil, err
 			}
+			fmt.Println(v)
 			if v != nil {
 				fmt.Println("hit")
 				return v, nil
