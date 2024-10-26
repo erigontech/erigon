@@ -529,7 +529,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		if err != nil {
 			return err
 		}
-		if i == 999424 && snapName == "blockroot" {
+		if i == 999424 {
 			fmt.Printf("BlockRoot: %d %x\n", i, dump)
 		}
 		if i%20_000 == 0 {
