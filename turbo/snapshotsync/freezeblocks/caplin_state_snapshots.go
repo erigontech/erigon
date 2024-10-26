@@ -214,15 +214,13 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
-		f, _, ok := snaptype.ParseFileName(s.dir, fName)
-		fmt.Println(f, ok)
-		if !ok {
-			continue
-		}
+		f, _, _ := snaptype.ParseFileName(s.dir, fName)
 
 		var processed bool = true
 		var exists bool
 		var sn *DirtySegment
+
+		fmt.Println(f.TypeString)
 		segments, ok := s.Segments[f.TypeString]
 		if !ok {
 			continue
