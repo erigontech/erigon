@@ -322,16 +322,6 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector s
 
 func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, eth1DataVotesLength, slot uint64, out *solid.ListSSZ[*cltypes.Eth1Data]) error {
 	initialSlot := r.cfg.RoundSlotToVotePeriod(slot)
-	initialKey := base_encoding.Encode64ToBytes4(initialSlot)
-	cursor, err := tx.Cursor(kv.Eth1DataVotes)
-	if err != nil {
-		return err
-	}
-	defer cursor.Close()
-	k, v, err := cursor.Seek(initialKey)
-	if err != nil {
-		return err
-	}
 	if initialSlot <= r.genesisState.Slot() {
 		// We need to prepend the genesis votes
 		for i := 0; i < r.genesisState.Eth1DataVotes().Len(); i++ {
@@ -339,22 +329,28 @@ func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, eth1DataVotesLength
 		}
 	}
 
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
 	endSlot := r.cfg.RoundSlotToVotePeriod(slot + r.cfg.SlotsPerEpoch*r.cfg.EpochsPerEth1VotingPeriod)
 
-	for k != nil && base_encoding.Decode64FromBytes4(k) < endSlot {
+	for i := initialSlot; i < endSlot; i++ {
 		if out.Len() >= int(eth1DataVotesLength) {
 			break
+		}
+		key := base_encoding.Encode64ToBytes4(i)
+		v, err := getter(kv.Eth1DataVotes, key)
+		if err != nil {
+			return err
+		}
+		if len(v) == 0 {
+			continue
 		}
 		eth1Data := &cltypes.Eth1Data{}
 		if err := eth1Data.DecodeSSZ(v, 0); err != nil {
 			return err
 		}
 		out.Append(eth1Data)
-		k, v, err = cursor.Next()
-		if err != nil {
-			return err
-		}
 	}
+
 	return nil
 }
 
@@ -486,25 +482,44 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 		return nil, err
 	}
 
-	diffCursor, err := tx.Cursor(diffBucket)
+	highestSlotAvailable, err := r.highestSlotInSnapshotsAndDB(tx, diffBucket)
 	if err != nil {
 		return nil, err
 	}
-	defer diffCursor.Close()
 	if forward {
-		for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
+		// for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	if len(k) != 4 {
+		// 		return nil, fmt.Errorf("invalid key %x", k)
+		// 	}
+		// 	currSlot := base_encoding.Decode64FromBytes4(k)
+		// 	if currSlot == freshDumpSlot {
+		// 		continue
+		// 	}
+		// 	if currSlot > slot {
+		// 		return nil, fmt.Errorf("diff not found for slot %d", slot)
+		// 	}
+		// 	currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, false)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// }
+		for currSlot := freshDumpSlot; currSlot <= slot && currSlot < highestSlotAvailable; currSlot++ {
+			key := base_encoding.Encode64ToBytes4(currSlot)
+			v, err := getter(diffBucket, key)
 			if err != nil {
 				return nil, err
 			}
-			if len(k) != 4 {
-				return nil, fmt.Errorf("invalid key %x", k)
-			}
-			currSlot := base_encoding.Decode64FromBytes4(k)
-			if currSlot == freshDumpSlot {
+			if len(v) == 0 {
 				continue
 			}
-			if currSlot > slot {
-				return nil, fmt.Errorf("diff not found for slot %d", slot)
+			if len(key) != 4 {
+				return nil, fmt.Errorf("invalid key %x", key)
+			}
+			if currSlot == freshDumpSlot {
+				continue
 			}
 			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, false)
 			if err != nil {
@@ -512,16 +527,33 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 			}
 		}
 	} else {
-		for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot + clparams.SlotsPerDump)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) > slot; k, v, err = diffCursor.Prev() {
+		// for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot + clparams.SlotsPerDump)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) > slot; k, v, err = diffCursor.Prev() {
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	if len(k) != 4 {
+		// 		return nil, fmt.Errorf("invalid key %x", k)
+		// 	}
+		// 	currSlot := base_encoding.Decode64FromBytes4(k)
+		// 	if currSlot <= slot || currSlot > freshDumpSlot+clparams.SlotsPerDump {
+		// 		continue
+		// 	}
+		// 	currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, true)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// }
+		for currSlot := freshDumpSlot + clparams.SlotsPerDump; currSlot > slot && currSlot > r.genesisState.Slot(); currSlot-- {
+			key := base_encoding.Encode64ToBytes4(currSlot)
+			v, err := getter(diffBucket, key)
 			if err != nil {
 				return nil, err
 			}
-			if len(k) != 4 {
-				return nil, fmt.Errorf("invalid key %x", k)
-			}
-			currSlot := base_encoding.Decode64FromBytes4(k)
-			if currSlot <= slot || currSlot > freshDumpSlot+clparams.SlotsPerDump {
+			if len(v) == 0 {
 				continue
+			}
+			if len(key) != 4 {
+				return nil, fmt.Errorf("invalid key %x", key)
 			}
 			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, true)
 			if err != nil {
@@ -612,11 +644,6 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 		}
 	}
 
-	diffCursor, err := tx.Cursor(diffBucket)
-	if err != nil {
-		return nil, err
-	}
-	defer diffCursor.Close()
 	if slot%r.cfg.SlotsPerEpoch == 0 {
 		currentList = currentList[:validatorSetLength*8]
 		return currentList, nil
@@ -635,26 +662,24 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 }
 
 func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64, bkt string, size int, out solid.Uint64ListSSZ) error {
-	diffCursor, err := tx.Cursor(bkt)
-	if err != nil {
-		return err
-	}
-	defer diffCursor.Close()
-
-	k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(slot))
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		return fmt.Errorf("diff not found for slot %d", slot)
-	}
-	keySlot := base_encoding.Decode64FromBytes4(k)
-	if keySlot > slot {
-		_, v, err = diffCursor.Prev()
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
+	var (
+		v   []byte
+		err error
+	)
+	// Try seeking <= to slot
+	for i := slot; i >= r.genesisState.Slot(); i-- {
+		key := base_encoding.Encode64ToBytes4(i)
+		v, err = getter(bkt, key)
 		if err != nil {
 			return err
 		}
+		if len(v) == 0 {
+			continue
+		}
+		break
 	}
+
 	var b bytes.Buffer
 	if _, err := b.Write(v); err != nil {
 		return err
