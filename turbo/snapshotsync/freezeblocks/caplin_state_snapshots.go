@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -31,6 +32,7 @@ import (
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/recsplit"
 
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -472,7 +474,34 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	// Ugly hack to wait for fsync
 	time.Sleep(15 * time.Second)
 
-	return BeaconSimpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+	return simpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+}
+
+func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+	num := make([]byte, binary.MaxVarintLen64)
+	cfg := recsplit.RecSplitArgs{
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		Salt:       &salt,
+		BaseDataID: sn.From,
+	}
+	if err := snaptype.BuildIndexWithSnapName(ctx, sn, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+		if i%20_000 == 0 {
+			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
+		}
+		p.Processed.Add(1)
+		n := binary.PutUvarint(num, i)
+		if err := idx.AddKey(num[:n], offset); err != nil {
+			return err
+		}
+		return nil
+	}, logger); err != nil {
+		return fmt.Errorf("idx: %w", err)
+	}
+
+	return nil
 }
 
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
