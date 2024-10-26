@@ -536,6 +536,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 type RetrieveHistoricalState struct {
 	chainCfg
 	outputFolder
+	withPPROF
 	CompareFile string `help:"compare file" default:""`
 	CompareSlot uint64 `help:"compare slot" default:"0"`
 	Out         string `help:"output file" default:""`
@@ -587,70 +588,71 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn)
-	start := time.Now()
-	haveState, err := hr.ReadHistoricalState(ctx, tx, r.CompareSlot)
-	if err != nil {
-		return err
-	}
-	endTime := time.Since(start)
-	hRoot, err := haveState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
-
-	if err := haveState.InitBeaconState(); err != nil {
-		return err
-	}
-
-	v := haveState.Version()
-	// encode and decode the state
-	enc, err := haveState.EncodeSSZ(nil)
-	if err != nil {
-		return err
-	}
-	haveState = state.New(beaconConfig)
-	if err := haveState.DecodeSSZ(enc, int(v)); err != nil {
-		return err
-	}
-	if r.Out != "" {
-		// create file
-		if err := os.WriteFile(r.Out, enc, 0644); err != nil {
+	for {
+		hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn)
+		start := time.Now()
+		haveState, err := hr.ReadHistoricalState(ctx, tx, r.CompareSlot)
+		if err != nil {
 			return err
 		}
-	}
-
-	hRoot, err = haveState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if r.CompareFile == "" {
-		return nil
-	}
-	// Read the content of CompareFile in a []byte  without afero
-	rawBytes, err := os.ReadFile(r.CompareFile)
-	if err != nil {
-		return err
-	}
-	// Decode the []byte into a state
-	wantState := state.New(beaconConfig)
-	if err := wantState.DecodeSSZ(rawBytes, int(haveState.Version())); err != nil {
-		return err
-	}
-	wRoot, err := wantState.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if hRoot != wRoot {
-		for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
-			if haveState.BlockRoots().Get(i) != wantState.BlockRoots().Get(i) {
-				log.Info("block roots mismatch", "index", i, "have", haveState.BlockRoots().Get(i), "want", wantState.BlockRoots().Get(i))
-			}
+		endTime := time.Since(start)
+		hRoot, err := haveState.HashSSZ()
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
+		log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
 	}
-	return nil
+	// if err := haveState.InitBeaconState(); err != nil {
+	// 	return err
+	// }
+
+	// v := haveState.Version()
+	// // encode and decode the state
+	// enc, err := haveState.EncodeSSZ(nil)
+	// if err != nil {
+	// 	return err
+	// }
+	// haveState = state.New(beaconConfig)
+	// if err := haveState.DecodeSSZ(enc, int(v)); err != nil {
+	// 	return err
+	// }
+	// if r.Out != "" {
+	// 	// create file
+	// 	if err := os.WriteFile(r.Out, enc, 0644); err != nil {
+	// 		return err
+	// 	}
+	// }
+
+	// hRoot, err = haveState.HashSSZ()
+	// if err != nil {
+	// 	return err
+	// }
+	// if r.CompareFile == "" {
+	// 	return nil
+	// }
+	// // Read the content of CompareFile in a []byte  without afero
+	// rawBytes, err := os.ReadFile(r.CompareFile)
+	// if err != nil {
+	// 	return err
+	// }
+	// // Decode the []byte into a state
+	// wantState := state.New(beaconConfig)
+	// if err := wantState.DecodeSSZ(rawBytes, int(haveState.Version())); err != nil {
+	// 	return err
+	// }
+	// wRoot, err := wantState.HashSSZ()
+	// if err != nil {
+	// 	return err
+	// }
+	// if hRoot != wRoot {
+	// 	for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
+	// 		if haveState.BlockRoots().Get(i) != wantState.BlockRoots().Get(i) {
+	// 			log.Info("block roots mismatch", "index", i, "have", haveState.BlockRoots().Get(i), "want", wantState.BlockRoots().Get(i))
+	// 		}
+	// 	}
+	// 	return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
+	// }
+	// return nil
 }
 
 type ArchiveSanitizer struct {
