@@ -53,27 +53,24 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 
 // Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
+	reply, err := api.ethBackend.Status(ctx)
+	if err != nil {
+		return false, err
+	}
+	highestBlock := reply.LastNewBlockSeen
+	frozenBlocks := reply.FrozenBlocks
+
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	reply, err := api.ethBackend.Status()
-	highestBlock := reply.LastNewBlockSeen
-	frozenBlocks := reply.FrozenBlocks
-
-	highestBlock, err := rawdb.ReadLastNewBlockSeen(tx)
-	if err != nil {
-		return false, err
-	}
-
 	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return false, err
 	}
 
-	frozenBlocks := api._blockReader.FrozenBlocks()
 	if highestBlock < frozenBlocks {
 		highestBlock = frozenBlocks
 	}
