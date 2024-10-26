@@ -458,7 +458,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		if i%20_000 == 0 {
 			logger.Log(lvl, fmt.Sprintf("Dumping %s", snapName), "progress", i)
 		}
-		if err := sn.AddWord(dump); err != nil {
+		if err := sn.AddUncompressedWord(dump); err != nil {
 			return err
 		}
 	}
