@@ -35,7 +35,7 @@ type GetValFn func(table string, key []byte) ([]byte, error)
 func GetValFnTxAndSnapshot(tx kv.Tx, snapshot *freezeblocks.CaplinStateSnapshots) GetValFn {
 	return func(table string, key []byte) ([]byte, error) {
 		if snapshot != nil {
-			v, err := snapshot.Get(table, uint64(binary.LittleEndian.Uint32(key)))
+			v, err := snapshot.Get(table, uint64(binary.BigEndian.Uint32(key)))
 			if err != nil {
 				return nil, err
 			}
