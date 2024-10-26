@@ -466,7 +466,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		return fmt.Errorf("expected %d blocks, got %d", snaptype.CaplinMergeLimit, sn.Count())
 	}
 	if err := sn.Compress(); err != nil {
-		return fmt.Errorf("compress: %w", err)
+		return err
 	}
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
