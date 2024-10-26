@@ -86,9 +86,10 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.EffectiveBalancesDump:     getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
 		},
 		Compression: map[string]bool{
-			kv.EpochData:   true,
-			kv.SlotData:    true,
-			kv.StateEvents: true,
+			kv.EpochData:     true,
+			kv.SlotData:      true,
+			kv.StateEvents:   true,
+			kv.Eth1DataVotes: true,
 		},
 	}
 }
@@ -593,7 +594,6 @@ func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, to
 	fromSlot = (fromSlot / blocksPerFile) * blocksPerFile
 	toSlot = (toSlot / blocksPerFile) * blocksPerFile
 	for snapName, kvGetter := range s.snapshotTypes.KeyValueGetters {
-		snapName = strings.ToLower(snapName)
 		for i := fromSlot; i < toSlot; i += blocksPerFile {
 			if toSlot-i < blocksPerFile {
 				break
