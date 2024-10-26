@@ -196,7 +196,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	// Update the last new block seen.
 	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
-	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+	if err := e.db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
 		if err != nil {
 			return err
