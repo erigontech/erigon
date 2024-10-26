@@ -772,7 +772,7 @@ For example: btrfs's autodefrag option - may increase write IO 100x times
 
 ### Gnome Tracker can kill Erigon
 
-[Gnome Tracker](https://wiki.gnome.org/Projects/Tracker) - detecting miners and kill them.
+[Gnome Tracker](https://wiki.gnome.org/Attic/Tracker) - detecting miners and kill them.
 
 ### the --mount option requires BuildKit error
 
