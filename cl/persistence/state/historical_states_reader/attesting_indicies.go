@@ -164,7 +164,9 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index u
 }
 
 func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
-	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
+
+	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(getter, r.cfg.RoundSlotToEpoch(stateSlot))
 	if err != nil {
 		return nil, err
 	}

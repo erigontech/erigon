@@ -379,8 +379,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 	}
-
-	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling, blobBackfilling, config.SnapshotGenerationEnabled, snBuildSema)
+	stateSnapshots := freezeblocks.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, freezeblocks.MakeCaplinStateSnapshotsTypes(indexDB), logger)
+	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, logger, states, backfilling, blobBackfilling, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
 		if err := antiq.Loop(); err != nil {
@@ -392,7 +392,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 
-	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState)
+	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState, stateSnapshots)
 	validatorParameters := validator_params.NewValidatorParams()
 	if config.BeaconAPIRouter.Active {
 		apiHandler := handler.NewApiHandler(
@@ -427,6 +427,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			proposerSlashingService,
 			option.builderClient,
 			validatorMonitor,
+			stateSnapshots,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,

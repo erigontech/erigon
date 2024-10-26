@@ -83,7 +83,9 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	}
 	// Read them from the archive node if we do not have them in the fast-access storage
 	if !ok {
-		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(tx, a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch))
+		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(
+			state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots),
+			a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch))
 		if syncCommittee == nil {
 			log.Warn("could not find sync committee for epoch", "epoch", epoch, "period", period)
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find sync committee for epoch %d", epoch))

@@ -262,8 +262,10 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots)
 	if !ok {
-		currentJustifiedCheckpoint, previousJustifiedCheckpoint, finalizedCheckpoint, ok, err = state_accessors.ReadCheckpoints(tx, a.beaconChainCfg.RoundSlotToEpoch(*slot))
+		currentJustifiedCheckpoint, previousJustifiedCheckpoint, finalizedCheckpoint, ok, err = state_accessors.ReadCheckpoints(stateGetter, a.beaconChainCfg.RoundSlotToEpoch(*slot))
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
@@ -316,17 +318,18 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
 	}
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots)
 
 	// Code here
 	currentSyncCommittee, nextSyncCommittee, ok := a.forkchoiceStore.GetSyncCommittees(a.beaconChainCfg.SyncCommitteePeriod(*slot))
 	if !ok {
 		syncCommitteeSlot := a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(*slot)
 		// Check the main database if it cannot be found in the forkchoice store
-		currentSyncCommittee, err = state_accessors.ReadCurrentSyncCommittee(tx, syncCommitteeSlot)
+		currentSyncCommittee, err = state_accessors.ReadCurrentSyncCommittee(stateGetter, syncCommitteeSlot)
 		if err != nil {
 			return nil, err
 		}
-		nextSyncCommittee, err = state_accessors.ReadNextSyncCommittee(tx, syncCommitteeSlot)
+		nextSyncCommittee, err = state_accessors.ReadNextSyncCommittee(stateGetter, syncCommitteeSlot)
 		if err != nil {
 			return nil, err
 		}

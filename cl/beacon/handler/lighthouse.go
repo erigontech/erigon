@@ -75,6 +75,7 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 		return nil, err
 	}
 	defer tx.Rollback()
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots)
 
 	slot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	if slot >= a.forkchoiceStore.LowestAvailableSlot() {
@@ -120,14 +121,14 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 	}
 
 	// read the epoch datas first
-	epochData, err := state_accessors.ReadEpochData(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
 	if epochData == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for current epoch"))
 	}
-	prevEpochData, err := state_accessors.ReadEpochData(tx, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
+	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
@@ -277,15 +278,16 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		return newBeaconResponse(a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, activeBalance, prevActiveBalance, validatorSet, currentEpochParticipation, previousEpochParticipation)), nil
 	}
 
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots)
 	// read the epoch datas first
-	epochData, err := state_accessors.ReadEpochData(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
 	if epochData == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for current epoch"))
 	}
-	prevEpochData, err := state_accessors.ReadEpochData(tx, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
+	prevEpochData, err := state_accessors.ReadEpochData(stateGetter, prevEpoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}

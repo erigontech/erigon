@@ -120,7 +120,9 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		return newBeaconResponse(resp).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 	}
 	// finality case
-	activeIdxs, err := state_accessors.ReadActiveIndicies(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	activeIdxs, err := state_accessors.ReadActiveIndicies(
+		state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots),
+		epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}

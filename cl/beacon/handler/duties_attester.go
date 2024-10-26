@@ -149,8 +149,11 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if (epoch)*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is too far in the future", epoch))
 	}
+
 	// finality case
-	activeIdxs, err := state_accessors.ReadActiveIndicies(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	activeIdxs, err := state_accessors.ReadActiveIndicies(
+		state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots),
+		epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
 	}
