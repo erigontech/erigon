@@ -118,7 +118,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return err
 		}
 	}
-	s.hook.LastNewBlockSeen()
 	cfg.hd.Progress()
 	return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
 
