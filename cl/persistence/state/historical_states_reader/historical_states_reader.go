@@ -308,11 +308,6 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector s
 		currKeySlot = i
 		out.Set(int(currKeySlot%size), common.BytesToHash(v))
 		inserted++
-		if table == kv.BlockRoot {
-			if int(currKeySlot%size) == 0 {
-				fmt.Println(i, common.BytesToHash(v))
-			}
-		}
 		if inserted == needFromDB {
 			break
 		}
