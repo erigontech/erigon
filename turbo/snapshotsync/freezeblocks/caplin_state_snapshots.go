@@ -216,7 +216,6 @@ func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	defer s.recalcVisibleFiles()
-	fmt.Println(fileNames)
 
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
