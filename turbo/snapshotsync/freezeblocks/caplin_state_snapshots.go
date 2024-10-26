@@ -65,7 +65,7 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 
 func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 	return SnapshotTypes{
-		Types: map[string]KeyValueGetter{
+		KeyValueGetters: map[string]KeyValueGetter{
 			kv.ValidatorEffectiveBalance: getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
 			kv.ValidatorSlashings:        getKvGetterForStateTable(db, kv.ValidatorSlashings),
 			kv.ValidatorBalance:          getKvGetterForStateTable(db, kv.ValidatorBalance),
@@ -84,6 +84,11 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.Proposers:                 getKvGetterForStateTable(db, kv.Proposers),
 			kv.BalancesDump:              getKvGetterForStateTable(db, kv.BalancesDump),
 			kv.EffectiveBalancesDump:     getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
+		},
+		Compression: map[string]bool{
+			kv.EpochData:   true,
+			kv.SlotData:    true,
+			kv.StateEvents: true,
 		},
 	}
 }
@@ -120,7 +125,8 @@ type CaplinStateSnapshots struct {
 type KeyValueGetter func(numId uint64) ([]byte, []byte, error)
 
 type SnapshotTypes struct {
-	Types map[string]KeyValueGetter
+	KeyValueGetters map[string]KeyValueGetter
+	Compression     map[string]bool
 }
 
 // NewCaplinStateSnapshots - opens all snapshots. But to simplify everything:
@@ -136,7 +142,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	// 	DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 	// }
 	Segments := make(map[string]*segments)
-	for k := range snapshotTypes.Types {
+	for k := range snapshotTypes.KeyValueGetters {
 		Segments[strings.ToLower(k)] = &segments{
 			DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 		}
@@ -505,7 +511,7 @@ func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegme
 	return nil, false
 }
 
-func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
+func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger, compress bool) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.SnapCaplin
 
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
@@ -531,8 +537,14 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		if i%20_000 == 0 {
 			logger.Log(lvl, fmt.Sprintf("Dumping %s", snapName), "progress", i)
 		}
-		if err := sn.AddUncompressedWord(dump); err != nil {
-			return err
+		if compress {
+			if err := sn.AddWord(dump); err != nil {
+				return err
+			}
+		} else {
+			if err := sn.AddUncompressedWord(dump); err != nil {
+				return err
+			}
 		}
 	}
 	if sn.Count() != int(blocksPerFile) {
@@ -581,7 +593,7 @@ func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, to
 	fromSlot = (fromSlot / blocksPerFile) * blocksPerFile
 	toSlot = (toSlot / blocksPerFile) * blocksPerFile
 	fmt.Println("DumpCaplinState", fromSlot, toSlot)
-	for snapName, kvGetter := range s.snapshotTypes.Types {
+	for snapName, kvGetter := range s.snapshotTypes.KeyValueGetters {
 		for i := fromSlot; i < toSlot; i += blocksPerFile {
 			if toSlot-i < blocksPerFile {
 				break
@@ -589,7 +601,7 @@ func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, to
 			// keep beaconblocks here but whatever....
 			to := i + blocksPerFile
 			logger.Log(lvl, fmt.Sprintf("Dumping %s", snapName), "from", i, "to", to)
-			if err := dumpCaplinState(ctx, snapName, kvGetter, i, to, blocksPerFile, salt, dirs, workers, lvl, logger); err != nil {
+			if err := dumpCaplinState(ctx, snapName, kvGetter, i, to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[snapName]); err != nil {
 				return err
 			}
 		}
