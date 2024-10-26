@@ -175,7 +175,10 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 		if blockReader.FrozenBlocks() > 0 {
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
 				finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
-				return err
+				if err != nil {
+					return err
+				}
+				return nil
 			}); err != nil {
 				return err
 			}
