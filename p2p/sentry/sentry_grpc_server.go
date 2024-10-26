@@ -625,7 +625,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 	var disc enode.Iterator
 	if dialCandidates != nil {
 		disc = dialCandidates()
+	} else {
+		disc, _ = setupDiscovery(ss.p2p.DiscoveryDNS)
 	}
+
 	protocols := []uint{protocol}
 	if protocol == direct.ETH67 {
 		protocols = append(protocols, direct.ETH66)
@@ -1023,13 +1026,14 @@ func (ss *GrpcServer) startP2PServer(genesisHash libcommon.Hash) (*p2p.Server, e
 			if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
 				ss.p2p.DiscoveryDNS = []string{url}
 			}
-		}
-		for _, p := range ss.Protocols {
-			dialCandidates, err := setupDiscovery(ss.p2p.DiscoveryDNS)
-			if err != nil {
-				return nil, err
+
+			for _, p := range ss.Protocols {
+				dialCandidates, err := setupDiscovery(ss.p2p.DiscoveryDNS)
+				if err != nil {
+					return nil, err
+				}
+				p.DialCandidates = dialCandidates
 			}
-			p.DialCandidates = dialCandidates
 		}
 	}
 
