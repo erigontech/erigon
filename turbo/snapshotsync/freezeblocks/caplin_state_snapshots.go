@@ -280,7 +280,7 @@ Loop:
 			// then make segment available even if index open may fail
 			segments.DirtySegments.Set(sn)
 		}
-		if err := openIdxForCaplinStateIfNeeded(sn, s.dir, optimistic); err != nil {
+		if err := openIdxForCaplinStateIfNeeded(sn, filePath, optimistic); err != nil {
 			fmt.Println(err)
 			return err
 		}
@@ -302,11 +302,11 @@ Loop:
 	return nil
 }
 
-func openIdxForCaplinStateIfNeeded(s *DirtySegment, dir string, optimistic bool) error {
+func openIdxForCaplinStateIfNeeded(s *DirtySegment, filePath string, optimistic bool) error {
 	if s.Decompressor == nil {
 		return nil
 	}
-	err := openIdxIfNeedForCaplinState(s, dir)
+	err := openIdxIfNeedForCaplinState(s, filePath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			if optimistic {
@@ -320,16 +320,16 @@ func openIdxForCaplinStateIfNeeded(s *DirtySegment, dir string, optimistic bool)
 	return nil
 }
 
-func openIdxIfNeedForCaplinState(s *DirtySegment, dir string) (err error) {
+func openIdxIfNeedForCaplinState(s *DirtySegment, filePath string) (err error) {
 	s.indexes = make([]*recsplit.Index, 1)
 	if s.indexes[0] != nil {
 		return nil
 	}
 
-	fileName := strings.ReplaceAll(s.FileName(), ".seg", ".idx")
-	index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
+	filePath = strings.ReplaceAll(filePath, ".seg", ".idx")
+	index, err := recsplit.OpenIndex(filepath.Join(dir, filePath))
 	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
+		return fmt.Errorf("%w, fileName: %s", err, filePath)
 	}
 
 	s.indexes[0] = index
