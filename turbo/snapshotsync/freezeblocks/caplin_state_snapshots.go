@@ -494,10 +494,12 @@ func (v *CaplinStateView) Close() {
 }
 
 func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
+	fmt.Println(v.s.Segments[tbl].VisibleSegments, tbl)
 	return v.s.Segments[tbl].VisibleSegments
 }
 
 func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegment, bool) {
+	f
 	for _, seg := range v.VisibleSegments(tbl) {
 		if !(slot >= seg.from && slot < seg.to) {
 			continue
@@ -654,7 +656,6 @@ func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {
 
 	seg, ok := view.VisibleSegment(slot, strings.ToLower(tbl))
 	if !ok {
-		fmt.Println("not ok", strings.ToLower(tbl), view.roTxs)
 		return nil, nil
 	}
 
