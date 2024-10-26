@@ -643,11 +643,11 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
-		// for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
-		// 	if haveState.PreviousEpochParticipation().Get(i) != wantState.PreviousEpochParticipation().Get(i) {
-		// 		log.Info("Participation mismatch", "index", i, "have", haveState.PreviousEpochParticipation().Get(i), "want", wantState.PreviousEpochParticipation().Get(i))
-		// 	}
-		// }
+		for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
+			if haveState.BlockRoots().Get(i) != wantState.BlockRoots().Get(i) {
+				log.Info("block roots mismatch", "index", i, "have", haveState.BlockRoots().Get(i), "want", wantState.BlockRoots().Get(i))
+			}
+		}
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
