@@ -336,6 +336,20 @@ func openIdxIfNeedForCaplinState(s *DirtySegment, dir string) (err error) {
 
 	return nil
 }
+
+func isIndexed(s *DirtySegment) bool {
+	if s.Decompressor == nil {
+		return false
+	}
+
+	for _, idx := range s.indexes {
+		if idx == nil {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
@@ -352,7 +366,7 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 				if sn.canDelete.Load() {
 					continue
 				}
-				if !sn.Indexed() {
+				if !isIndexed(sn) {
 					continue
 				}
 				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
