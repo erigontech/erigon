@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -413,6 +415,25 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
+	if s.snapgen {
+		if err := s.stateSn.OpenFolder(); err != nil {
+			return err
+		}
+		if err := s.stateSn.DumpCaplinState(
+			ctx,
+			s.stateSn.BlocksAvailable()+1,
+			s.currentState.Slot(),
+			snaptype.CaplinMergeLimit,
+			s.sn.Salt,
+			s.dirs,
+			runtime.NumCPU(),
+			log.LvlDebug,
+			s.logger,
+		); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
