@@ -88,10 +88,10 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 type CaplinSnapshots struct {
 	Salt uint32
 
-	dirtyLock sync.RWMutex                   // guards `dirty` field
+	dirtyLock sync.RWMutex                                // guards `dirty` field
 	dirty     []*btree.BTreeG[*snapshotsync.DirtySegment] // ordered map `type.Enum()` -> DirtySegments
 
-	visibleLock sync.RWMutex      // guards  `visible` field
+	visibleLock sync.RWMutex                   // guards  `visible` field
 	visible     []snapshotsync.VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
 
 	dir         string

@@ -19,7 +19,7 @@ package heimdall
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
+	"errors"
 
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 
@@ -105,7 +105,7 @@ func (i txRangeIndex) Put(ctx context.Context, r ClosedRange, id uint64) error {
 	tx, ok := i.tx.(kv.RwTx)
 
 	if !ok {
-		return fmt.Errorf("tx not writable")
+		return errors.New("tx not writable")
 	}
 
 	return tx.Put(i.table, key[:], value[:])

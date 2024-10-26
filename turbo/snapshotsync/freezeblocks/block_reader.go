@@ -1456,7 +1456,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimd
 
 func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	if r.heimdallStore == nil {
-		return 0, false, fmt.Errorf("no heimdall store")
+		return 0, false, errors.New("no heimdall store")
 	}
 
 	if tx == nil {
@@ -1470,7 +1470,7 @@ func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, e
 
 func (r *BlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	if r.heimdallStore == nil {
-		return 0, false, fmt.Errorf("no heimdall store")
+		return 0, false, errors.New("no heimdall store")
 	}
 
 	return r.heimdallStore.Milestones().(interface {
@@ -1480,7 +1480,7 @@ func (r *BlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bo
 
 func (r *BlockReader) Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) (*heimdall.Milestone, bool, error) {
 	if r.heimdallStore == nil {
-		return nil, false, fmt.Errorf("no heimdall store")
+		return nil, false, errors.New("no heimdall store")
 	}
 
 	return r.heimdallStore.Milestones().(interface {
@@ -1490,7 +1490,7 @@ func (r *BlockReader) Milestone(ctx context.Context, tx kv.Tx, milestoneId uint6
 
 func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	if r.heimdallStore == nil {
-		return 0, false, fmt.Errorf("no heimdall store")
+		return 0, false, errors.New("no heimdall store")
 	}
 
 	return r.heimdallStore.Checkpoints().(interface {
@@ -1500,7 +1500,7 @@ func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, b
 
 func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) (*heimdall.Checkpoint, bool, error) {
 	if r.heimdallStore == nil {
-		return nil, false, fmt.Errorf("no heimdall store")
+		return nil, false, errors.New("no heimdall store")
 	}
 
 	return r.heimdallStore.Checkpoints().(interface {

@@ -18,7 +18,7 @@ package polygoncommon
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"path/filepath"
 	"sync"
 
@@ -114,7 +114,7 @@ func (db *Database) BeginRw(ctx context.Context) (kv.RwTx, error) {
 		return db.BeginRw(ctx)
 	}
 
-	return nil, fmt.Errorf("db is read only")
+	return nil, errors.New("db is read only")
 }
 
 func (db *Database) View(ctx context.Context, f func(tx kv.Tx) error) error {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -68,27 +69,27 @@ func (NoopEntityStore[TEntity]) Prepare(ctx context.Context) error {
 func (NoopEntityStore[TEntity]) Close() {}
 
 func (NoopEntityStore[TEntity]) LastEntityId(ctx context.Context) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("noop")
+	return 0, false, errors.New("noop")
 }
 func (NoopEntityStore[TEntity]) LastFrozenEntityId() uint64 { return 0 }
 func (NoopEntityStore[TEntity]) LastEntity(ctx context.Context) (TEntity, bool, error) {
 	var res TEntity
-	return res, false, fmt.Errorf("noop")
+	return res, false, errors.New("noop")
 }
 func (NoopEntityStore[TEntity]) Entity(ctx context.Context, id uint64) (TEntity, bool, error) {
 	var res TEntity
-	return res, false, fmt.Errorf("noop")
+	return res, false, errors.New("noop")
 }
 func (NoopEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity TEntity) error {
 	return nil
 }
 
 func (NoopEntityStore[TEntity]) EntityIdFromBlockNum(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("noop")
+	return 0, false, errors.New("noop")
 }
 
 func (NoopEntityStore[TEntity]) RangeFromBlockNum(ctx context.Context, startBlockNum uint64) ([]TEntity, error) {
-	return nil, fmt.Errorf("noop")
+	return nil, errors.New("noop")
 }
 func (NoopEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoint uint64, limit int) (int, error) {
 	return 0, nil
@@ -99,7 +100,6 @@ func (NoopEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPo
 }
 
 func (ns NoopEntityStore[TEntity]) SnapType() snaptype.Type { return ns.Type }
-
 
 type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
 
@@ -484,7 +484,7 @@ func (s txEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPo
 		return 0, nil
 	}
 
-	var entityKey = entityStoreKey(uint64(lastEntityToKeep + 1))
+	var entityKey = entityStoreKey(lastEntityToKeep + 1)
 	var k []byte
 	var deleted int
 	for k, _, err = cursor.Seek(entityKey[:]); err == nil && k != nil; k, _, err = cursor.Next() {

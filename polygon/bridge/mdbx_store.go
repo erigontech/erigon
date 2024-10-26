@@ -424,7 +424,7 @@ func (s txStore) PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockI
 	tx, ok := s.tx.(kv.RwTx)
 
 	if !ok {
-		return fmt.Errorf("expected RW tx")
+		return errors.New("expected RW tx")
 	}
 
 	return putProcessedBlockInfo(tx, info)
@@ -446,7 +446,7 @@ func (s txStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum m
 	tx, ok := s.tx.(kv.RwTx)
 
 	if !ok {
-		return fmt.Errorf("expected RW tx")
+		return errors.New("expected RW tx")
 	}
 
 	vBigNum := new(big.Int)
@@ -484,7 +484,7 @@ func (s txStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWi
 	tx, ok := s.tx.(kv.RwTx)
 
 	if !ok {
-		return fmt.Errorf("expected RW tx")
+		return errors.New("expected RW tx")
 	}
 
 	for _, event := range events {
@@ -538,7 +538,7 @@ func (s txStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map
 	tx, ok := s.tx.(kv.RwTx)
 
 	if !ok {
-		return fmt.Errorf("expected RW tx")
+		return errors.New("expected RW tx")
 	}
 
 	kByte := make([]byte, 8)
@@ -633,7 +633,7 @@ func (s txStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteL
 	tx, ok := s.tx.(kv.RwTx)
 
 	if !ok {
-		return 0, fmt.Errorf("expected RW tx")
+		return 0, errors.New("expected RW tx")
 	}
 
 	// events
@@ -708,7 +708,7 @@ func (s txStore) Unwind(ctx context.Context, blockNum uint64) error {
 	tx, ok := s.tx.(kv.RwTx)
 
 	if !ok {
-		return fmt.Errorf("expected RW tx")
+		return errors.New("expected RW tx")
 	}
 
 	if err := UnwindBlockNumToEventID(tx, blockNum); err != nil {

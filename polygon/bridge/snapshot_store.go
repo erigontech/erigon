@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 
@@ -105,7 +106,7 @@ func (s *snapshotStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBl
 	}
 
 	if s.sprintLengthCalculator == nil {
-		return ProcessedBlockInfo{}, false, fmt.Errorf("can't calculate last block: missing sprint length calculator")
+		return ProcessedBlockInfo{}, false, errors.New("can't calculate last block: missing sprint length calculator")
 	}
 
 	lastBlockNum := segments[len(segments)-1].To() - 1

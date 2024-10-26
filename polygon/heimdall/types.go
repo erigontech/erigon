@@ -311,8 +311,8 @@ var (
 
 					if blockFrom > 0 {
 						if prevTo, err := checkpointId(rangeIndex, blockFrom-1); err == nil {
-							if prevTo == CheckpointId(checkpointFrom) {
-								if prevTo == CheckpointId(checkpointTo) {
+							if prevTo == checkpointFrom {
+								if prevTo == checkpointTo {
 									checkpointFrom = 0
 									checkpointTo = 0
 								} else {

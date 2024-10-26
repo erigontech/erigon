@@ -18,8 +18,8 @@ package heimdall
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"time"
 
 	commonerrors "github.com/erigontech/erigon-lib/common/errors"

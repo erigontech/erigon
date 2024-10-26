@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/rlp"
 )
 
-// go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
+//(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
 
 var (
 	receiptStatusFailedRLP     = []byte{}

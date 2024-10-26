@@ -601,7 +601,7 @@ func ExecV3(ctx context.Context,
 					defer tx.Rollback()
 					doms.SetTx(tx)
 
-					applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+					applyCtx, cancelApplyCtx = context.WithCancel(ctx) //nolint
 					defer cancelApplyCtx()
 					applyLoopWg.Add(1)
 					go applyLoop(applyCtx, rwLoopErrCh)

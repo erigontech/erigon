@@ -19,7 +19,6 @@ package heimdallsim
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"time"
 
@@ -61,16 +60,16 @@ func (noopBridgeStore) Prepare(ctx context.Context) error {
 func (noopBridgeStore) Close() {}
 
 func (noopBridgeStore) LastEventId(ctx context.Context) (uint64, error) {
-	return 0, fmt.Errorf("noop")
+	return 0, errors.New("noop")
 }
 func (noopBridgeStore) LastEventIdWithinWindow(ctx context.Context, fromID uint64, toTime time.Time) (uint64, error) {
-	return 0, fmt.Errorf("noop")
+	return 0, errors.New("noop")
 }
 func (noopBridgeStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
-	return 0, fmt.Errorf("noop")
+	return 0, errors.New("noop")
 }
 func (noopBridgeStore) LastProcessedBlockInfo(ctx context.Context) (bridge.ProcessedBlockInfo, bool, error) {
-	return bridge.ProcessedBlockInfo{}, false, fmt.Errorf("noop")
+	return bridge.ProcessedBlockInfo{}, false, errors.New("noop")
 }
 func (noopBridgeStore) LastFrozenEventId() uint64 {
 	return 0
@@ -79,13 +78,13 @@ func (noopBridgeStore) LastFrozenEventBlockNum() uint64 {
 	return 0
 }
 func (noopBridgeStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
-	return 0, false, fmt.Errorf("noop")
+	return 0, false, errors.New("noop")
 }
 func (noopBridgeStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
-	return nil, fmt.Errorf("noop")
+	return nil, errors.New("noop")
 }
 func (noopBridgeStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, err error) {
-	return 0, 0, fmt.Errorf("noop")
+	return 0, 0, errors.New("noop")
 }
 func (noopBridgeStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error {
 	return nil
@@ -103,13 +102,13 @@ func (noopBridgeStore) Unwind(ctx context.Context, blockNum uint64) error {
 	return nil
 }
 func (noopBridgeStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
-	return 0, fmt.Errorf("noop")
+	return 0, errors.New("noop")
 }
 func (noopBridgeStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockNum uint64) ([]rlp.RawValue, error) {
-	return nil, fmt.Errorf("noop")
+	return nil, errors.New("noop")
 }
 func (noopBridgeStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
-	return nil, false, fmt.Errorf("noop")
+	return nil, false, errors.New("noop")
 }
 func (noopBridgeStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	return 0, nil
