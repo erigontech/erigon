@@ -654,7 +654,7 @@ func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {
 
 	seg, ok := view.VisibleSegment(slot, strings.ToLower(tbl))
 	if !ok {
-		fmt.Println("not ok", strings.ToLower(tbl), iew.roTxs)
+		fmt.Println("not ok", strings.ToLower(tbl), view.roTxs)
 		return nil, nil
 	}
 
