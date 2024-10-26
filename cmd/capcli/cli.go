@@ -588,6 +588,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
+	r.withPPROF.withProfile()
 	for {
 		hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn)
 		start := time.Now()
