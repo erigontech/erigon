@@ -137,7 +137,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 			DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 		}
 	}
-	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, Segments: Segments, logger: logger, beaconCfg: beaconCfg}
+	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, Segments: Segments, logger: logger, beaconCfg: beaconCfg}
 	c.recalcVisibleFiles()
 	return c
 }
@@ -431,7 +431,7 @@ func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegme
 }
 
 func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
-	tmpDir, snapDir := dirs.Tmp, dirs.Snap
+	tmpDir, snapDir := dirs.Tmp, dirs.SnapCaplin
 
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
 	// a little bit ugly.
