@@ -504,17 +504,16 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 	return nil
 }
 
-func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
-	cfg := snapcfg.KnownCfg("")
+func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	for snapName, kvGetter := range s.snapshotTypes.Types {
-		for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, nil) {
-			blocksPerFile := snapcfg.MergeLimitFromCfg(cfg, snaptype.CaplinEnums.BeaconBlocks, i)
-
+		fromSlot := fromSlot / blocksPerFile
+		toSlot := toSlot / blocksPerFile
+		for i := fromSlot; i < toSlot; i += blocksPerFile {
 			if toSlot-i < blocksPerFile {
 				break
 			}
 			// keep beaconblocks here but whatever....
-			to := chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, nil)
+			to := i
 			logger.Log(lvl, fmt.Sprintf("Dumping %s", snapName), "from", i, "to", to)
 			if err := dumpCaplinState(ctx, snapName, kvGetter, i, to, salt, dirs, workers, lvl, logger); err != nil {
 				return err

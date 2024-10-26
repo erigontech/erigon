@@ -1214,7 +1214,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	snTypes := freezeblocks.MakeCaplinStateSnapshotsTypes(db)
 	stateSn := freezeblocks.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
 	stateSn.OpenFolder()
-	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
+	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, 100_000, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
 		return err
 	}
 	return nil
