@@ -58,22 +58,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return false, err
 	}
 	highestBlock := reply.LastNewBlockSeen
-	frozenBlocks := reply.FrozenBlocks
-
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return false, err
-	}
-
-	if highestBlock < frozenBlocks {
-		highestBlock = frozenBlocks
-	}
+	currentBlock := reply.CurrentBlock
 
 	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
 	if highestBlock == 0 {
@@ -96,13 +81,9 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		BlockNumber hexutil.Uint64 `json:"block_number"`
 	}
 	stagesMap := make([]S, len(stages.AllStages))
-	for i, stage := range stages.AllStages {
-		progress, err := stages.GetStageProgress(tx, stage)
-		if err != nil {
-			return nil, err
-		}
-		stagesMap[i].StageName = string(stage)
-		stagesMap[i].BlockNumber = hexutil.Uint64(progress)
+	for i, stage := range reply.Stages {
+		stagesMap[i].StageName = stage.StageName
+		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
 	}
 
 	return map[string]interface{}{
