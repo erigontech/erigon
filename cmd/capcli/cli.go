@@ -1224,7 +1224,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	if err := r.ReadFrom(buf); err != nil {
 		return err
 	}
-	fmt.Println(stateSn.BlocksAvailable())
+	fmt.Println(stateSn.BlocksAvailable(), r.ValidatorLength)
 	panic("A")
 	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, 100_000, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
 		return err
