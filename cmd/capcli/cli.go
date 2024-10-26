@@ -584,7 +584,9 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	snTypes := freezeblocks.MakeCaplinStateSnapshotsTypes(db)
 	stateSn := freezeblocks.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
-
+	if err := stateSn.OpenFolder(); err != nil {
+		return err
+	}
 	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn)
 	start := time.Now()
 	haveState, err := hr.ReadHistoricalState(ctx, tx, r.CompareSlot)
