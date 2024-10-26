@@ -210,6 +210,7 @@ func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, dir string) error
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, sn.FilePath())
 	}
+	return nil
 }
 
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
