@@ -649,30 +649,10 @@ func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {
 	view := s.View()
 	defer view.Close()
 
-	var buf []byte
-
 	seg, ok := view.VisibleSegment(slot, strings.ToLower(tbl))
 	if !ok {
 		return nil, nil
 	}
 
-	idxSlot := seg.src.Index()
-
-	if idxSlot == nil {
-		return nil, nil
-	}
-	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
-
-	gg := seg.src.MakeGetter()
-	gg.Reset(blockOffset)
-	if !gg.HasNext() {
-		return nil, nil
-	}
-
-	buf, _ = gg.Next(buf)
-	if len(buf) == 0 {
-		return nil, nil
-	}
-
-	return buf, nil
+	return seg.Get(slot)
 }

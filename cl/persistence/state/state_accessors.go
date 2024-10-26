@@ -35,12 +35,15 @@ type GetValFn func(table string, key []byte) ([]byte, error)
 func GetValFnTxAndSnapshot(tx kv.Tx, snapshot *freezeblocks.CaplinStateSnapshots) GetValFn {
 	return func(table string, key []byte) ([]byte, error) {
 		if snapshot != nil {
-			v, err := snapshot.Get(table, uint64(binary.BigEndian.Uint32(key)))
-			if err != nil {
-				return nil, err
-			}
-			if v != nil {
-				return v, nil
+			view := snapshot.View()
+			// v, err := snapshot.Get(table, uint64(binary.BigEndian.Uint32(key)))
+			// if err != nil {
+			// 	return nil, err
+			// }
+			slot := uint64(binary.BigEndian.Uint32(key))
+			segment, ok := view.VisibleSegment(slot, table)
+			if ok {
+				return segment.Get(slot)
 			}
 		}
 		return tx.GetOne(table, key)
