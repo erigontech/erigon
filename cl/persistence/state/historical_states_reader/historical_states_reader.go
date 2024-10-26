@@ -289,23 +289,30 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector s
 	}
 
 	needFromDB := size - needFromGenesis
-	cursor, err := tx.Cursor(table)
+	highestAvaiableSlot, err := r.highestSlotInSnapshotsAndDB(tx, table)
 	if err != nil {
 		return err
 	}
-	defer cursor.Close()
+
 	var currKeySlot uint64
-	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(slot - needFromDB)); err == nil && k != nil; k, v, err = cursor.Next() {
-		if len(v) != 32 {
-			return fmt.Errorf("invalid key %x", k)
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
+	for i := slot - needFromDB; i <= highestAvaiableSlot; i++ {
+		key := base_encoding.Encode64ToBytes4(i)
+		v, err := getter(table, key)
+		if err != nil {
+			return err
 		}
-		currKeySlot = base_encoding.Decode64FromBytes4(k)
+		if len(v) != 32 {
+			return fmt.Errorf("invalid key %x", key)
+		}
+		currKeySlot = i
 		out.Set(int(currKeySlot%size), common.BytesToHash(v))
 		inserted++
 		if inserted == needFromDB {
 			break
 		}
 	}
+
 	for i := 0; i < int(needFromGenesis); i++ {
 		currKeySlot++
 		out.Set(int(currKeySlot%size), genesisVector.Get(int(currKeySlot%size)))
@@ -351,6 +358,30 @@ func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, eth1DataVotesLength
 	return nil
 }
 
+func (r *HistoricalStatesReader) highestSlotInSnapshotsAndDB(tx kv.Tx, tbl string) (uint64, error) {
+	cursor, err := tx.Cursor(tbl)
+	if err != nil {
+		return 0, err
+	}
+	defer cursor.Close()
+	k, _, err := cursor.Last()
+	if err != nil {
+		return 0, err
+	}
+	if k == nil {
+		if r.stateSn != nil {
+			return r.stateSn.BlocksAvailable(), nil
+		}
+		return 0, nil
+	}
+	avaiableInDB := base_encoding.Decode64FromBytes4(k)
+	var availableInSnapshots uint64
+	if r.stateSn != nil {
+		availableInSnapshots = r.stateSn.BlocksAvailable()
+	}
+	return max(avaiableInDB, availableInSnapshots), nil
+}
+
 func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out solid.HashVectorSSZ) error {
 	size := r.cfg.EpochsPerHistoricalVector
 	genesisVector := r.genesisState.RandaoMixes()
@@ -361,19 +392,29 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 	if size > epoch || epoch-size <= genesisEpoch {
 		needFromGenesis = size - (epoch - genesisEpoch)
 	}
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
 
 	needFromDB := size - needFromGenesis
-	cursor, err := tx.Cursor(kv.RandaoMixes)
+
+	highestAvaiableSlot, err := r.highestSlotInSnapshotsAndDB(tx, kv.RandaoMixes)
 	if err != nil {
 		return err
 	}
-	defer cursor.Close()
 	var currKeyEpoch uint64
-	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(roundedSlot - (needFromDB)*r.cfg.SlotsPerEpoch)); err == nil && k != nil; k, v, err = cursor.Next() {
-		if len(v) != 32 {
-			return fmt.Errorf("invalid key %x", k)
+
+	for i := roundedSlot - (needFromDB)*r.cfg.SlotsPerEpoch; i <= highestAvaiableSlot; i++ {
+		key := base_encoding.Encode64ToBytes4(i)
+		v, err := getter(kv.RandaoMixes, key)
+		if err != nil {
+			return err
 		}
-		currKeyEpoch = base_encoding.Decode64FromBytes4(k) / r.cfg.SlotsPerEpoch
+		if len(v) == 0 {
+			continue
+		}
+		if len(v) != 32 {
+			return fmt.Errorf("invalid key %x", key)
+		}
+		currKeyEpoch = i / r.cfg.SlotsPerEpoch
 		out.Set(int(currKeyEpoch%size), common.BytesToHash(v))
 		inserted++
 		if inserted == needFromDB {
@@ -384,7 +425,6 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 		currKeyEpoch++
 		out.Set(int(currKeyEpoch%size), genesisVector.Get(int(currKeyEpoch%size)))
 	}
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
 
 	// Now we need to read the intra epoch randao mix.
 	intraRandaoMix, err := getter(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(slot))
