@@ -53,7 +53,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 
 // Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
-	reply, err := api.ethBackend.Status(ctx)
+	reply, err := api.ethBackend.Syncing(ctx)
 	if err != nil {
 		return false, err
 	}

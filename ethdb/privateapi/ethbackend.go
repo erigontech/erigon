@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -117,9 +119,56 @@ func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.Ver
 	return EthBackendAPIVersion, nil
 }
 
-func (s *EthBackendServer) LastNewBlockSeen(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
-	s.notifications.LastNewBlockSeen.Load()
-	return EthBackendAPIVersion, nil
+func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remote.SyncingReply, error) {
+	highestBlock := s.notifications.LastNewBlockSeen.Load()
+	frozenBlocks := s.blockReader.FrozenBlocks()
+
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+
+	if highestBlock < frozenBlocks {
+		highestBlock = frozenBlocks
+	}
+
+	reply := &remote.SyncingReply{
+		CurrentBlock:     currentBlock,
+		FrozenBlocks:     frozenBlocks,
+		LastNewBlockSeen: math.MaxUint64,
+	}
+
+	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
+	if highestBlock == 0 {
+		reply.Syncing = true
+		return reply, nil
+	}
+	reorgRange := 8
+
+	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
+	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
+		reply.Syncing = false
+		return reply, nil
+	}
+
+	reply.LastNewBlockSeen = highestBlock
+	reply.Stages = make([]*remote.SyncingReply_StageProgress, len(stages.AllStages))
+	for i, stage := range stages.AllStages {
+		progress, err := stages.GetStageProgress(tx, stage)
+		if err != nil {
+			return nil, err
+		}
+		reply.Stages[i].StageName = string(stage)
+		reply.Stages[i].BlockNumber = progress
+	}
+
+	return reply, nil
 }
 
 func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {

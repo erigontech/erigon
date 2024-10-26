@@ -25,7 +25,7 @@ const (
 	ETHBACKEND_NetVersion_FullMethodName              = "/remote.ETHBACKEND/NetVersion"
 	ETHBACKEND_NetPeerCount_FullMethodName            = "/remote.ETHBACKEND/NetPeerCount"
 	ETHBACKEND_Version_FullMethodName                 = "/remote.ETHBACKEND/Version"
-	ETHBACKEND_Status_FullMethodName                  = "/remote.ETHBACKEND/Status"
+	ETHBACKEND_Syncing_FullMethodName                 = "/remote.ETHBACKEND/Syncing"
 	ETHBACKEND_ProtocolVersion_FullMethodName         = "/remote.ETHBACKEND/ProtocolVersion"
 	ETHBACKEND_ClientVersion_FullMethodName           = "/remote.ETHBACKEND/ClientVersion"
 	ETHBACKEND_Subscribe_FullMethodName               = "/remote.ETHBACKEND/Subscribe"
@@ -52,8 +52,8 @@ type ETHBACKENDClient interface {
 	NetPeerCount(ctx context.Context, in *NetPeerCountRequest, opts ...grpc.CallOption) (*NetPeerCountReply, error)
 	// Version returns the service version number
 	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error)
-	// Status
-	Status(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*StatusReply, error)
+	// Syncing returns a data object detailing the status of the sync process
+	Syncing(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*SyncingReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
 	ProtocolVersion(ctx context.Context, in *ProtocolVersionRequest, opts ...grpc.CallOption) (*ProtocolVersionReply, error)
 	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
@@ -133,10 +133,10 @@ func (c *eTHBACKENDClient) Version(ctx context.Context, in *emptypb.Empty, opts 
 	return out, nil
 }
 
-func (c *eTHBACKENDClient) Status(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*StatusReply, error) {
+func (c *eTHBACKENDClient) Syncing(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*SyncingReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StatusReply)
-	err := c.cc.Invoke(ctx, ETHBACKEND_Status_FullMethodName, in, out, cOpts...)
+	out := new(SyncingReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_Syncing_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -347,8 +347,8 @@ type ETHBACKENDServer interface {
 	NetPeerCount(context.Context, *NetPeerCountRequest) (*NetPeerCountReply, error)
 	// Version returns the service version number
 	Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error)
-	// Status
-	Status(context.Context, *emptypb.Empty) (*StatusReply, error)
+	// Syncing returns a data object detailing the status of the sync process
+	Syncing(context.Context, *emptypb.Empty) (*SyncingReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
 	ProtocolVersion(context.Context, *ProtocolVersionRequest) (*ProtocolVersionReply, error)
 	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
@@ -397,8 +397,8 @@ func (UnimplementedETHBACKENDServer) NetPeerCount(context.Context, *NetPeerCount
 func (UnimplementedETHBACKENDServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
 }
-func (UnimplementedETHBACKENDServer) Status(context.Context, *emptypb.Empty) (*StatusReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Status not implemented")
+func (UnimplementedETHBACKENDServer) Syncing(context.Context, *emptypb.Empty) (*SyncingReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Syncing not implemented")
 }
 func (UnimplementedETHBACKENDServer) ProtocolVersion(context.Context, *ProtocolVersionRequest) (*ProtocolVersionReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProtocolVersion not implemented")
@@ -530,20 +530,20 @@ func _ETHBACKEND_Version_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ETHBACKEND_Status_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ETHBACKEND_Syncing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ETHBACKENDServer).Status(ctx, in)
+		return srv.(ETHBACKENDServer).Syncing(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: ETHBACKEND_Status_FullMethodName,
+		FullMethod: ETHBACKEND_Syncing_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).Status(ctx, req.(*emptypb.Empty))
+		return srv.(ETHBACKENDServer).Syncing(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -853,8 +853,8 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ETHBACKEND_Version_Handler,
 		},
 		{
-			MethodName: "Status",
-			Handler:    _ETHBACKEND_Status_Handler,
+			MethodName: "Syncing",
+			Handler:    _ETHBACKEND_Syncing_Handler,
 		},
 		{
 			MethodName: "ProtocolVersion",

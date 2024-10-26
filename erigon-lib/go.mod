@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e
-	github.com/erigontech/interfaces v0.0.0-20241026043638-abca2ec86a8d
+	github.com/erigontech/interfaces v0.0.0-20241026045526-56f59523ec08
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
@@ -32,7 +32,6 @@ require (
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.3.1
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
-	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.2.3
 	github.com/prometheus/client_golang v1.20.5

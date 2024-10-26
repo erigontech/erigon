@@ -22,9 +22,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-
 	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/p2p"
 )
@@ -33,7 +31,7 @@ import (
 // implementation can work with local Ethereum object or with Remote (grpc-based) one
 // this is reason why all methods are accepting context and returning error
 type ApiBackend interface {
-	Status(ctx context.Context) (*remote.StatusReply, error)
+	Syncing(ctx context.Context) (*remote.SyncingReply, error)
 	Etherbase(ctx context.Context) (libcommon.Address, error)
 	NetVersion(ctx context.Context) (uint64, error)
 	NetPeerCount(ctx context.Context) (uint64, error)

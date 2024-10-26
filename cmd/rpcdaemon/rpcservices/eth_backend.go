@@ -151,8 +151,8 @@ func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error
 	return gointerfaces.ConvertH160toAddress(res.Address), nil
 }
 
-func (back *RemoteBackend) Status(ctx context.Context) (*remote.StatusReply, error) {
-	res, err := back.remoteEthBackend.Status(ctx, &emptypb.Empty{})
+func (back *RemoteBackend) Syncing(ctx context.Context) (*remote.SyncingReply, error) {
+	res, err := back.remoteEthBackend.Syncing(ctx, &emptypb.Empty{})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return nil, errors.New(s.Message())
