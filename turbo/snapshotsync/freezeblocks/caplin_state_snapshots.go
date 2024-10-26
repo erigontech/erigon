@@ -468,7 +468,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	s.visibleSegmentsLock.RLock()
 	defer s.visibleSegmentsLock.RUnlock()
 
-	v := &CaplinStateView{s: s}
+	v := &CaplinStateView{s: s, roTxs: make(map[string]*segmentsRotx)}
 	// BeginRo increments refcount - which is contended
 	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
@@ -635,7 +635,7 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("ReadHeader(%d), %s, %s\n", slot, rec, dbg.Stack()))
+			panic(fmt.Sprintf("Get(%s, %d), %s, %s\n", tbl, slot, rec, dbg.Stack()))
 		}
 	}()
 
