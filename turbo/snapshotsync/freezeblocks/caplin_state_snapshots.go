@@ -85,12 +85,7 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.BalancesDump:              getKvGetterForStateTable(db, kv.BalancesDump),
 			kv.EffectiveBalancesDump:     getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
 		},
-		Compression: map[string]bool{
-			kv.EpochData:     true,
-			kv.SlotData:      true,
-			kv.StateEvents:   true,
-			kv.Eth1DataVotes: true,
-		},
+		Compression: map[string]bool{},
 	}
 }
 
