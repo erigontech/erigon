@@ -515,7 +515,7 @@ func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, to
 			}
 			// keep beaconblocks here but whatever....
 			to := chooseSegmentEnd(i, toSlot, snaptype.CaplinEnums.BeaconBlocks, nil)
-			logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
+			logger.Log(lvl, fmt.Sprintf("Dumping %s", snapName), "from", i, "to", to)
 			if err := dumpCaplinState(ctx, snapName, kvGetter, i, to, salt, dirs, workers, lvl, logger); err != nil {
 				return err
 			}
