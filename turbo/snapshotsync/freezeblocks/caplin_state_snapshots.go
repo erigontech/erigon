@@ -214,6 +214,7 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 Loop:
 	for _, fName := range fileNames {
 		f, _, ok := snaptype.ParseFileName(s.dir, fName)
+		fmt.Println(f, ok)
 		if !ok {
 			continue
 		}
