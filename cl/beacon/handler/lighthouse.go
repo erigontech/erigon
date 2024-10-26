@@ -75,7 +75,10 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 		return nil, err
 	}
 	defer tx.Rollback()
-	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots)
+
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 
 	slot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	if slot >= a.forkchoiceStore.LowestAvailableSlot() {
@@ -135,15 +138,16 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 	if prevEpochData == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for previous epoch"))
 	}
+
 	// read the validator set
-	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, slot)
+	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, slot)
 	if err != nil {
 		return nil, err
 	}
 	if validatorSet == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator set not found for current epoch"))
 	}
-	currentEpochParticipation, previousEpochParticipation, err := a.stateReader.ReadParticipations(tx, slot+(a.beaconChainCfg.SlotsPerEpoch-1))
+	currentEpochParticipation, previousEpochParticipation, err := a.stateReader.ReadParticipations(tx, stateGetter, slot+(a.beaconChainCfg.SlotsPerEpoch-1))
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +282,9 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		return newBeaconResponse(a.computeLighthouseValidatorInclusion(int(validatorIndex), prevEpoch, epoch, activeBalance, prevActiveBalance, validatorSet, currentEpochParticipation, previousEpochParticipation)), nil
 	}
 
-	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots)
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	// read the epoch datas first
 	epochData, err := state_accessors.ReadEpochData(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
@@ -295,14 +301,14 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch data not found for previous epoch"))
 	}
 	// read the validator set
-	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, slot)
+	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, slot)
 	if err != nil {
 		return nil, err
 	}
 	if validatorSet == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator set not found for current epoch"))
 	}
-	currentEpochParticipation, previousEpochParticipation, err := a.stateReader.ReadParticipations(tx, slot+(a.beaconChainCfg.SlotsPerEpoch-1))
+	currentEpochParticipation, previousEpochParticipation, err := a.stateReader.ReadParticipations(tx, stateGetter, slot+(a.beaconChainCfg.SlotsPerEpoch-1))
 	if err != nil {
 		return nil, err
 	}

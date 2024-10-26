@@ -81,7 +81,10 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 			Total:             blkRewards.Attestations + blkRewards.ProposerSlashings + blkRewards.AttesterSlashings + blkRewards.SyncAggregate,
 		}).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 	}
-	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots)
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	slotData, err := state_accessors.ReadSlotData(stateGetter, slot)
 	if err != nil {
 		return nil, err
@@ -166,7 +169,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 		syncCommittee      *solid.SyncCommittee
 		totalActiveBalance uint64
 	)
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots)
+
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	if slot < a.forkchoiceStore.LowestAvailableSlot() {
 		if !isCanonical {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("non-canonical finalized block not found"))

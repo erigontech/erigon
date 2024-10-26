@@ -178,15 +178,17 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if lastSlot > stateProgress {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("requested range is not yet processed or the node is not archivial"))
 	}
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
 
-	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots)
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 
 	epochData, err := state_accessors.ReadEpochData(stateGetter, a.beaconChainCfg.RoundSlotToEpoch(lastSlot))
 	if err != nil {
 		return nil, err
 	}
 
-	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, lastSlot)
+	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, lastSlot)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +196,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no validator set found for this epoch"))
 	}
 
-	_, previousIdx, err := a.stateReader.ReadParticipations(tx, lastSlot)
+	_, previousIdx, err := a.stateReader.ReadParticipations(tx, stateGetter, lastSlot)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +216,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 	}
 	inactivityScores := solid.NewUint64ListSSZ(int(a.beaconChainCfg.ValidatorRegistryLimit))
-	if err := a.stateReader.ReconstructUint64ListDump(tx, lastSlot, kv.InactivityScores, validatorSet.Length(), inactivityScores); err != nil {
+	if err := a.stateReader.ReconstructUint64ListDump(stateGetter, lastSlot, kv.InactivityScores, validatorSet.Length(), inactivityScores); err != nil {
 		return nil, err
 	}
 	resp, err := a.computeAttestationsRewardsForAltair(

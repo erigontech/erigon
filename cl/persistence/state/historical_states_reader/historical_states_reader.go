@@ -75,7 +75,9 @@ func NewHistoricalStatesReader(
 }
 
 func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
+	snapshotView := r.stateSn.View()
+	defer snapshotView.Close()
+	kvGetter := state_accessors.GetValFnTxAndSnapshot(tx, snapshotView)
 
 	ret := state.New(r.cfg)
 	latestProcessedState, err := state_accessors.GetStateProcessingProgress(tx)
@@ -105,7 +107,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	blockHeader := block.SignedBeaconBlockHeader().Header
 	blockHeader.Root = common.Hash{}
 	// Read the epoch and per-slot data.
-	slotData, err := state_accessors.ReadSlotData(getter, slot)
+	slotData, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +117,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
 
-	epochData, err := state_accessors.ReadEpochData(getter, roundedSlot)
+	epochData, err := state_accessors.ReadEpochData(kvGetter, roundedSlot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read epoch data: %w", err)
 	}
@@ -134,12 +136,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	stateRoots, blockRoots := solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot))
 	ret.SetLatestBlockHeader(blockHeader)
 
-	if err := r.readHistoryHashVector(tx, r.genesisState.BlockRoots(), slot, r.cfg.SlotsPerHistoricalRoot, kv.BlockRoot, blockRoots); err != nil {
+	if err := r.readHistoryHashVector(tx, kvGetter, r.genesisState.BlockRoots(), slot, r.cfg.SlotsPerHistoricalRoot, kv.BlockRoot, blockRoots); err != nil {
 		return nil, fmt.Errorf("failed to read block roots: %w", err)
 	}
 	ret.SetBlockRoots(blockRoots)
 
-	if err := r.readHistoryHashVector(tx, r.genesisState.StateRoots(), slot, r.cfg.SlotsPerHistoricalRoot, kv.StateRoot, stateRoots); err != nil {
+	if err := r.readHistoryHashVector(tx, kvGetter, r.genesisState.StateRoots(), slot, r.cfg.SlotsPerHistoricalRoot, kv.StateRoot, stateRoots); err != nil {
 		return nil, fmt.Errorf("failed to read state roots: %w", err)
 	}
 	ret.SetStateRoots(stateRoots)
@@ -155,14 +157,14 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	// Eth1
 	eth1DataVotes := solid.NewStaticListSSZ[*cltypes.Eth1Data](int(r.cfg.Eth1DataVotesLength()), 72)
-	if err := r.readEth1DataVotes(tx, slotData.Eth1DataLength, slot, eth1DataVotes); err != nil {
+	if err := r.readEth1DataVotes(kvGetter, slotData.Eth1DataLength, slot, eth1DataVotes); err != nil {
 		return nil, fmt.Errorf("failed to read eth1 data votes: %w", err)
 	}
 	ret.SetEth1DataVotes(eth1DataVotes)
 	ret.SetEth1Data(slotData.Eth1Data)
 	ret.SetEth1DepositIndex(slotData.Eth1DepositIndex)
 	// Registry (Validators + Balances)
-	balancesBytes, err := r.reconstructBalances(tx, slotData.ValidatorLength, slot, kv.ValidatorBalance, kv.BalancesDump)
+	balancesBytes, err := r.reconstructBalances(tx, kvGetter, slotData.ValidatorLength, slot, kv.ValidatorBalance, kv.BalancesDump)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read validator balances: %w", err)
 	}
@@ -173,27 +175,27 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	ret.SetBalances(balances)
 
-	validatorSet, err := r.ReadValidatorsForHistoricalState(tx, slot)
+	validatorSet, err := r.ReadValidatorsForHistoricalState(tx, kvGetter, slot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read validators: %w", err)
 	}
 	ret.SetValidators(validatorSet)
 	// Randomness
 	randaoMixes := solid.NewHashVector(int(r.cfg.EpochsPerHistoricalVector))
-	if err := r.readRandaoMixes(tx, slot, randaoMixes); err != nil {
+	if err := r.readRandaoMixes(tx, kvGetter, slot, randaoMixes); err != nil {
 		return nil, fmt.Errorf("failed to read randao mixes: %w", err)
 	}
 	ret.SetRandaoMixes(randaoMixes)
 	slashingsVector := solid.NewUint64VectorSSZ(int(r.cfg.EpochsPerSlashingsVector))
 	// Slashings
-	err = r.ReconstructUint64ListDump(tx, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector), slashingsVector)
+	err = r.ReconstructUint64ListDump(kvGetter, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector), slashingsVector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read slashings: %w", err)
 	}
 	ret.SetSlashings(slashingsVector)
 
 	// Finality
-	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, ok, err := state_accessors.ReadCheckpoints(getter, roundedSlot)
+	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, ok, err := state_accessors.ReadCheckpoints(kvGetter, roundedSlot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read checkpoints: %w", err)
 	}
@@ -216,7 +218,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		ret.SetCurrentEpochAttestations(currentAtts)
 		ret.SetPreviousEpochAttestations(previousAtts)
 	} else {
-		currentIdxs, previousIdxs, err := r.ReadParticipations(tx, slot)
+		currentIdxs, previousIdxs, err := r.ReadParticipations(tx, kvGetter, slot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read participations: %w", err)
 		}
@@ -229,7 +231,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	inactivityScores := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 	// Inactivity
-	err = r.ReconstructUint64ListDump(tx, slot, kv.InactivityScores, int(slotData.ValidatorLength), inactivityScores)
+	err = r.ReconstructUint64ListDump(kvGetter, slot, kv.InactivityScores, int(slotData.ValidatorLength), inactivityScores)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read inactivity scores: %w", err)
 	}
@@ -237,7 +239,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetInactivityScoresRaw(inactivityScores)
 	// Sync
 	syncCommitteeSlot := r.cfg.RoundSlotToSyncCommitteePeriod(slot)
-	currentSyncCommittee, err := state_accessors.ReadCurrentSyncCommittee(getter, syncCommitteeSlot)
+	currentSyncCommittee, err := state_accessors.ReadCurrentSyncCommittee(kvGetter, syncCommitteeSlot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read current sync committee: %w", err)
 	}
@@ -245,7 +247,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		currentSyncCommittee = r.genesisState.CurrentSyncCommittee()
 	}
 
-	nextSyncCommittee, err := state_accessors.ReadNextSyncCommittee(getter, syncCommitteeSlot)
+	nextSyncCommittee, err := state_accessors.ReadNextSyncCommittee(kvGetter, syncCommitteeSlot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read next sync committee: %w", err)
 	}
@@ -282,7 +284,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	return ret, nil
 }
 
-func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector solid.HashVectorSSZ, slot, size uint64, table string, out solid.HashVectorSSZ) (err error) {
+func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, kvGetter state_accessors.GetValFn, genesisVector solid.HashVectorSSZ, slot, size uint64, table string, out solid.HashVectorSSZ) (err error) {
 	var needFromGenesis, inserted uint64
 	if size > slot || slot-size <= r.genesisState.Slot() {
 		needFromGenesis = size - (slot - r.genesisState.Slot())
@@ -295,10 +297,9 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector s
 	}
 
 	var currKeySlot uint64
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
 	for i := slot - needFromDB; i <= highestAvaiableSlot; i++ {
 		key := base_encoding.Encode64ToBytes4(i)
-		v, err := getter(table, key)
+		v, err := kvGetter(table, key)
 		if err != nil {
 			return err
 		}
@@ -320,7 +321,7 @@ func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector s
 	return nil
 }
 
-func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, eth1DataVotesLength, slot uint64, out *solid.ListSSZ[*cltypes.Eth1Data]) error {
+func (r *HistoricalStatesReader) readEth1DataVotes(kvGetter state_accessors.GetValFn, eth1DataVotesLength, slot uint64, out *solid.ListSSZ[*cltypes.Eth1Data]) error {
 	initialSlot := r.cfg.RoundSlotToVotePeriod(slot)
 	if initialSlot <= r.genesisState.Slot() {
 		// We need to prepend the genesis votes
@@ -329,7 +330,6 @@ func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, eth1DataVotesLength
 		}
 	}
 
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
 	endSlot := r.cfg.RoundSlotToVotePeriod(slot + r.cfg.SlotsPerEpoch*r.cfg.EpochsPerEth1VotingPeriod)
 
 	for i := initialSlot; i < endSlot; i++ {
@@ -337,7 +337,7 @@ func (r *HistoricalStatesReader) readEth1DataVotes(tx kv.Tx, eth1DataVotesLength
 			break
 		}
 		key := base_encoding.Encode64ToBytes4(i)
-		v, err := getter(kv.Eth1DataVotes, key)
+		v, err := kvGetter(kv.Eth1DataVotes, key)
 		if err != nil {
 			return err
 		}
@@ -378,7 +378,7 @@ func (r *HistoricalStatesReader) highestSlotInSnapshotsAndDB(tx kv.Tx, tbl strin
 	return max(avaiableInDB, availableInSnapshots), nil
 }
 
-func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out solid.HashVectorSSZ) error {
+func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64, out solid.HashVectorSSZ) error {
 	size := r.cfg.EpochsPerHistoricalVector
 	genesisVector := r.genesisState.RandaoMixes()
 	var needFromGenesis, inserted uint64
@@ -388,7 +388,6 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 	if size > epoch || epoch-size <= genesisEpoch {
 		needFromGenesis = size - (epoch - genesisEpoch)
 	}
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
 
 	needFromDB := size - needFromGenesis
 
@@ -400,7 +399,7 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 
 	for i := roundedSlot - (needFromDB)*r.cfg.SlotsPerEpoch; i <= highestAvaiableSlot; i++ {
 		key := base_encoding.Encode64ToBytes4(i)
-		v, err := getter(kv.RandaoMixes, key)
+		v, err := kvGetter(kv.RandaoMixes, key)
 		if err != nil {
 			return err
 		}
@@ -423,7 +422,7 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 	}
 
 	// Now we need to read the intra epoch randao mix.
-	intraRandaoMix, err := getter(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(slot))
+	intraRandaoMix, err := kvGetter(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return err
 	}
@@ -434,11 +433,10 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 	return nil
 }
 
-func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validatorSetLength, slot uint64, diffBucket string, dumpBucket string) ([]byte, error) {
+func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter state_accessors.GetValFn, validatorSetLength, slot uint64, diffBucket string, dumpBucket string) ([]byte, error) {
 	// Read the file
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
 
 	midpoint := uint64(clparams.SlotsPerDump / 2)
 	var compressed []byte
@@ -448,12 +446,12 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 	}
 	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
 	if forward {
-		compressed, err = getter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
+		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		compressed, err = getter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
+		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
 		if err != nil {
 			return nil, err
 		}
@@ -487,28 +485,9 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 		return nil, err
 	}
 	if forward {
-		// for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// 	if len(k) != 4 {
-		// 		return nil, fmt.Errorf("invalid key %x", k)
-		// 	}
-		// 	currSlot := base_encoding.Decode64FromBytes4(k)
-		// 	if currSlot == freshDumpSlot {
-		// 		continue
-		// 	}
-		// 	if currSlot > slot {
-		// 		return nil, fmt.Errorf("diff not found for slot %d", slot)
-		// 	}
-		// 	currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, false)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// }
 		for currSlot := freshDumpSlot; currSlot <= slot && currSlot < highestSlotAvailable; currSlot++ {
 			key := base_encoding.Encode64ToBytes4(currSlot)
-			v, err := getter(diffBucket, key)
+			v, err := kvGetter(diffBucket, key)
 			if err != nil {
 				return nil, err
 			}
@@ -527,25 +506,9 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 			}
 		}
 	} else {
-		// for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot + clparams.SlotsPerDump)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) > slot; k, v, err = diffCursor.Prev() {
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// 	if len(k) != 4 {
-		// 		return nil, fmt.Errorf("invalid key %x", k)
-		// 	}
-		// 	currSlot := base_encoding.Decode64FromBytes4(k)
-		// 	if currSlot <= slot || currSlot > freshDumpSlot+clparams.SlotsPerDump {
-		// 		continue
-		// 	}
-		// 	currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, true)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// }
 		for currSlot := freshDumpSlot + clparams.SlotsPerDump; currSlot > slot && currSlot > r.genesisState.Slot(); currSlot-- {
 			key := base_encoding.Encode64ToBytes4(currSlot)
-			v, err := getter(diffBucket, key)
+			v, err := kvGetter(diffBucket, key)
 			if err != nil {
 				return nil, err
 			}
@@ -565,10 +528,9 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 	return currentList, err
 }
 
-func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLength, slot uint64, diffBucket, dumpBucket string) ([]byte, error) {
+func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_accessors.GetValFn, validatorSetLength, slot uint64, diffBucket, dumpBucket string) ([]byte, error) {
 	remainder := slot % clparams.SlotsPerDump
 	freshDumpSlot := slot - remainder
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
 
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
@@ -582,12 +544,12 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 	midpoint := uint64(clparams.SlotsPerDump / 2)
 	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
 	if forward {
-		compressed, err = getter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
+		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		compressed, err = getter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
+		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
 		if err != nil {
 			return nil, err
 		}
@@ -616,7 +578,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 			if i == freshDumpSlot {
 				continue
 			}
-			diff, err := getter(diffBucket, base_encoding.Encode64ToBytes4(i))
+			diff, err := kvGetter(diffBucket, base_encoding.Encode64ToBytes4(i))
 			if err != nil {
 				return nil, err
 			}
@@ -630,7 +592,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 		}
 	} else {
 		for i := freshDumpSlot + clparams.SlotsPerDump; i > roundedSlot; i -= r.cfg.SlotsPerEpoch {
-			diff, err := getter(diffBucket, base_encoding.Encode64ToBytes4(i))
+			diff, err := kvGetter(diffBucket, base_encoding.Encode64ToBytes4(i))
 			if err != nil {
 				return nil, err
 			}
@@ -649,7 +611,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 		return currentList, nil
 	}
 
-	slotDiff, err := getter(diffBucket, base_encoding.Encode64ToBytes4(slot))
+	slotDiff, err := kvGetter(diffBucket, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -661,8 +623,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 	return base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, slotDiff, false)
 }
 
-func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64, bkt string, size int, out solid.Uint64ListSSZ) error {
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
+func (r *HistoricalStatesReader) ReconstructUint64ListDump(kvGetter state_accessors.GetValFn, slot uint64, bkt string, size int, out solid.Uint64ListSSZ) error {
 	var (
 		v   []byte
 		err error
@@ -670,7 +631,7 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64
 	// Try seeking <= to slot
 	for i := slot; i >= r.genesisState.Slot(); i-- {
 		key := base_encoding.Encode64ToBytes4(i)
-		v, err = getter(bkt, key)
+		v, err = kvGetter(bkt, key)
 		if err != nil {
 			return err
 		}
@@ -699,11 +660,9 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64
 	return out.DecodeSSZ(currentList, 0)
 }
 
-func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot uint64) (*solid.ValidatorSet, error) {
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
-
+func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (*solid.ValidatorSet, error) {
 	// Read the minimal beacon state which have the small fields.
-	sd, err := state_accessors.ReadSlotData(getter, slot)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -724,7 +683,7 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot
 	})
 	// Read the balances
 
-	bytesEffectiveBalances, err := r.reconstructDiffedUint64List(tx, validatorSetLength, slot, kv.ValidatorEffectiveBalance, kv.EffectiveBalancesDump)
+	bytesEffectiveBalances, err := r.reconstructDiffedUint64List(tx, kvGetter, validatorSetLength, slot, kv.ValidatorEffectiveBalance, kv.EffectiveBalancesDump)
 	if err != nil {
 		return nil, err
 	}
@@ -787,13 +746,12 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64) (*soli
 }
 
 // readParticipations shuffles active indicies and returns the participation flags for the given epoch.
-func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*solid.ParticipationBitList, *solid.ParticipationBitList, error) {
+func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (*solid.ParticipationBitList, *solid.ParticipationBitList, error) {
 	var beginSlot uint64
 	epoch, prevEpoch := r.computeRelevantEpochs(slot)
 	beginSlot = prevEpoch * r.cfg.SlotsPerEpoch
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
 
-	currentActiveIndicies, err := state_accessors.ReadActiveIndicies(getter, epoch*r.cfg.SlotsPerEpoch)
+	currentActiveIndicies, err := state_accessors.ReadActiveIndicies(kvGetter, epoch*r.cfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -801,14 +759,14 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*sol
 	if epoch == 0 {
 		previousActiveIndicies = currentActiveIndicies
 	} else {
-		previousActiveIndicies, err = state_accessors.ReadActiveIndicies(getter, (epoch-1)*r.cfg.SlotsPerEpoch)
+		previousActiveIndicies, err = state_accessors.ReadActiveIndicies(kvGetter, (epoch-1)*r.cfg.SlotsPerEpoch)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
 
 	// Read the minimal beacon state which have the small fields.
-	sd, err := state_accessors.ReadSlotData(getter, slot)
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -824,7 +782,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*sol
 		return nil, nil, err
 	}
 	// trigger the cache for shuffled sets in parallel
-	if err := r.tryCachingEpochsInParallell(tx, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch}); err != nil {
+	if err := r.tryCachingEpochsInParallell(tx, kvGetter, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch}); err != nil {
 		return nil, nil, err
 	}
 	// Read the previous idxs
@@ -861,7 +819,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*sol
 			attestationEpoch := data.Slot / r.cfg.SlotsPerEpoch
 
 			mixPosition := (attestationEpoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-			mix, err := r.ReadRandaoMixBySlotAndIndex(tx, data.Slot, mixPosition)
+			mix, err := r.ReadRandaoMixBySlotAndIndex(tx, kvGetter, data.Slot, mixPosition)
 			if err != nil {
 				return false
 			}
@@ -872,7 +830,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, slot uint64) (*sol
 				return false
 			}
 			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, block.Version(), i, *data, i-data.Slot, true)
+			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, kvGetter, block.Version(), i, *data, i-data.Slot, true)
 			if err != nil {
 				return false
 			}
@@ -913,12 +871,12 @@ func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uin
 	return epoch, epoch - 1
 }
 
-func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, activeIdxs [][]uint64, epochs []uint64) error {
+func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, kvGetter state_accessors.GetValFn, activeIdxs [][]uint64, epochs []uint64) error {
 	var wg sync.WaitGroup
 	wg.Add(len(epochs))
 	for i, epoch := range epochs {
 		mixPosition := (epoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-		mix, err := r.ReadRandaoMixBySlotAndIndex(tx, epochs[0]*r.cfg.SlotsPerEpoch, mixPosition)
+		mix, err := r.ReadRandaoMixBySlotAndIndex(tx, kvGetter, epochs[0]*r.cfg.SlotsPerEpoch, mixPosition)
 		if err != nil {
 			return err
 		}
@@ -933,9 +891,8 @@ func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, activeIdx
 	return nil
 }
 
-func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (solid.Uint64ListSSZ, error) {
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
-	sd, err := state_accessors.ReadSlotData(getter, slot)
+func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, kvGetter state_accessors.GetValFn, slot uint64) (solid.Uint64ListSSZ, error) {
+	sd, err := state_accessors.ReadSlotData(kvGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -944,7 +901,7 @@ func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (
 		return nil, nil
 	}
 
-	balances, err := r.reconstructBalances(tx, sd.ValidatorLength, slot, kv.ValidatorBalance, kv.BalancesDump)
+	balances, err := r.reconstructBalances(tx, kvGetter, sd.ValidatorLength, slot, kv.ValidatorBalance, kv.BalancesDump)
 	if err != nil {
 		return nil, err
 	}
@@ -953,12 +910,11 @@ func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (
 	return balancesList, balancesList.DecodeSSZ(balances, 0)
 }
 
-func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, slot, index uint64) (common.Hash, error) {
-	getter := state_accessors.GetValFnTxAndSnapshot(tx, r.stateSn)
+func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, kvGetter state_accessors.GetValFn, slot, index uint64) (common.Hash, error) {
 	epoch := slot / r.cfg.SlotsPerEpoch
 	epochSubIndex := epoch % r.cfg.EpochsPerHistoricalVector
 	if index == epochSubIndex {
-		intraRandaoMix, err := getter(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(slot))
+		intraRandaoMix, err := kvGetter(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(slot))
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -987,7 +943,7 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, slot, ind
 	if needFromGenesis {
 		return r.genesisState.GetRandaoMixes(epoch), nil
 	}
-	mixBytes, err := getter(kv.RandaoMixes, base_encoding.Encode64ToBytes4(epochLookup*r.cfg.SlotsPerEpoch))
+	mixBytes, err := kvGetter(kv.RandaoMixes, base_encoding.Encode64ToBytes4(epochLookup*r.cfg.SlotsPerEpoch))
 	if err != nil {
 		return common.Hash{}, err
 	}

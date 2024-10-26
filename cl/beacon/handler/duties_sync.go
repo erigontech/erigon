@@ -81,10 +81,12 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	if !ok {
 		_, syncCommittee, ok = a.forkchoiceStore.GetSyncCommittees(period - 1)
 	}
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
 	// Read them from the archive node if we do not have them in the fast-access storage
 	if !ok {
 		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(
-			state_accessors.GetValFnTxAndSnapshot(tx, a.caplinStateSnapshots),
+			state_accessors.GetValFnTxAndSnapshot(tx, snRoTx),
 			a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch))
 		if syncCommittee == nil {
 			log.Warn("could not find sync committee for epoch", "epoch", epoch, "period", period)
