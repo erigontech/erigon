@@ -239,12 +239,13 @@ Loop:
 		if !ok {
 			continue
 		}
+		filePath := filepath.Join(s.dir, fName)
 		segments.DirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn2 := range segments {
 				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				if fName == sn2.FileName() {
+				if filePath == sn2.filePath {
 					sn = sn2
 					exists = true
 					break
@@ -255,12 +256,12 @@ Loop:
 		if !exists {
 			sn = &DirtySegment{
 				// segType: f.Type, Unsupported
-				version: f.Version,
-				Range:   Range{f.From, f.To},
-				frozen:  snapcfg.IsFrozen(s.cfg.ChainName, f),
+				version:  f.Version,
+				Range:    Range{f.From, f.To},
+				frozen:   snapcfg.IsFrozen(s.cfg.ChainName, f),
+				filePath: filePath,
 			}
 		}
-		filePath := filepath.Join(s.dir, fName)
 		if err := s.openSegIfNeed(sn, filePath); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				if optimistic {

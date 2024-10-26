@@ -223,6 +223,9 @@ type DirtySegment struct {
 	refcount atomic.Int32
 
 	canDelete atomic.Bool
+
+	// caplin state snapshots only
+	filePath string
 }
 
 type VisibleSegment struct {
