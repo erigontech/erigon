@@ -242,10 +242,8 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		defer txc.Tx.Rollback()
 	}
 
-	if hook != nil {
-		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
-			return err
-		}
+	if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
+		return err
 	}
 	_, err = sync.Run(db, txc, initialCycle, firstCycle)
 	if err != nil {
@@ -266,10 +264,8 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}
 
 	// -- send notifications START
-	if hook != nil {
-		if err = hook.AfterRun(txc.Tx, finishProgressBefore); err != nil {
-			return err
-		}
+	if err = hook.AfterRun(txc.Tx, finishProgressBefore); err != nil {
+		return err
 	}
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
 		logger.Info("Commit cycle", "in", commitTime)
@@ -396,13 +392,25 @@ func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 	}
 	return nil
 }
+func (h *Hook) LastNewBlockSeen(n uint64) {
+	if h == nil || h.notifications == nil {
+		return
+	}
+	h.notifications.LastNewBlockSeen.Store(n)
+}
 func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
+	if h == nil {
+		return nil
+	}
 	if tx == nil {
 		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.beforeRun(tx, inSync) })
 	}
 	return h.beforeRun(tx, inSync)
 }
 func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
+	if h == nil {
+		return nil
+	}
 	if tx == nil {
 		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.afterRun(tx, finishProgressBefore) })
 	}

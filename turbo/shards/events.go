@@ -18,6 +18,7 @@ package shards
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -161,6 +162,7 @@ type Notifications struct {
 	Accumulator          *Accumulator // StateAccumulator
 	StateChangesConsumer StateChangeConsumer
 	RecentLogs           *RecentLogs
+	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
 }
 
 func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {

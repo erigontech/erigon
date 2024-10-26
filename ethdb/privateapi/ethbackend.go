@@ -54,7 +54,7 @@ type EthBackendServer struct {
 
 	ctx                   context.Context
 	eth                   EthBackend
-	events                *shards.Events
+	notifications         *shards.Notifications
 	db                    kv.RoDB
 	blockReader           services.FullBlockReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
@@ -72,21 +72,21 @@ type EthBackend interface {
 	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
 	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore,
 ) *EthBackendServer {
 	s := &EthBackendServer{
 		ctx:                   ctx,
 		eth:                   eth,
-		events:                events,
+		notifications:         notifications,
 		db:                    db,
 		blockReader:           blockReader,
-		logsFilter:            NewLogsFilterAggregator(events),
+		logsFilter:            NewLogsFilterAggregator(notifications.Events),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 	}
 
-	ch, clean := s.events.AddLogsSubscription()
+	ch, clean := s.notifications.Events.AddLogsSubscription()
 	go func() {
 		var err error
 		defer clean()
@@ -114,6 +114,11 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
+	return EthBackendAPIVersion, nil
+}
+
+func (s *EthBackendServer) LastNewBlockSeen(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
+	s.notifications.LastNewBlockSeen.Load()
 	return EthBackendAPIVersion, nil
 }
 
@@ -170,9 +175,9 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) (err error) {
 	s.logger.Debug("Establishing event subscription channel with the RPC daemon ...")
-	ch, clean := s.events.AddHeaderSubscription()
+	ch, clean := s.notifications.Events.AddHeaderSubscription()
 	defer clean()
-	newSnCh, newSnClean := s.events.AddNewSnapshotSubscription()
+	newSnCh, newSnClean := s.notifications.Events.AddNewSnapshotSubscription()
 	defer newSnClean()
 	s.logger.Info("new subscription to newHeaders established")
 	defer func() {

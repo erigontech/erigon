@@ -59,6 +59,10 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	}
 	defer tx.Rollback()
 
+	reply, err := api.ethBackend.Status()
+	highestBlock := reply.LastNewBlockSeen
+	frozenBlocks := reply.FrozenBlocks
+
 	highestBlock, err := rawdb.ReadLastNewBlockSeen(tx)
 	if err != nil {
 		return false, err

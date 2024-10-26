@@ -213,7 +213,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return
 		}
 		if num != nil {
-			e.LastNewBlockSeen.Store(*num)
+			e.hook.LastNewBlockSeen(*num) // used by eth_syncing
 		}
 	}
 
@@ -342,11 +342,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
-		if e.hook != nil {
-			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-				return
-			}
+		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
 		}
 		// Run the unwind
 		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
