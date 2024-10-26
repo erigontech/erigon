@@ -397,6 +397,7 @@ func listAllSegFilesInDir(dir string) []string {
 		if filepath.Ext(f.Name()) != ".seg" {
 			continue
 		}
+		list = append(list, f.Name())
 	}
 	return list
 }
