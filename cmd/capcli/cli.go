@@ -1178,7 +1178,8 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 type DumpStateSnapshots struct {
 	chainCfg
 	outputFolder
-	To uint64 `name:"to" help:"slot to dump"`
+	To       uint64 `name:"to" help:"slot to dump"`
+	StepSize uint64 `name:"step-size" help:"step size" default:"10000"`
 }
 
 func (c *DumpStateSnapshots) Run(ctx *Context) error {
@@ -1217,7 +1218,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, 100_000, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
+	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, c.StepSize, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
 		return err
 	}
 	return nil
