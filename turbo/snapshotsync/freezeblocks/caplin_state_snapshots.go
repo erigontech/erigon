@@ -247,6 +247,7 @@ Loop:
 			}
 		}
 		if err := sn.openSegIfNeed(s.dir); err != nil {
+			fmt.Println(err)
 			if errors.Is(err, os.ErrNotExist) {
 				if optimistic {
 					continue Loop
@@ -268,6 +269,7 @@ Loop:
 			segments.DirtySegments.Set(sn)
 		}
 		if err := openIdxForCaplinStateIfNeeded(sn, s.dir, optimistic); err != nil {
+			fmt.Println(err)
 			return err
 		}
 		// Only bob sidecars count for progression
