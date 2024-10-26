@@ -499,7 +499,6 @@ func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
 }
 
 func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegment, bool) {
-	f
 	for _, seg := range v.VisibleSegments(tbl) {
 		if !(slot >= seg.from && slot < seg.to) {
 			continue
