@@ -77,6 +77,7 @@ func NewHistoricalStatesReader(
 func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.Tx, slot uint64) (*state.CachingBeaconState, error) {
 	snapshotView := r.stateSn.View()
 	defer snapshotView.Close()
+
 	kvGetter := state_accessors.GetValFnTxAndSnapshot(tx, snapshotView)
 
 	ret := state.New(r.cfg)

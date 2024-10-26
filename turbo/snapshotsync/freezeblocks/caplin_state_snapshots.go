@@ -493,10 +493,14 @@ func (v *CaplinStateView) Close() {
 }
 
 func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
+	if v.s == nil || v.s.Segments[tbl] == nil {
+		return nil
+	}
 	return v.s.Segments[tbl].VisibleSegments
 }
 
 func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegment, bool) {
+	tbl = strings.ToLower(tbl)
 	for _, seg := range v.VisibleSegments(tbl) {
 		if !(slot >= seg.from && slot < seg.to) {
 			continue
