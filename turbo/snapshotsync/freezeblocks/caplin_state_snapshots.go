@@ -66,24 +66,24 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 	return SnapshotTypes{
 		KeyValueGetters: map[string]KeyValueGetter{
-			kv.ValidatorEffectiveBalance: getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
-			kv.ValidatorSlashings:        getKvGetterForStateTable(db, kv.ValidatorSlashings),
-			kv.ValidatorBalance:          getKvGetterForStateTable(db, kv.ValidatorBalance),
-			kv.StateEvents:               getKvGetterForStateTable(db, kv.StateEvents),
-			kv.ActiveValidatorIndicies:   getKvGetterForStateTable(db, kv.ActiveValidatorIndicies),
-			kv.StateRoot:                 getKvGetterForStateTable(db, kv.StateRoot),
-			kv.BlockRoot:                 getKvGetterForStateTable(db, kv.BlockRoot),
-			kv.SlotData:                  getKvGetterForStateTable(db, kv.SlotData),
-			kv.EpochData:                 getKvGetterForStateTable(db, kv.EpochData),
-			kv.InactivityScores:          getKvGetterForStateTable(db, kv.InactivityScores),
-			kv.NextSyncCommittee:         getKvGetterForStateTable(db, kv.NextSyncCommittee),
-			kv.CurrentSyncCommittee:      getKvGetterForStateTable(db, kv.CurrentSyncCommittee),
-			kv.Eth1DataVotes:             getKvGetterForStateTable(db, kv.Eth1DataVotes),
-			kv.IntraRandaoMixes:          getKvGetterForStateTable(db, kv.IntraRandaoMixes),
-			kv.RandaoMixes:               getKvGetterForStateTable(db, kv.RandaoMixes),
-			kv.Proposers:                 getKvGetterForStateTable(db, kv.Proposers),
-			kv.BalancesDump:              getKvGetterForStateTable(db, kv.BalancesDump),
-			kv.EffectiveBalancesDump:     getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
+			// kv.ValidatorEffectiveBalance: getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
+			// kv.ValidatorSlashings:        getKvGetterForStateTable(db, kv.ValidatorSlashings),
+			// kv.ValidatorBalance:          getKvGetterForStateTable(db, kv.ValidatorBalance),
+			// kv.StateEvents:               getKvGetterForStateTable(db, kv.StateEvents),
+			// kv.ActiveValidatorIndicies:   getKvGetterForStateTable(db, kv.ActiveValidatorIndicies),
+			// kv.StateRoot:                 getKvGetterForStateTable(db, kv.StateRoot),
+			kv.BlockRoot: getKvGetterForStateTable(db, kv.BlockRoot),
+			// kv.SlotData:                  getKvGetterForStateTable(db, kv.SlotData),
+			// kv.EpochData:                 getKvGetterForStateTable(db, kv.EpochData),
+			// kv.InactivityScores:          getKvGetterForStateTable(db, kv.InactivityScores),
+			// kv.NextSyncCommittee:         getKvGetterForStateTable(db, kv.NextSyncCommittee),
+			// kv.CurrentSyncCommittee:      getKvGetterForStateTable(db, kv.CurrentSyncCommittee),
+			// kv.Eth1DataVotes:             getKvGetterForStateTable(db, kv.Eth1DataVotes),
+			// kv.IntraRandaoMixes:          getKvGetterForStateTable(db, kv.IntraRandaoMixes),
+			// kv.RandaoMixes:               getKvGetterForStateTable(db, kv.RandaoMixes),
+			// kv.Proposers:                 getKvGetterForStateTable(db, kv.Proposers),
+			// kv.BalancesDump:              getKvGetterForStateTable(db, kv.BalancesDump),
+			// kv.EffectiveBalancesDump:     getKvGetterForStateTable(db, kv.EffectiveBalancesDump),
 		},
 		Compression: map[string]bool{},
 	}
@@ -528,6 +528,9 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		_, dump, err := kvGetter(i)
 		if err != nil {
 			return err
+		}
+		if i == 999424 && snapName == "blockroot" {
+			fmt.Printf("BlockRoot: %d %x\n", i, dump)
 		}
 		if i%20_000 == 0 {
 			logger.Log(lvl, fmt.Sprintf("Dumping %s", snapName), "progress", i)
