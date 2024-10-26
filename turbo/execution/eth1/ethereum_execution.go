@@ -59,6 +59,8 @@ type EthereumExecutionModule struct {
 	// Snapshots + MDBX
 	blockReader services.FullBlockReader
 
+	LastNewBlockSeen atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+
 	// MDBX database
 	db                kv.RwDB // main database
 	semaphore         *semaphore.Weighted
@@ -223,13 +225,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	defer e.semaphore.Release(1)
 
-	// Update the last new block seen.
-	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
-	if err := e.db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteLastNewBlockSeen(tx, req.Number)
-	}); err != nil {
-		return nil, err
-	}
+	e.LastNewBlockSeen.Store(req.Number) // used by eth_syncing
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 
