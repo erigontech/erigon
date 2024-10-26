@@ -201,14 +201,14 @@ func (s *CaplinStateSnapshots) Close() {
 	s.closeWhatNotInList(nil)
 }
 
-func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, dir string) error {
+func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, filepath string) error {
 	if sn.Decompressor != nil {
 		return nil
 	}
 	var err error
-	sn.Decompressor, err = seg.NewDecompressor(sn.FilePath())
+	sn.Decompressor, err = seg.NewDecompressor(filepath)
 	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, sn.FilePath())
+		return fmt.Errorf("%w, fileName: %s", err, filepath)
 	}
 	return nil
 }
@@ -257,8 +257,8 @@ Loop:
 				frozen:  snapcfg.IsFrozen(s.cfg.ChainName, f),
 			}
 		}
-
-		if err := s.openSegIfNeed(sn, s.dir); err != nil {
+		filePath := filepath.Join(s.dir, fName)
+		if err := s.openSegIfNeed(sn, filePath); err != nil {
 			fmt.Println(err)
 			if errors.Is(err, os.ErrNotExist) {
 				if optimistic {
