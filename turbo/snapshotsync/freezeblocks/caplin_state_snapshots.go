@@ -327,7 +327,7 @@ func openIdxIfNeedForCaplinState(s *DirtySegment, filePath string) (err error) {
 	}
 
 	filePath = strings.ReplaceAll(filePath, ".seg", ".idx")
-	index, err := recsplit.OpenIndex(filepath.Join(dir, filePath))
+	index, err := recsplit.OpenIndex(filePath)
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, filePath)
 	}
