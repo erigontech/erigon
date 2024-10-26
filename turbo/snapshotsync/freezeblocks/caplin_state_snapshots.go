@@ -267,7 +267,7 @@ Loop:
 			// then make segment available even if index open may fail
 			segments.DirtySegments.Set(sn)
 		}
-		if err := sn.openIdxIfNeed(s.dir, optimistic); err != nil {
+		if err := openIdxForCaplinStateIfNeeded(sn, s.dir, optimistic); err != nil {
 			return err
 		}
 		// Only bob sidecars count for progression
@@ -288,6 +288,40 @@ Loop:
 	return nil
 }
 
+func openIdxForCaplinStateIfNeeded(s *DirtySegment, dir string, optimistic bool) error {
+	if s.Decompressor == nil {
+		return nil
+	}
+	err := openIdxIfNeedForCaplinState(s, dir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			if optimistic {
+				log.Warn("[snapshots] open index", "err", err)
+			} else {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func openIdxIfNeedForCaplinState(s *DirtySegment, dir string) (err error) {
+	s.indexes = make([]*recsplit.Index, 1)
+	if s.indexes[0] != nil {
+		return nil
+	}
+
+	fileName := strings.ReplaceAll(s.FileName(), ".seg", ".idx")
+	index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
+	if err != nil {
+		return fmt.Errorf("%w, fileName: %s", err, fileName)
+	}
+
+	s.indexes[0] = index
+
+	return nil
+}
 func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	defer func() {
 		s.idxMax.Store(s.idxAvailability())
