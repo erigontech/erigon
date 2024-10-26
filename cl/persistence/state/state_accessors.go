@@ -18,7 +18,6 @@ package state_accessors
 
 import (
 	"bytes"
-	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -34,15 +33,15 @@ type GetValFn func(table string, key []byte) ([]byte, error)
 
 func GetValFnTxAndSnapshot(tx kv.Tx, snapshot *freezeblocks.CaplinStateSnapshots) GetValFn {
 	return func(table string, key []byte) ([]byte, error) {
-		if snapshot != nil {
-			v, err := snapshot.Get(table, uint64(binary.LittleEndian.Uint32(key)))
-			if err != nil {
-				return nil, err
-			}
-			if v != nil {
-				return v, nil
-			}
-		}
+		// if snapshot != nil {
+		// 	v, err := snapshot.Get(table, uint64(binary.LittleEndian.Uint32(key)))
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	if v != nil {
+		// 		return v, nil
+		// 	}
+		// }
 		return tx.GetOne(table, key)
 	}
 }
