@@ -97,6 +97,7 @@ func StageLoop(
 			// continue
 		}
 
+		hook.LastNewBlockSeen(hd.Progress())
 		t := time.Now()
 		// Estimate the current top height seen from the peer
 		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
