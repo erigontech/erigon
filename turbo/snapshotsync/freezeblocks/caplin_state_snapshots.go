@@ -201,6 +201,17 @@ func (s *CaplinStateSnapshots) Close() {
 	s.closeWhatNotInList(nil)
 }
 
+func (s *CaplinStateSnapshots) openSegIfNeed(sn *DirtySegment, dir string) error {
+	if sn.Decompressor != nil {
+		return nil
+	}
+	var err error
+	sn.Decompressor, err = seg.NewDecompressor(sn.FilePath())
+	if err != nil {
+		return fmt.Errorf("%w, fileName: %s", err, sn.FilePath())
+	}
+}
+
 // OpenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	defer s.recalcVisibleFiles()
@@ -220,7 +231,6 @@ Loop:
 		var exists bool
 		var sn *DirtySegment
 
-		fmt.Println(f.TypeString)
 		segments, ok := s.Segments[f.TypeString]
 		if !ok {
 			continue
@@ -246,7 +256,8 @@ Loop:
 				frozen:  snapcfg.IsFrozen(s.cfg.ChainName, f),
 			}
 		}
-		if err := sn.openSegIfNeed(s.dir); err != nil {
+
+		if err := s.openSegIfNeed(sn, s.dir); err != nil {
 			fmt.Println(err)
 			if errors.Is(err, os.ErrNotExist) {
 				if optimistic {
