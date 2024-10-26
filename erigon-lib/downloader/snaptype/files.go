@@ -152,11 +152,12 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		return
 	}
 	res.To = to * 1_000
+	res.TypeString = parts[3]
+
 	res.Type, ok = ParseFileType(parts[3])
 	if !ok {
 		return res, ok
 	}
-	res.TypeString = parts[3]
 	return res, ok
 }
 
