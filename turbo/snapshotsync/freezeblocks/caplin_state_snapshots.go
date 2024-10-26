@@ -592,8 +592,8 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	fromSlot = (fromSlot / blocksPerFile) * blocksPerFile
 	toSlot = (toSlot / blocksPerFile) * blocksPerFile
-	fmt.Println("DumpCaplinState", fromSlot, toSlot)
 	for snapName, kvGetter := range s.snapshotTypes.KeyValueGetters {
+		snapName = strings.ToLower(snapName)
 		for i := fromSlot; i < toSlot; i += blocksPerFile {
 			if toSlot-i < blocksPerFile {
 				break
