@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
@@ -105,7 +106,18 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		slot           = att.Attestation.Data.Slot
 		committeeIndex = att.Attestation.Data.CommitteeIndex
 		targetEpoch    = att.Attestation.Data.Target.Epoch
+		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
+		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
+
+	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := att.Attestation.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return err
+		}
+		committeeIndex = index
+	}
+
 	headState := s.syncedDataManager.HeadStateReader()
 	if headState == nil {
 		return ErrIgnore
@@ -233,6 +245,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		Pks:        [][]byte{pubKey[:]},
 		GossipData: att.GossipData,
 		F: func() {
+			start := time.Now()
+			defer monitor.ObserveAggregateAttestation(start)
 			err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
 			if errors.Is(err, aggregation.ErrIsSuperset) {
 				return

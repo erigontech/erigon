@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,7 +36,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -68,7 +68,7 @@ type MdbxOpts struct {
 	shrinkThreshold int
 	flags           uint
 	pageSize        uint64
-	dirtySpace      uint64 // if exeed this space, modified pages will `spill` to disk
+	dirtySpace      uint64 // if exceed this space, modified pages will `spill` to disk
 	mergeThreshold  uint64
 	verbosity       kv.DBVerbosityLvl
 	label           kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
@@ -674,7 +674,7 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 					return err
 				}
 			}
-			return tx.Commit() // when open db as read-only, commit of this RO transaction is required
+			return tx.(*MdbxTx).Commit() // when open db as read-only, commit of this RO transaction is required
 		})
 	}
 
@@ -951,7 +951,7 @@ func (db *MdbxKV) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (e
 	if err != nil {
 		return err
 	}
-	err = tx.Commit()
+	err = tx.(*MdbxTx).Commit()
 	if err != nil {
 		return err
 	}
@@ -968,7 +968,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err err
 	if err != nil {
 		return err
 	}
-	err = tx.Commit()
+	err = tx.(*MdbxTx).Commit()
 	if err != nil {
 		return err
 	}
@@ -1013,7 +1013,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
 
 	if err != nil {
-		return fmt.Errorf("db-talbe doesn't exists: %s, %w. Tip: try run `integration run_migrations` to create non-existing tables", name, err)
+		return fmt.Errorf("db-talbe doesn't exists: %s, lable: %s, %w. Tip: try run `integration run_migrations` to create non-existing tables", name, tx.db.opts.label, err)
 	}
 	cnfCopy.DBI = kv.DBI(dbi)
 

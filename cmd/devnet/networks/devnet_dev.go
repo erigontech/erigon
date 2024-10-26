@@ -58,7 +58,7 @@ func NewDevDevnet(
 
 	network := devnet.Network{
 		DataDir:            dataDir,
-		Chain:              networkname.DevChainName,
+		Chain:              networkname.Dev,
 		Logger:             logger,
 		BasePrivateApiAddr: "localhost:10090",
 		BaseRPCHost:        baseRpcHost,
@@ -70,7 +70,7 @@ func NewDevDevnet(
 			GasLimit: gasLimit,
 		},
 		Services: []devnet.Service{
-			account_services.NewFaucet(networkname.DevChainName, faucetSource),
+			account_services.NewFaucet(networkname.Dev, faucetSource),
 		},
 		MaxNumberOfEmptyBlockChecks: 30,
 		Nodes: append(nodes,
