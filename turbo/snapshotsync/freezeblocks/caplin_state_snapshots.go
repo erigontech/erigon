@@ -383,17 +383,26 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	return minVisible
 }
 
-func (s *CaplinStateSnapshots) OpenFolder() error {
-	files, _, err := SegmentsCaplin(s.dir, s.segmentsMin.Load())
+func listAllSegFilesInDir(dir string) []string {
+	files, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		panic(err)
 	}
 	list := make([]string, 0, len(files))
 	for _, f := range files {
-		_, fName := filepath.Split(f.Path)
-		list = append(list, fName)
+		if f.IsDir() {
+			continue
+		}
+		// check if it's a .seg file
+		if filepath.Ext(f.Name()) != ".seg" {
+			continue
+		}
 	}
-	return s.OpenList(list, false)
+	return list
+}
+
+func (s *CaplinStateSnapshots) OpenFolder() error {
+	return s.OpenList(listAllSegFilesInDir(s.dir), false)
 }
 
 func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
