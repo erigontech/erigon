@@ -262,7 +262,6 @@ Loop:
 		}
 		filePath := filepath.Join(s.dir, fName)
 		if err := s.openSegIfNeed(sn, filePath); err != nil {
-			fmt.Println(err)
 			if errors.Is(err, os.ErrNotExist) {
 				if optimistic {
 					continue Loop
@@ -284,7 +283,6 @@ Loop:
 			segments.DirtySegments.Set(sn)
 		}
 		if err := openIdxForCaplinStateIfNeeded(sn, filePath, optimistic); err != nil {
-			fmt.Println(err)
 			return err
 		}
 		// Only bob sidecars count for progression
@@ -494,7 +492,6 @@ func (v *CaplinStateView) Close() {
 }
 
 func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
-	fmt.Println(v.s.Segments[tbl].VisibleSegments, tbl)
 	return v.s.Segments[tbl].VisibleSegments
 }
 
