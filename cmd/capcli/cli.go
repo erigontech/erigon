@@ -17,7 +17,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -1214,18 +1213,10 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	}
 	snTypes := freezeblocks.MakeCaplinStateSnapshotsTypes(db)
 	stateSn := freezeblocks.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
-	stateSn.OpenFolder()
-	v, err := stateSn.Get(kv.SlotData, 100)
-	if err != nil {
+	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	buf := bytes.NewBuffer(v)
-	r := &state_accessors.SlotData{}
-	if err := r.ReadFrom(buf); err != nil {
-		return err
-	}
-	fmt.Println(stateSn.BlocksAvailable(), r.ValidatorLength)
-	panic("A")
+
 	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, 100_000, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
 		return err
 	}
