@@ -419,11 +419,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
 		}
+		blocksPerStatefulFile := snaptype.CaplinMergeLimit * 5
 		if err := s.stateSn.DumpCaplinState(
 			ctx,
 			s.stateSn.BlocksAvailable()+1,
 			s.currentState.Slot(),
-			snaptype.CaplinMergeLimit,
+			uint64(blocksPerStatefulFile),
 			s.sn.Salt,
 			s.dirs,
 			runtime.NumCPU(),
