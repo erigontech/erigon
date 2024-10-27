@@ -113,6 +113,9 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	if err != nil {
 		return
 	}
+	if s.stateSn != nil {
+		progress = max(progress, s.stateSn.BlocksAvailable())
+	}
 
 	finalized, err = beacon_indicies.ReadHighestFinalized(tx)
 	if err != nil {
