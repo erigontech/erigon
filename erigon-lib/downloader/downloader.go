@@ -2652,7 +2652,7 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 			return nil, err
 		}
 	}
-	l5, err := seedableSegmentFiles(dirs.Snap, "caplin", all)
+	l5, err := seedableSegmentFiles(path.Join(dirs.Snap, "caplin"), chainName, all)
 	if err != nil {
 		return nil, err
 	}
