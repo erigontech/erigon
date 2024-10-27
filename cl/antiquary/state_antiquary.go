@@ -573,6 +573,7 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		if err != nil {
 			return fmt.Errorf("failed to read historical state at slot %d: %w", attempt, err)
 		}
+		fmt.Println("currentState", s.currentState, attempt)
 		if s.currentState == nil {
 			log.Warn("historical state not found, backoff more and try again", "slot", attempt)
 			backoffStep += backoffStrides
