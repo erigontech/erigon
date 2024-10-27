@@ -134,14 +134,16 @@ func (s *Antiquary) fillStaticValidatorsTable(ctx context.Context) error {
 	blocksAvaiable := s.stateSn.BlocksAvailable()
 	stateSnRoTx := s.stateSn.View()
 	defer stateSnRoTx.Close()
+	if s.genesisState == nil {
+		return fmt.Errorf("genesis state is nil")
+	}
+	startSlot := s.validatorsTable.Slot() + 1
+	if startSlot == 1 {
+		startSlot = 0
+	}
 
 	start := time.Now()
-	lastLog := time.Now()
 	for slot := s.validatorsTable.Slot() + 1; slot <= blocksAvaiable; slot++ {
-		if slot%100_000 == 0 {
-			s.logger.Info("[Antiquary] Filling static validators table", "slot", slot, "elapsed", time.Since(lastLog))
-			lastLog = time.Now()
-		}
 		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
 		if !ok {
 			return fmt.Errorf("segment not found for slot %d", slot)
