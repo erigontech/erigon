@@ -451,6 +451,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, err
 	}
 	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
+	fmt.Println("forward", forward)
 	if forward {
 		compressed, err = kvGetter(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
 		if err != nil {
@@ -491,7 +492,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 		return nil, err
 	}
 	if forward {
-		for currSlot := freshDumpSlot; currSlot <= slot && currSlot < highestSlotAvailable; currSlot++ {
+		for currSlot := freshDumpSlot; currSlot <= slot && currSlot <= highestSlotAvailable; currSlot++ {
 			key := base_encoding.Encode64ToBytes4(currSlot)
 			v, err := kvGetter(diffBucket, key)
 			if err != nil {

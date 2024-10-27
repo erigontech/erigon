@@ -103,7 +103,13 @@ type CaplinStateSnapshots struct {
 
 	// BeaconBlocks *segments
 	// BlobSidecars *segments
-	Segments      map[string]*segments
+	// Segments      map[string]*segments
+	dirtyLock sync.RWMutex                            // guards `dirty` field
+	dirty     map[string]*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+
+	visibleLock sync.RWMutex               // guards  `visible` field
+	visible     map[string]VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
+
 	snapshotTypes SnapshotTypes
 
 	dir         string
@@ -137,13 +143,21 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	// BlobSidecars := &segments{
 	// 	DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 	// }
-	Segments := make(map[string]*segments)
+	// Segments := make(map[string]*segments)
+	// for k := range snapshotTypes.KeyValueGetters {
+	// 	Segments[k] = &segments{
+	// 		DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
+	// 	}
+	// }
+	dirty := make(map[string]*btree.BTreeG[*DirtySegment])
 	for k := range snapshotTypes.KeyValueGetters {
-		Segments[k] = &segments{
-			DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
-		}
+		dirty[k] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, Segments: Segments, logger: logger, beaconCfg: beaconCfg}
+	visible := make(map[string]VisibleSegments)
+	for k := range snapshotTypes.KeyValueGetters {
+		visible[k] = make(VisibleSegments, 0)
+	}
+	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, visible: visible, dirty: dirty, logger: logger, beaconCfg: beaconCfg}
 	c.recalcVisibleFiles()
 	return c
 }
@@ -165,8 +179,8 @@ func (s *CaplinStateSnapshots) LS() {
 
 	for _, roTx := range view.roTxs {
 		if roTx != nil {
-			for _, seg := range roTx.VisibleSegments {
-				s.logger.Info("[agg] ", "f", seg.src.Decompressor.FileName(), "words", seg.src.Decompressor.Count())
+			for _, seg := range roTx.segments {
+				s.logger.Info("[agg] ", "f", seg.src.filePath, "words", seg.src.Decompressor.Count())
 			}
 		}
 	}
@@ -182,11 +196,13 @@ func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
 		if roTx == nil {
 			continue
 		}
-		for _, seg := range roTx.VisibleSegments {
-			if seg.from >= from && seg.to <= to {
-				res = append(res, seg.src.FileName())
+		for _, seg := range roTx.segments {
+			if seg.from >= to || seg.to <= from {
+				continue
 			}
+			res = append(res, seg.src.filePath)
 		}
+
 	}
 	return res
 }
@@ -235,12 +251,12 @@ Loop:
 		var exists bool
 		var sn *DirtySegment
 
-		segments, ok := s.Segments[f.TypeString]
+		dirtySegments, ok := s.dirty[f.TypeString]
 		if !ok {
 			continue
 		}
 		filePath := filepath.Join(s.dir, fName)
-		segments.DirtySegments.Walk(func(segments []*DirtySegment) bool {
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn2 := range segments {
 				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
@@ -281,7 +297,7 @@ Loop:
 		if !exists {
 			// it's possible to iterate over .seg file even if you don't have index
 			// then make segment available even if index open may fail
-			segments.DirtySegments.Set(sn)
+			dirtySegments.Set(sn)
 		}
 		if err := openIdxForCaplinStateIfNeeded(sn, filePath, optimistic); err != nil {
 			return err
@@ -358,8 +374,8 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		s.indicesReady.Store(true)
 	}()
 
-	s.visibleSegmentsLock.Lock()
-	defer s.visibleSegmentsLock.Unlock()
+	s.visibleLock.Lock()
+	defer s.visibleLock.Unlock()
 
 	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
 		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
@@ -386,27 +402,28 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		return newVisibleSegments
 	}
 
-	for _, segments := range s.Segments {
-		segments.VisibleSegments = getNewVisibleSegments(segments.DirtySegments)
-		var maxIdx uint64
-		if len(segments.VisibleSegments) > 0 {
-			maxIdx = segments.VisibleSegments[len(segments.VisibleSegments)-1].to - 1
-		}
-		segments.maxVisibleBlock.Store(maxIdx)
+	for k := range s.visible {
+		s.visible[k] = getNewVisibleSegments(s.dirty[k])
 	}
 }
 
 func (s *CaplinStateSnapshots) idxAvailability() uint64 {
-	minVisible := uint64(math.MaxUint64)
-	for _, segments := range s.Segments {
-		if segments.maxVisibleBlock.Load() < minVisible {
-			minVisible = segments.maxVisibleBlock.Load()
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
+
+	min := uint64(math.MaxUint64)
+	for _, segs := range s.visible {
+		if len(segs) == 0 {
+			return 0
+		}
+		if segs[len(segs)-1].to < min {
+			min = segs[len(segs)-1].to
 		}
 	}
-	if minVisible == math.MaxUint64 {
+	if min == math.MaxUint64 {
 		return 0
 	}
-	return minVisible
+	return min
 }
 
 func listAllSegFilesInDir(dir string) []string {
@@ -438,9 +455,9 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 		protectFiles[fName] = struct{}{}
 	}
 
-	for _, segments := range s.Segments {
+	for _, dirtySegments := range s.dirty {
 		toClose := make([]*DirtySegment, 0)
-		segments.DirtySegments.Walk(func(segments []*DirtySegment) bool {
+		dirtySegments.Walk(func(segments []*DirtySegment) bool {
 			for _, sn := range segments {
 				if sn.Decompressor == nil {
 					continue
@@ -455,7 +472,7 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 		})
 		for _, sn := range toClose {
 			sn.close()
-			segments.DirtySegments.Delete(sn)
+			dirtySegments.Delete(sn)
 		}
 	}
 }
@@ -478,7 +495,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
 
-	for k, segments := range s.Segments {
+	for k, segments := range s.visible {
 		v.roTxs[k] = segments.BeginRotx()
 	}
 	return v
@@ -499,10 +516,10 @@ func (v *CaplinStateView) Close() {
 }
 
 func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
-	if v.s == nil || v.s.Segments[tbl] == nil {
+	if v.s == nil || v.s.visible[tbl] == nil {
 		return nil
 	}
-	return v.s.Segments[tbl].VisibleSegments
+	return v.s.visible[tbl]
 }
 
 func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegment, bool) {
