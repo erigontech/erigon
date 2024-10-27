@@ -143,7 +143,7 @@ func (s *Antiquary) fillStaticValidatorsTable(ctx context.Context) error {
 	}
 
 	start := time.Now()
-	for slot := s.validatorsTable.Slot() + 1; slot <= blocksAvaiable; slot++ {
+	for slot := startSlot; slot <= blocksAvaiable; slot++ {
 		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
 		if !ok {
 			return fmt.Errorf("segment not found for slot %d", slot)
