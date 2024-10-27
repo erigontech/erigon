@@ -527,7 +527,7 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 	defer segmentRotx.Close()
 
 	buf := make([]byte, 128)
-	segments := segmentRotx.VisibleSegments
+	segments := segmentRotx.segments
 	for i := len(segments) - 1; i >= 0; i-- {
 		h, err = r.headerFromSnapshotByHash(hash, segments[i], buf)
 		if err != nil {
@@ -837,7 +837,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return
 	}
 	if txCount == 0 {
-		block = types.NewBlockFromStorage(hash, h, nil, b.Uncles, b.Withdrawals, b.Requests)
+		block = types.NewBlockFromStorage(hash, h, nil, b.Uncles, b.Withdrawals)
 		if len(senders) != block.Transactions().Len() {
 			if dbgLogs {
 				log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))
@@ -851,7 +851,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
 	if !ok {
 		if dbgLogs {
-			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.indicesReady", r.sn.indicesReady.Load())
+			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable())
 		}
 		return
 	}
@@ -863,7 +863,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	}
 	release()
 
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, b.Requests)
+	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))
@@ -955,7 +955,6 @@ func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *VisibleSegment, b
 	body := new(types.Body)
 	body.Uncles = b.Uncles
 	body.Withdrawals = b.Withdrawals
-	body.Requests = b.Requests
 	var txCount uint32
 	if b.TxCount >= 2 {
 		txCount = b.TxCount - 2
@@ -1171,7 +1170,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 
 	txns := r.sn.ViewType(coresnaptype.Transactions)
 	defer txns.Close()
-	_, blockNum, ok, err := r.txnByHash(txnHash, txns.VisibleSegments, nil)
+	_, blockNum, ok, err := r.txnByHash(txnHash, txns.segments, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1356,7 +1355,7 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash com
 	segs := r.borSn.ViewType(borsnaptype.BorEvents)
 	defer segs.Close()
 
-	blockNum, ok, err := r.borBlockByEventHash(txnHash, segs.VisibleSegments, nil)
+	blockNum, ok, err := r.borBlockByEventHash(txnHash, segs.segments, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1415,8 +1414,8 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 	segments := r.borSn.ViewType(borsnaptype.BorEvents)
 	defer segments.Close()
 
-	for i := len(segments.VisibleSegments) - 1; i >= 0; i-- {
-		sn := segments.VisibleSegments[i]
+	for i := len(segments.segments) - 1; i >= 0; i-- {
+		sn := segments.segments[i]
 		if sn.from > blockHeight {
 			continue
 		}
@@ -1495,8 +1494,8 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 
 	var buf []byte
 	result := []rlp.RawValue{}
-	for i := len(segments.VisibleSegments) - 1; i >= 0; i-- {
-		sn := segments.VisibleSegments[i]
+	for i := len(segments.segments) - 1; i >= 0; i-- {
+		sn := segments.segments[i]
 		if sn.from > blockHeight {
 			continue
 		}
@@ -1537,7 +1536,7 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 	var result []*heimdall.EventRecordWithTime
 	maxTime := false
 
-	for _, sn := range segments.VisibleSegments {
+	for _, sn := range segments.segments {
 		idxBorTxnHash := sn.src.Index()
 
 		if idxBorTxnHash == nil || idxBorTxnHash.KeyCount() == 0 {
@@ -1610,12 +1609,12 @@ func (r *BlockReader) LastFrozenEventId() uint64 {
 	segments := r.borSn.ViewType(borsnaptype.BorEvents)
 	defer segments.Close()
 
-	if len(segments.VisibleSegments) == 0 {
+	if len(segments.segments) == 0 {
 		return 0
 	}
 	// find the last segment which has a built index
 	var lastSegment *VisibleSegment
-	visibleSegments := segments.VisibleSegments
+	visibleSegments := segments.segments
 	for i := len(visibleSegments) - 1; i >= 0; i-- {
 		if visibleSegments[i].src.Index() != nil {
 			gg := visibleSegments[i].src.MakeGetter()
@@ -1649,7 +1648,7 @@ func (r *BlockReader) LastFrozenEventBlockNum() uint64 {
 	segmentsRotx := r.borSn.ViewType(borsnaptype.BorEvents)
 	defer segmentsRotx.Close()
 
-	segments := segmentsRotx.VisibleSegments
+	segments := segmentsRotx.segments
 	if len(segments) == 0 {
 		return 0
 	}
@@ -1711,14 +1710,14 @@ func (r *BlockReader) LastFrozenSpanId() uint64 {
 	segments := r.borSn.ViewType(borsnaptype.BorSpans)
 	defer segments.Close()
 
-	if len(segments.VisibleSegments) == 0 {
+	if len(segments.segments) == 0 {
 		return 0
 	}
 	// find the last segment which has a built index
 	var lastSegment *VisibleSegment
-	for i := len(segments.VisibleSegments) - 1; i >= 0; i-- {
-		if segments.VisibleSegments[i].src.Index() != nil {
-			lastSegment = segments.VisibleSegments[i]
+	for i := len(segments.segments) - 1; i >= 0; i-- {
+		if segments.segments[i].src.Index() != nil {
+			lastSegment = segments.segments[i]
 			break
 		}
 	}
@@ -1755,7 +1754,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	segmentsRotx := r.borSn.ViewType(borsnaptype.BorSpans)
 	defer segmentsRotx.Close()
 
-	segments := segmentsRotx.VisibleSegments
+	segments := segmentsRotx.segments
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		idx := sn.src.Index()
@@ -1864,7 +1863,7 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 	segmentsRotx := r.borSn.ViewType(borsnaptype.BorCheckpoints)
 	defer segmentsRotx.Close()
 
-	segments := segmentsRotx.VisibleSegments
+	segments := segmentsRotx.segments
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		index := sn.src.Index()
@@ -1896,7 +1895,7 @@ func (r *BlockReader) LastFrozenCheckpointId() uint64 {
 
 	defer segmentsRotx.Close()
 
-	segments := segmentsRotx.VisibleSegments
+	segments := segmentsRotx.segments
 	if len(segments) == 0 {
 		return 0
 	}

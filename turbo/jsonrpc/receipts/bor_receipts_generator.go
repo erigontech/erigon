@@ -49,7 +49,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *
 	}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
-	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), chainConfig, g.blockReader, txNumsReader, tx, 0)
+	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), chainConfig, g.blockReader, txNumsReader, tx, len(blockReceipts)) // we want to get the state at the end of the block
 	if err != nil {
 		return nil, err
 	}

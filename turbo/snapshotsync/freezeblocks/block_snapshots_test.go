@@ -212,13 +212,13 @@ func TestMergeSnapshots(t *testing.T) {
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.MainnetChainName}, dir, 0, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, 0, logger)
 	defer s.Close()
-	require.NoError(s.ReopenFolder())
+	require.NoError(s.OpenFolder())
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
+		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false)
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.Equal(3, len(ranges))
 		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
@@ -235,7 +235,7 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		s.ReopenFolder()
+		s.OpenFolder()
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.Equal(0, len(ranges))
 		err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
@@ -257,7 +257,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// }
 	// s = NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, start, logger)
 	// defer s.Close()
-	// require.NoError(s.ReopenFolder())
+	// require.NoError(s.OpenFolder())
 	// {
 	// 	merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 	// 	merger.DisableFsync()
@@ -279,7 +279,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// {
 	// 	merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 	// 	merger.DisableFsync()
-	// 	s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
+	// 	s.OpenSegments(coresnaptype.BlockSnapshotTypes, false)
 	// 	ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 	// 	require.True(len(ranges) == 0)
 	// 	err := merger.Merge(context.Background(), s, coresnaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
@@ -308,14 +308,14 @@ func TestDeleteSnapshots(t *testing.T) {
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.MainnetChainName}, dir, 0, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, 0, logger)
 	defer s.Close()
 	retireFiles := []string{
 		"v1-000000-000010-bodies.seg",
 		"v1-000000-000010-headers.seg",
 		"v1-000000-000010-transactions.seg",
 	}
-	require.NoError(s.ReopenFolder())
+	require.NoError(s.OpenFolder())
 	for _, f := range retireFiles {
 		require.NoError(s.Delete(f))
 		require.False(slices.Contains(s.Files(), f))
@@ -353,10 +353,10 @@ func TestRemoveOverlaps(t *testing.T) {
 		createFile(200_000+i*10_000, 200_000+(i+1)*10_000)
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.MainnetChainName}, dir, 0, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, 0, logger)
 
 	defer s.Close()
-	require.NoError(s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false))
+	require.NoError(s.OpenSegments(coresnaptype.BlockSnapshotTypes, false))
 
 	list, err := snaptype.Segments(s.dir)
 	require.NoError(err)
@@ -403,7 +403,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 	steps := []uint64{500_000, 100_000}
 
-	for i, chain := range []string{networkname.MainnetChainName, networkname.AmoyChainName} {
+	for i, chain := range []string{networkname.Mainnet, networkname.Amoy} {
 		step := steps[i]
 		dir := filepath.Join(baseDir, chain)
 		chainSnapshotCfg := snapcfg.KnownCfg(chain)
@@ -414,31 +414,27 @@ func TestOpenAllSnapshot(t *testing.T) {
 		}
 		s := NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
-		err := s.ReopenFolder()
+		err := s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(s.segments.Get(coresnaptype.Enums.Headers))
-		getSegs := func(e snaptype.Enum) *segments {
-			res, _ := s.segments.Get(e)
-			return res
-		}
-		require.Equal(0, len(getSegs(coresnaptype.Enums.Headers).VisibleSegments))
+		require.NotNil(s.visible[coresnaptype.Enums.Headers])
+		require.Equal(0, len(s.visible[coresnaptype.Enums.Headers]))
 		s.Close()
 
 		createFile(step, step*2, coresnaptype.Bodies)
 		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
-		require.NotNil(getSegs(coresnaptype.Enums.Bodies))
-		require.Equal(0, len(getSegs(coresnaptype.Enums.Bodies).VisibleSegments))
+		require.NotNil(s.visible[coresnaptype.Enums.Bodies])
+		require.Equal(0, len(s.visible[coresnaptype.Enums.Bodies]))
 		s.Close()
 
 		createFile(step, step*2, coresnaptype.Headers)
 		createFile(step, step*2, coresnaptype.Transactions)
 		s = NewRoSnapshots(cfg, dir, 0, logger)
-		err = s.ReopenFolder()
+		err = s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(getSegs(coresnaptype.Enums.Headers))
-		s.ReopenSegments(coresnaptype.BlockSnapshotTypes, false)
-		// require.Equal(1, len(getSegs(coresnaptype.Enums.Headers).visibleSegments))
+		require.NotNil(s.visible[coresnaptype.Enums.Headers])
+		s.OpenSegments(coresnaptype.BlockSnapshotTypes, false)
+		// require.Equal(1, len(getSegs(coresnaptype.Enums.Headers]))
 		s.Close()
 
 		createFile(0, step, coresnaptype.Bodies)
@@ -447,10 +443,10 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
 
-		err = s.ReopenFolder()
+		err = s.OpenFolder()
 		require.NoError(err)
-		require.NotNil(getSegs(coresnaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).VisibleSegments))
+		require.NotNil(s.visible[coresnaptype.Enums.Headers])
+		require.Equal(2, len(s.visible[coresnaptype.Enums.Headers]))
 
 		view := s.View()
 		defer view.Close()
@@ -470,11 +466,11 @@ func TestOpenAllSnapshot(t *testing.T) {
 		// ExpectedBlocks - says only how much block must come from Torrent
 		chainSnapshotCfg.ExpectBlocks = 500_000 - 1
 		s = NewRoSnapshots(cfg, dir, 0, logger)
-		err = s.ReopenFolder()
+		err = s.OpenFolder()
 		require.NoError(err)
 		defer s.Close()
-		require.NotNil(getSegs(coresnaptype.Enums.Headers))
-		require.Equal(2, len(getSegs(coresnaptype.Enums.Headers).VisibleSegments))
+		require.NotNil(s.visible[coresnaptype.Enums.Headers])
+		require.Equal(2, len(s.visible[coresnaptype.Enums.Headers]))
 
 		createFile(step, step*2-step/5, coresnaptype.Headers)
 		createFile(step, step*2-step/5, coresnaptype.Bodies)
@@ -482,7 +478,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
-		err = s.ReopenFolder()
+		err = s.OpenFolder()
 		require.NoError(err)
 	}
 }
@@ -526,11 +522,6 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(2_000, int(f.To))
 }
 
-func getSeg(s *RoSnapshots, e snaptype.Enum) *segments {
-	res, _ := s.segments.Get(e)
-	return res
-}
-
 func TestCalculateVisibleSegments(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
@@ -547,56 +538,56 @@ func TestCalculateVisibleSegments(t *testing.T) {
 	for i := uint64(0); i < 5; i++ {
 		createFile(i*500_000, (i+1)*500_000, coresnaptype.Transactions)
 	}
-	cfg := ethconfig.BlocksFreezing{ChainName: networkname.MainnetChainName}
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
 	s := NewRoSnapshots(cfg, dir, 0, logger)
 	defer s.Close()
 
 	{
-		require.NoError(s.ReopenFolder())
+		require.NoError(s.OpenFolder())
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).VisibleSegments))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Headers]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Bodies]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Transactions]))
 
-		require.Equal(7, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
-		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
-		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
+		require.Equal(7, s.dirty[coresnaptype.Enums.Headers].Len())
+		require.Equal(6, s.dirty[coresnaptype.Enums.Bodies].Len())
+		require.Equal(5, s.dirty[coresnaptype.Enums.Transactions].Len())
 	}
 
 	// gap in transactions: [5*500_000 - 6*500_000]
 	{
 		createFile(6*500_000, 7*500_000, coresnaptype.Transactions)
 
-		require.NoError(s.ReopenFolder())
+		require.NoError(s.OpenFolder())
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).VisibleSegments))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Headers]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Bodies]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Transactions]))
 
-		require.Equal(7, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
-		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
-		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
+		require.Equal(7, s.dirty[coresnaptype.Enums.Headers].Len())
+		require.Equal(6, s.dirty[coresnaptype.Enums.Bodies].Len())
+		require.Equal(5, s.dirty[coresnaptype.Enums.Transactions].Len())
 	}
 
 	// overlap in transactions: [4*500_000 - 4.5*500_000]
 	{
 		createFile(4*500_000, 4*500_000+250_000, coresnaptype.Transactions)
 
-		require.NoError(s.ReopenFolder())
+		require.NoError(s.OpenFolder())
 		idx := s.idxAvailability()
 		require.Equal(2_500_000-1, int(idx))
 
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Bodies).VisibleSegments))
-		require.Equal(5, len(getSeg(s, coresnaptype.Enums.Transactions).VisibleSegments))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Headers]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Bodies]))
+		require.Equal(5, len(s.visible[coresnaptype.Enums.Transactions]))
 
-		require.Equal(7, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
-		require.Equal(6, getSeg(s, coresnaptype.Enums.Bodies).DirtySegments.Len())
-		require.Equal(5, getSeg(s, coresnaptype.Enums.Transactions).DirtySegments.Len())
+		require.Equal(7, s.dirty[coresnaptype.Enums.Headers].Len())
+		require.Equal(6, s.dirty[coresnaptype.Enums.Bodies].Len())
+		require.Equal(5, s.dirty[coresnaptype.Enums.Transactions].Len())
 	}
 }
 
@@ -617,14 +608,14 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	err := os.Remove(missingIdxFile)
 	require.NoError(err)
 
-	cfg := ethconfig.BlocksFreezing{ChainName: networkname.MainnetChainName}
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
 	s := NewRoSnapshots(cfg, dir, 0, logger)
 	defer s.Close()
 
-	require.NoError(s.ReopenFolder())
+	require.NoError(s.OpenFolder())
 	idx := s.idxAvailability()
 	require.Equal(500_000-1, int(idx))
 
-	require.Equal(1, len(getSeg(s, coresnaptype.Enums.Headers).VisibleSegments))
-	require.Equal(3, getSeg(s, coresnaptype.Enums.Headers).DirtySegments.Len())
+	require.Equal(1, len(s.visible[coresnaptype.Enums.Headers]))
+	require.Equal(3, s.dirty[coresnaptype.Enums.Headers].Len())
 }

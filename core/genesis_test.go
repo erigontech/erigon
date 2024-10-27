@@ -113,7 +113,7 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
+	genesis := core.GenesisBlockByChainName(networkname.Mainnet)
 	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)

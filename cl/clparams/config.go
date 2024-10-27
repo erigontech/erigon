@@ -1056,19 +1056,19 @@ func GetConfigsByNetwork(net NetworkType) (*NetworkConfig, *BeaconChainConfig) {
 
 func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, NetworkType, error) {
 	switch net {
-	case networkname.MainnetChainName:
+	case networkname.Mainnet:
 		networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
 		return networkCfg, beaconCfg, MainnetNetwork, nil
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
 		return networkCfg, beaconCfg, SepoliaNetwork, nil
-	case networkname.GnosisChainName:
+	case networkname.Gnosis:
 		networkCfg, beaconCfg := GetConfigsByNetwork(GnosisNetwork)
 		return networkCfg, beaconCfg, GnosisNetwork, nil
-	case networkname.ChiadoChainName:
+	case networkname.Chiado:
 		networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
 		return networkCfg, beaconCfg, ChiadoNetwork, nil
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
 		return networkCfg, beaconCfg, HoleskyNetwork, nil
 	default:

@@ -22,10 +22,11 @@ var (
 )
 
 type BatchSignatureVerifier struct {
-	sentinel             sentinel.SentinelClient
-	attVerifyAndExecute  chan *AggregateVerificationData
-	aggregateProofVerify chan *AggregateVerificationData
-	ctx                  context.Context
+	sentinel                   sentinel.SentinelClient
+	attVerifyAndExecute        chan *AggregateVerificationData
+	aggregateProofVerify       chan *AggregateVerificationData
+	blsToExecutionChangeVerify chan *AggregateVerificationData
+	ctx                        context.Context
 }
 
 // each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
@@ -41,10 +42,11 @@ type AggregateVerificationData struct {
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
 	return &BatchSignatureVerifier{
-		ctx:                  ctx,
-		sentinel:             sentinel,
-		attVerifyAndExecute:  make(chan *AggregateVerificationData, 1024),
-		aggregateProofVerify: make(chan *AggregateVerificationData, 1024),
+		ctx:                        ctx,
+		sentinel:                   sentinel,
+		attVerifyAndExecute:        make(chan *AggregateVerificationData, 1024),
+		aggregateProofVerify:       make(chan *AggregateVerificationData, 1024),
+		blsToExecutionChangeVerify: make(chan *AggregateVerificationData, 1024),
 	}
 }
 
@@ -57,6 +59,10 @@ func (b *BatchSignatureVerifier) AsyncVerifyAggregateProof(data *AggregateVerifi
 	b.aggregateProofVerify <- data
 }
 
+func (b *BatchSignatureVerifier) AsyncVerifyBlsToExecutionChange(data *AggregateVerificationData) {
+	b.blsToExecutionChangeVerify <- data
+}
+
 func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificationData) error {
 	return b.processSignatureVerification([]*AggregateVerificationData{data})
 }
@@ -65,6 +71,7 @@ func (b *BatchSignatureVerifier) Start() {
 	// separate goroutines for each type of verification
 	go b.start(b.attVerifyAndExecute)
 	go b.start(b.aggregateProofVerify)
+	go b.start(b.blsToExecutionChangeVerify)
 }
 
 // When receiving AggregateVerificationData, we simply collect all the signature verification data

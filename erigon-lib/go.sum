@@ -146,10 +146,10 @@ github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymF
 github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1mIlRU8Am5FuJP05cCM98=
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978 h1:7ECOf7Us3+/706WGZXIX84qQc6zmxQby8fGbFLiqFlU=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
-github.com/erigontech/interfaces v0.0.0-20241011102608-29c1d07f457d h1:T0xEfGinQBrv1aV2WdIQCBoCPOn2CKKH5hi35o/V0m8=
-github.com/erigontech/interfaces v0.0.0-20241011102608-29c1d07f457d/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e h1:ZpIO6HeopuZPYDLldL6zR0qyRezj80kQrDOGEF779ts=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
+github.com/erigontech/interfaces v0.0.0-20241024130452-38a90d9c6fd5 h1:1Rc1N2CGb9NGlHH5frMbh5xXHL028abz/boh5eSgBVU=
+github.com/erigontech/interfaces v0.0.0-20241024130452-38a90d9c6fd5/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
 github.com/erigontech/mdbx-go v0.38.4 h1:S9T7mTe9KPcFe4dOoOtVdI6gPzht9y7wMnYfUBgrQLo=
 github.com/erigontech/mdbx-go v0.38.4/go.mod h1:IcOLQDPw3VM/asP6T5JVPPN4FHHgJtY16XfYjzWKVNI=
 github.com/erigontech/secp256k1 v1.1.0 h1:mO3YJMUSoASE15Ya//SoHiisptUhdXExuMUN1M0X9qY=

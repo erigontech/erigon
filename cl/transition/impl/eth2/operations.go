@@ -544,7 +544,7 @@ func (I *impl) processAttestationPostAltair(
 	return attestingIndicies, state.IncreaseBalance(s, proposer, reward)
 }
 
-// processAttestationsPhase0 implements the rules for phase0 processing.
+// processAttestationPhase0 implements the rules for phase0 processing.
 func (I *impl) processAttestationPhase0(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
