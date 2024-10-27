@@ -90,7 +90,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if r.stateSn != nil {
 		blocksAvailableInSnapshots = r.stateSn.BlocksAvailable()
 	}
-	latestProcessedState = max(latestProcessedState, blocksAvailableInSnapshots))
+	latestProcessedState = max(latestProcessedState, blocksAvailableInSnapshots)
 
 	// If this happens, we need to update our static tables
 	if slot > latestProcessedState || slot > r.validatorTable.Slot() {
