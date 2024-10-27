@@ -125,12 +125,12 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	return
 }
 
-func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *freezeblocks.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) error {
+func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *freezeblocks.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) (bool, error) {
 	if stateSn == nil || validatorsTable.Slot() != 0 {
-		return nil
+		return false, nil
 	}
 	if err := stateSn.OpenFolder(); err != nil {
-		return err
+		return false, err
 	}
 	blocksAvaiable := stateSn.BlocksAvailable()
 	stateSnRoTx := stateSn.View()
@@ -140,11 +140,11 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	for slot := uint64(0); slot <= stateSn.BlocksAvailable(); slot++ {
 		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
 		if !ok {
-			return fmt.Errorf("segment not found for slot %d", slot)
+			return false, fmt.Errorf("segment not found for slot %d", slot)
 		}
 		buf, err := seg.Get(slot)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if len(buf) == 0 {
 			continue
@@ -177,14 +177,14 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 		validatorsTable.SetSlot(slot)
 	}
 	logger.Info("[Antiquary] Filled static validators table", "slots", blocksAvaiable, "elapsed", time.Since(start))
-	return nil
+	return true, nil
 }
 
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
-	var tx kv.Tx
 
 	// Check if you need to fill the static validators table
-	if err := FillStaticValidatorsTableIfNeeded(ctx, s.logger, s.stateSn, s.validatorsTable); err != nil {
+	refilledStaticValidators, err := FillStaticValidatorsTableIfNeeded(ctx, s.logger, s.stateSn, s.validatorsTable)
+	if err != nil {
 		return err
 	}
 
@@ -196,6 +196,13 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	// maps which validators changes
 	var changedValidators sync.Map
+
+	if refilledStaticValidators {
+		s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
+			changedValidators.Store(validatorIndex, struct{}{})
+			return true
+		})
+	}
 
 	stateAntiquaryCollector := newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 	defer stateAntiquaryCollector.close()
