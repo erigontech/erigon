@@ -107,8 +107,7 @@ type TxTask struct {
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
 
-	Requests types.Requests
-	Config   *chain.Config
+	Config *chain.Config
 }
 
 func (t *TxTask) CreateReceipt(tx kv.Tx) {

@@ -83,7 +83,7 @@ func (task *ExecutionTask) Execute(mvh *blockstm.MVHashMap, incarnation int, log
 		}
 	}
 
-	task.statedb = state.NewWithMVHashmap(state.NewPlainStateReader(task.dbtx), mvh)
+	//task.statedb = state.NewWithMVHashmap(state.NewPlainStateReader(task.dbtx), mvh)
 	task.statedb.SetTxContext(task.TxIndex)
 
 	task.statedb.SetBlockSTMIncarnation(incarnation)
@@ -441,7 +441,7 @@ func ParallelExecuteBlockEphemerally(
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), block.Requests(), chainReader, false, logger); err != nil {
+		if _, _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, logger); err != nil {
 			return nil, err
 		}
 	}
