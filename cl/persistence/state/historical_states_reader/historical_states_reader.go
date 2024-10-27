@@ -787,10 +787,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 	if err != nil {
 		return nil, nil, err
 	}
-	// trigger the cache for shuffled sets in parallel
-	if err := r.tryCachingEpochsInParallell(tx, kvGetter, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch}); err != nil {
-		return nil, nil, err
-	}
+
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
 		// Read the block
