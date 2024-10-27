@@ -139,7 +139,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	// }
 	Segments := make(map[string]*segments)
 	for k := range snapshotTypes.KeyValueGetters {
-		Segments[strings.ToLower(k)] = &segments{
+		Segments[k] = &segments{
 			DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 		}
 	}
@@ -500,7 +500,6 @@ func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
 }
 
 func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegment, bool) {
-	tbl = strings.ToLower(tbl)
 	for _, seg := range v.VisibleSegments(tbl) {
 		if !(slot >= seg.from && slot < seg.to) {
 			continue
@@ -515,7 +514,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
 	// a little bit ugly.
-	segName = strings.ReplaceAll(segName, "beaconblocks", strings.ToLower(snapName))
+	segName = strings.ReplaceAll(segName, "beaconblocks", snapName)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
 	compressCfg := seg.DefaultCfg
@@ -653,7 +652,7 @@ func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {
 	view := s.View()
 	defer view.Close()
 
-	seg, ok := view.VisibleSegment(slot, strings.ToLower(tbl))
+	seg, ok := view.VisibleSegment(slot, tbl)
 	if !ok {
 		return nil, nil
 	}
