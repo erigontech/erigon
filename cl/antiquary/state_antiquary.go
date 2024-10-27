@@ -121,8 +121,69 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	return
 }
 
+func (s *Antiquary) fillStaticValidatorsTable(ctx context.Context) error {
+	if s.stateSn == nil || s.stateSn.BlocksAvailable() <= s.validatorsTable.Slot() {
+		return nil
+	}
+	if err := s.stateSn.OpenFolder(); err != nil {
+		return err
+	}
+	blocksAvaiable := s.stateSn.BlocksAvailable()
+	stateSnRoTx := s.stateSn.View()
+	defer stateSnRoTx.Close()
+
+	start := time.Now()
+	lastLog := time.Now()
+	for slot := s.validatorsTable.Slot() + 1; slot <= blocksAvaiable; slot++ {
+		if slot%100_000 == 0 {
+			s.logger.Info("[Antiquary] Filling static validators table", "slot", slot, "elapsed", time.Since(lastLog))
+			lastLog = time.Now()
+		}
+		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
+		if !ok {
+			return fmt.Errorf("segment not found for slot %d", slot)
+		}
+		buf, err := seg.Get(slot)
+		if err != nil {
+			return err
+		}
+		if len(buf) == 0 {
+			continue
+		}
+		event := state_accessors.NewStateEventsFromBytes(buf)
+		state_accessors.ReplayEvents(
+			func(validatorIndex uint64, validator solid.Validator) error {
+				return s.validatorsTable.AddValidator(validator, validatorIndex, slot)
+			},
+			func(validatorIndex uint64, exitEpoch uint64) error {
+				return s.validatorsTable.AddExitEpoch(validatorIndex, slot, exitEpoch)
+			},
+			func(validatorIndex uint64, withdrawableEpoch uint64) error {
+				return s.validatorsTable.AddWithdrawableEpoch(validatorIndex, slot, withdrawableEpoch)
+			},
+			func(validatorIndex uint64, withdrawalCredentials libcommon.Hash) error {
+				return s.validatorsTable.AddWithdrawalCredentials(validatorIndex, slot, withdrawalCredentials)
+			},
+			func(validatorIndex uint64, activationEpoch uint64) error {
+				return s.validatorsTable.AddActivationEpoch(validatorIndex, slot, activationEpoch)
+			},
+			func(validatorIndex uint64, activationEligibilityEpoch uint64) error {
+				return s.validatorsTable.AddActivationEligibility(validatorIndex, slot, activationEligibilityEpoch)
+			},
+			func(validatorIndex uint64, slashed bool) error {
+				return s.validatorsTable.AddSlashed(validatorIndex, slot, slashed)
+			},
+			event,
+		)
+	}
+	s.logger.Info("[Antiquary] Filled static validators table", "slots", blocksAvaiable, "elapsed", time.Since(start))
+	return nil
+}
+
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	var tx kv.Tx
+
+	// Check if you need to fill the static validators table
 
 	tx, err := s.mainDB.BeginRo(ctx)
 	if err != nil {

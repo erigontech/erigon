@@ -50,6 +50,10 @@ func NewStateEvents() *StateEvents {
 	return &StateEvents{}
 }
 
+func NewStateEventsFromBytes(buf []byte) *StateEvents {
+	return &StateEvents{buf: libcommon.Copy(buf)}
+}
+
 func (se *StateEvents) AddValidator(validatorIndex uint64, validator solid.Validator) {
 	se.mu.Lock()
 	defer se.mu.Unlock()
