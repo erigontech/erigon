@@ -424,10 +424,15 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if from+blocksPerStatefulFile+safetyMargin > s.currentState.Slot() {
 			return nil
 		}
+		to := s.currentState.Slot()
+		if to < (safetyMargin + blocksPerStatefulFile) {
+			return nil
+		}
+		to = to - (safetyMargin + blocksPerStatefulFile)
 		if err := s.stateSn.DumpCaplinState(
 			ctx,
 			s.stateSn.BlocksAvailable()+1,
-			s.currentState.Slot(),
+			to,
 			blocksPerStatefulFile,
 			s.sn.Salt,
 			s.dirs,
