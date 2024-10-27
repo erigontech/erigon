@@ -542,7 +542,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = workers
-	sn, err := seg.NewCompressor(ctx, fmt.Sprintf("Snapshots %s", snapName), f.Path, tmpDir, compressCfg, lvl, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshots "+snapName, f.Path, tmpDir, compressCfg, lvl, logger)
 	if err != nil {
 		return err
 	}
@@ -556,7 +556,7 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 			return err
 		}
 		if i%20_000 == 0 {
-			logger.Log(lvl, fmt.Sprintf("Dumping %s", snapName), "progress", i)
+			logger.Log(lvl, "Dumping "+snapName, "progress", i)
 		}
 		if compress {
 			if err := sn.AddWord(dump); err != nil {
@@ -620,7 +620,7 @@ func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, fromSlot, to
 			}
 			// keep beaconblocks here but whatever....
 			to := i + blocksPerFile
-			logger.Log(lvl, fmt.Sprintf("Dumping %s", snapName), "from", i, "to", to)
+			logger.Log(lvl, "Dumping "+snapName, "from", i, "to", to)
 			if err := dumpCaplinState(ctx, snapName, kvGetter, i, to, blocksPerFile, salt, dirs, workers, lvl, logger, s.snapshotTypes.Compression[snapName]); err != nil {
 				return err
 			}
