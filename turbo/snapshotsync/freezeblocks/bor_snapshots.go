@@ -475,10 +475,14 @@ func (v *BorView) Close() {
 	v.base.Close()
 }
 
-func (v *BorView) Events() []*VisibleSegment      { return v.base.segments(borsnaptype.BorEvents) }
-func (v *BorView) Spans() []*VisibleSegment       { return v.base.segments(borsnaptype.BorSpans) }
-func (v *BorView) Checkpoints() []*VisibleSegment { return v.base.segments(borsnaptype.BorCheckpoints) }
-func (v *BorView) Milestones() []*VisibleSegment  { return v.base.segments(borsnaptype.BorMilestones) }
+func (v *BorView) Events() []*VisibleSegment { return v.base.segmentsByType(borsnaptype.BorEvents) }
+func (v *BorView) Spans() []*VisibleSegment  { return v.base.segmentsByType(borsnaptype.BorSpans) }
+func (v *BorView) Checkpoints() []*VisibleSegment {
+	return v.base.segmentsByType(borsnaptype.BorCheckpoints)
+}
+func (v *BorView) Milestones() []*VisibleSegment {
+	return v.base.segmentsByType(borsnaptype.BorMilestones)
+}
 
 func (v *BorView) EventsSegment(blockNum uint64) (*VisibleSegment, bool) {
 	return v.base.Segment(borsnaptype.BorEvents, blockNum)
