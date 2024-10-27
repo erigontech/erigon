@@ -132,7 +132,7 @@ func committeeCount(cfg *clparams.BeaconChainConfig, epoch uint64, idxs []uint64
 	return committeCount
 }
 
-func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index uint64) (libcommon.Hash, error) {
+func (r *HistoricalStatesReader) readHistoricalBlockRoot(kvGetter state_accessors.GetValFn, slot, index uint64) (libcommon.Hash, error) {
 	slotSubIndex := slot % r.cfg.SlotsPerHistoricalRoot
 	needFromGenesis := true
 
@@ -152,7 +152,7 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index u
 	if needFromGenesis {
 		return r.genesisState.GetBlockRootAtSlot(slot)
 	}
-	br, err := tx.GetOne(kv.BlockRoot, base_encoding.Encode64ToBytes4(slotLookup))
+	br, err := kvGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(slotLookup))
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -187,13 +187,13 @@ func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.T
 		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match.")
 	}
 	i := (data.Target.Epoch * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot
-	targetRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
+	targetRoot, err := r.readHistoricalBlockRoot(getter, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}
 
 	i = data.Slot % r.cfg.SlotsPerHistoricalRoot
-	headRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
+	headRoot, err := r.readHistoricalBlockRoot(getter, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}
