@@ -141,7 +141,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		}
 
 		if !valid {
-			log.Warn("[BatchVerifier] received invalid signature on the gossip", "topic", v.GossipData.Name)
+			log.Debug("[BatchVerifier] received invalid signature on the gossip", "topic", v.GossipData.Name)
 			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
 				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
 			}
