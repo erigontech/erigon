@@ -421,7 +421,7 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 	return nil
 }
 
-func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+func dump_pre_images_old(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	db, err := openDB(ctx, cfg.stateDb, logger, false)
 	if err != nil {
 		return err
@@ -516,7 +516,7 @@ func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) err
 	return nil
 }
 
-func dump_pre_images_new(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	db, err := openDB(ctx, cfg.stateDb, logger, false)
 	if err != nil {
 		return err
@@ -532,7 +532,6 @@ func dump_pre_images_new(ctx context.Context, cfg optionsCfg, logger log.Logger)
 	logInterval := time.NewTicker(120 * time.Second)
 	accFile, err := os.Create("acc_pre_images.dat")
 	storageFile, err := os.Create("storage_pre_images.dat")
-	// file, err := os.Create("pre_image_dump")
 	if err != nil {
 		return err
 	}
@@ -633,7 +632,7 @@ func dump_pre_images_new(ctx context.Context, cfg optionsCfg, logger log.Logger)
 		return err
 	}, etl.TransformArgs{})
 
-	logger.Info("Finished writing file ", "keyCounter", keyCounter, "notCurrIncarnation", notCurrIncarnation, "notCurrAddrCounter", notCurrAddrCounter)
+	logger.Info("Finished writing file ", "keyCounter", keyCounter, "accCounter", accCounter, "storageCounter", storageCounter, "notCurrIncarnation", notCurrIncarnation, "notCurrAddrCounter", notCurrAddrCounter)
 	return nil
 }
 
@@ -690,11 +689,11 @@ func main() {
 			logger.Error("Error", "err", err.Error())
 		}
 	case "dump_preimages":
-		if err := dump_pre_images(ctx, opt, logger); err != nil {
+		if err := dump_pre_images_old(ctx, opt, logger); err != nil {
 			logger.Error("Error", "err", err.Error())
 		}
 	case "dump_preimages_new":
-		if err := dump_pre_images_new(ctx, opt, logger); err != nil {
+		if err := dump_pre_images(ctx, opt, logger); err != nil {
 			logger.Error("Error", "err", err.Error())
 		}
 	default:
