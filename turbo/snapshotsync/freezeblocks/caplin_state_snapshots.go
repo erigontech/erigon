@@ -467,6 +467,9 @@ type CaplinStateView struct {
 }
 
 func (s *CaplinStateSnapshots) View() *CaplinStateView {
+	if s == nil {
+		return nil
+	}
 	s.visibleSegmentsLock.RLock()
 	defer s.visibleSegmentsLock.RUnlock()
 
@@ -482,6 +485,9 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 }
 
 func (v *CaplinStateView) Close() {
+	if v == nil {
+		return
+	}
 	if v.closed {
 		return
 	}
