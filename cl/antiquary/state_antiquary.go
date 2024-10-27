@@ -184,6 +184,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	var tx kv.Tx
 
 	// Check if you need to fill the static validators table
+	if err := s.fillStaticValidatorsTable(ctx); err != nil {
+		return err
+	}
 
 	tx, err := s.mainDB.BeginRo(ctx)
 	if err != nil {
