@@ -2652,7 +2652,11 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 			return nil, err
 		}
 	}
-	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
+	l5, err := seedableStateFilesBySubDir(dirs.Snap, "caplin", all)
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
 	return files, nil
 }
 

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 	"time"
 
@@ -30,6 +29,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -510,11 +510,24 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			blocksPerStatefulFile,
 			s.sn.Salt,
 			s.dirs,
-			runtime.NumCPU(),
+			1,
 			log.LvlInfo,
 			s.logger,
 		); err != nil {
 			return err
+		}
+		paths := s.stateSn.SegFileNames(from, to)
+		downloadItems := make([]*proto_downloader.AddItem, len(paths))
+		for i, path := range paths {
+			downloadItems[i] = &proto_downloader.AddItem{
+				Path: path,
+			}
+		}
+		if s.downloader != nil {
+			// Notify bittorent to seed the new snapshots
+			if _, err := s.downloader.Add(s.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+			}
 		}
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
@@ -576,7 +589,7 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		if err != nil {
 			return fmt.Errorf("failed to read historical state at slot %d: %w", attempt, err)
 		}
-		fmt.Println("currentState", s.currentState, attempt)
+
 		if s.currentState == nil {
 			log.Warn("historical state not found, backoff more and try again", "slot", attempt)
 			backoffStep += backoffStrides
