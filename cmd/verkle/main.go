@@ -436,13 +436,15 @@ func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) err
 
 	logInterval := time.NewTicker(120 * time.Second)
 	accFile, err := os.Create("acc_pre_images.dat")
+	accHashKeysFile, err := os.Create("acc_hashed_keys.dat")
 	storageFile, err := os.Create("storage_pre_images.dat")
+	storageHashKeysFile, err := os.Create("storage_hashed_keys.dat")
 	if err != nil {
 		return err
 	}
 	// collector := etl.NewCollector(".", "/tmp", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	accCollector := etl.NewCollector(".", cfg.tmpdir+"/tmpAcc", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
-	storageCollector := etl.NewCollector(".", cfg.tmpdir+"./tmpStg", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	storageCollector := etl.NewCollector(".", cfg.tmpdir+"/tmpStg", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer accCollector.Close()
 	defer storageCollector.Close()
 	stateCursor, err := tx.Cursor(kv.PlainState)
@@ -460,8 +462,10 @@ func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) err
 	var keyCounter, accCounter, storageCounter uint64
 	var notCurrAddrCounter = 0
 	var notCurrIncarnation = 0
+	acc := accounts.Account{}
+
 	// var buf buffer.Buffer
-	for k, _, err := stateCursor.First(); k != nil; k, _, err = stateCursor.Next() {
+	for k, v, err := stateCursor.First(); k != nil; k, _, err = stateCursor.Next() {
 		if err != nil {
 			return err
 		}
@@ -469,16 +473,16 @@ func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) err
 		if len(k) == 20 {
 			currentAddress = libcommon.BytesToAddress(k)
 			addressHash = utils.Sha256(currentAddress[:])
-			var acc accounts.Account
+			if err := acc.DecodeForStorage(v); err != nil {
+				return err
+			}
 
-			// if err := acc.DecodeForStorage(v); err != nil {
-			// return err
-			// }
-			currentAddress = libcommon.BytesToAddress(k)
+			// Storage will have incarnation 1 by default, acc incarnation will be incremented on SelfDestruct
+			currentIncarnation = acc.Incarnation + 1
+
 			if err := accCollector.Collect(addressHash[:], k); err != nil {
 				return err
 			}
-			currentIncarnation = acc.Incarnation
 			accCounter++
 		} else {
 			// logger.Info("Iterating through storage key", "k", k, "k[28:]", k[28:])
@@ -488,7 +492,8 @@ func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) err
 				notCurrAddrCounter++
 				continue
 			}
-			if binary.BigEndian.Uint64(k[20:]) != currentIncarnation {
+			inc := binary.BigEndian.Uint64(k[20:])
+			if inc != currentIncarnation {
 				notCurrIncarnation++
 				continue
 			}
@@ -517,6 +522,13 @@ func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) err
 	storageCounter = 0
 	accCollector.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		_, err := accFile.Write(v)
+		if err != nil {
+			return err
+		}
+		_, err = accHashKeysFile.Write(k)
+		if err != nil { 
+			return err
+		}
 		accCounter++
 		select {
 		case <-logInterval.C:
@@ -528,6 +540,13 @@ func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) err
 
 	storageCollector.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		_, err := storageFile.Write(v)
+		if err != nil {
+			return err
+		}
+		_, err = storageHashKeysFile.Write(k)
+		if err != nil {
+			return err
+		}
 		storageCounter++
 		select {
 		case <-logInterval.C:
