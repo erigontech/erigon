@@ -79,7 +79,6 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
-		fmt.Println(fPath)
 		_, name := filepath.Split(fPath)
 		// A bit hacky but whatever... basically caplin is incompatible with enums.
 		if strings.Contains(dir, "caplin") {
