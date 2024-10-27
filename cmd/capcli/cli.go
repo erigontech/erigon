@@ -588,7 +588,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	if err := antiquary.FillStaticValidatorsTableIfNeeded(ctx, log.Root(), stateSn, vt); err != nil {
+	if _, err := antiquary.FillStaticValidatorsTableIfNeeded(ctx, log.Root(), stateSn, vt); err != nil {
 		return err
 	}
 	fmt.Println(vt.WithdrawableEpoch(0, 1))
