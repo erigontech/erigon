@@ -421,101 +421,6 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 	return nil
 }
 
-func dump_pre_images_old(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
-	db, err := openDB(ctx, cfg.stateDb, logger, false)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	tx, err := db.BeginRw(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	logInterval := time.NewTicker(30 * time.Second)
-	file, err := os.Create("pre_image_dump")
-	if err != nil {
-		return err
-	}
-	collector := etl.NewCollector(".", "/tmp", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
-	defer collector.Close()
-	stateCursor, err := tx.Cursor(kv.PlainState)
-	if err != nil {
-		return err
-	}
-	num, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return err
-	}
-	logger.Info("Current Block Number", "num", num)
-	var currentIncarnation uint64
-	var currentAddress libcommon.Address
-	var addressHash libcommon.Hash
-	var keyCounter uint64 = 0
-	var notCurrAddrCounter = 0
-	var notCurrIncarnation = 0
-	// var buf buffer.Buffer
-	for k, v, err := stateCursor.First(); k != nil; k, v, err = stateCursor.Next() {
-		if err != nil {
-			return err
-		}
-		keyCounter++
-		if len(k) == 20 {
-			currentAddress = libcommon.BytesToAddress(k)
-			addressHash = utils.Sha256(currentAddress[:])
-			var acc accounts.Account
-
-			if err := acc.DecodeForStorage(v); err != nil {
-				return err
-			}
-			currentAddress = libcommon.BytesToAddress(k)
-			if err := collector.Collect(addressHash[:], k); err != nil {
-				return err
-			}
-			currentIncarnation = acc.Incarnation
-		} else {
-			// logger.Info("Iterating through storage key", "k", k, "k[28:]", k[28:])
-
-			address := libcommon.BytesToAddress(k[:20])
-			if address != currentAddress {
-				notCurrAddrCounter++
-				continue
-			}
-			if binary.BigEndian.Uint64(k[20:]) != currentIncarnation {
-				notCurrIncarnation++
-				continue
-			}
-			storageHash := utils.Sha256(k[28:])
-			if err := collector.Collect(append(addressHash[:], storageHash[:]...), k[28:]); err != nil {
-				return err
-			}
-			// buf.Write(k[28:])
-			// buf.Write(storageHash[:])
-		}
-
-		select {
-		case <-logInterval.C:
-			logger.Info("Computing preimages to state key", "key", common.Bytes2Hex(k))
-		default:
-		}
-	}
-	// if err := collector.Collect(addressHash[:], buf.Bytes()); err != nil {
-	// 	return err
-	// }
-	// db2, err := openDB(ctx, cfg.stateDb, logger, false)
-	logger.Info("Beginning writing file ", "keyCounter", keyCounter)
-
-	collector.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		_, err := file.Write(v)
-		return err
-	}, etl.TransformArgs{})
-	file.Close()
-	logger.Info("Finished writing file ", "keyCounter", keyCounter, "notCurrIncarnation", notCurrIncarnation, "notCurrAddrCounter", notCurrAddrCounter)
-	return nil
-}
-
 func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
 	db, err := openDB(ctx, cfg.stateDb, logger, false)
 	if err != nil {
@@ -675,24 +580,7 @@ func main() {
 		if err := IncrementVerkleTree(ctx, opt, logger); err != nil {
 			logger.Error("Error", "err", err.Error())
 		}
-	case "dump":
-		log.Info("Dumping in dump.txt")
-		if err := dump(ctx, opt); err != nil {
-			log.Error("Error", "err", err.Error())
-		}
-	case "acc_preimages":
-		if err := dump_acc_preimages(ctx, opt); err != nil {
-			logger.Error("Error", "err", err.Error())
-		}
-	case "storage_preimages":
-		if err := dump_storage_preimages(ctx, opt, logger); err != nil {
-			logger.Error("Error", "err", err.Error())
-		}
 	case "dump_preimages":
-		if err := dump_pre_images_old(ctx, opt, logger); err != nil {
-			logger.Error("Error", "err", err.Error())
-		}
-	case "dump_preimages_new":
 		if err := dump_pre_images(ctx, opt, logger); err != nil {
 			logger.Error("Error", "err", err.Error())
 		}
