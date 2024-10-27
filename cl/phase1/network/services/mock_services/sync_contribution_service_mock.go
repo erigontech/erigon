@@ -21,6 +21,7 @@ import (
 type MockSyncContributionService struct {
 	ctrl     *gomock.Controller
 	recorder *MockSyncContributionServiceMockRecorder
+	isgomock struct{}
 }
 
 // MockSyncContributionServiceMockRecorder is the mock recorder for MockSyncContributionService.
@@ -41,17 +42,17 @@ func (m *MockSyncContributionService) EXPECT() *MockSyncContributionServiceMockR
 }
 
 // ProcessMessage mocks base method.
-func (m *MockSyncContributionService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *cltypes.SignedContributionAndProof) error {
+func (m *MockSyncContributionService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedContributionAndProof) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ProcessMessage indicates an expected call of ProcessMessage.
-func (mr *MockSyncContributionServiceMockRecorder) ProcessMessage(arg0, arg1, arg2 any) *MockSyncContributionServiceProcessMessageCall {
+func (mr *MockSyncContributionServiceMockRecorder) ProcessMessage(ctx, subnet, msg any) *MockSyncContributionServiceProcessMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockSyncContributionService)(nil).ProcessMessage), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockSyncContributionService)(nil).ProcessMessage), ctx, subnet, msg)
 	return &MockSyncContributionServiceProcessMessageCall{Call: call}
 }
 

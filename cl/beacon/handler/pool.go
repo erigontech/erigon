@@ -25,6 +25,7 @@ import (
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -66,7 +67,17 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 		if slot != nil && atts[i].Data.Slot != *slot {
 			continue
 		}
-		if committeeIndex != nil && atts[i].Data.CommitteeIndex != *committeeIndex {
+		attVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetEpochAtSlot(atts[i].Data.Slot))
+		cIndex := atts[i].Data.CommitteeIndex
+		if attVersion.AfterOrEqual(clparams.ElectraVersion) {
+			index, err := atts[i].ElectraSingleCommitteeIndex()
+			if err != nil {
+				log.Warn("[Beacon REST] failed to get committee bits", "err", err)
+				continue
+			}
+			cIndex = index
+		}
+		if committeeIndex != nil && cIndex != *committeeIndex {
 			continue
 		}
 		ret = append(ret, atts[i])
@@ -91,12 +102,24 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 	for i, attestation := range req {
 		var (
 			slot                  = attestation.Data.Slot
+			epoch                 = a.ethClock.GetEpochAtSlot(slot)
+			attClVersion          = a.beaconChainCfg.GetCurrentStateVersion(epoch)
 			cIndex                = attestation.Data.CommitteeIndex
 			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
-			subnet                = subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		)
-		_ = i
+		if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
+			index, err := attestation.ElectraSingleCommitteeIndex()
+			if err != nil {
+				failures = append(failures, poolingFailure{
+					Index:   i,
+					Message: err.Error(),
+				})
+				continue
+			}
+			cIndex = index
+		}
 
+		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		encodedSSZ, err := attestation.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
@@ -168,7 +191,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
-	req := cltypes.NewAttesterSlashing()
+	clversion := a.syncedData.HeadState().Version()
+
+	req := cltypes.NewAttesterSlashing(clversion)
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -244,24 +269,21 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 	}
 	failures := []poolingFailure{}
 	for _, v := range req {
-		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
-			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
-			continue
+		encodedSSZ, err := v.EncodeSSZ(nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		// Broadcast to gossip
-		if a.sentinel != nil {
-			encodedSSZ, err := v.EncodeSSZ(nil)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+
+		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, &cltypes.SignedBLSToExecutionChangeWithGossipData{
+			SignedBLSToExecutionChange: v,
+			GossipData: &sentinel.GossipData{
 				Data: encodedSSZ,
 				Name: gossip.TopicNameBlsToExecutionChange,
-			}); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
+			},
+		}); err != nil && !errors.Is(err, services.ErrIgnore) {
+			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
+			continue
 		}
 	}
 

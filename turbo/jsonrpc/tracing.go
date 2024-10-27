@@ -25,11 +25,10 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
@@ -174,19 +173,24 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		if isBorStateSyncTxn {
+			var stateSyncEvents []*types.Message
+			stateSyncEvents, err = api.stateSyncEvents(ctx, tx, block.Hash(), blockNumber, chainConfig)
+			if err != nil {
+				return err
+			}
+
 			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 				ctx,
-				tx,
 				chainConfig,
 				config,
 				ibs,
-				api._blockReader,
 				block.Hash(),
 				block.NumberU64(),
 				block.Time(),
 				blockCtx,
 				stream,
 				api.evmCallTimeout,
+				stateSyncEvents,
 			)
 		} else {
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
@@ -312,19 +316,23 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 
 	if isBorStateSyncTxn {
+		stateSyncEvents, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		if err != nil {
+			return err
+		}
+
 		return polygontracer.TraceBorStateSyncTxnDebugAPI(
 			ctx,
-			tx,
 			chainConfig,
 			config,
 			ibs,
-			api._blockReader,
 			block.Hash(),
 			blockNum,
 			block.Time(),
 			blockCtx,
 			stream,
 			api.evmCallTimeout,
+			stateSyncEvents,
 		)
 	}
 

@@ -167,7 +167,7 @@ func (m *BlockProducer) Configure(baseNode NodeArgs, nodeNumber int) error {
 	}
 
 	switch m.Chain {
-	case networkname.DevChainName:
+	case networkname.Dev:
 		if m.DevPeriod == 0 {
 			m.DevPeriod = 30
 		}
@@ -175,7 +175,7 @@ func (m *BlockProducer) Configure(baseNode NodeArgs, nodeNumber int) error {
 		core.DevnetEtherbase = m.account.Address
 		core.DevnetSignPrivateKey = m.account.SigKey()
 
-	case networkname.BorDevnetChainName:
+	case networkname.BorDevnet:
 		m.account = accounts.NewAccount(m.GetName() + "-etherbase")
 
 		if len(m.HttpApi) == 0 {

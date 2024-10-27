@@ -135,7 +135,7 @@ func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, block
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *EthereumExecutionModule) getTD(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*big.Int, error) {
+func (e *EthereumExecutionModule) getTD(_ context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*big.Int, error) {
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 
 }
@@ -338,7 +338,12 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 }
 
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
-	e.semaphore.Acquire(ctx, 1)
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			e.logger.Error("Could not start execution service", "err", err)
+		}
+		return
+	}
 	defer e.semaphore.Release(1)
 
 	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, nil); err != nil {

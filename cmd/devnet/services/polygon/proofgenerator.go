@@ -117,7 +117,7 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 }
 
 func (pg *ProofGenerator) getChainBlockInfo(ctx context.Context, burnTxHash libcommon.Hash) (uint64, uint64, error) {
-	childNode := devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName))
+	childNode := devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnet))
 
 	var wg sync.WaitGroup
 

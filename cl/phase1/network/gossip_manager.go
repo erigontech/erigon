@@ -190,7 +190,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 	// If the deserialization is successful, the object is set to the deserialized value and the loop returns to the next iteration.
 	switch data.Name {
 	case gossip.TopicNameBeaconBlock:
-		obj := cltypes.NewSignedBeaconBlock(g.beaconConfig)
+		obj := cltypes.NewSignedBeaconBlock(g.beaconConfig, version)
 		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
@@ -218,8 +218,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 	case gossip.TopicNameAttesterSlashing:
 		return operationsContract[*cltypes.AttesterSlashing](ctx, g, data, int(version), "attester slashing", g.forkChoice.OnAttesterSlashing)
 	case gossip.TopicNameBlsToExecutionChange:
-		obj := &cltypes.SignedBLSToExecutionChange{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := &cltypes.SignedBLSToExecutionChangeWithGossipData{
+			GossipData:                 copyOfSentinelData(data),
+			SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{},
+		}
+		if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
@@ -317,7 +320,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 		select {
 		case ch <- data:
 		default:
-			log.Warn("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
+			//log.Warn("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
 		}
 	}
 

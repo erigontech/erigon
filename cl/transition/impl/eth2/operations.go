@@ -17,7 +17,6 @@
 package eth2
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -41,6 +40,10 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/utils"
 )
+
+func (I *impl) FullValidate() bool {
+	return I.FullValidation
+}
 
 func (I *impl) ProcessProposerSlashing(
 	s abstract.BeaconState,
@@ -71,33 +74,6 @@ func (I *impl) ProcessProposerSlashing(
 	}
 	if !proposer.IsSlashable(state.Epoch(s)) {
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
-	}
-
-	for _, signedHeader := range []*cltypes.SignedBeaconBlockHeader{propSlashing.Header1, propSlashing.Header2} {
-		domain, err := s.GetDomain(
-			s.BeaconConfig().DomainBeaconProposer,
-			state.GetEpochAtSlot(s.BeaconConfig(), signedHeader.Header.Slot),
-		)
-		if err != nil {
-			return fmt.Errorf("unable to get domain: %v", err)
-		}
-		signingRoot, err := fork.ComputeSigningRoot(signedHeader.Header, domain)
-		if err != nil {
-			return fmt.Errorf("unable to compute signing root: %v", err)
-		}
-		pk := proposer.PublicKey()
-		valid, err := bls.Verify(signedHeader.Signature[:], signingRoot[:], pk[:])
-		if err != nil {
-			return fmt.Errorf("unable to verify signature: %v", err)
-		}
-		if !valid {
-			return fmt.Errorf(
-				"invalid signature: signature %v, root %v, pubkey %v",
-				signedHeader.Signature[:],
-				signingRoot[:],
-				pk,
-			)
-		}
 	}
 
 	// Set whistleblower index to 0 so current proposer gets reward.
@@ -264,35 +240,7 @@ func (I *impl) ProcessVoluntaryExit(
 	if err != nil {
 		return err
 	}
-	validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
-	if err != nil {
-		return err
-	}
 
-	// We can skip it in some instances if we want to optimistically sync up.
-	if I.FullValidation {
-		var domain []byte
-		if s.Version() < clparams.DenebVersion {
-			domain, err = s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
-		} else if s.Version() >= clparams.DenebVersion {
-			domain, err = fork.ComputeDomain(s.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().CapellaForkVersion)), s.GenesisValidatorsRoot())
-		}
-		if err != nil {
-			return err
-		}
-		signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
-		if err != nil {
-			return err
-		}
-		pk := validator.PublicKey()
-		valid, err := bls.Verify(signedVoluntaryExit.Signature[:], signingRoot[:], pk[:])
-		if err != nil {
-			return err
-		}
-		if !valid {
-			return errors.New("ProcessVoluntaryExit: BLS verification failed")
-		}
-	}
 	// Do the exit (same process in slashing).
 	return s.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
 }
@@ -477,7 +425,6 @@ func (I *impl) ProcessBlsToExecutionChange(
 	signedChange *cltypes.SignedBLSToExecutionChange,
 ) error {
 	change := signedChange.Message
-
 	beaconConfig := s.BeaconConfig()
 	validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 	if err != nil {
@@ -486,39 +433,6 @@ func (I *impl) ProcessBlsToExecutionChange(
 
 	// Perform full validation if requested.
 	wc := validator.WithdrawalCredentials()
-	if I.FullValidation {
-		// Check the validator's withdrawal credentials prefix.
-		if wc[0] != byte(beaconConfig.BLSWithdrawalPrefixByte) {
-			return errors.New("invalid withdrawal credentials prefix")
-		}
-
-		// Check the validator's withdrawal credentials against the provided message.
-		hashedFrom := utils.Sha256(change.From[:])
-		if !bytes.Equal(hashedFrom[1:], wc[1:]) {
-			return errors.New("invalid withdrawal credentials")
-		}
-
-		// Compute the signing domain and verify the message signature.
-		domain, err := fork.ComputeDomain(
-			beaconConfig.DomainBLSToExecutionChange[:],
-			utils.Uint32ToBytes4(uint32(beaconConfig.GenesisForkVersion)),
-			s.GenesisValidatorsRoot(),
-		)
-		if err != nil {
-			return err
-		}
-		signedRoot, err := fork.ComputeSigningRoot(change, domain)
-		if err != nil {
-			return err
-		}
-		valid, err := bls.Verify(signedChange.Signature[:], signedRoot[:], change.From[:])
-		if err != nil {
-			return err
-		}
-		if !valid {
-			return errors.New("invalid signature")
-		}
-	}
 	credentials := wc
 	// Reset the validator's withdrawal credentials.
 	credentials[0] = byte(beaconConfig.ETH1AddressWithdrawalPrefixByte)
@@ -584,7 +498,7 @@ func (I *impl) processAttestationPostAltair(
 		return nil, err
 	}
 
-	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
+	attestingIndicies, err := s.GetAttestingIndicies(attestation, true)
 	if err != nil {
 		return nil, err
 	}
@@ -630,12 +544,13 @@ func (I *impl) processAttestationPostAltair(
 	return attestingIndicies, state.IncreaseBalance(s, proposer, reward)
 }
 
-// processAttestationsPhase0 implements the rules for phase0 processing.
+// processAttestationPhase0 implements the rules for phase0 processing.
 func (I *impl) processAttestationPhase0(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
 ) ([]uint64, error) {
 	data := attestation.Data
+	// NOTE: this function is only called in phase0, so don't need to change committee index field by electra fork.
 	committee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
 	if err != nil {
 		return nil, err
@@ -672,8 +587,7 @@ func (I *impl) processAttestationPhase0(
 	}
 	// Not required by specs but needed if we want performant epoch transition.
 	indicies, err := s.GetAttestingIndicies(
-		attestation.Data,
-		attestation.AggregationBits.Bytes(),
+		attestation,
 		true,
 	)
 	if err != nil {
@@ -771,7 +685,15 @@ func IsAttestationApplicable(s abstract.BeaconState, attestation *solid.Attestat
 		data.Slot+beaconConfig.MinAttestationInclusionDelay > stateSlot {
 		return errors.New("ProcessAttestation: attestation slot not in range")
 	}
-	if data.CommitteeIndex >= s.CommitteeCount(data.Target.Epoch) {
+	cIndex := data.CommitteeIndex
+	if s.Version().AfterOrEqual(clparams.ElectraVersion) {
+		index, err := attestation.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return err
+		}
+		cIndex = index
+	}
+	if cIndex >= s.CommitteeCount(data.Target.Epoch) {
 		return errors.New("ProcessAttestation: attester index out of range")
 	}
 	return nil
@@ -896,40 +818,6 @@ func (I *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex ui
 
 func (I *impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error {
 	epoch := state.Epoch(s)
-	proposer, err := s.ValidatorForValidatorIndex(int(proposerIndex))
-	if err != nil {
-		return err
-	}
-	if I.FullValidation {
-		domain, err := s.GetDomain(s.BeaconConfig().DomainRandao, epoch)
-		if err != nil {
-			return fmt.Errorf("ProcessRandao: unable to get domain: %v", err)
-		}
-		signingRoot, err := computeSigningRootEpoch(epoch, domain)
-		if err != nil {
-			return fmt.Errorf("ProcessRandao: unable to compute signing root: %v", err)
-		}
-		pk := proposer.PublicKey()
-		valid, err := bls.Verify(randao[:], signingRoot[:], pk[:])
-		if err != nil {
-			return fmt.Errorf(
-				"ProcessRandao: unable to verify public key: %x, with signing root: %x, and signature: %x, %v",
-				pk[:],
-				signingRoot[:],
-				randao[:],
-				err,
-			)
-		}
-		if !valid {
-			return fmt.Errorf(
-				"ProcessRandao: invalid signature: public key: %x, signing root: %x, signature: %x",
-				pk[:],
-				signingRoot[:],
-				randao[:],
-			)
-		}
-	}
-
 	randaoMixes := s.GetRandaoMixes(epoch)
 	randaoHash := utils.Sha256(randao[:])
 	mix := [32]byte{}
@@ -1009,6 +897,11 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 		}
 		if state.Epoch(s) == beaconConfig.DenebForkEpoch {
 			if err := s.UpgradeToDeneb(); err != nil {
+				return err
+			}
+		}
+		if state.Epoch(s) == beaconConfig.ElectraForkEpoch {
+			if err := s.UpgradeToElectra(); err != nil {
 				return err
 			}
 		}

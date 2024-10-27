@@ -50,7 +50,7 @@ type AttestationService Service[*AttestationWithGossipData]
 type VoluntaryExitService Service[*cltypes.SignedVoluntaryExit]
 
 //go:generate mockgen -typed=true -destination=./mock_services/bls_to_execution_change_service_mock.go -package=mock_services . BLSToExecutionChangeService
-type BLSToExecutionChangeService Service[*cltypes.SignedBLSToExecutionChange]
+type BLSToExecutionChangeService Service[*cltypes.SignedBLSToExecutionChangeWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/proposer_slashing_service_mock.go -package=mock_services . ProposerSlashingService
 type ProposerSlashingService Service[*cltypes.ProposerSlashing]

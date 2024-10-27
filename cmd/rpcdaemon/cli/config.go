@@ -65,7 +65,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/aura"
 	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -423,8 +425,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 		if allSegmentsDownloadComplete {
-			allSnapshots.OptimisticalyReopenFolder()
-			allBorSnapshots.OptimisticalyReopenFolder()
+			allSnapshots.OptimisticalyOpenFolder()
+			allBorSnapshots.OptimisticalyOpenFolder()
 
 			allSnapshots.LogStat("remote")
 			allBorSnapshots.LogStat("bor:remote")
@@ -440,7 +442,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				return nil
 			})
 		} else {
-			log.Warn("[rpc] download of segments not complete yet (need wait, then RPC will work)")
+			logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 		}
 
 		wg := errgroup.Group{}
@@ -452,12 +454,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					logger.Warn("[snapshots] reopen", "err", err)
 					return nil
 				}
-				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+				if err := allSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					allSnapshots.LogStat("reopen")
 				}
-				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+				if err := allBorSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[bor snapshots] reopen", "err", err)
 				} else {
 					allBorSnapshots.LogStat("bor:reopen")
@@ -571,8 +573,23 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}
 			// Skip the compatibility check, until we have a schema in erigon-lib
 			engine = bor.NewRo(cc, borKv, blockReader, logger)
+		} else if cc != nil && cc.Aura != nil {
+			consensusDB, err := kv2.NewMDBX(logger).Path(filepath.Join(cfg.DataDir, "aura")).Label(kv.ConsensusDB).Accede().Open(ctx)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+			engine, err = aura.NewAuRa(cc.Aura, consensusDB)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+			if cc.TerminalTotalDifficulty != nil {
+				engine = merge.New(engine.(consensus.Engine)) // the Merge
+			}
 		} else {
 			engine = ethash.NewFaker()
+			if cc.TerminalTotalDifficulty != nil {
+				engine = merge.New(engine.(consensus.Engine)) // the Merge
+			}
 		}
 	} else {
 		if polygonSync {
@@ -1083,7 +1100,7 @@ func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.
 	panic("remoteConsensusEngine.Prepare not supported")
 }
 
-func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.Requests, error) {
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	panic("remoteConsensusEngine.Finalize not supported")
 }
 

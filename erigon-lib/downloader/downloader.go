@@ -2930,6 +2930,8 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 func (d *Downloader) Completed() bool {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
 	return d.stats.Completed
 }
 
@@ -2955,7 +2957,7 @@ func (d *Downloader) notifyCompleted(tName string, tHash *prototypes.H160) {
 	d.onTorrentComplete(tName, tHash)
 }
 
-func (d *Downloader) getCompletedTorrents() map[string]completedTorrentInfo {
+func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
 

@@ -243,11 +243,28 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var blockNum uint64
+	var ok bool
 	// find non-nil receipt
 	for _, receipt := range receipts {
 		if receipt != nil {
-			r.receipts[receipts[0].BlockNumber.Uint64()] = receipts
-			return
+			ok = true
+			blockNum = receipt.BlockNumber.Uint64()
+			break
+		}
+	}
+	if !ok {
+		return
+	}
+	r.receipts[blockNum] = receipts
+
+	//enforce `limit`: drop all items older than `limit` blocks
+	if len(r.receipts) <= int(r.limit) {
+		return
+	}
+	for bn := range r.receipts {
+		if bn+r.limit < blockNum {
+			delete(r.receipts, bn)
 		}
 	}
 }

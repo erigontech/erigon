@@ -96,7 +96,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	}
 
 	if blocksRetired {
-		if err := snapshots.ReopenFolder(); err != nil {
+		if err := snapshots.OpenFolder(); err != nil {
 			return blocksRetired, fmt.Errorf("reopen: %w", err)
 		}
 		snapshots.LogStat("bor:retire")
@@ -238,7 +238,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 	}
 }
 
-func (s *BorRoSnapshots) ReopenFolder() error {
+func (s *BorRoSnapshots) OpenFolder() error {
 	files, _, err := typedSegments(s.dir, borsnaptype.BorSnapshotTypes(), false)
 	if err != nil {
 		return err
@@ -249,7 +249,7 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	if err := s.ReopenList(list, false); err != nil {
+	if err := s.OpenList(list, false); err != nil {
 		return err
 	}
 	return nil
@@ -475,10 +475,14 @@ func (v *BorView) Close() {
 	v.base.Close()
 }
 
-func (v *BorView) Events() []*VisibleSegment      { return v.base.segments(borsnaptype.BorEvents) }
-func (v *BorView) Spans() []*VisibleSegment       { return v.base.segments(borsnaptype.BorSpans) }
-func (v *BorView) Checkpoints() []*VisibleSegment { return v.base.segments(borsnaptype.BorCheckpoints) }
-func (v *BorView) Milestones() []*VisibleSegment  { return v.base.segments(borsnaptype.BorMilestones) }
+func (v *BorView) Events() []*VisibleSegment { return v.base.segmentsByType(borsnaptype.BorEvents) }
+func (v *BorView) Spans() []*VisibleSegment  { return v.base.segmentsByType(borsnaptype.BorSpans) }
+func (v *BorView) Checkpoints() []*VisibleSegment {
+	return v.base.segmentsByType(borsnaptype.BorCheckpoints)
+}
+func (v *BorView) Milestones() []*VisibleSegment {
+	return v.base.segmentsByType(borsnaptype.BorMilestones)
+}
 
 func (v *BorView) EventsSegment(blockNum uint64) (*VisibleSegment, bool) {
 	return v.base.Segment(borsnaptype.BorEvents, blockNum)
