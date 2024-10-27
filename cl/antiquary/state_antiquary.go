@@ -178,6 +178,7 @@ func (s *Antiquary) fillStaticValidatorsTable(ctx context.Context) error {
 			},
 			event,
 		)
+		s.validatorsTable.SetSlot(slot)
 	}
 	s.logger.Info("[Antiquary] Filled static validators table", "slots", blocksAvaiable, "elapsed", time.Since(start))
 	return nil
