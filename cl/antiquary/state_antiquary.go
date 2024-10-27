@@ -126,7 +126,7 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 }
 
 func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *freezeblocks.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) error {
-	if stateSn == nil || stateSn.BlocksAvailable() <= validatorsTable.Slot() {
+	if stateSn == nil || validatorsTable.Slot() != 0 {
 		return nil
 	}
 	if err := stateSn.OpenFolder(); err != nil {
@@ -136,13 +136,8 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	stateSnRoTx := stateSn.View()
 	defer stateSnRoTx.Close()
 
-	startSlot := validatorsTable.Slot() + 1
-	if startSlot == 1 {
-		startSlot = 0
-	}
-
 	start := time.Now()
-	for slot := startSlot; slot <= blocksAvaiable; slot++ {
+	for slot := uint64(0); slot <= stateSn.BlocksAvailable(); slot++ {
 		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
 		if !ok {
 			return fmt.Errorf("segment not found for slot %d", slot)
