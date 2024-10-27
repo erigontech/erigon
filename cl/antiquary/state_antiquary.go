@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // pool for buffers
@@ -124,20 +125,18 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	return
 }
 
-func (s *Antiquary) fillStaticValidatorsTable(ctx context.Context) error {
-	if s.stateSn == nil || s.stateSn.BlocksAvailable() <= s.validatorsTable.Slot() {
+func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *freezeblocks.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) error {
+	if stateSn == nil || stateSn.BlocksAvailable() <= validatorsTable.Slot() {
 		return nil
 	}
-	if err := s.stateSn.OpenFolder(); err != nil {
+	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	blocksAvaiable := s.stateSn.BlocksAvailable()
-	stateSnRoTx := s.stateSn.View()
+	blocksAvaiable := stateSn.BlocksAvailable()
+	stateSnRoTx := stateSn.View()
 	defer stateSnRoTx.Close()
-	if s.genesisState == nil {
-		return fmt.Errorf("genesis state is nil")
-	}
-	startSlot := s.validatorsTable.Slot() + 1
+
+	startSlot := validatorsTable.Slot() + 1
 	if startSlot == 1 {
 		startSlot = 0
 	}
@@ -158,31 +157,31 @@ func (s *Antiquary) fillStaticValidatorsTable(ctx context.Context) error {
 		event := state_accessors.NewStateEventsFromBytes(buf)
 		state_accessors.ReplayEvents(
 			func(validatorIndex uint64, validator solid.Validator) error {
-				return s.validatorsTable.AddValidator(validator, validatorIndex, slot)
+				return validatorsTable.AddValidator(validator, validatorIndex, slot)
 			},
 			func(validatorIndex uint64, exitEpoch uint64) error {
-				return s.validatorsTable.AddExitEpoch(validatorIndex, slot, exitEpoch)
+				return validatorsTable.AddExitEpoch(validatorIndex, slot, exitEpoch)
 			},
 			func(validatorIndex uint64, withdrawableEpoch uint64) error {
-				return s.validatorsTable.AddWithdrawableEpoch(validatorIndex, slot, withdrawableEpoch)
+				return validatorsTable.AddWithdrawableEpoch(validatorIndex, slot, withdrawableEpoch)
 			},
 			func(validatorIndex uint64, withdrawalCredentials libcommon.Hash) error {
-				return s.validatorsTable.AddWithdrawalCredentials(validatorIndex, slot, withdrawalCredentials)
+				return validatorsTable.AddWithdrawalCredentials(validatorIndex, slot, withdrawalCredentials)
 			},
 			func(validatorIndex uint64, activationEpoch uint64) error {
-				return s.validatorsTable.AddActivationEpoch(validatorIndex, slot, activationEpoch)
+				return validatorsTable.AddActivationEpoch(validatorIndex, slot, activationEpoch)
 			},
 			func(validatorIndex uint64, activationEligibilityEpoch uint64) error {
-				return s.validatorsTable.AddActivationEligibility(validatorIndex, slot, activationEligibilityEpoch)
+				return validatorsTable.AddActivationEligibility(validatorIndex, slot, activationEligibilityEpoch)
 			},
 			func(validatorIndex uint64, slashed bool) error {
-				return s.validatorsTable.AddSlashed(validatorIndex, slot, slashed)
+				return validatorsTable.AddSlashed(validatorIndex, slot, slashed)
 			},
 			event,
 		)
-		s.validatorsTable.SetSlot(slot)
+		validatorsTable.SetSlot(slot)
 	}
-	s.logger.Info("[Antiquary] Filled static validators table", "slots", blocksAvaiable, "elapsed", time.Since(start))
+	logger.Info("[Antiquary] Filled static validators table", "slots", blocksAvaiable, "elapsed", time.Since(start))
 	return nil
 }
 
@@ -190,7 +189,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	var tx kv.Tx
 
 	// Check if you need to fill the static validators table
-	if err := s.fillStaticValidatorsTable(ctx); err != nil {
+	if err := FillStaticValidatorsTableIfNeeded(ctx, s.logger, s.stateSn, s.validatorsTable); err != nil {
 		return err
 	}
 
