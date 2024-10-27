@@ -73,6 +73,7 @@ func New(datadir string) Dirs {
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
 		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessor"),
+		SnapCaplin:      filepath.Join(datadir, "snapshots", "caplin"),
 		Downloader:      filepath.Join(datadir, "downloader"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
@@ -80,7 +81,6 @@ func New(datadir string) Dirs {
 		CaplinIndexing:  filepath.Join(datadir, "caplin", "indexing"),
 		CaplinLatest:    filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:   filepath.Join(datadir, "caplin", "genesis"),
-		SnapCaplin:      filepath.Join(datadir, "snapshots", "caplin"),
 	}
 
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
