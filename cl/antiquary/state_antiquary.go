@@ -432,7 +432,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			s.sn.Salt,
 			s.dirs,
 			runtime.NumCPU(),
-			log.LvlDebug,
+			log.LvlInfo,
 			s.logger,
 		); err != nil {
 			return err
