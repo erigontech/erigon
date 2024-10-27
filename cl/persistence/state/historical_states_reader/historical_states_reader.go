@@ -48,9 +48,6 @@ type HistoricalStatesReader struct {
 	blockReader    freezeblocks.BeaconSnapshotReader
 	stateSn        *freezeblocks.CaplinStateSnapshots
 	genesisState   *state.CachingBeaconState
-
-	// cache for shuffled sets
-	shuffledSetsCache *lru.Cache[uint64, []uint64]
 }
 
 func NewHistoricalStatesReader(

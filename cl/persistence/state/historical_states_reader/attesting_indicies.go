@@ -19,13 +19,11 @@ package historical_states_reader
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
@@ -104,19 +102,9 @@ func (r *HistoricalStatesReader) ComputeCommittee(mix libcommon.Hash, indicies [
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64
-	epoch := slot / cfg.SlotsPerEpoch
-	/*
-	   mixPosition := (epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) % cfg.EpochsPerHistoricalVector
-	*/
-	if shuffledIndicesInterface, ok := r.shuffledSetsCache.Get(epoch); ok {
-		shuffledIndicies = shuffledIndicesInterface
-	} else {
-		shuffledIndicies = make([]uint64, lenIndicies)
-		start := time.Now()
-		shuffledIndicies = shuffling.ComputeShuffledIndicies(cfg, mix, shuffledIndicies, indicies, slot)
-		shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
-		r.shuffledSetsCache.Add(epoch, shuffledIndicies)
-	}
+
+	shuffledIndicies = make([]uint64, lenIndicies)
+	shuffledIndicies = shuffling.ComputeShuffledIndicies(cfg, mix, shuffledIndicies, indicies, slot)
 
 	return shuffledIndicies[start:end], nil
 }
