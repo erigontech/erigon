@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -134,46 +133,6 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 	p.prevRepeatCount = repeatCount
 }
 
-/*
-ExecV3 - parallel execution. Has many layers of abstractions - each layer does accumulate
-state changes (updates) and can "atomically commit all changes to underlying layer of abstraction"
-
-Layers from top to bottom:
-- IntraBlockState - used to exec txs. It does store inside all updates of given txn.
-Can understand if txn failed or OutOfGas - then revert all changes.
-Each parallel-worker hav own IntraBlockState.
-IntraBlockState does commit changes to lower-abstraction-level by method `ibs.MakeWriteSet()`
-
-- StateWriterBufferedV3 - txs which executed by parallel workers can conflict with each-other.
-This writer does accumulate updates and then send them to conflict-resolution.
-Until conflict-resolution succeed - none of execution updates must pass to lower-abstraction-level.
-Object TxTask it's just set of small buffers (readset + writeset) for each transaction.
-Write to TxTask happens by code like `txTask.ReadLists = rw.stateReader.ReadSet()`.
-
-- TxTask - objects coming from parallel-workers to conflict-resolution goroutine (ApplyLoop and method ReadsValid).
-Flush of data to lower-level-of-abstraction is done by method `agg.ApplyState` (method agg.ApplyHistory exists
-only for performance - to reduce time of RwLock on state, but by meaning `ApplyState+ApplyHistory` it's 1 method to
-flush changes from TxTask to lower-level-of-abstraction).
-
-- StateV3 - it's all updates which are stored in RAM - all parallel workers can see this updates.
-Execution of txs always done on Valid version of state (no partial-updates of state).
-Flush of updates to lower-level-of-abstractions done by method `StateV3.Flush`.
-On this level-of-abstraction also exists ReaderV3.
-IntraBlockState does call ReaderV3, and ReaderV3 call StateV3(in-mem-cache) or DB (RoTx).
-WAL - also on this level-of-abstraction - agg.ApplyHistory does write updates from TxTask to WAL.
-WAL it's like StateV3 just without reading api (can only write there). WAL flush to disk periodically (doesn't need much RAM).
-
-- RoTx - see everything what committed to DB. Commit is done by rwLoop goroutine.
-rwloop does:
-  - stop all Workers
-  - call StateV3.Flush()
-  - commit
-  - open new RoTx
-  - set new RoTx to all Workers
-  - start Worker start workers
-
-When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
-*/
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
 	parallel bool, //nolint
@@ -359,7 +318,6 @@ func ExecV3(ctx context.Context,
 	var outputBlockNum = stages.SyncMetrics[stages.Execution]
 	inputBlockNum := &atomic.Uint64{}
 	var count uint64
-	var lock sync.RWMutex
 
 	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
@@ -404,9 +362,6 @@ func ExecV3(ctx context.Context,
 	defer func() {
 		processed.Log("Done", rs, in, nil, txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 	}()
-
-	_, _, _, stopWorkers, _ := exec3.NewWorkersPool(lock.RLocker(), accumulator, logger, ctx, parallel, chainDb, rs, in, blockReader, chainConfig, cfg.genesis, engine, workerCount+1, cfg.dirs, isMining)
-	defer stopWorkers()
 
 	var pe *parallelExecutor
 
@@ -1042,61 +997,4 @@ func blockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 		_ = txn.Hash()
 	}
 	return b, err
-}
-
-func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.Aggregator, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool, isMining bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
-	rwsIt := rws.Iter()
-	defer rwsIt.Close()
-
-	var i int
-	outputTxNum = outputTxNumIn
-	for rwsIt.HasNext(outputTxNum) {
-		txTask := rwsIt.PopNext()
-		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
-			conflicts++
-
-			if i > 0 && canRetry {
-				//send to re-exex
-				rs.ReTry(txTask, in)
-				continue
-			}
-
-			// resolve first conflict right here: it's faster and conflict-free
-			applyWorker.RunTxTask(txTask, isMining)
-			if txTask.Error != nil {
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
-			}
-			// TODO: post-validation of gasUsed and blobGasUsed
-			i++
-		}
-
-		if txTask.Final {
-			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
-			err := rs.ApplyState4(ctx, txTask)
-			if err != nil {
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
-			}
-			//if !bytes.Equal(rh, txTask.BlockRoot[:]) {
-			//	log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(txTask.BlockRoot[:]), "bn", txTask.BlockNum, "txn", txTask.TxNum)
-			//	return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hashk mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
-			//}
-		}
-		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum, in)
-		outputTxNum++
-		if backPressure != nil {
-			select {
-			case backPressure <- struct{}{}:
-			default:
-			}
-		}
-		if err := rs.ApplyLogsAndTraces4(txTask, rs.Domains()); err != nil {
-			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
-		}
-		processedBlockNum = txTask.BlockNum
-		stopedAtBlockEnd = txTask.Final
-		if forceStopAtBlockEnd && txTask.Final {
-			break
-		}
-	}
-	return
 }
