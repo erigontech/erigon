@@ -53,8 +53,11 @@ import (
 )
 
 func TestAggregatorV3_Merge(t *testing.T) {
+	ti := time.Now()
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
+	println("testDbAndAggregatorv3", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 	rwTx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -62,12 +65,16 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			rwTx.Rollback()
 		}
 	}()
+	println("BeginRwNosync", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	require.NoError(t, err)
 	defer domains.Close()
+	println("Initialisation", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	txs := uint64(1000)
 	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -120,33 +127,50 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		require.NoError(t, err)
 
 	}
+	println("cycle", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
+	println("flush", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	require.NoError(t, err)
 	err = rwTx.Commit()
 	require.NoError(t, err)
 	rwTx = nil
+	println("commit", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
+	println("build files", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
 	rwTx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
+	println("beginrw", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
 	require.NoError(t, err)
+	println("prune", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 	t.Logf("Prune: %s", stat)
 
 	err = rwTx.Commit()
 	require.NoError(t, err)
+	println("2 commit", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	err = agg.MergeLoop(context.Background())
 	require.NoError(t, err)
+	println("mergeloop", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	// Check the history
 	roTx, err := db.BeginRo(context.Background())
@@ -154,17 +178,169 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	defer roTx.Rollback()
 
 	dc := agg.BeginFilesRo()
+	println("Initialisation 2", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, nil, roTx)
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey1)
 
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+	println("getlatest1", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, nil, roTx)
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey2)
 	dc.Close()
+	println("getlates2", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+}
+
+func BenchmarkAggregatorV3_Merge(t *testing.B) {
+	ti := time.Now()
+	db, agg := testDbAndAggregatorv3Bench(t, 10)
+	println("testDbAndAggregatorv3", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+	rwTx, err := db.BeginRwNosync(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
+	println("BeginRwNosync", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	ac := agg.BeginFilesRo()
+	defer ac.Close()
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	println("Initialisation", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	txs := uint64(1000)
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	var (
+		commKey1 = []byte("someCommKey")
+		commKey2 = []byte("otherCommKey")
+	)
+
+	// keys are encodings of numbers 1..31
+	// each key changes value on every txNum which is multiple of the key
+	var maxWrite, otherMaxWrite uint64
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		domains.SetTxNum(txNum)
+
+		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
+
+		n, err := rnd.Read(addr)
+		require.NoError(t, err)
+		require.EqualValues(t, length.Addr, n)
+
+		n, err = rnd.Read(loc)
+		require.NoError(t, err)
+		require.EqualValues(t, length.Hash, n)
+
+		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(0), nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
+		require.NoError(t, err)
+
+		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		require.NoError(t, err)
+
+		var v [8]byte
+		binary.BigEndian.PutUint64(v[:], txNum)
+		if txNum%135 == 0 {
+			pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, nil, rwTx)
+			require.NoError(t, err)
+
+			err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
+			require.NoError(t, err)
+			otherMaxWrite = txNum
+		} else {
+			pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, nil, rwTx)
+			require.NoError(t, err)
+
+			err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv, step)
+			require.NoError(t, err)
+			maxWrite = txNum
+		}
+		require.NoError(t, err)
+
+	}
+	println("cycle", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	err = domains.Flush(context.Background(), rwTx)
+	require.NoError(t, err)
+	println("flush", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	require.NoError(t, err)
+	err = rwTx.Commit()
+	require.NoError(t, err)
+	rwTx = nil
+	println("commit", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	err = agg.BuildFiles(txs)
+	require.NoError(t, err)
+
+	println("build files", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	rwTx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	println("beginrw", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+	require.NoError(t, err)
+	println("prune", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+	t.Logf("Prune: %s", stat)
+
+	err = rwTx.Commit()
+	require.NoError(t, err)
+	println("2 commit", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	err = agg.MergeLoop(context.Background())
+	require.NoError(t, err)
+	println("mergeloop", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	// Check the history
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	dc := agg.BeginFilesRo()
+	println("Initialisation 2", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, nil, roTx)
+	require.NoError(t, err)
+	require.Truef(t, ex, "key %x not found", commKey1)
+
+	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+	println("getlatest1", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
+
+	v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, nil, roTx)
+	require.NoError(t, err)
+	require.Truef(t, ex, "key %x not found", commKey2)
+	dc.Close()
+	println("getlates2", time.Now().Sub(ti).Milliseconds())
+	ti = time.Now()
 
 	require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
@@ -1089,6 +1265,25 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 }
 
 func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {
+	t.Helper()
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	logger := log.New()
+	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.ChaindataTablesCfg
+	}).MustOpen()
+	t.Cleanup(db.Close)
+
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
+	require.NoError(err)
+	t.Cleanup(agg.Close)
+	err = agg.OpenFolder()
+	require.NoError(err)
+	agg.DisableFsync()
+	return db, agg
+}
+
+func testDbAndAggregatorv3Bench(t *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
 	t.Helper()
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
