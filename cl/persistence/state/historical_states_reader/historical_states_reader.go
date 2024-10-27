@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/klauspost/compress/zstd"
 )
@@ -56,18 +55,12 @@ func NewHistoricalStatesReader(
 	validatorTable *state_accessors.StaticValidatorTable,
 	genesisState *state.CachingBeaconState, stateSn *freezeblocks.CaplinStateSnapshots) *HistoricalStatesReader {
 
-	cache, err := lru.New[uint64, []uint64]("shuffledSetsCache_reader", 125)
-	if err != nil {
-		panic(err)
-	}
-
 	return &HistoricalStatesReader{
-		cfg:               cfg,
-		blockReader:       blockReader,
-		genesisState:      genesisState,
-		validatorTable:    validatorTable,
-		shuffledSetsCache: cache,
-		stateSn:           stateSn,
+		cfg:            cfg,
+		blockReader:    blockReader,
+		genesisState:   genesisState,
+		validatorTable: validatorTable,
+		stateSn:        stateSn,
 	}
 }
 
