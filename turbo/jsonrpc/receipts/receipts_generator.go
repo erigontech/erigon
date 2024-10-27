@@ -2,8 +2,8 @@ package receipts
 
 import (
 	"context"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"fmt"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
