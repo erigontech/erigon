@@ -79,7 +79,7 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
-
+		fmt.Println(fPath)
 		_, name := filepath.Split(fPath)
 		if !skipSeedableCheck && !snaptype.IsCorrectFileName(name) {
 			continue

@@ -2652,6 +2652,7 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 			return nil, err
 		}
 	}
+	fmt.Println(dirs.SnapCaplin)
 	l5, err := seedableSegmentFiles(dirs.SnapCaplin, chainName, all)
 	if err != nil {
 		return nil, err
