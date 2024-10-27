@@ -543,6 +543,9 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 	if err != nil {
 		return err
 	}
+	if s.stateSn != nil {
+		targetSlot = max(targetSlot, s.stateSn.BlocksAvailable())
+	}
 	// We want to backoff by some slots until we get a correct state from DB.
 	// we start from 10 * clparams.SlotsPerDump.
 	backoffStrides := uint64(10)
