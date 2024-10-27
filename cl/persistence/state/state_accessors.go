@@ -19,6 +19,7 @@ package state_accessors
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -41,6 +42,7 @@ func GetValFnTxAndSnapshot(tx kv.Tx, snapshotRoTx *freezeblocks.CaplinStateView)
 				return segment.Get(slot)
 			}
 		}
+		fmt.Println("mis", table)
 		return tx.GetOne(table, key)
 	}
 }
