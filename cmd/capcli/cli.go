@@ -588,6 +588,10 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
+	if _, err := antiquary.FillStaticValidatorsTableIfNeeded(ctx, log.Root(), stateSn, vt); err != nil {
+		return err
+	}
+	fmt.Println(vt.WithdrawableEpoch(0, 1))
 	r.withPPROF.withProfile()
 	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn)
 	start := time.Now()

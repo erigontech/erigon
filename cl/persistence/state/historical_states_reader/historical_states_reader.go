@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/klauspost/compress/zstd"
 )
@@ -48,9 +47,6 @@ type HistoricalStatesReader struct {
 	blockReader    freezeblocks.BeaconSnapshotReader
 	stateSn        *freezeblocks.CaplinStateSnapshots
 	genesisState   *state.CachingBeaconState
-
-	// cache for shuffled sets
-	shuffledSetsCache *lru.Cache[uint64, []uint64]
 }
 
 func NewHistoricalStatesReader(
@@ -59,18 +55,12 @@ func NewHistoricalStatesReader(
 	validatorTable *state_accessors.StaticValidatorTable,
 	genesisState *state.CachingBeaconState, stateSn *freezeblocks.CaplinStateSnapshots) *HistoricalStatesReader {
 
-	cache, err := lru.New[uint64, []uint64]("shuffledSetsCache_reader", 125)
-	if err != nil {
-		panic(err)
-	}
-
 	return &HistoricalStatesReader{
-		cfg:               cfg,
-		blockReader:       blockReader,
-		genesisState:      genesisState,
-		validatorTable:    validatorTable,
-		shuffledSetsCache: cache,
-		stateSn:           stateSn,
+		cfg:            cfg,
+		blockReader:    blockReader,
+		genesisState:   genesisState,
+		validatorTable: validatorTable,
+		stateSn:        stateSn,
 	}
 }
 
@@ -788,10 +778,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 	if err != nil {
 		return nil, nil, err
 	}
-	// trigger the cache for shuffled sets in parallel
-	if err := r.tryCachingEpochsInParallell(tx, kvGetter, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch}); err != nil {
-		return nil, nil, err
-	}
+
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
 		// Read the block
