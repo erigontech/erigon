@@ -6,9 +6,9 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon-lib/chain"
 )
 
 const (
@@ -610,7 +610,7 @@ func (cc *CounterCollector) finishBatchProcessing() {
 
 func (cc *CounterCollector) isColdAddress() {
 	cc.Deduct(S, 100)
-	if cc.forkId >= chain.ForkId13Durian {
+	if cc.forkId >= uint16(chain.ForkId13Durian) {
 		cc.Deduct(B, 3+1)
 	} else {
 		cc.Deduct(B, 2+1)
@@ -850,7 +850,7 @@ func (cc *CounterCollector) preModExp(callDataLength, returnDataLength, bLen, mL
 
 func (cc *CounterCollector) modExp(bLen, mLen, eLen int, base, exponent, modulus *big.Int) {
 	var steps, binary, arith *big.Int
-	if cc.forkId >= chain.ForkId13Durian {
+	if cc.forkId >= uint16(chain.ForkId13Durian) {
 		steps, binary, arith = expectedModExpCounters(
 			int(math.Ceil(float64(bLen)/32)),
 			int(math.Ceil(float64(eLen)/32)),
