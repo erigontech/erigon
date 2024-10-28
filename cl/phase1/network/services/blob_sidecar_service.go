@@ -211,10 +211,6 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		headState, cn := b.syncedDataManager.HeadState()
-		if headState == nil {
-			continue
-		}
 
 		b.blobSidecarsScheduledForLaterExecution.Range(func(key, value any) bool {
 			job := value.(*blobSidecarJob)
@@ -232,7 +228,12 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
 				return true
 			}
-
+			headState, cn := b.syncedDataManager.HeadState()
+			defer cn()
+			if headState == nil {
+				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
+				return false
+			}
 			if err := b.verifyAndStoreBlobSidecar(headState, job.blobSidecar); err != nil {
 				log.Trace("blob sidecar verification failed", "err", err,
 					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
@@ -241,6 +242,5 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 			b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
 		})
-		cn()
 	}
 }

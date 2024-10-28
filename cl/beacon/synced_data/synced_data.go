@@ -17,6 +17,7 @@
 package synced_data
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -37,9 +38,6 @@ type SyncedDataManager struct {
 
 	headState *state.CachingBeaconState
 
-	// Beacon state accessors
-	committeeCount atomic.Uint64
-
 	mu sync.RWMutex
 }
 
@@ -54,8 +52,10 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
+	fmt.Println("Start lock")
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fmt.Println("Unlock lock")
 
 	var blkRoot common.Hash
 
@@ -80,18 +80,24 @@ func EmptyCancel() {}
 
 func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	_, synced := s.headRoot.Load().(common.Hash)
-	if !s.enabled && !synced {
+	if !s.enabled || !synced {
 		return nil, EmptyCancel
 	}
+	fmt.Println("Start rlock")
+	//debug.PrintStack()
 
-	var isCanceled atomic.Bool
+	isCanceled := false
+	var mu sync.Mutex
 
 	s.mu.RLock()
 	return s.headState, func() {
-		if isCanceled.Load() {
+		mu.Lock()
+		defer mu.Unlock()
+		if isCanceled {
 			return
 		}
-		isCanceled.Store(true)
+		fmt.Println("end rlock")
+		isCanceled = true
 		s.mu.RUnlock()
 	}
 }
