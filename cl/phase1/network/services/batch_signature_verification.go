@@ -164,7 +164,6 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 
 		// run corresponding function and publish the gossip into the network
 		v.F()
-
 		if b.sentinel != nil && v.GossipData != nil {
 			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
 				log.Warn("failed publish gossip", "err", err)
