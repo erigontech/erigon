@@ -85,7 +85,8 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 			},
 			Signature: [96]byte{1, 2, 3},
 		},
-		GossipData: nil,
+		GossipData:            nil,
+		ImmediateVerification: true,
 	}
 
 	tests := []struct {
@@ -179,7 +180,7 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
 			},
 			msg:         mockMsg,
-			specificErr: ErrIgnore,
+			specificErr: ErrInvalidBlsSignature,
 			wantErr:     true,
 		},
 		{
@@ -206,9 +207,9 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				mockStateMutator.EXPECT().SetWithdrawalCredentialForValidatorAtIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex), mockNewWc).Times(1)
 				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
 			},
-			msg:         mockMsg,
-			specificErr: ErrIgnore,
-			wantErr:     true,
+			msg: mockMsg,
+			// specificErr: ErrInvalidBlsSignature,
+			// wantErr:     true,
 		},
 	}
 
