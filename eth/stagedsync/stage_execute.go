@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -393,10 +394,12 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
+		pruneTimeout := 250 * time.Millisecond
 		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip *= 10
+			pruneDiffsLimitOnChainTip = math.MaxUint64
+			pruneTimeout = time.Hour
 		}
-		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip); err != nil {
+		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip, pruneTimeout); err != nil {
 			return err
 		}
 	}
