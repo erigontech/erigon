@@ -96,11 +96,11 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 	failures := []poolingFailure{}
 	for i, attestation := range req {
 		headState, cn := a.syncedData.HeadState()
+		defer cn()
 		if headState == nil {
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
 			return
 		}
-		defer cn()
 		var (
 			slot                  = attestation.Data.Slot
 			epoch                 = a.ethClock.GetEpochAtSlot(slot)
