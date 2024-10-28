@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -30,7 +31,8 @@ type MerkleTree struct {
 	hashBuf [64]byte // buffer to store the input for hash(hash1, hash2)
 	limit   *uint64  // Optional limit for the number of leaves (this will enable limit-oriented hashing)
 
-	mu sync.Mutex
+	dirtyLeaves []atomic.Bool
+	mu          sync.RWMutex
 }
 
 var _ HashTreeEncodable = (*MerkleTree)(nil)
@@ -53,12 +55,17 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 		m.limit = new(uint64)
 		*m.limit = *limitOptional
 	}
+	m.dirtyLeaves = make([]atomic.Bool, leavesCount)
+}
+
+func (m *MerkleTree) MarkLeafAsDirty(idx int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	m.dirtyLeaves[idx].Store(true)
 }
 
 // MarkLeafAsDirty resets the leaf at the given index, so that it will be recomputed on the next call to ComputeRoot.
-func (m *MerkleTree) MarkLeafAsDirty(idx int) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *MerkleTree) markLeafAsDirty(idx int) {
 	for i := 0; i < len(m.layers); i++ {
 		currDivisor := 1 << (i + 1) // i+1 because the first layer is not the leaf layer
 		layerSize := (m.leavesCount + (currDivisor - 1)) / currDivisor
@@ -80,6 +87,8 @@ func (m *MerkleTree) MarkLeafAsDirty(idx int) {
 }
 
 func (m *MerkleTree) AppendLeaf() {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	/*
 		Step 1: Append a new dirty leaf
 		Step 2: Extend each layer with the new leaf when needed (1.5x extension)
@@ -123,13 +132,22 @@ func (m *MerkleTree) extendLayer(layerIdx int) {
 		m.layers[layerIdx] = m.layers[layerIdx][:newLayerSize]
 		copy(m.layers[layerIdx][newLayerSize-length.Hash:], ZeroHashes[0][:])
 	}
+	m.dirtyLeaves = append(m.dirtyLeaves, atomic.Bool{})
 }
 
 // ComputeRoot computes the root of the Merkle tree.
 func (m *MerkleTree) ComputeRoot() libcommon.Hash {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var root libcommon.Hash
 	if len(m.layers) == 0 {
 		return ZeroHashes[0]
+	}
+	for idx := range m.dirtyLeaves {
+		if m.dirtyLeaves[idx].Load() {
+			m.markLeafAsDirty(idx)
+			m.dirtyLeaves[idx].Store(false)
+		}
 	}
 
 	if m.leavesCount == 0 {
