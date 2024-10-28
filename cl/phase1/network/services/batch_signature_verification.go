@@ -144,6 +144,9 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
 			log.Crit("[BatchVerifier] signature verification failed with the error: " + err.Error())
+			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
+				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
+			}
 			continue
 		}
 
@@ -160,7 +163,6 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 
 		// run corresponding function and publish the gossip into the network
 		v.F()
-
 		if b.sentinel != nil && v.GossipData != nil {
 			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
 				log.Debug("failed to publish gossip", "err", err)

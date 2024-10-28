@@ -41,9 +41,13 @@ func EpochDataFromBeaconState(s *state.CachingBeaconState) *EpochData {
 	justificationCopy := &cltypes.JustificationBits{}
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
+	totalBalance, err := state.GetTotalBalance(s, s.GetActiveValidatorsIndices(state.Epoch(s)))
+	if err != nil {
+		return nil
+	}
 	return &EpochData{
 		JustificationBits:           justificationCopy,
-		TotalActiveBalance:          s.GetTotalActiveBalance(),
+		TotalActiveBalance:          totalBalance,
 		CurrentJustifiedCheckpoint:  s.CurrentJustifiedCheckpoint(),
 		PreviousJustifiedCheckpoint: s.PreviousJustifiedCheckpoint(),
 		FinalizedCheckpoint:         s.FinalizedCheckpoint(),
