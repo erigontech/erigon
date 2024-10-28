@@ -367,17 +367,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	log.Info("[Receipt] batch start", "fromBlock", fromBlock, "toBlock", toBlock, "workers", cfg.Workers)
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
-	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
-		if tx != nil {
-			h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
-		} else {
-			cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
-				h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
-				return nil
-			})
-		}
-		return h
-	}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.BlockReader))
 
@@ -399,6 +388,19 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	if cfg.Workers > 0 {
 		WorkerCount = cfg.Workers
 	}
+
+	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
+		if tx != nil && WorkerCount == 1 {
+			h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
+		} else {
+			cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
+				h, _ = cfg.BlockReader.Header(ctx, tx, hash, number)
+				return nil
+			})
+		}
+		return h
+	}
+
 	outTxNum := &atomic.Uint64{}
 	outTxNum.Store(fromTxNum)
 	workers, applyWorker, cleanup := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
