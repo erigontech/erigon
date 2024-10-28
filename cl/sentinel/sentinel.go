@@ -391,7 +391,6 @@ func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
 		if len(sub.topic.ListPeers()) > peerSubnetTarget {
 			return true
 		}
-
 		if gossip.IsTopicBeaconAttestation(sub.sub.Topic()) {
 			ret = s.isPeerUsefulForAttNet(sub, nodeAttnets)
 			return !ret

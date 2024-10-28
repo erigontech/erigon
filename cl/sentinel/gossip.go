@@ -192,7 +192,7 @@ func (s *Sentinel) forkWatcher() {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 		return
 	}
-	iterationInterval := time.NewTicker(10000 * time.Millisecond)
+	iterationInterval := time.NewTicker(30 * time.Millisecond)
 	for {
 		select {
 		case <-s.ctx.Done():

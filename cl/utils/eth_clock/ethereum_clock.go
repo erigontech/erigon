@@ -19,12 +19,9 @@ package eth_clock
 import (
 	"encoding/binary"
 	"sort"
-	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 )
@@ -127,12 +124,7 @@ func (t *ethereumClockImpl) CurrentForkDigest() (common.Bytes4, error) {
 	currentEpoch := t.GetCurrentEpoch()
 	// Retrieve current fork version.
 	currentForkVersion := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
-	forkVersionSchedule := map[libcommon.Bytes4]clparams.VersionScheduleEntry{}
-	p := (*map[libcommon.Bytes4]clparams.VersionScheduleEntry)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&t.beaconCfg.ForkVersionSchedule))))
-	if p != nil {
-		forkVersionSchedule = *p
-	}
-	for _, fork := range forkList(forkVersionSchedule) {
+	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
 		if currentEpoch >= fork.epoch {
 			currentForkVersion = fork.version
 			continue
@@ -146,12 +138,7 @@ func (t *ethereumClockImpl) NextForkDigest() (common.Bytes4, error) {
 	currentEpoch := t.GetCurrentEpoch()
 	// Retrieve next fork version.
 	nextForkIndex := 0
-	forkVersionSchedule := map[libcommon.Bytes4]clparams.VersionScheduleEntry{}
-	p := (*map[libcommon.Bytes4]clparams.VersionScheduleEntry)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&t.beaconCfg.ForkVersionSchedule))))
-	if p != nil {
-		forkVersionSchedule = *p
-	}
-	forkList := forkList(forkVersionSchedule)
+	forkList := forkList(t.beaconCfg.ForkVersionSchedule)
 	for _, fork := range forkList {
 		if currentEpoch >= fork.epoch {
 			nextForkIndex++
@@ -179,12 +166,7 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 
 	var nextForkVersion [4]byte
 	nextForkEpoch := uint64(0)
-	forkVersionSchedule := map[libcommon.Bytes4]clparams.VersionScheduleEntry{}
-	p := (*map[libcommon.Bytes4]clparams.VersionScheduleEntry)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&t.beaconCfg.ForkVersionSchedule))))
-	if p != nil {
-		forkVersionSchedule = *p
-	}
-	for _, fork := range forkList(forkVersionSchedule) {
+	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
 		if currentEpoch < fork.epoch {
 			nextForkVersion = fork.version
 			nextForkEpoch = fork.epoch
@@ -205,13 +187,7 @@ func (t *ethereumClockImpl) LastFork() (common.Bytes4, error) {
 	currentEpoch := t.GetCurrentEpoch()
 	// Retrieve current fork version.
 	currentFork := utils.Uint32ToBytes4(uint32(t.beaconCfg.GenesisForkVersion))
-
-	forkVersionSchedule := map[libcommon.Bytes4]clparams.VersionScheduleEntry{}
-	p := (*map[libcommon.Bytes4]clparams.VersionScheduleEntry)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&t.beaconCfg.ForkVersionSchedule))))
-	if p != nil {
-		forkVersionSchedule = *p
-	}
-	for _, fork := range forkList(forkVersionSchedule) {
+	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
 		if currentEpoch >= fork.epoch {
 			currentFork = fork.version
 			continue

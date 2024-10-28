@@ -96,6 +96,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	wg := sync.WaitGroup{}
 
 	for slot := expectedSlot; slot < expectedSlot+a.beaconChainCfg.SlotsPerEpoch; slot++ {
+		var proposerIndex uint64
 		// Lets do proposer index computation
 		mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
 			a.beaconChainCfg.EpochsPerHistoricalVector
@@ -123,7 +124,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		// Do it in parallel
 		go func(i, slot uint64, indicies []uint64, seedArray [32]byte) {
 			defer wg.Done()
-			proposerIndex, err := shuffling2.ComputeProposerIndex(state.BeaconState, indices, seedArray)
+			proposerIndex, err = shuffling2.ComputeProposerIndex(state.BeaconState, indices, seedArray)
 			if err != nil {
 				panic(err)
 			}

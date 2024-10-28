@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"time"
 
 	"github.com/Giulio2002/bls"
@@ -18,7 +17,7 @@ const (
 )
 
 var (
-	batchCheckInterval          atomic.Int32
+	batchCheckInterval          = 500 * time.Millisecond
 	blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
 )
 
@@ -30,6 +29,8 @@ type BatchSignatureVerifier struct {
 	ctx                        context.Context
 }
 
+var ErrInvalidBlsSignature = errors.New("invalid bls signature")
+
 // each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
 // to make sure that we can validate it separately and in case of failure we ban corresponding
 // GossipData.Peer or simply run F and publish GossipData in case signature verification succeeds.
@@ -39,10 +40,6 @@ type AggregateVerificationData struct {
 	Pks        [][]byte
 	F          func()
 	GossipData *sentinel.GossipData
-}
-
-func init() {
-	batchCheckInterval.Store(500)
 }
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
@@ -82,7 +79,7 @@ func (b *BatchSignatureVerifier) Start() {
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
 func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData) {
-	ticker := time.NewTicker(time.Duration(batchCheckInterval.Load()) * time.Millisecond)
+	ticker := time.NewTicker(batchCheckInterval)
 	defer ticker.Stop()
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, reservedSize)
 	for {
@@ -93,7 +90,7 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
-				ticker.Reset(time.Duration(batchCheckInterval.Load()) * time.Millisecond)
+				ticker.Reset(batchCheckInterval)
 				// clear the slice
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 			}
@@ -186,7 +183,7 @@ func (b *BatchSignatureVerifier) runBatchVerification(signatures [][]byte, signR
 	monitor.ObserveBatchVerificationThroughput(time.Since(start), len(signatures))
 
 	if !valid {
-		return errors.New("batch invalid signature")
+		return ErrInvalidBlsSignature
 	}
 
 	return nil

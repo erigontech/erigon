@@ -26,9 +26,7 @@ import (
 	"os"
 	"path"
 	"strconv"
-	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"gopkg.in/yaml.v2"
 
@@ -487,7 +485,7 @@ type BeaconChainConfig struct {
 	ElectraForkVersion   ConfigForkVersion `yaml:"ELECTRA_FORK_VERSION" spec:"true" json:"ELECTRA_FORK_VERSION"`        // ElectraForkVersion is used to represent the fork version for Electra.
 	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 
-	ForkVersionSchedule *map[libcommon.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
+	ForkVersionSchedule map[libcommon.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -588,8 +586,7 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
-	m := configForkSchedule(b)
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&b.ForkVersionSchedule)), unsafe.Pointer(&m))
+	b.ForkVersionSchedule = configForkSchedule(b)
 }
 
 func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]VersionScheduleEntry {
