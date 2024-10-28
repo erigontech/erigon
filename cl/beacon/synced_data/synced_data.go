@@ -83,8 +83,6 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	if !s.enabled || !synced {
 		return nil, EmptyCancel
 	}
-	fmt.Println("Start rlock")
-	//debug.PrintStack()
 
 	isCanceled := false
 	var mu sync.Mutex
@@ -96,7 +94,6 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 		if isCanceled {
 			return
 		}
-		fmt.Println("end rlock")
 		isCanceled = true
 		s.mu.RUnlock()
 	}
