@@ -192,7 +192,7 @@ func (s *Sentinel) forkWatcher() {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 		return
 	}
-	iterationInterval := time.NewTicker(30 * time.Millisecond)
+	iterationInterval := time.NewTicker(10000 * time.Millisecond)
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -513,9 +513,11 @@ func (g *GossipManager) Start(ctx context.Context) {
 				logArgs := []interface{}{}
 				g.subscriptions.Range(func(key, value any) bool {
 					sub := value.(*GossipSubscription)
+					sub.lock.Lock()
 					if sub.topic != nil {
 						logArgs = append(logArgs, sub.topic.String(), sub.subscribed.Load())
 					}
+					sub.lock.Unlock()
 					return true
 				})
 				log.Trace("[Gossip] Subscriptions", "subscriptions", logArgs)

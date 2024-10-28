@@ -378,6 +378,8 @@ func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
 
 	s.subManager.subscriptions.Range(func(key, value any) bool {
 		sub := value.(*GossipSubscription)
+		sub.lock.Lock()
+		defer sub.lock.Unlock()
 		if sub.sub == nil {
 			return true
 		}
@@ -389,6 +391,7 @@ func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
 		if len(sub.topic.ListPeers()) > peerSubnetTarget {
 			return true
 		}
+
 		if gossip.IsTopicBeaconAttestation(sub.sub.Topic()) {
 			ret = s.isPeerUsefulForAttNet(sub, nodeAttnets)
 			return !ret

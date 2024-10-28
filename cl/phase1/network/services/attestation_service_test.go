@@ -81,7 +81,7 @@ func (t *attestationTestSuite) SetupTest() {
 	netConfig := &clparams.NetworkConfig{}
 	emitters := beaconevents.NewEventEmitter()
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
-	batchCheckInterval = 1 * time.Millisecond
+	batchCheckInterval.Store(1)
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
 	go batchSignatureVerifier.Start()
 	ctx, cn := context.WithCancel(context.Background())

@@ -20,9 +20,12 @@ import (
 	"bytes"
 	"net/http"
 	"sort"
+	"sync/atomic"
+	"unsafe"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
@@ -41,7 +44,13 @@ func (a *ApiHandler) getDepositContract(w http.ResponseWriter, r *http.Request) 
 func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	response := []cltypes.Fork{}
 	// create first response (unordered and incomplete)
-	for currentVersion, entry := range a.beaconChainCfg.ForkVersionSchedule {
+	forkVersionSchedule := map[libcommon.Bytes4]clparams.VersionScheduleEntry{}
+	p := (*map[libcommon.Bytes4]clparams.VersionScheduleEntry)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&a.beaconChainCfg.ForkVersionSchedule))))
+	if p != nil {
+		forkVersionSchedule = *p
+	}
+
+	for currentVersion, entry := range forkVersionSchedule {
 		response = append(response, cltypes.Fork{
 			CurrentVersion: currentVersion,
 			Epoch:          entry.Epoch,

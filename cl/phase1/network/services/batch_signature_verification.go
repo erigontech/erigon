@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/Giulio2002/bls"
@@ -17,7 +18,7 @@ const (
 )
 
 var (
-	batchCheckInterval          = 500 * time.Millisecond
+	batchCheckInterval          atomic.Int32
 	blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
 )
 
@@ -38,6 +39,10 @@ type AggregateVerificationData struct {
 	Pks        [][]byte
 	F          func()
 	GossipData *sentinel.GossipData
+}
+
+func init() {
+	batchCheckInterval.Store(500)
 }
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelClient) *BatchSignatureVerifier {
@@ -77,7 +82,7 @@ func (b *BatchSignatureVerifier) Start() {
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
 func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData) {
-	ticker := time.NewTicker(batchCheckInterval)
+	ticker := time.NewTicker(time.Duration(batchCheckInterval.Load()) * time.Millisecond)
 	defer ticker.Stop()
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, reservedSize)
 	for {
@@ -88,7 +93,7 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
-				ticker.Reset(batchCheckInterval)
+				ticker.Reset(time.Duration(batchCheckInterval.Load()) * time.Millisecond)
 				// clear the slice
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 			}
