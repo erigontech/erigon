@@ -199,7 +199,7 @@ func (p *BatchesProcessor) processFullBlock(blockEntry *types.FullL2Block) (rest
 	// channels can be read in random orders which then creates problems in detecting fork changes during
 	// execution
 	if blockEntry.BatchNumber > p.highestSeenBatchNo && p.lastForkId < blockEntry.ForkId {
-		if blockEntry.ForkId > HIGHEST_KNOWN_FORK {
+		if blockEntry.ForkId >= uint64(chain.ImpossibleForkId) {
 			message := fmt.Sprintf("unsupported fork id %v received from the data stream", blockEntry.ForkId)
 			panic(message)
 		}

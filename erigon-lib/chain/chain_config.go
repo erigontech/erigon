@@ -29,6 +29,7 @@ import (
 // this needs to always be in descending order
 // add new forkIds at the beginning of the array
 var ForkIdsOrdered = []ForkId{
+	ForkId13Durian,
 	ForkID12Banana,
 	ForkID11,
 	ForkID10,
@@ -180,6 +181,8 @@ func (c *Config) SetForkIdBlock(forkIdNumber ForkId, blockNum uint64) error {
 		c.ForkID11 = new(big.Int).SetUint64(blockNum)
 	case ForkID12Banana:
 		c.ForkID12BananaBlock = new(big.Int).SetUint64(blockNum)
+	case ForkId13Durian:
+		c.ForkId13Durian = new(big.Int).SetUint64(blockNum)
 	default:
 		return fmt.Errorf("unknown fork id number %d", forkIdNumber)
 	}
@@ -665,6 +668,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsForkId10:           c.IsForkID10(num),
 		IsForkId11:           c.IsForkID11(num),
 		IsForkID12Banana:     c.IsForkID12Banana(num),
+		IsForkID13Durian:     c.IsForkID13Durian(num),
 	}
 }
 

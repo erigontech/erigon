@@ -456,7 +456,7 @@ func TestLastPolicyTransactions(t *testing.T) {
 	policyTransactionTwo := PolicyTransaction{addr: common.HexToAddress("0xabcdef1234567890"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(Add.ToByte())}
 
 	// LastPolicyTransactions seems to append in reverse order than this test function. So the order of elements is also reversed
-	// Single element in PolicyTransaction slice
+	// No element in PolicyTransaction slice
 	var policyTransactionSliceNone []PolicyTransaction
 
 	// Single element in PolicyTransaction slice
