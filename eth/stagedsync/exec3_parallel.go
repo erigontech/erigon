@@ -64,6 +64,7 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type executor interface {
 	execute(ctx context.Context, tasks []*state.TxTask) (bool, error)
+	status(ctx context.Context, commitThreshold uint64) error
 	wait() error
 }
 

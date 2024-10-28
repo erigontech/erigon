@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
@@ -363,10 +362,10 @@ func ExecV3(ctx context.Context,
 		processed.Log("Done", rs, in, nil, txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 	}()
 
-	var pe *parallelExecutor
+	var executor executor
 
 	if parallel {
-		pe = &parallelExecutor{
+		pe := &parallelExecutor{
 			execStage:                execStage,
 			chainDb:                  chainDb,
 			applyWorker:              applyWorker,
@@ -388,6 +387,29 @@ func ExecV3(ctx context.Context,
 
 		executorCancel := pe.run(ctx, maxTxNum, logger)
 		defer executorCancel()
+
+		defer func() {
+			processed.Log("Done", rs, in, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+		}()
+
+		executor = pe
+	} else {
+		se := &serialExecutor{
+			cfg: cfg,
+			rs:  rs, doms: doms, u: u, isMining: isMining, inMemExec: inMemExec,
+			isInitialCycle: execStage.CurrentSyncCycle.IsInitialCycle,
+			kvTx:           applyTx,
+			worker:         applyWorker,
+			outputTxNum:    &outputTxNum,
+			logPrefix:      execStage.LogPrefix(),
+			logger:         logger,
+		}
+
+		defer func() {
+			processed.Log("Done", rs, in, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+		}()
+
+		executor = se
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -489,7 +511,7 @@ Loop:
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
 		// print type of engine
 		if parallel {
-			if err := pe.status(ctx, commitThreshold); err != nil {
+			if err := executor.status(ctx, commitThreshold); err != nil {
 				return err
 			}
 		} else if shouldReportToTxPool {
@@ -506,7 +528,7 @@ Loop:
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
-		var usedGas, blobGasUsed uint64
+		var usedGas uint64
 		var txTasks []*state.TxTask
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
@@ -535,7 +557,7 @@ Loop:
 				Config: chainConfig,
 			}
 			if txTask.HistoryExecution && usedGas == 0 {
-				usedGas, blobGasUsed, _, err = rawtemporaldb.ReceiptAsOf(applyTx.(kv.TemporalTx), txTask.TxNum)
+				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(applyTx.(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
 					return err
 				}
@@ -572,101 +594,35 @@ Loop:
 				}
 			}
 
-			if parallel {
-				txTasks = append(txTasks, txTask)
-				stageProgress = blockNum
-				inputTxNum++
-				continue
-			}
-
-			count++
-			if txTask.Error != nil {
-				break Loop
-			}
-			applyWorker.RunTxTaskNoLock(txTask, isMining)
-			if err := func() error {
-				if errors.Is(txTask.Error, context.Canceled) {
-					return err
-				}
-				if txTask.Error != nil {
-					return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
-				}
-
-				txCount++
-				usedGas += txTask.UsedGas
-				logGas += txTask.UsedGas
-				mxExecGas.Add(float64(txTask.UsedGas))
-				mxExecTransactions.Add(1)
-
-				if txTask.Tx != nil {
-					blobGasUsed += txTask.Tx.GetBlobGas()
-				}
-
-				txTask.CreateReceipt(applyTx)
-
-				if txTask.Final {
-					if !isMining && !inMemExec && !skipPostEvaluation && !execStage.CurrentSyncCycle.IsInitialCycle {
-						cfg.notifications.RecentLogs.Add(blockReceipts)
-					}
-					checkReceipts := !cfg.vmConfig.StatelessExec && chainConfig.IsByzantium(txTask.BlockNum) && !cfg.vmConfig.NoReceipts && !isMining
-					if txTask.BlockNum > 0 && !skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-						if err := core.BlockPostValidation(usedGas, blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, isMining); err != nil {
-							return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
-						}
-					}
-					usedGas, blobGasUsed = 0, 0
-				}
-				return nil
-			}(); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return err
-				}
-				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
-				if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
-					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
-				}
-				if cfg.badBlockHalt {
-					return err
-				}
-				if errors.Is(err, consensus.ErrInvalidBlock) {
-					if u != nil {
-						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
-							return err
-						}
-					}
-				} else {
-					if u != nil {
-						if err := u.UnwindTo(blockNum-1, ExecUnwind, applyTx); err != nil {
-							return err
-						}
-					}
-				}
-				break Loop
-			}
-
-			if !txTask.Final {
-				var receipt *types.Receipt
-				if txTask.TxIndex >= 0 && !txTask.Final {
-					receipt = txTask.BlockReceipts[txTask.TxIndex]
-				}
-				if err := rawtemporaldb.AppendReceipt(doms, receipt, blobGasUsed); err != nil {
-					return err
-				}
-			}
-
-			// MA applystate
-			if err := rs.ApplyState4(ctx, txTask); err != nil {
-				return err
-			}
-
+			txTasks = append(txTasks, txTask)
 			stageProgress = blockNum
-			outputTxNum.Add(1)
 			inputTxNum++
 		}
 
 		if parallel {
-			if _, err := pe.execute(ctx, txTasks); err != nil {
+			if _, err := executor.execute(ctx, txTasks); err != nil {
 				return err
+			}
+			agg.BuildFilesInBackground(outputTxNum.Load())
+		} else {
+			se := executor.(*serialExecutor)
+
+			se.skipPostEvaluation = skipPostEvaluation
+
+			continueLoop, err := se.execute(ctx, txTasks)
+
+			if err != nil {
+				return err
+			}
+
+			count += uint64(len(txTasks))
+			logGas += se.usedGas
+
+			se.usedGas = 0
+			se.blobGasUsed = 0
+
+			if !continueLoop {
+				break Loop
 			}
 		}
 
@@ -802,9 +758,6 @@ Loop:
 			}
 		}
 
-		if parallel { // sequential exec - does aggregate right after commit
-			agg.BuildFilesInBackground(outputTxNum.Load())
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -814,10 +767,7 @@ Loop:
 
 	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", mxExecRepeats.GetValueUint64())
 
-	if parallel {
-		logger.Warn("[dbg] all txs sent")
-		pe.wait()
-	}
+	executor.wait()
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
