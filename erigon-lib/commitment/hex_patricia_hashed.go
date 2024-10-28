@@ -1520,21 +1520,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
 			}
 			fmt.Printf("storage FOUND = %v\n", storage.Storage)
-			// hashedKeyForStorage := crypto.Keccak256Hash(plainKey)
-			// address := plainKey[:20]
-			// addrHash := crypto.Keccak256(address)
-			// // Concatenate address and hashedKeyForStorage into a new slice
-			// fullHashedKeyForStorage := make([]byte, len(addrHash)+len(hashedKeyForStorage.Bytes()))
-			// copy(fullHashedKeyForStorage, addrHash)
-			// copy(fullHashedKeyForStorage[32:], hashedKeyForStorage.Bytes())
-
-			// fullNibblizedKey := nibblize(fullHashedKeyForStorage)
-
-			// fmt.Printf("fullNibblizedKey = %x\n", fullNibblizedKey)
-			// fmt.Printf("hashedKey = %x\n", hashedKey)
-			// if !bytes.Equal(fullNibblizedKey, hashedKey) {
-			// 	panic("WRONG hashedkey for storage")
-			// }
 		}
 
 		fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])

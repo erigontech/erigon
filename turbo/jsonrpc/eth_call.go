@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/params"
@@ -550,9 +549,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	if err != nil {
 		return nil, err
 	}
-
-	_ = store
-
 	// // The code below is for using ExecV3 instead of ExecuteBlockEphemerally
 	// txNumsReader := rawdbv3.TxNums
 	// cr := rawdb.NewCanonicalReader(txNumsReader)
@@ -601,10 +597,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// }
 
 	// execute block ephemerally
-	chainReader := consensuschain.NewReader(chainConfig, txBatch2, api._blockReader, logger)
-	if err != nil {
-		return nil, err
-	}
 
 	// var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
 	// stateReader := rpchelper.NewLatestStateReader(txBatch)
@@ -660,7 +652,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// }
 	// fmt.Printf("accountUpdate for plainKey=%x in commitment = %v\n", accountOfInterestBytes, accountUpdate)
 
-	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, chainReader, nil, logger)
+	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +718,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 
 	store.Tds.SetTrie(witnessTrie)
-	newStateRoot, err := stagedsync.ExecuteBlockStatelessly(block, prevHeader, chainReader, store.Tds, &cfg, &witnessBuffer, store.GetHashFn, logger)
+	newStateRoot, err := stagedsync.ExecuteBlockStatelessly(block, prevHeader, store.ChainReader, store.Tds, &cfg, &witnessBuffer, store.GetHashFn, logger)
 	if err != nil {
 		return nil, err
 	}

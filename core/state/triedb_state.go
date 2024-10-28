@@ -10,7 +10,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -146,7 +145,7 @@ type TrieDbState struct {
 	incarnationMap    map[libcommon.Address]uint64 // Temporary map of incarnation for the cases when contracts are deleted and recreated within 1 block
 }
 
-func NewTrieDbState(root libcommon.Hash, db kv.Tx, blockNr uint64, stateReader StateReader) *TrieDbState {
+func NewTrieDbState(root libcommon.Hash, blockNr uint64, stateReader StateReader) *TrieDbState {
 	t := trie.New(root)
 	tds := &TrieDbState{
 		t:                 t,

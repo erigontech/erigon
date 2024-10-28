@@ -66,7 +66,7 @@ func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, cf
 		return nil, err
 	}
 
-	tds := state.NewTrieDbState(prevRoot, tx, blockNr-1, reader)
+	tds := state.NewTrieDbState(prevRoot, blockNr-1, reader)
 	tds.SetResolveReads(true)
 
 	tds.StartNewBuffer()
