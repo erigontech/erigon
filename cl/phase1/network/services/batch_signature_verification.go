@@ -144,6 +144,9 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
+			if v.GossipData == nil {
+				continue
+			}
 			log.Warn("signature verification failed with the error: " + err.Error())
 			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
 				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
