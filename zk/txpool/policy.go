@@ -371,7 +371,7 @@ func LastPolicyTransactions(ctx context.Context, aclDB kv.RwDB, count int) ([]Po
 		}
 		pts = append(pts, pt)
 
-		for i := 0; i < count; i++ {
+		for i := 1; i < count; i++ {
 			_, value, err = c.Prev()
 			if err != nil {
 				return err

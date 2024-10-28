@@ -444,34 +444,41 @@ func TestLastPolicyTransactions(t *testing.T) {
 	addrOne := common.HexToAddress("0x1234567890abcdef")
 	policyOne := SendTx
 
-	// addrTwo := common.HexToAddress("0xabcdef1234567890")
-	// policyTwo := SendTx
+	addrTwo := common.HexToAddress("0xabcdef1234567890")
+	policyTwo := SendTx
 
 	// Add the policy to the ACL
 	require.NoError(t, AddPolicy(ctx, db, "blocklist", addrOne, policyOne))
-	// require.NoError(t, AddPolicy(ctx, db, "blocklist", addrTwo, policyTwo))
+	require.NoError(t, AddPolicy(ctx, db, "blocklist", addrTwo, policyTwo))
 
 	// Create expected policyTransaction output and append to []PolicyTransaction
 	policyTransactionOne := PolicyTransaction{addr: common.HexToAddress("0x1234567890abcdef"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(Add.ToByte())}
-	// policyTransactionTwo := PolicyTransaction{addr: common.HexToAddress("0xabcdef1234567890"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(Add.ToByte())}
+	policyTransactionTwo := PolicyTransaction{addr: common.HexToAddress("0xabcdef1234567890"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(Add.ToByte())}
 
-	var policyTransactionSlice []PolicyTransaction
-	policyTransactionSlice = append(policyTransactionSlice, policyTransactionOne)
-	// policyTransactionSlice = append(policyTransactionSlice, policyTransactionTwo)
+	// LastPolicyTransactions seems to append in reverse order than this test function. So the order of elements is also reversed
+	// Single element in PolicyTransaction slice
+	var policyTransactionSliceSingle []PolicyTransaction
+	policyTransactionSliceSingle = append(policyTransactionSliceSingle, policyTransactionTwo)
+
+	// Two elements in PolicyTransaction slice
+	var policyTransactionSliceDouble []PolicyTransaction
+	policyTransactionSliceDouble = append(policyTransactionSliceDouble, policyTransactionTwo)
+	policyTransactionSliceDouble = append(policyTransactionSliceDouble, policyTransactionOne)
 
 	// Table driven test
 	var tests = []struct {
 		count int
 		want  []PolicyTransaction
 	}{
-		{1, policyTransactionSlice},
+		{1, policyTransactionSliceSingle},
+		{2, policyTransactionSliceDouble},
 	}
 	for _, tt := range tests {
 		t.Run("LastPolicyTransactions", func(t *testing.T) {
-			ans, _ := LastPolicyTransactions(ctx, db, tt.count)
-			// if err != nil {
-			// 	t.Errorf("LastPolicyTransactions did not execute successfully: %v", err)
-			// }
+			ans, err := LastPolicyTransactions(ctx, db, tt.count)
+			if err != nil {
+				t.Errorf("LastPolicyTransactions did not execute successfully: %v", err)
+			}
 			if !policyTransactionSliceEqual(ans, tt.want) {
 				t.Errorf("got %v, want %v", ans, tt.want)
 			}
