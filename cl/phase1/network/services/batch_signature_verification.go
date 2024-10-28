@@ -29,6 +29,8 @@ type BatchSignatureVerifier struct {
 	ctx                        context.Context
 }
 
+var ErrInvalidBlsSignature = errors.New("invalid bls signature")
+
 // each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
 // to make sure that we can validate it separately and in case of failure we ban corresponding
 // GossipData.Peer or simply run F and publish GossipData in case signature verification succeeds.
@@ -180,7 +182,7 @@ func (b *BatchSignatureVerifier) runBatchVerification(signatures [][]byte, signR
 	monitor.ObserveBatchVerificationThroughput(time.Since(start), len(signatures))
 
 	if !valid {
-		return errors.New("batch invalid signature")
+		return ErrInvalidBlsSignature
 	}
 
 	return nil
