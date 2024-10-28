@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/rlp"
+	ecrypto "github.com/erigontech/erigon/crypto"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -840,6 +841,50 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("\n")
 }
 
+func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []byte, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash) (*trie.AccountNode, error) {
+	_, storageIsSet, storageRootHash, err := hph.computeCellHash(c, hph.depths[row], nil)
+	if err != nil {
+		return nil, err
+	}
+	accountUpdate, err := hph.Ctx.Account(c.accountAddr[:c.accountAddrLen])
+	if err != nil {
+		return nil, err
+	}
+	var account accounts.Account
+	account.Nonce = accountUpdate.Nonce
+	account.Balance = accountUpdate.Balance
+	account.Initialised = true
+	account.Root = accountUpdate.Storage
+	account.CodeHash = accountUpdate.CodeHash
+
+	addrHash, err := compactKey(hashedKey[:64])
+	if err != nil {
+		return nil, err
+	}
+
+	// get code
+	var code []byte
+	codeWithHash, hasCode := codeReads[[32]byte(addrHash)]
+	if !hasCode {
+		code = nil
+	} else {
+		code = codeWithHash.Code
+		// sanity check
+		if account.CodeHash != codeWithHash.CodeHash {
+			return nil, fmt.Errorf("account.CodeHash(%x)!=codeReads[%x].CodeHash(%x)", account.CodeHash, addrHash, codeWithHash.CodeHash)
+		}
+	}
+
+	var accountNode *trie.AccountNode
+	if !storageIsSet {
+		account.Root = trie.EmptyRoot
+		accountNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: code, CodeSize: -1}
+	} else {
+		accountNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: code, CodeSize: -1}
+	}
+	return accountNode, nil
+}
+
 func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
@@ -858,13 +903,29 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 			extensionKey[len(extensionKey)-1] = 16        // append terminator byte
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
 			keyPos += cellToExpand.hashedExtLen           // jump ahead
-			if keyPos+1 == len(hashedKey) && cellToExpand.storageAddrLen > 0 {
-				storageUpdate, err := hph.Ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
-				if err != nil {
-					return nil, err
+			if keyPos+1 == len(hashedKey) {
+				if cellToExpand.storageAddrLen > 0 {
+					storageUpdate, err := hph.Ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
+					if err != nil {
+						return nil, err
+					}
+					storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
+					nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
+				} else if cellToExpand.accountAddrLen > 0 {
+					accNode, err := hph.createAccountNode(cellToExpand, row, hashedKey, codeReads)
+					if err != nil {
+						return nil, err
+					}
+					nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
+					extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
+					subTrieRoot := extNodeSubTrie.Root()
+					cellHash, _, _, _ := hph.computeCellHash(cellToExpand, hph.depths[row], nil)
+					if !bytes.Equal(subTrieRoot, cellHash[1:]) {
+						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
+					}
+					terminalHashedKey := ecrypto.Keccak256(cellToExpand.accountAddr[:])
+					fmt.Printf("terminalHashedKey = %x\n", terminalHashedKey)
 				}
-				storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
-				nextNode = &trie.ShortNode{Key: extensionKey, Val: storageValueNode}
 			}
 			// // for debugging only
 			// cellHash, err := hph.computeCellHash(cellToExpand, hph.depths[row], nil)
@@ -881,45 +942,11 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 			nextNode = &storageValueNode
 			break
 		} else if cellToExpand.accountAddrLen > 0 { // account cell
-			_, storageIsSet, storageRootHash, err := hph.computeCellHash(cellToExpand, hph.depths[row], nil)
+			accNode, err := hph.createAccountNode(cellToExpand, row, hashedKey, codeReads)
 			if err != nil {
 				return nil, err
 			}
-			accountUpdate, err := hph.Ctx.Account(cellToExpand.accountAddr[:cellToExpand.accountAddrLen])
-			if err != nil {
-				return nil, err
-			}
-			var account accounts.Account
-			account.Nonce = accountUpdate.Nonce
-			account.Balance = accountUpdate.Balance
-			account.Initialised = true
-			account.Root = accountUpdate.Storage
-			account.CodeHash = accountUpdate.CodeHash
-
-			addrHash, err := compactKey(hashedKey[:64])
-			if err != nil {
-				return nil, err
-			}
-
-			// get code
-			var code []byte
-			codeWithHash, hasCode := codeReads[[32]byte(addrHash)]
-			if !hasCode {
-				code = nil
-			} else {
-				code = codeWithHash.Code
-				// sanity check
-				if account.CodeHash != codeWithHash.CodeHash {
-					return nil, fmt.Errorf("account.CodeHash(%x)!=codeReads[%x].CodeHash(%x)", account.CodeHash, addrHash, codeWithHash.CodeHash)
-				}
-			}
-
-			if !storageIsSet {
-				account.Root = trie.EmptyRoot
-				nextNode = &trie.AccountNode{Account: account, Storage: nil, RootCorrect: true, Code: code, CodeSize: -1}
-			} else {
-				nextNode = &trie.AccountNode{Account: account, Storage: trie.NewHashNode(storageRootHash), RootCorrect: true, Code: code, CodeSize: -1}
-			}
+			nextNode = accNode
 			keyPos++ // only move one nibble
 		} else if cellToExpand.hashLen > 0 { // hash cell means we will expand using a full node
 			nextNode = &trie.FullNode{}
@@ -945,7 +972,12 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 				}
 				fullNode.Children[col] = trie.NewHashNode(cellHash[1:]) // because cellHash has 33 bytes and we want 32
 			}
-			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path                                  // move to the next nibble of the key
+			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
+			if row == 1 {
+				fullNodeSubTrie := trie.NewInMemoryTrie(fullNode)
+				subTrieRoot := fullNodeSubTrie.Root()
+				fmt.Printf("subTrieRoot = %x\n", subTrieRoot)
+			}
 		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
 			if len(hashedKey) <= 64 { // no storage, stop here
 				nextNode = nil
@@ -1474,30 +1506,13 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		var tr *trie.Trie
 		var computedRootHash []byte
 
-		fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
-
-		// Keep folding until the currentKey is the prefix of the key we modify
-		for hph.needFolding(hashedKey) {
-			if err := hph.fold(); err != nil {
-				return fmt.Errorf("fold: %w", err)
-			}
-		}
-		// Now unfold until we step on an empty cell
-		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-			if err := hph.unfold(hashedKey, unfolding); err != nil {
-				return fmt.Errorf("unfold: %w", err)
-			}
-		}
-
-		fmt.Printf("\n%d/%d) PRINT plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
-		hph.PrintGrid()
-
 		if len(plainKey) == 20 { // account
 			account, err := hph.Ctx.Account(plainKey)
 			if err != nil {
 				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
 			} else {
-				fmt.Printf("account FOUND = %v\n", account)
+				addrHash := ecrypto.Keccak256(plainKey)
+				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, account)
 			}
 		} else {
 			storage, err := hph.Ctx.Storage(plainKey)
@@ -1521,6 +1536,24 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			// 	panic("WRONG hashedkey for storage")
 			// }
 		}
+
+		fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+
+		// Keep folding until the currentKey is the prefix of the key we modify
+		for hph.needFolding(hashedKey) {
+			if err := hph.fold(); err != nil {
+				return fmt.Errorf("fold: %w", err)
+			}
+		}
+		// Now unfold until we step on an empty cell
+		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+			if err := hph.unfold(hashedKey, unfolding); err != nil {
+				return fmt.Errorf("unfold: %w", err)
+			}
+		}
+
+		fmt.Printf("\n%d/%d) PRINT plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		hph.PrintGrid()
 
 		tr, err = hph.ToTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {

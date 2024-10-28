@@ -44,9 +44,8 @@ type WitnessStore struct {
 	GetHashFn       func(n uint64) libcommon.Hash
 }
 
-func StageWitnessCfg(db kv.RwDB, enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
+func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
 	return WitnessCfg{
-		db:                      db,
 		enableWitnessGeneration: enableWitnessGeneration,
 		maxWitnessLimit:         maxWitnessLimit,
 		chainConfig:             chainConfig,
@@ -120,7 +119,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	dirs := cfg.dirs
 	blockReader := cfg.blockReader
 	syncCfg := ethconfig.Defaults.Sync
-	execCfg := StageExecuteBlocksCfg(cfg.db, pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig, nil,
+	execCfg := StageExecuteBlocksCfg(batch.MemDB(), pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, nil)
 

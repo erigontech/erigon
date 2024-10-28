@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -527,12 +526,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, fmt.Errorf("engine is not consensus.Engine")
 	}
 
-	// Prepare witness config
-	chainConfig, err := api.chainConfig(ctx, roTx)
-	if err != nil {
-		return nil, fmt.Errorf("error loading chain config: %v", err)
-	}
-
 	// // DEBUGGING
 	roTx2, err := db.BeginRo(ctx)
 	if err != nil {
@@ -540,17 +533,14 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
 	defer txBatch2.Rollback()
-	// latestHistoryReader, err := rpchelper.CreateHistoryStateReader(txBatch2, txNumsReader, latestBlock, 0, chainConfig.ChainName)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// systemAccount, err := latestHistoryReader.ReadAccountData(state.SystemAddress)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// fmt.Printf("systemAccount = %v\n", systemAccount)
 
-	cfg := stagedsync.StageWitnessCfg(txBatch2.MemDB(), true, 0, chainConfig, engine, api._blockReader, api.dirs)
+	// Prepare witness config
+	chainConfig, err := api.chainConfig(ctx, roTx2)
+	if err != nil {
+		return nil, fmt.Errorf("error loading chain config: %v", err)
+	}
+
+	cfg := stagedsync.StageWitnessCfg(true, 0, chainConfig, engine, api._blockReader, api.dirs)
 	err = stagedsync.RewindStagesForWitness(txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
 		return nil, err
@@ -612,13 +602,14 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	// execute block ephemerally
 	chainReader := consensuschain.NewReader(chainConfig, txBatch2, api._blockReader, logger)
+	if err != nil {
+		return nil, err
+	}
+
 	// var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
 	// stateReader := rpchelper.NewLatestStateReader(txBatch)
 	// stateReader, err := rpchelper.CreateHistoryStateReader(roTx, txNumsReader, blockNr, 0, "")  <-----
 	// stateReader := state.NewHistoryReaderV3()
-	if err != nil {
-		return nil, err
-	}
 
 	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
 	if err != nil {
@@ -631,38 +622,54 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
 	}
 
-	// example storage key where sharedDomains doesn't find this key, whereas StateReader finds it
-	plainStorageKeyStr := "000f3df6d732807ef1319fb7b8bb8522d0beac0200000000000000000000000000000000000000000000000000000000000009f7"
-	addressStr := "000f3df6d732807ef1319fb7b8bb8522d0beac02"
-	address, err := hex.DecodeString(addressStr)
-	storageKey := [32]byte{}
-	storageKey[30] = 0x9
-	storageKey[31] = 0xf7 // storageKey = 0x0000....09f7
-	keyHash := libcommon.Hash(storageKey)
+	// // example storage key where sharedDomains doesn't find this key, whereas StateReader finds it
+	// plainStorageKeyStr := "000f3df6d732807ef1319fb7b8bb8522d0beac0200000000000000000000000000000000000000000000000000000000000009f7"
+	// addressStr := "000f3df6d732807ef1319fb7b8bb8522d0beac02"
+	// address, err := hex.DecodeString(addressStr)
+	// storageKey := [32]byte{}
+	// storageKey[30] = 0x9
+	// storageKey[31] = 0xf7 // storageKey = 0x0000....09f7
+	// keyHash := libcommon.Hash(storageKey)
 
-	if err != nil {
-		panic(err)
-	}
-	plainStorageKey, err := hex.DecodeString(plainStorageKeyStr)
-	if err != nil {
-		panic(err)
-	}
-	storageInCommitment, err := hph.Ctx.Storage(plainStorageKey)
-	if err != nil {
-		panic(err)
-	}
-	_ = storageInCommitment
-	_ = address
-	storageVal, err := store.Tds.StateReader.ReadAccountStorage(libcommon.Address(address), 1, &keyHash)
-	if err != nil {
-		panic(err)
-	}
-	_ = storageVal
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// plainStorageKey, err := hex.DecodeString(plainStorageKeyStr)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// storageInCommitment, err := hph.Ctx.Storage(plainStorageKey)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// _ = storageInCommitment
+	// _ = address
+	// storageVal, err := store.Tds.StateReader.ReadAccountStorage(libcommon.Address(address), 1, &keyHash)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// _ = storageVal
+
+	// // Debugging
+	// accountOfInterest := "e0a65106f4bfd859a2ccc7f254ed0c1cc127c760"
+	// accountOfInterestBytes := libcommon.FromHex(accountOfInterest)
+	// // accountOfInterestAddress := libcommon.Address(accountOfInterestBytes)
+	// accountUpdate, err := hph.Ctx.Account(accountOfInterestBytes)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Printf("accountUpdate for plainKey=%x in commitment = %v\n", accountOfInterestBytes, accountUpdate)
 
 	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, chainReader, nil, logger)
 	if err != nil {
 		return nil, err
 	}
+
+	// accountUpdate2, err := hph.Ctx.Account(accountOfInterestBytes)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Printf("accountUpdate2 for plainKey=%x in commitment = %v\n", accountOfInterestBytes, accountUpdate2)
 
 	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
 	codeReads := store.Tds.BuildCodeTouches()
@@ -671,7 +678,13 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	for _, key := range touchedPlainKeys {
 		updates.TouchPlainKey(key, nil, updates.TouchAccount)
 	}
-	fmt.Printf("BLOCK ROOT = %x\n", prevHeader.Root[:])
+
+	// accountUpdate3, err := hph.Ctx.Account(accountOfInterestBytes)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Printf("accountUpdate2 for plainKey=%x in commitment = %v\n", accountOfInterestBytes, accountUpdate3)
+	// fmt.Printf("BLOCK ROOT = %x\n", prevHeader.Root[:])
 	hph.SetTrace(true) // enable tracing
 	witnessTrie, rootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
 	if err != nil {
@@ -720,7 +733,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	if !bytes.Equal(newStateRoot.Bytes(), block.Root().Bytes()) {
 		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
 	}
-	return witnessBuffer.Bytes(), nil
+	witnessBufBytes := witnessBuffer.Bytes()
+	witnessBufBytesCopy := make([]byte, len(witnessBufBytes))
+	copy(witnessBufBytesCopy, witnessBufBytes)
+	return witnessBufBytesCopy, nil
 }
 
 func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
