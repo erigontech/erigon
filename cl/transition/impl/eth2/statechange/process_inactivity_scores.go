@@ -50,6 +50,7 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		if !state.InactivityLeaking(s) {
 			score -= min(s.BeaconConfig().InactivityScoreRecoveryRate, score)
 		}
+
 		if err := s.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
 			return err
 		}

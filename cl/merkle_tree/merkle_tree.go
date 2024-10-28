@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"sync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -28,6 +29,8 @@ type MerkleTree struct {
 
 	hashBuf [64]byte // buffer to store the input for hash(hash1, hash2)
 	limit   *uint64  // Optional limit for the number of leaves (this will enable limit-oriented hashing)
+
+	mu sync.Mutex
 }
 
 var _ HashTreeEncodable = (*MerkleTree)(nil)
@@ -54,6 +57,8 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 
 // MarkLeafAsDirty resets the leaf at the given index, so that it will be recomputed on the next call to ComputeRoot.
 func (m *MerkleTree) MarkLeafAsDirty(idx int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for i := 0; i < len(m.layers); i++ {
 		currDivisor := 1 << (i + 1) // i+1 because the first layer is not the leaf layer
 		layerSize := (m.leavesCount + (currDivisor - 1)) / currDivisor

@@ -18,7 +18,6 @@ package raw
 
 import (
 	"fmt"
-	"runtime/debug"
 	"sync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -34,7 +33,6 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 		return [32]byte{}, err
 	}
 	fmt.Println("Hashing BeaconState")
-	debug.PrintStack()
 	// for i := 0; i < len(b.leaves); i += 32 {
 	// 	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
 	// }
