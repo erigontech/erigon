@@ -76,12 +76,12 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	return err
 }
 
-func emptyCancel() {}
+func EmptyCancel() {}
 
-func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, cancelFn) {
+func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	_, synced := s.headRoot.Load().(common.Hash)
 	if !s.enabled && !synced {
-		return nil, emptyCancel
+		return nil, EmptyCancel
 	}
 
 	var isCanceled atomic.Bool
@@ -96,7 +96,7 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, cancelFn) {
 	}
 }
 
-func (s *SyncedDataManager) HeadStateReader() (abstract.BeaconStateReader, cancelFn) {
+func (s *SyncedDataManager) HeadStateReader() (abstract.BeaconStateReader, CancelFn) {
 	return s.HeadState()
 }
 

@@ -22,13 +22,13 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-type cancelFn func()
+type CancelFn func()
 
 //go:generate mockgen -typed=true -destination=./mock_services/synced_data_mock.go -package=mock_services . SyncedData
 type SyncedData interface {
 	OnHeadState(newState *state.CachingBeaconState) error
-	HeadState() (*state.CachingBeaconState, cancelFn)
-	HeadStateReader() (abstract.BeaconStateReader, cancelFn)
+	HeadState() (*state.CachingBeaconState, CancelFn)
+	HeadStateReader() (abstract.BeaconStateReader, CancelFn)
 	Syncing() bool
 	HeadSlot() uint64
 	HeadRoot() common.Hash
