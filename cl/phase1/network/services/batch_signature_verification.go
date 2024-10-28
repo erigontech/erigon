@@ -30,6 +30,8 @@ type BatchSignatureVerifier struct {
 	ctx                        context.Context
 }
 
+var ErrInvalidBlsSignature = errors.New("invalid bls signature")
+
 // each AggregateVerification request has sentinel.SentinelClient and *sentinel.GossipData
 // to make sure that we can validate it separately and in case of failure we ban corresponding
 // GossipData.Peer or simply run F and publish GossipData in case signature verification succeeds.
@@ -151,6 +153,9 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
+			if v.GossipData == nil {
+				continue
+			}
 			log.Warn("signature verification failed with the error: " + err.Error())
 			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
 				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
@@ -168,7 +173,6 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 
 		// run corresponding function and publish the gossip into the network
 		v.F()
-
 		if b.sentinel != nil && v.GossipData != nil {
 			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
 				log.Warn("failed publish gossip", "err", err)
@@ -186,7 +190,7 @@ func (b *BatchSignatureVerifier) runBatchVerification(signatures [][]byte, signR
 	monitor.ObserveBatchVerificationThroughput(time.Since(start), len(signatures))
 
 	if !valid {
-		return errors.New("batch invalid signature")
+		return ErrInvalidBlsSignature
 	}
 
 	return nil

@@ -65,7 +65,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/aura"
 	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -571,8 +573,23 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}
 			// Skip the compatibility check, until we have a schema in erigon-lib
 			engine = bor.NewRo(cc, borKv, blockReader, logger)
+		} else if cc != nil && cc.Aura != nil {
+			consensusDB, err := kv2.NewMDBX(logger).Path(filepath.Join(cfg.DataDir, "aura")).Label(kv.ConsensusDB).Accede().Open(ctx)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+			engine, err = aura.NewAuRa(cc.Aura, consensusDB)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+			if cc.TerminalTotalDifficulty != nil {
+				engine = merge.New(engine.(consensus.Engine)) // the Merge
+			}
 		} else {
 			engine = ethash.NewFaker()
+			if cc.TerminalTotalDifficulty != nil {
+				engine = merge.New(engine.(consensus.Engine)) // the Merge
+			}
 		}
 	} else {
 		if polygonSync {

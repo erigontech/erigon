@@ -225,7 +225,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 			},
 			msg:     mockMsg,
 			err:     ErrIgnore,
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 
@@ -234,7 +234,6 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		t.SetupTest()
 		tt.mock()
 		err := t.voluntaryExitService.ProcessMessage(context.Background(), nil, tt.msg)
-		time.Sleep(10 * time.Millisecond)
 		if tt.wantErr {
 			t.Require().Error(err)
 			if tt.err != nil {
