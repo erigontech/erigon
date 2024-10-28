@@ -84,7 +84,8 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return b.verifyAndStoreBlobSidecar(nil, msg)
 	}
 
-	headState := b.syncedDataManager.HeadState()
+	headState, cn := b.syncedDataManager.HeadState()
+	defer cn()
 	if headState == nil {
 		b.scheduleBlobSidecarForLaterExecution(msg)
 		return ErrIgnore
@@ -210,10 +211,11 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		headState := b.syncedDataManager.HeadState()
+		headState, cn := b.syncedDataManager.HeadState()
 		if headState == nil {
 			continue
 		}
+
 		b.blobSidecarsScheduledForLaterExecution.Range(func(key, value any) bool {
 			job := value.(*blobSidecarJob)
 			// check if it has expired
@@ -239,5 +241,6 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 			b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
 		})
+		cn()
 	}
 }

@@ -123,7 +123,9 @@ func (m *validatorMonitorImpl) runReportProposerStatus() {
 	ticker := time.NewTicker(time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		headState := m.syncedData.HeadStateReader()
+		headState, cn := m.syncedData.HeadState()
+		defer cn()
+
 		if headState == nil {
 			continue
 		}

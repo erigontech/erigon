@@ -118,7 +118,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		committeeIndex = index
 	}
 
-	headState := s.syncedDataManager.HeadStateReader()
+	headState, cn := s.syncedDataManager.HeadStateReader()
+	defer cn()
+
 	if headState == nil {
 		return ErrIgnore
 	}

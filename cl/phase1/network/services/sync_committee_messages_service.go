@@ -74,7 +74,8 @@ func NewSyncCommitteeMessagesService(
 func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	headState := s.syncedDataManager.HeadState()
+	headState, cn := s.syncedDataManager.HeadState()
+	defer cn()
 	if headState == nil {
 		return ErrIgnore
 	}

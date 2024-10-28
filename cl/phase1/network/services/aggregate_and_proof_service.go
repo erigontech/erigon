@@ -98,7 +98,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *cltypes.SignedAggregateAndProofData,
 ) error {
-	headState := a.syncedDataManager.HeadState()
+	headState, cn := a.syncedDataManager.HeadState()
+	defer cn()
 	if headState == nil {
 		return ErrIgnore
 	}
@@ -370,7 +371,7 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		headState := a.syncedDataManager.HeadState()
+		headState, cn := a.syncedDataManager.HeadState()
 		if headState == nil {
 			continue
 		}
@@ -393,5 +394,6 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 			a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
 		})
+		cn()
 	}
 }

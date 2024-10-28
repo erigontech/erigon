@@ -29,20 +29,24 @@ import (
 var _ SyncedData = (*SyncedDataManager)(nil)
 
 type SyncedDataManager struct {
-	enabled   bool
-	cfg       *clparams.BeaconChainConfig
-	headState atomic.Value
-	headRoot  atomic.Value
+	enabled bool
+	cfg     *clparams.BeaconChainConfig
 
-	copyBuffer      *state.CachingBeaconState
-	copyBufferMutex sync.Mutex
+	headRoot atomic.Value
+	headSlot atomic.Uint64
+
+	headState *state.CachingBeaconState
+
+	// Beacon state accessors
+	committeeCount atomic.Uint64
+
+	mu sync.RWMutex
 }
 
 func NewSyncedDataManager(enabled bool, cfg *clparams.BeaconChainConfig) *SyncedDataManager {
 	return &SyncedDataManager{
-		enabled:    enabled,
-		cfg:        cfg,
-		copyBuffer: state.New(cfg),
+		enabled: enabled,
+		cfg:     cfg,
 	}
 }
 
@@ -50,73 +54,63 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	s.copyBufferMutex.Lock()
-	defer s.copyBufferMutex.Unlock()
-	newPtr := s.copyBuffer
-	if err := newState.CopyInto(newPtr); err != nil {
-		return err
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var blkRoot common.Hash
+
+	if s.headState == nil {
+		s.headState, err = newState.Copy()
+	} else {
+		err = newState.CopyInto(s.headState)
 	}
-	blkRoot, err := newState.BlockRoot()
 	if err != nil {
 		return err
 	}
+	blkRoot, err = newState.BlockRoot()
+	if err != nil {
+		return err
+	}
+	s.headSlot.Store(newState.Slot())
 	s.headRoot.Store(common.Hash(blkRoot))
-	curPtr, ok := s.headState.Load().(*state.CachingBeaconState)
-	if !ok {
-		// No head state yet
-		s.headState.Store(newPtr)
-		s.copyBuffer = state.New(s.cfg) // acquire new buffer
-		return
-	}
-
-	// swap buffers
-	s.headState.Store(newPtr)
-	s.copyBuffer = curPtr
-	return
+	return err
 }
 
-func (s *SyncedDataManager) HeadState() *state.CachingBeaconState {
-	if !s.enabled {
-		return nil
+func emptyCancel() {}
+
+func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, cancelFn) {
+	if !s.enabled || s.headState == nil {
+		return nil, emptyCancel
 	}
-	if ret, ok := s.headState.Load().(*state.CachingBeaconState); ok {
-		return ret
+
+	var isCanceled atomic.Bool
+
+	s.mu.RLock()
+	return s.headState, func() {
+		if isCanceled.Load() {
+			return
+		}
+		isCanceled.Store(true)
+		s.mu.RUnlock()
 	}
-	return nil
 }
 
-func (s *SyncedDataManager) HeadStateReader() abstract.BeaconStateReader {
-	headstate := s.HeadState()
-	if headstate == nil {
-		return nil
-	}
-	return headstate
-}
-
-func (s *SyncedDataManager) HeadStateMutator() abstract.BeaconStateMutator {
-	headstate := s.HeadState()
-	if headstate == nil {
-		return nil
-	}
-	return headstate
+func (s *SyncedDataManager) HeadStateReader() (abstract.BeaconStateReader, cancelFn) {
+	return s.HeadState()
 }
 
 func (s *SyncedDataManager) Syncing() bool {
 	if !s.enabled {
 		return false
 	}
-	return s.headState.Load() == nil
+	return s.headState == nil
 }
 
 func (s *SyncedDataManager) HeadSlot() uint64 {
 	if !s.enabled {
 		return 0
 	}
-	st, ok := s.headState.Load().(*state.CachingBeaconState)
-	if !ok {
-		return 0
-	}
-	return st.Slot()
+	return s.headSlot.Load()
 }
 
 func (s *SyncedDataManager) HeadRoot() common.Hash {

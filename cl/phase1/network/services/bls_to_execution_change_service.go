@@ -23,7 +23,6 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -69,12 +68,9 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return ErrIgnore
 	}
 	change := msg.SignedBLSToExecutionChange.Message
-	stateReader := s.syncedDataManager.HeadStateReader()
+	stateReader, cn := s.syncedDataManager.HeadStateReader()
+	defer cn()
 	if stateReader == nil {
-		return ErrIgnore
-	}
-	stateMutator := s.syncedDataManager.HeadStateMutator()
-	if stateMutator == nil {
 		return ErrIgnore
 	}
 
@@ -120,17 +116,6 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		Pks:        [][]byte{change.From[:]},
 		GossipData: msg.GossipData,
 		F: func() {
-			// validator.withdrawal_credentials = (
-			//    ETH1_ADDRESS_WITHDRAWAL_PREFIX
-			//    + b'\x00' * 11
-			//    + address_change.to_execution_address
-			// )
-			newWc := libcommon.Hash{}
-			newWc[0] = byte(s.beaconCfg.ETH1AddressWithdrawalPrefixByte)
-			copy(newWc[1:], make([]byte, 11))
-			copy(newWc[12:], change.To[:])
-			stateMutator.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), newWc)
-
 			s.emitters.Operation().SendBlsToExecution(msg.SignedBLSToExecutionChange)
 			s.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
 		},
