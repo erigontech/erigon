@@ -87,8 +87,8 @@ func (m *MerkleTree) markLeafAsDirty(idx int) {
 }
 
 func (m *MerkleTree) AppendLeaf() {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	/*
 		Step 1: Append a new dirty leaf
 		Step 2: Extend each layer with the new leaf when needed (1.5x extension)
@@ -97,6 +97,7 @@ func (m *MerkleTree) AppendLeaf() {
 		m.extendLayer(i)
 	}
 	m.leavesCount++
+	m.dirtyLeaves = append(m.dirtyLeaves, atomic.Bool{})
 }
 
 // extendLayer extends the layer with the given index by 1.5x, by marking the new leaf as dirty.
@@ -132,7 +133,6 @@ func (m *MerkleTree) extendLayer(layerIdx int) {
 		m.layers[layerIdx] = m.layers[layerIdx][:newLayerSize]
 		copy(m.layers[layerIdx][newLayerSize-length.Hash:], ZeroHashes[0][:])
 	}
-	m.dirtyLeaves = append(m.dirtyLeaves, atomic.Bool{})
 }
 
 // ComputeRoot computes the root of the Merkle tree.
