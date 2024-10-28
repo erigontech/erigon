@@ -136,6 +136,10 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		},
 	}
 
+	if msg.ImmediateVerification {
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	}
+
 	// push the signatures to verify asynchronously and run final functions after that.
 	s.batchSignatureVerifier.AsyncVerifyBlsToExecutionChange(aggregateVerificationData)
 
