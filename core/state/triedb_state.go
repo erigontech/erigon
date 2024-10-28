@@ -3,10 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"io"
-	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -15,13 +12,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types/accounts"
 	witnesstypes "github.com/erigontech/erigon/core/types/witness"
 	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/ethdb"
 	"github.com/erigontech/erigon/turbo/trie"
 	"github.com/holiman/uint256"
 )
@@ -140,47 +134,29 @@ func (b *Buffer) merge(other *Buffer) {
 type TrieDbState struct {
 	t                 *trie.Trie
 	tMu               *sync.Mutex
-	db                kv.Tx
 	StateReader       StateReader
 	rl                *trie.RetainList
 	blockNr           uint64
 	buffers           []*Buffer
 	aggregateBuffer   *Buffer // Merge of all buffers
 	currentBuffer     *Buffer
-	historical        bool
-	noHistory         bool
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
-	tp                *trie.Eviction
-	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
-	loader            *trie.SubTrieLoader
-	pw                *PreimageWriter
 	incarnationMap    map[libcommon.Address]uint64 // Temporary map of incarnation for the cases when contracts are deleted and recreated within 1 block
 }
 
 func NewTrieDbState(root libcommon.Hash, db kv.Tx, blockNr uint64, stateReader StateReader) *TrieDbState {
 	t := trie.New(root)
-	tp := trie.NewEviction()
-
 	tds := &TrieDbState{
 		t:                 t,
 		tMu:               new(sync.Mutex),
-		db:                db,
 		StateReader:       stateReader,
 		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
-		tp:                tp,
-		pw:                &PreimageWriter{db: db, savePreimages: true},
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[libcommon.Address]uint64),
 	}
-
-	tp.SetBlockNumber(blockNr)
-
-	t.AddObserver(tp)
-	// t.AddObserver(NewIntermediateHashes(tds.db, tds.db))
-
 	return tds
 }
 
@@ -192,20 +168,8 @@ func (tds *TrieDbState) SetTrie(tr *trie.Trie) {
 	tds.t = tr
 }
 
-func (tds *TrieDbState) EnablePreimages(ep bool) {
-	tds.pw.SetSavePreimages(ep)
-}
-
-func (tds *TrieDbState) SetHistorical(h bool) {
-	tds.historical = h
-}
-
 func (tds *TrieDbState) SetResolveReads(rr bool) {
 	tds.resolveReads = rr
-}
-
-func (tds *TrieDbState) SetNoHistory(nh bool) {
-	tds.noHistory = nh
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
@@ -220,16 +184,10 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	cpy := TrieDbState{
 		t:              &tcopy,
 		tMu:            new(sync.Mutex),
-		db:             tds.db,
 		blockNr:        n,
-		tp:             tp,
-		pw:             &PreimageWriter{db: tds.db, savePreimages: true},
 		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[libcommon.Address]uint64),
 	}
-
-	cpy.t.AddObserver(tp)
-
 	return &cpy
 }
 
@@ -264,17 +222,12 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 	t := &TrieDbState{
 		t:                 tds.t,
 		tMu:               tds.tMu,
-		db:                tds.db,
 		blockNr:           tds.getBlockNr(),
 		buffers:           buffers,
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
-		historical:        tds.historical,
-		noHistory:         tds.noHistory,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
-		tp:                tds.tp,
-		pw:                tds.pw,
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[libcommon.Address]uint64),
 	}
@@ -294,17 +247,12 @@ func (tds *TrieDbState) WithLastBuffer() *TrieDbState {
 	return &TrieDbState{
 		t:                 tds.t,
 		tMu:               tds.tMu,
-		db:                tds.db,
 		blockNr:           tds.getBlockNr(),
 		buffers:           buffers,
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
-		historical:        tds.historical,
-		noHistory:         tds.noHistory,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder.Copy(),
-		tp:                tds.tp,
-		pw:                tds.pw,
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[libcommon.Address]uint64),
 	}
@@ -494,7 +442,7 @@ func (tds *TrieDbState) buildAccountAddressReads() ([][]byte, [][]byte) {
 // period for which we are aggregating updates.
 func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account, [][]byte) {
 	accountTouches := common.Hashes{}
-	for addrHash, _ := range tds.aggregateBuffer.accountUpdates {
+	for addrHash := range tds.aggregateBuffer.accountUpdates {
 		if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
 			// This adds an extra entry that wipes out the storage of the accout in the stream
 			accountTouches = append(accountTouches, addrHash)
@@ -672,22 +620,10 @@ func (tds *TrieDbState) ClearUpdates() {
 
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.setBlockNr(blockNr)
-	tds.tp.SetBlockNumber(blockNr)
 }
 
 func (tds *TrieDbState) GetBlockNr() uint64 {
 	return tds.getBlockNr()
-}
-
-func (tds *TrieDbState) readAccountDataByHash(addrHash libcommon.Hash) (*accounts.Account, error) {
-	var a accounts.Account
-	// addr := libcommon.BytesToAddress(addrHash[:])
-	if ok, err := rawdb.ReadAccountByHash(tds.db, addrHash, &a); err != nil {
-		return nil, err
-	} else if !ok {
-		return nil, nil
-	}
-	return &a, nil
 }
 
 func (tds *TrieDbState) GetAccount(addrHash libcommon.Hash) (*accounts.Account, bool) {
@@ -706,19 +642,10 @@ func (tds *TrieDbState) ReadAccountData(address libcommon.Address) (*accounts.Ac
 	}
 
 	account, ok := tds.GetAccount(addrHash)
-
 	if !ok {
-		if tds.StateReader != nil {
-			account, err = tds.StateReader.ReadAccountData(address)
-
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			account, err = tds.readAccountDataByHash(addrHash)
-			if err != nil {
-				return nil, err
-			}
+		account, err = tds.StateReader.ReadAccountData(address)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -731,16 +658,8 @@ func (tds *TrieDbState) ReadAccountData(address libcommon.Address) (*accounts.Ac
 	return account, nil
 }
 
-func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
-	key, _ := tds.db.GetOne(kv.PreimagePrefix, shaKey)
-	return key
-}
-
 func (tds *TrieDbState) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
-	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
-	if err != nil {
-		return nil, err
-	}
+	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 	if tds.currentBuffer != nil {
 		if _, ok := tds.currentBuffer.deleted[addrHash]; ok {
 			return nil, nil
@@ -751,7 +670,7 @@ func (tds *TrieDbState) ReadAccountStorage(address libcommon.Address, incarnatio
 			return nil, nil
 		}
 	}
-	seckey, err := tds.pw.HashKey(key, false /*save*/)
+	seckey, err := libcommon.HashData(key.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -767,27 +686,12 @@ func (tds *TrieDbState) ReadAccountStorage(address libcommon.Address, incarnatio
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
-
 	if !ok {
-		if tds.StateReader != nil {
-			enc, err := tds.StateReader.ReadAccountStorage(address, incarnation, key)
-
-			if err != nil {
-				return nil, err
-			}
-
-			return enc, nil
-		} else {
-			if !ok {
-				// Not present in the trie, try database
-				enc, err = tds.db.GetOne(kv.HashedAccounts, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
-				if err != nil {
-					enc = nil
-				}
-			}
-
-			return enc, nil
+		enc, err := tds.StateReader.ReadAccountStorage(address, incarnation, key)
+		if err != nil {
+			return nil, err
 		}
+		return enc, nil
 	}
 
 	return enc, nil
@@ -810,19 +714,12 @@ func (tds *TrieDbState) ReadAccountCode(address libcommon.Address, incarnation u
 		return nil, nil
 	}
 
-	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
-	if err != nil {
-		return nil, err
-	}
+	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 
 	if cached, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
 		code, err = cached, nil
 	} else {
-		if tds.StateReader != nil {
-			code, err = tds.StateReader.ReadAccountCode(address, incarnation, codeHash)
-		} else {
-			code, err = tds.db.GetOne(kv.Code, codeHash[:])
-		}
+		code, err = tds.StateReader.ReadAccountCode(address, incarnation, codeHash)
 	}
 	if tds.resolveReads {
 		addrHash, err1 := libcommon.HashData(address[:])
@@ -840,26 +737,13 @@ func (tds *TrieDbState) ReadAccountCode(address libcommon.Address, incarnation u
 }
 
 func (tds *TrieDbState) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (codeSize int, err error) {
-	addrHash, err := tds.pw.HashAddress(address, false /*save*/)
-	if err != nil {
-		return 0, err
-	}
-
+	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
 		codeSize, err = cached, nil
 	} else {
-		if tds.StateReader != nil {
-			codeSize, err = tds.StateReader.ReadAccountCodeSize(address, incarnation, codeHash)
-			if err != nil {
-				return 0, err
-			}
-		} else {
-			var code []byte
-			code, err = tds.db.GetOne(kv.Code, codeHash[:])
-			if err != nil {
-				return 0, err
-			}
-			codeSize = len(code)
+		codeSize, err = tds.StateReader.ReadAccountCodeSize(address, incarnation, codeHash)
+		if err != nil {
+			return 0, err
 		}
 	}
 	if tds.resolveReads {
@@ -888,26 +772,11 @@ func (tds *TrieDbState) ReadAccountIncarnation(address libcommon.Address) (uint6
 	if inc, ok := tds.incarnationMap[address]; ok {
 		return inc, nil
 	}
-
-	if tds.StateReader != nil {
-		inc, err := tds.StateReader.ReadAccountIncarnation(address)
-		if err != nil {
-			return 0, err
-		} else {
-			return inc, nil
-		}
+	inc, err := tds.StateReader.ReadAccountIncarnation(address)
+	if err != nil {
+		return 0, err
 	} else {
-		if b, err := tds.db.GetOne(kv.IncarnationMap, address[:]); err == nil {
-			if len(b) == 0 {
-				return 0, nil
-			}
-
-			return binary.BigEndian.Uint64(b), nil
-		} else if errors.Is(err, ethdb.ErrKeyNotFound) {
-			return 0, nil
-		} else {
-			return 0, err
-		}
+		return inc, nil
 	}
 }
 
@@ -915,96 +784,16 @@ type TrieStateWriter struct {
 	tds *TrieDbState
 }
 
-func (tds *TrieDbState) EvictTries(print bool) {
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-	strict := print
-	tds.incarnationMap = make(map[libcommon.Address]uint64)
-	if print {
-		trieSize := tds.t.TrieSize()
-		fmt.Println("") // newline for better formatting
-		fmt.Printf("[Before] Actual nodes size: %d, accounted size: %d\n", trieSize, tds.tp.TotalSize())
-	}
-
-	if strict {
-		actualAccounts := uint64(tds.t.NumberOfAccounts())
-		fmt.Println("number of leaves: ", actualAccounts)
-		accountedAccounts := tds.tp.NumberOf()
-		if actualAccounts != accountedAccounts {
-			panic(fmt.Errorf("account number mismatch: trie=%v eviction=%v", actualAccounts, accountedAccounts))
-		}
-		fmt.Printf("checking number --> ok\n")
-
-		actualSize := uint64(tds.t.TrieSize())
-		accountedSize := tds.tp.TotalSize()
-
-		if actualSize != accountedSize {
-			panic(fmt.Errorf("account size mismatch: trie=%v eviction=%v", actualSize, accountedSize))
-		}
-		fmt.Printf("checking size --> ok\n")
-	}
-
-	tds.tp.EvictToFitSize(tds.t, MaxTrieCacheSize)
-
-	if strict {
-		actualAccounts := uint64(tds.t.NumberOfAccounts())
-		fmt.Println("number of leaves: ", actualAccounts)
-		accountedAccounts := tds.tp.NumberOf()
-		if actualAccounts != accountedAccounts {
-			panic(fmt.Errorf("after eviction account number mismatch: trie=%v eviction=%v", actualAccounts, accountedAccounts))
-		}
-		fmt.Printf("checking number --> ok\n")
-
-		actualSize := uint64(tds.t.TrieSize())
-		accountedSize := tds.tp.TotalSize()
-
-		if actualSize != accountedSize {
-			panic(fmt.Errorf("after eviction account size mismatch: trie=%v eviction=%v", actualSize, accountedSize))
-		}
-		fmt.Printf("checking size --> ok\n")
-	}
-
-	if print {
-		trieSize := tds.t.TrieSize()
-		fmt.Printf("[After] Actual nodes size: %d, accounted size: %d\n", trieSize, tds.tp.TotalSize())
-
-		actualAccounts := uint64(tds.t.NumberOfAccounts())
-		fmt.Println("number of leaves: ", actualAccounts)
-	}
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("Memory", "nodes size", tds.tp.TotalSize(),
-		"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-	if print {
-		fmt.Printf("Eviction done. Nodes size: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.TotalSize(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
-	}
-}
-
 func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
 }
-
-// // DbStateWriter creates a writer that is designed to write changes into the database batch
-// func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-// 	db, ok := tds.db.(putDel)
-
-// 	if !ok {
-// 		panic("DbStateWriter can only be used with a putDel database")
-// 	}
-
-// 	return &DbStateWriter{blockNr: tds.blockNr, db: db, csw: NewChangeSetWriter()}
-// }
 
 func (tds *TrieStateWriter) WriteChangeSets() error { return nil }
 
 func (tds *TrieStateWriter) WriteHistory() error { return nil }
 
 func (tsw *TrieStateWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
-	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
-	if err != nil {
-		return err
-	}
+	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: address, Account: account}
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	if original != nil {
@@ -1014,10 +803,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(address libcommon.Address, origina
 }
 
 func (tsw *TrieStateWriter) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
-	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
-	if err != err {
-		return err
-	}
+	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: address, Account: original} // TODO: might be needed to use *AccountWithAddress to point to nil
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	if original != nil {
@@ -1046,10 +832,7 @@ func (tsw *TrieStateWriter) UpdateAccountCode(address libcommon.Address, incarna
 }
 
 func (tsw *TrieStateWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
-	addrHash, err := tsw.tds.pw.HashAddress(address, false /*save*/)
-	if err != nil {
-		return err
-	}
+	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 
 	v := value.Bytes()
 	m, ok := tsw.tds.currentBuffer.storageUpdates[addrHash]
@@ -1058,7 +841,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address libcommon.Address, incar
 		tsw.tds.currentBuffer.storageUpdates[addrHash] = m
 	}
 	tsw.tds.currentBuffer.storageIncarnation[addrHash] = incarnation
-	seckey, err := tsw.tds.pw.HashKey(key, false /*save*/)
+	seckey, err := libcommon.HashData(key.Bytes())
 	if err != nil {
 		return err
 	}
@@ -1115,19 +898,12 @@ func (tds *TrieDbState) makeBlockWitness(trace bool, rl trie.RetainDecider, isBi
 }
 
 func (tsw *TrieStateWriter) CreateContract(address libcommon.Address) error {
-	addrHash, err := tsw.tds.pw.HashAddress(address, true /*save*/)
-	if err != nil {
-		return err
-	}
+	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 	tsw.tds.currentBuffer.created[addrHash] = address
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
 	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	return nil
-}
-
-func (tds *TrieDbState) TriePruningDebugDump() string {
-	return tds.tp.DebugDump()
 }
 
 func (tds *TrieDbState) getBlockNr() uint64 {
@@ -1137,14 +913,6 @@ func (tds *TrieDbState) getBlockNr() uint64 {
 func (tds *TrieDbState) setBlockNr(n uint64) {
 	atomic.StoreUint64(&tds.blockNr, n)
 }
-
-// GetNodeByHash gets node's RLP by hash.
-// func (tds *TrieDbState) GetNodeByHash(hash libcommon.Hash) []byte {
-// 	tds.tMu.Lock()
-// 	defer tds.tMu.Unlock()
-
-// 	return tds.t.GetNodeByHash(hash)
-// }
 
 func (tds *TrieDbState) GetTrieHash() libcommon.Hash {
 	tds.tMu.Lock()
