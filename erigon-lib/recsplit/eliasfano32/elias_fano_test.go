@@ -71,6 +71,9 @@ func TestEliasFanoSeekBoundaries(t *testing.T) {
 	ef := NewEliasFano(1, 1)
 	ef.Reset(buf)
 
+	first := ef.Get(0)
+	second := ef.Get(1)
+
 	// This test does a seek in a reverse iterator for the 0th value of the sequence.
 	//
 	// Data is specially crafted so the 0th element is represented by setting the 63th bit in the upper bytes word and
@@ -80,7 +83,12 @@ func TestEliasFanoSeekBoundaries(t *testing.T) {
 	// the last bit of the previous upper word.
 	t.Run("reverse seek 63th upper bit", func(t *testing.T) {
 		it := ef.ReverseIterator()
-		it.Seek(1140805601)
+		it.Seek(first)
+	})
+
+	t.Run("seek 0th upper bit", func(t *testing.T) {
+		it := ef.Iterator()
+		it.Seek(second)
 	})
 }
 
