@@ -386,3 +386,31 @@ func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []by
 	return bytes.Compare(resBuf, k), resBuf, nil
 	//return b.getter.Match(k), result, nil
 }
+
+func Test_Btrie_Insert(t *testing.T) {
+	bt := NewBtrie()
+	bt.Insert([]byte{0xde, 0xad}, 0)
+	bt.Insert([]byte{0xce, 0xad}, 1)
+	bt.Insert([]byte{0xde, 0, 0, 0, 0, 0xbd}, 2)
+	bt.Insert([]byte{0xde, 0, 0, 1, 0, 0xbd}, 3)
+	bt.Insert([]byte{0xde, 0, 0, 0xbd}, 4)
+	bt.printRoot()
+
+	keys := [][]byte{
+		[]byte{0xde, 0xad},
+		[]byte{0xce, 0xad},
+		[]byte{0xfe, 0xad},
+		[]byte{0xde, 0, 0, 0, 0, 0xbd},
+	}
+
+	for _, key := range keys {
+		di := bt.Get(key)
+		fmt.Printf("%x -> %d\n", key, di)
+	}
+
+	// bt.Insert([]byte("app"), 0)
+	// bt.Insert([]byte("apangu"), 1)
+	// bt.Insert([]byte("appolo"), 2)
+	// bt.Insert([]byte("ban"), 3)
+	// bt.Insert([]byte("banjo"), 4)
+}

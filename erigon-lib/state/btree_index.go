@@ -1089,5 +1089,288 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 	}
 	return b.newCursor(context.Background(), k, v, i, getter)
 }
+
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
+
+func commonPrefixLength(b1, b2 []byte) int {
+	var i int
+
+	// fmt.Printf("CPL %x | %x", b1, b2)
+	// defer func() { fmt.Printf(" -> %x len=%d\n", b1[:i], i) }()
+	for i < len(b1) && i < len(b2) {
+		if b1[i] != b2[i] {
+			break
+		}
+		i++
+	}
+	return i
+}
+
+type Btrie struct {
+	child [256]*trieNode
+}
+
+type trieNode struct {
+	child map[byte]*trieNode
+	ext   []byte
+	di    *uint64
+}
+
+func newTrieNode(di uint64, ext []byte) *trieNode {
+	tn := &trieNode{
+		child: make(map[byte]*trieNode),
+		ext:   make([]byte, len(ext)),
+		di:    &di,
+	}
+	copy(tn.ext, ext)
+	return tn
+}
+
+func (tn *trieNode) nextChildTo(nibble byte) (byte, bool) {
+	if len(tn.child) == 0 {
+		return 0, false
+	}
+	for b := nibble + 1; b <= 255; b++ {
+		if tn.child[b] != nil {
+			return b, true
+		}
+	}
+	return 0, false
+}
+
+// When split needed ?
+//   - insert new node with partially matching extension.
+//
+// Split updates original node - it becomes a new branch.
+//
+//	Leaf or previous branch goes down with nibble=ext[cpl:] and keeps di/child.
+//	new node become new leaf with nibble=ext2[cpl:]
+//	 // would it work if cpl == 0, so
+//
+//	 extension is part of a key without [0] nibble - it becomes index nibble to access this node
+func (tn *trieNode) split(ext2 []byte, cpl int, di uint64) {
+	if cpl == len(tn.ext) {
+		// ext2 has prefix tn.ext.
+		panic("help me")
+	}
+	rest := newTrieNode(*tn.di, tn.ext[cpl:])
+	for n, c := range tn.child {
+		rest.child[n] = c
+	}
+	clear(tn.child)
+
+	insLeaf := newTrieNode(di, ext2[cpl:])
+
+	tn.child[tn.ext[cpl]] = rest
+	tn.child[ext2[cpl]] = insLeaf
+
+	fmt.Printf("split %x cpl=%d onto (rest %x) and (leaf %x)\n", tn.ext, cpl, rest.ext, insLeaf.ext)
+
+	tn.ext = tn.ext[:cpl]
+	tn.di = nil
+}
+
+func NewBtrie() *Btrie {
+	return &Btrie{}
+}
+
+func (bt *Btrie) printRoot() {
+	for n := 0; n < len(bt.child); n++ {
+		node := bt.child[n]
+		if node != nil {
+			if node.di != nil {
+				fmt.Printf(" %x: %p [%d] %x\n", n, node, node.di, node.ext)
+			} else {
+				fmt.Printf(" %x: %p [%x] branch size %d\n", n, node, node.ext, len(node.child))
+
+			}
+		}
+	}
+}
+
+// lookup first di which key >= seekKey
+func (bt *Btrie) Seek(key []byte) (di uint64, skey []byte) {
+	if len(key) == 0 {
+		return 0, nil
+	}
+
+	depth := 0
+	nib := key[depth]
+
+	fmt.Printf("Seek '%x'\n", key)
+
+	var next, kin *trieNode
+	if bt.child[nib] != nil {
+		next = bt.child[nib]
+		for b := nib + 1; b <= 255; b++ {
+			if bt.child[b] != nil {
+				kin = bt.child[b] // top level neighbour, keeping track of next largest
+				break
+			}
+		}
+	} else {
+		for b := nib + 1; b <= 255; b++ {
+			if bt.child[b] != nil {
+				next = bt.child[b]
+				break
+			}
+			// this next is already bigger than requested key
+		}
+		if next == nil {
+			return 2<<63 - 1, nil
+		}
+	}
+	_ = kin
+	depth++
+
+	for {
+		fmt.Printf("next depth %d %x\n", depth, next.ext)
+		cpl := commonPrefixLength(key[depth:], next.ext)
+		if cpl == 0 {
+			if len(next.ext) > 0 {
+
+				// need to use partial prefix DI values. Like if we matched some part and the rest is bigger, can exit straight away
+			}
+		}
+
+	}
+
+	return 0, nil
+}
+
+// Get seeks exact match to the key.
+// Key not found - di > N
+// key found     - di = it's exact position
+func (bt *Btrie) Get(key []byte) (di uint64) {
+	depth := 0
+	nib := key[depth]
+
+	fmt.Printf("Get '%x'\n", key)
+
+	if bt.child[nib] == nil {
+		return 2<<63 - 1
+	}
+
+	depth++
+	next := bt.child[nib]
+	traversed := make([]byte, 0, len(key))
+	traversed = append(traversed, key[:depth]...)
+	for {
+		fmt.Printf("next depth %d %x\n", depth, next.ext)
+		cpl := commonPrefixLength(key[depth:], next.ext)
+		if cpl == 0 { // full mismatch
+			if len(next.ext) == 0 {
+				nib := key[depth:][cpl]
+				nx := next.child[nib]
+				fmt.Printf("depth=%d part t=%x nibble %x\n", depth, traversed, nib)
+				if nx != nil { // not found
+					next = nx
+					traversed = append(traversed, nib)
+					// traversed = append(traversed[depth:], key[depth:depth+cpl]...)
+					if depth+1 == len(key) {
+						fmt.Printf("found %x depth=%d\n", traversed, depth)
+						return *next.di
+					}
+					depth += cpl
+					continue
+				}
+			}
+			fmt.Printf("not found depth=%d key=%x t=%x suff %x\n", depth, key, traversed, next.ext)
+			return 2<<63 - 1
+		}
+		if cpl < len(next.ext) { // partially matched but not found
+			fmt.Printf("not found depth=%d key=%x t=%x rest %x\n", depth, key, traversed, next.ext[cpl:])
+			return 2<<63 - 1
+		}
+		if cpl == len(next.ext) {
+			if cpl == len(key[depth:]) { // full match
+
+				traversed = append(traversed[depth:], key[depth:depth+cpl]...)
+				fmt.Printf("found %x depth=%d\n", traversed, depth)
+				return *next.di
+			}
+			// next.ext is a prefix of key[depth:]
+			nib := key[depth:][cpl]
+			nx := next.child[nib]
+			fmt.Printf("depth=%d part t=%x nibble %x\n", depth, traversed, nib)
+			if nx == nil { // not found
+				fmt.Printf("not found depth=%d key=%x t=%x\n", depth, key, traversed)
+				return 2<<63 - 1
+			}
+			next = nx
+			traversed = append(traversed[depth:], key[depth:depth+cpl]...)
+			depth += cpl
+			continue
+		}
+
+		panic("wtf")
+		traversed = append(traversed[depth:], key[depth:depth+cpl]...)
+		depth += cpl
+		fmt.Printf("depth=%d t=%x\n", depth, traversed)
+		if cpl != len(next.ext) {
+
+		}
+
+	}
+
+	return 0
+}
+
+func (bt *Btrie) Insert(key []byte, di uint64) {
+	if len(key) == 0 {
+		return // nothing to insert
+	}
+	ki := 0 // reflects current position in key
+	nib := key[ki]
+	ki++
+
+	fmt.Printf("insert key %x di=%d\n", key, di)
+
+	if bt.child[nib] == nil {
+		bt.child[nib] = newTrieNode(di, key[ki:])
+		fmt.Printf("new root-leaf key %x di=%d ext %x\n", key, bt.child[nib].di, bt.child[nib].ext)
+		return
+	}
+
+	next := bt.child[nib]
+	depth := 0 //
+	for {
+		depth++
+		cpl := commonPrefixLength(key[ki:], next.ext)
+		if cpl == 0 { // no matching prefix
+			nib = key[ki]
+			if nx := next.child[nib]; nx != nil {
+				fmt.Printf("-depth=%d next [%d] %x\n", depth, nx.di, nx.ext[:])
+				next = nx
+				continue
+			}
+			// ki++
+			// _ = key[ki]
+
+			fmt.Printf("-depth=%d insert [%d] %x\n", depth, di, key[ki:])
+			next.split(key[ki:], cpl, di)
+			return
+		}
+		if cpl == len(next.ext) {
+			nib = key[cpl]
+			if nx := next.child[nib]; nx != nil {
+				fmt.Printf("depth=%d next [%d] %x\n", depth, nx.di, nx.ext[:])
+				next = nx
+				continue
+			}
+			ki += cpl
+			// _ = key[ki]
+
+			fmt.Printf("depth=%d insert [%d] %x\n", depth, di, key[ki:])
+
+			next.child[nib] = newTrieNode(di, key[ki:])
+			return
+
+		}
+
+		next.split(key[ki:], cpl, di)
+		ki += cpl
+		return
+	}
+}
