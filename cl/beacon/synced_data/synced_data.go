@@ -79,7 +79,8 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 func emptyCancel() {}
 
 func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, cancelFn) {
-	if !s.enabled || s.headState == nil {
+	_, synced := s.headRoot.Load().(common.Hash)
+	if !s.enabled && !synced {
 		return nil, emptyCancel
 	}
 
