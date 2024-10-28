@@ -355,6 +355,9 @@ func bytesToTimestamp(b []byte) time.Time {
 func LastPolicyTransactions(ctx context.Context, aclDB kv.RwDB, count int) ([]PolicyTransaction, error) {
 	var pts []PolicyTransaction
 	err := aclDB.View(ctx, func(tx kv.Tx) error {
+		if count == 0 {
+			return nil
+		}
 		c, err := tx.Cursor(PolicyTransactions)
 		if err != nil {
 			return err

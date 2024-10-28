@@ -457,6 +457,9 @@ func TestLastPolicyTransactions(t *testing.T) {
 
 	// LastPolicyTransactions seems to append in reverse order than this test function. So the order of elements is also reversed
 	// Single element in PolicyTransaction slice
+	var policyTransactionSliceNone []PolicyTransaction
+
+	// Single element in PolicyTransaction slice
 	var policyTransactionSliceSingle []PolicyTransaction
 	policyTransactionSliceSingle = append(policyTransactionSliceSingle, policyTransactionTwo)
 
@@ -470,6 +473,7 @@ func TestLastPolicyTransactions(t *testing.T) {
 		count int
 		want  []PolicyTransaction
 	}{
+		{0, policyTransactionSliceNone},
 		{1, policyTransactionSliceSingle},
 		{2, policyTransactionSliceDouble},
 	}
