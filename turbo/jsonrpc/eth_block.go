@@ -298,7 +298,9 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	if err != nil {
 		return nil, err
 	}
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	if td != nil {
+		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	}
 	// ==============================
 
 	chainConfig, err := api.chainConfig(ctx, tx)
