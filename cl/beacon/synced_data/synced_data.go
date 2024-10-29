@@ -102,7 +102,6 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	isCanceled := false
 	var mu sync.Mutex
 
-	debug.PrintStack()
 	st := debug.Stack()
 
 	ch := make(chan struct{})
