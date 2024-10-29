@@ -41,7 +41,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/crypto/ecies"
+	"github.com/erigontech/erigon-lib/crypto/ecies"
 	"github.com/erigontech/erigon/rlp"
 )
 

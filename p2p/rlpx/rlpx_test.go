@@ -35,7 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/crypto/ecies"
+	"github.com/erigontech/erigon-lib/crypto/ecies"
 	"github.com/erigontech/erigon/p2p/simulations/pipes"
 	"github.com/erigontech/erigon/rlp"
 )
