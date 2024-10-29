@@ -109,7 +109,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
 		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
-	return ErrIgnore
 
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
 		index, err := att.Attestation.ElectraSingleCommitteeIndex()
@@ -118,7 +117,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		}
 		committeeIndex = index
 	}
-
 	headState, cn := s.syncedDataManager.HeadState()
 	defer cn()
 
@@ -241,6 +239,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
 		return ErrIgnore
 	}
+	cn()
 
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{signature[:]},
