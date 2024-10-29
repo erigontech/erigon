@@ -38,16 +38,16 @@ func TestRotate(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	primary, secondary, err := Tables(tx, kv.TxLookup)
+	primary, secondary, err := kv.TxLookup.Partitions(tx)
 	require.NoError(err)
 	require.Equal(kv.Partitions[kv.TxLookup][0], primary)
 	require.Equal(kv.Partitions[kv.TxLookup][1], secondary)
 
-	done, err := Rotate(tx, kv.TxLookup)
+	done, err := kv.TxLookup.Rotate(tx)
 	require.NoError(err)
 	require.True(done)
 
-	primary, secondary, err = Tables(tx, kv.TxLookup)
+	primary, secondary, err = kv.TxLookup.Partitions(tx)
 	require.NoError(err)
 	require.Equal(kv.Partitions[kv.TxLookup][1], primary)
 	require.Equal(kv.Partitions[kv.TxLookup][0], secondary)
@@ -59,20 +59,20 @@ func TestRotate(t *testing.T) {
 	require.NoError(err)
 	require.Equal(1, int(cnt))
 
-	v, err := ReadFromPartitions(tx, kv.TxLookup, []byte{1})
+	v, err := kv.TxLookup.GetOne(tx, []byte{1})
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
 	//see after rotate
-	done, err = Rotate(tx, kv.TxLookup)
+	done, err = kv.TxLookup.Rotate(tx)
 	require.NoError(err)
 	require.True(done)
 
-	v, err = ReadFromPartitions(tx, kv.TxLookup, []byte{1})
+	v, err = kv.TxLookup.GetOne(tx, []byte{1})
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
-	primary, secondary, err = Tables(tx, kv.TxLookup)
+	primary, secondary, err = kv.TxLookup.Partitions(tx)
 	require.NoError(err)
 
 	cnt, err = tx.Count(primary)

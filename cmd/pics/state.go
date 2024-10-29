@@ -96,7 +96,7 @@ var bucketLabels = map[string]string{
 	kv.HeaderTD:          "Headers TD",
 	kv.BlockBody:         "Block Bodies",
 	kv.HeaderNumber:      "Header Numbers",
-	kv.TxLookup:          "Transaction Index",
+	kv.TxLookupOld:       "Transaction Index",
 	kv.Code:              "Code Of Contracts",
 	kv.SyncStageProgress: "Sync Progress",
 	kv.PlainState:        "Plain State",

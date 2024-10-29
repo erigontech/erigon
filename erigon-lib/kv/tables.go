@@ -969,17 +969,3 @@ func String2Appendable(in string) (Appendable, error) {
 		return Appendable(MaxUint16), fmt.Errorf("unknown Appendable name: %s", in)
 	}
 }
-
-type PartitionsID [2]string
-type PartitionedTable string
-
-var (
-	TxLookup PartitionedTable
-)
-
-var (
-	TxLookupPartitions = PartitionsID{txLookup0, txLookup1}
-	Partitions         = map[PartitionedTable]PartitionsID{
-		TxLookup: TxLookupPartitions,
-	}
-)
