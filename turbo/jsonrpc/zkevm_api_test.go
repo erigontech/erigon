@@ -417,6 +417,9 @@ func TestGetBatchByNumber(t *testing.T) {
 		assert.NoError(err)
 	}
 
+	err = hDB.WriteBatchEnd(4)
+	assert.NoError(err)
+
 	err = hDB.WriteBlockBatch(5, 2)
 	assert.NoError(err)
 	err = hDB.WriteSequence(4, 1, common.HexToHash("0x22ddb9a356815c3fac1026b6dec5df3124afbadb485c9ba5a3e3398a04b7ba97"), stateRoots[len(stateRoots)-1], common.HexToHash("0x0"))
@@ -540,6 +543,8 @@ func TestGetBatchDataByNumber(t *testing.T) {
 		err = hDB.WriteL1InfoTreeUpdateToGer(l1InforTree)
 		assert.NoError(err)
 	}
+	err = hDB.WriteBatchEnd(4)
+	assert.NoError(err)
 
 	err = hDB.WriteSequence(4, 1, common.HexToHash("0x22ddb9a356815c3fac1026b6dec5df3124afbadb485c9ba5a3e3398a04b7ba97"), stateRoots[len(stateRoots)-1], common.HexToHash("0x0"))
 	assert.NoError(err)
