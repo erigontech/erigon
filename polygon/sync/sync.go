@@ -35,12 +35,14 @@ type heimdallSynchronizer interface {
 	SynchronizeCheckpoints(ctx context.Context) (latest *heimdall.Checkpoint, err error)
 	SynchronizeMilestones(ctx context.Context) (latest *heimdall.Milestone, err error)
 	SynchronizeSpans(ctx context.Context, blockNum uint64) error
+	Ready(ctx context.Context) <-chan error
 }
 
 type bridgeSynchronizer interface {
 	Synchronize(ctx context.Context, blockNum uint64) error
 	Unwind(ctx context.Context, blockNum uint64) error
 	ProcessNewBlocks(ctx context.Context, blocks []*types.Block) error
+	Ready(ctx context.Context) <-chan error
 }
 
 type Sync struct {
@@ -322,6 +324,13 @@ func (s *Sync) applyNewBlockOnTip(
 
 	// len(newConnectedHeaders) is always <= len(blockChain)
 	newConnectedBlocks := blockChain[len(blockChain)-len(newConnectedHeaders):]
+	if len(newConnectedBlocks) > 1 {
+		s.logger.Info(
+			syncLogPrefix(fmt.Sprintf("inserting %d connected blocks", len(newConnectedBlocks))),
+			"start", newConnectedBlocks[0].NumberU64(),
+			"end", newConnectedBlocks[len(newConnectedBlocks)-1].NumberU64(),
+		)
+	}
 	if err := s.store.InsertBlocks(ctx, newConnectedBlocks); err != nil {
 		return err
 	}
@@ -599,7 +608,21 @@ func (s *Sync) maybePenalizePeerOnBadBlockEvent(ctx context.Context, event Event
 //
 
 func (s *Sync) Run(ctx context.Context) error {
-	s.logger.Debug(syncLogPrefix("running sync component"))
+	s.logger.Info(syncLogPrefix("waiting for execution client"))
+
+	if err := <-s.bridgeSync.Ready(ctx); err != nil {
+		return err
+	}
+
+	if err := <-s.heimdallSync.Ready(ctx); err != nil {
+		return err
+	}
+
+	if err := s.execution.Prepare(ctx); err != nil {
+		return err
+	}
+
+	s.logger.Info(syncLogPrefix("running sync component"))
 
 	result, err := s.syncToTip(ctx)
 	if err != nil {
@@ -704,14 +727,25 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 		return syncToTipResult{}, err
 	}
 
+	blocks := result.latestTip.Number.Uint64() - latestTipOnStart.Number.Uint64()
+	s.logger.Info(
+		syncLogPrefix("checkpoint sync finished"),
+		"tip", result.latestTip.Number.Uint64(),
+		"time", common.PrettyAge(startTime),
+		"blocks", blocks,
+		"blk/sec", uint64(float64(blocks)/time.Since(startTime).Seconds()),
+	)
+
+	startTime = time.Now()
 	result, err = s.syncToTipUsingMilestones(ctx, result.latestTip)
 	if err != nil {
 		return syncToTipResult{}, err
 	}
 
-	blocks := result.latestTip.Number.Uint64() - latestTipOnStart.Number.Uint64()
+	blocks = result.latestTip.Number.Uint64() - latestTipOnStart.Number.Uint64()
 	s.logger.Info(
 		syncLogPrefix("sync to tip finished"),
+		"tip", result.latestTip.Number.Uint64(),
 		"time", common.PrettyAge(startTime),
 		"blocks", blocks,
 		"blk/sec", uint64(float64(blocks)/time.Since(startTime).Seconds()),
@@ -756,8 +790,14 @@ type tipDownloaderFunc func(ctx context.Context, startBlockNum uint64) (syncToTi
 
 func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDownloaderFunc) (syncToTipResult, error) {
 	var latestWaypoint heimdall.Waypoint
+	var startBlockNum uint64 = 1
+
 	for {
-		newResult, err := tipDownloader(ctx, tip.Number.Uint64()+1)
+		if tip != nil {
+			startBlockNum = tip.Number.Uint64() + 1
+		}
+
+		newResult, err := tipDownloader(ctx, startBlockNum)
 		if err != nil {
 			return syncToTipResult{}, err
 		}

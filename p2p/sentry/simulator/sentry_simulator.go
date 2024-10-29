@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -121,7 +122,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		messageReceivers: map[isentry.MessageId][]isentry.Sentry_MessagesServer{},
 		knownSnapshots:   knownSnapshots,
 		activeSnapshots:  activeSnapshots,
-		blockReader:      freezeblocks.NewBlockReader(activeSnapshots, nil),
+		blockReader:      freezeblocks.NewBlockReader(activeSnapshots, nil, nil, nil),
 		logger:           logger,
 		downloader:       downloader,
 		chain:            chain,
@@ -455,7 +456,7 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*corety
 	return s.blockReader.HeaderByHash(ctx, nil, hash)
 }
 
-func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.VisibleSegment) error {
+func (s *server) downloadHeaders(ctx context.Context, header *snapshotsync.VisibleSegment) error {
 	fileName := snaptype.SegmentFileName(0, header.From(), header.To(), coresnaptype.Enums.Headers)
 	session := sync.NewTorrentSession(s.downloader, s.chain)
 
@@ -471,5 +472,5 @@ func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Visib
 
 	info, _, _ := snaptype.ParseFileName(session.LocalFsRoot(), fileName)
 
-	return coresnaptype.Headers.BuildIndexes(ctx, info, nil, session.LocalFsRoot(), nil, log.LvlDebug, s.logger)
+	return coresnaptype.Headers.BuildIndexes(ctx, info, nil, nil, session.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }

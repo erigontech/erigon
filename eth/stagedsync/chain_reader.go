@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -34,7 +35,7 @@ import (
 // ChainReader implements consensus.ChainReader
 type ChainReader struct {
 	Cfg         chain.Config
-	Db          kv.Getter
+	Db          kv.Tx
 	BlockReader services.FullBlockReader
 	Logger      log.Logger
 }
@@ -113,15 +114,15 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 func (cr ChainReader) FrozenBlocks() uint64    { return cr.BlockReader.FrozenBlocks() }
 func (cr ChainReader) FrozenBorBlocks() uint64 { return cr.BlockReader.FrozenBorBlocks() }
 
-func (cr ChainReader) BorStartEventID(_ libcommon.Hash, _ uint64) uint64 {
+func (cr ChainReader) BorStartEventId(_ libcommon.Hash, _ uint64) uint64 {
 	panic("bor events by block not implemented")
 }
 func (cr ChainReader) BorEventsByBlock(_ libcommon.Hash, _ uint64) []rlp.RawValue {
 	panic("bor events by block not implemented")
 }
 
-func (cr ChainReader) BorSpan(spanId uint64) []byte {
-	span, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
+func (cr ChainReader) BorSpan(spanId uint64) *heimdall.Span {
+	span, _, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
 	if err != nil {
 		cr.Logger.Error("BorSpan failed", "err", err)
 		return nil

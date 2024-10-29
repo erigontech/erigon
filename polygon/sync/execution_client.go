@@ -36,6 +36,7 @@ var ErrForkChoiceUpdateFailure = errors.New("fork choice update failure")
 var ErrForkChoiceUpdateBadBlock = errors.New("fork choice update bad block")
 
 type ExecutionClient interface {
+	Prepare(ctx context.Context) error
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) (common.Hash, error)
 	CurrentHeader(ctx context.Context) (*types.Header, error)
@@ -49,6 +50,20 @@ type executionClient struct {
 
 func NewExecutionClient(client executionproto.ExecutionClient) ExecutionClient {
 	return &executionClient{client}
+}
+
+func (e *executionClient) Prepare(ctx context.Context) error {
+	ready, err := e.client.Ready(ctx, &emptypb.Empty{})
+
+	if err != nil {
+		return err
+	}
+
+	if !ready.Ready {
+		return errors.New("excecution client not ready")
+	}
+
+	return nil
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
@@ -128,9 +143,7 @@ func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, err
 	if err != nil {
 		return nil, err
 	}
-	if (response == nil) || (response.Header == nil) {
-		return nil, nil
-	}
+
 	return eth1utils.HeaderRpcToHeader(response.Header)
 }
 

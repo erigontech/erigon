@@ -44,7 +44,9 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 		d: d,
 	}
 
+	d.lock.Lock()
 	d.onTorrentComplete = svr.onTorrentComplete
+	d.lock.Unlock()
 
 	return svr, nil
 }

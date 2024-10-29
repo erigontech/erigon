@@ -65,7 +65,7 @@ import (
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
 	"github.com/erigontech/erigon/params"
-	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/logging"
 )
@@ -1661,9 +1661,10 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 	cfg.WithHeimdallWaypointRecording = ctx.Bool(WithHeimdallWaypoints.Name)
-	borsnaptype.RecordWayPoints(cfg.WithHeimdallWaypointRecording)
 	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 	cfg.PolygonSyncStage = ctx.Bool(PolygonSyncStageFlag.Name)
+	heimdall.RecordWayPoints(
+		cfg.WithHeimdallWaypointRecording || cfg.PolygonSync || cfg.PolygonSyncStage)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
