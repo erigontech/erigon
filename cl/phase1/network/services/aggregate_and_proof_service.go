@@ -127,6 +127,16 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
 		return ErrIgnore
 	}
+
+	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
+	committeeCountPerSlot := headState.CommitteeCount(target.Epoch)
+	if committeeIndex >= committeeCountPerSlot {
+		return errors.New("invalid committee index in aggregate and proof")
+	}
+	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
+	if aggregateData.Target.Epoch != epoch {
+		return errors.New("invalid target epoch in aggregate and proof")
+	}
 	cn()
 	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 	finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
@@ -152,16 +162,11 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return ErrIgnore
 	}
 
-	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
-	committeeCountPerSlot := headState.CommitteeCount(target.Epoch)
-	if committeeIndex >= committeeCountPerSlot {
-		return errors.New("invalid committee index in aggregate and proof")
+	headState, cn = a.syncedDataManager.HeadState()
+	defer cn()
+	if headState == nil {
+		return ErrIgnore
 	}
-	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
-	if aggregateData.Target.Epoch != epoch {
-		return errors.New("invalid target epoch in aggregate and proof")
-	}
-	// AAAA
 
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
@@ -175,6 +180,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if len(attestingIndices) == 0 {
 		return errors.New("no attesting indicies")
 	}
+	cn()
 
 	monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
 
