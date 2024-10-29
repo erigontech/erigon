@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
+const EnableDeadlockDetector = true
+
 var _ SyncedData = (*SyncedDataManager)(nil)
 
 type SyncedDataManager struct {
@@ -91,8 +93,6 @@ func (s *SyncedDataManager) waitUntilNotWriting() {
 
 func EmptyCancel() {}
 
-var x atomic.Int64
-
 func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	s.waitUntilNotWriting()
 	_, synced := s.headRoot.Load().(common.Hash)
@@ -105,14 +105,16 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	st := debug.Stack()
 
 	ch := make(chan struct{})
-	go func() {
-		select {
-		case <-ch:
-			return
-		case <-time.After(100 * time.Second):
-			panic(string(st))
-		}
-	}()
+	if EnableDeadlockDetector {
+		go func() {
+			select {
+			case <-ch:
+				return
+			case <-time.After(100 * time.Second):
+				panic(string(st))
+			}
+		}()
+	}
 
 	s.mu.RLock()
 	return s.headState, func() {
@@ -121,7 +123,9 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 		if isCanceled {
 			return
 		}
-		ch <- struct{}{}
+		if EnableDeadlockDetector {
+			ch <- struct{}{}
+		}
 		isCanceled = true
 		s.mu.RUnlock()
 	}
