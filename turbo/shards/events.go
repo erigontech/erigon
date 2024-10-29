@@ -207,6 +207,10 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 		var blockNum uint64
 		reply := make([]*remote.SubscribeLogsReply, 0, len(receipts))
 		for _, receipt := range receipts {
+			if receipt == nil {
+				continue
+			}
+
 			blockNum = receipt.BlockNumber.Uint64()
 			//txIndex++
 			//// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)

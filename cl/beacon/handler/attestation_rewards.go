@@ -92,9 +92,9 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
-	_, headSlot, err := a.forkchoiceStore.GetHead()
+	_, headSlot, statusCode, err := a.getHead()
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 	headEpoch := headSlot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch > headEpoch {

@@ -194,6 +194,22 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	//}
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
+	// Update the last new block seen.
+	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
+		if err != nil {
+			return err
+		}
+		if num != nil {
+			return rawdb.WriteLastNewBlockSeen(tx, *num)
+		}
+		return nil
+	}); err != nil {
+		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		return
+	}
+
 	var validationError string
 	type canonicalEntry struct {
 		hash   common.Hash
@@ -521,7 +537,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
-		logArgs := []interface{}{"head", headHash, "hash", blockHash}
+		logArgs := []interface{}{"age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)), "head", headHash, "hash", blockHash}
 		if flushExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
 			if !e.syncCfg.ParallelStateFlushing {

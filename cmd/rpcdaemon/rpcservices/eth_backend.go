@@ -41,8 +41,10 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 var _ services.FullBlockReader = &RemoteBackend{}
@@ -109,13 +111,18 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	block, _, err := back.BlockWithSenders(ctx, db, hash, *number)
 	return block, err
 }
-func (back *RemoteBackend) TxsV3Enabled() bool                    { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() services.BlockSnapshots    { panic("not implemented") }
-func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
-func (back *RemoteBackend) AllTypes() []snaptype.Type             { panic("not implemented") }
-func (back *RemoteBackend) FrozenBlocks() uint64                  { return back.blockReader.FrozenBlocks() }
-func (back *RemoteBackend) FrozenBorBlocks() uint64               { return back.blockReader.FrozenBorBlocks() }
-func (back *RemoteBackend) FrozenFiles() (list []string)          { return back.blockReader.FrozenFiles() }
+func (back *RemoteBackend) TxsV3Enabled() bool                        { panic("not implemented") }
+func (back *RemoteBackend) Snapshots() snapshotsync.BlockSnapshots    { panic("not implemented") }
+func (back *RemoteBackend) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
+
+func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
+	return back.blockReader.Ready(ctx)
+}
+
+func (back *RemoteBackend) AllTypes() []snaptype.Type    { panic("not implemented") }
+func (back *RemoteBackend) FrozenBlocks() uint64         { return back.blockReader.FrozenBlocks() }
+func (back *RemoteBackend) FrozenBorBlocks() uint64      { return back.blockReader.FrozenBorBlocks() }
+func (back *RemoteBackend) FrozenFiles() (list []string) { return back.blockReader.FrozenFiles() }
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
 }
@@ -325,14 +332,14 @@ func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bl
 func (back *RemoteBackend) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	return back.blockReader.LastEventId(ctx, tx)
 }
-func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
 	return back.blockReader.EventLookup(ctx, tx, txnHash)
 }
 func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return back.blockReader.EventsByBlock(ctx, tx, hash, blockNum)
 }
-func (back *RemoteBackend) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error) {
-	return back.blockReader.BorStartEventID(ctx, tx, hash, blockNum)
+func (back *RemoteBackend) BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error) {
+	return back.blockReader.BorStartEventId(ctx, tx, hash, blockNum)
 }
 
 func (back *RemoteBackend) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
@@ -347,7 +354,7 @@ func (back *RemoteBackend) LastFrozenEventBlockNum() uint64 {
 	panic("not implemented")
 }
 
-func (back *RemoteBackend) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+func (back *RemoteBackend) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error) {
 	return back.blockReader.Span(ctx, tx, spanId)
 }
 
@@ -355,16 +362,16 @@ func (r *RemoteBackend) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, 
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
-	return nil, nil
+func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Milestone, bool, error) {
+	return nil, false, nil
 }
 
 func (r *RemoteBackend) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	return 0, false, errors.New("not implemented")
 }
 
-func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
-	return nil, nil
+func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Checkpoint, bool, error) {
+	return nil, false, nil
 }
 
 func (back *RemoteBackend) LastFrozenSpanId() uint64 {

@@ -133,9 +133,10 @@ type ForkChoiceStore struct {
 	emitters *beaconevents.EventEmitter
 	synced   atomic.Bool
 
-	ethClock         eth_clock.EthereumClock
-	optimisticStore  optimistic.OptimisticStore
-	validatorMonitor monitor.ValidatorMonitor
+	ethClock                eth_clock.EthereumClock
+	optimisticStore         optimistic.OptimisticStore
+	validatorMonitor        monitor.ValidatorMonitor
+	probabilisticHeadGetter bool
 }
 
 type LatestMessage struct {
@@ -159,6 +160,7 @@ func NewForkChoiceStore(
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
 	validatorMonitor monitor.ValidatorMonitor,
+	probabilisticHeadGetter bool,
 ) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -233,32 +235,33 @@ func NewForkChoiceStore(
 	headSet := make(map[libcommon.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
-		forkGraph:             forkGraph,
-		equivocatingIndicies:  make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:        make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		eth2Roots:             eth2Roots,
-		engine:                engine,
-		operationsPool:        operationsPool,
-		anchorPublicKeys:      anchorPublicKeys,
-		beaconCfg:             anchorState.BeaconConfig(),
-		preverifiedSizes:      preverifiedSizes,
-		finalityCheckpoints:   finalityCheckpoints,
-		totalActiveBalances:   totalActiveBalances,
-		randaoMixesLists:      randaoMixesLists,
-		randaoDeltas:          randaoDeltas,
-		headSet:               headSet,
-		weights:               make(map[libcommon.Hash]uint64),
-		participation:         participation,
-		emitters:              emitters,
-		genesisTime:           anchorState.GenesisTime(),
-		syncedDataManager:     syncedDataManager,
-		nextBlockProposers:    nextBlockProposers,
-		genesisValidatorsRoot: anchorState.GenesisValidatorsRoot(),
-		hotSidecars:           make(map[libcommon.Hash][]*cltypes.BlobSidecar),
-		blobStorage:           blobStorage,
-		ethClock:              ethClock,
-		optimisticStore:       optimistic.NewOptimisticStore(),
-		validatorMonitor:      validatorMonitor,
+		forkGraph:               forkGraph,
+		equivocatingIndicies:    make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:          make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		eth2Roots:               eth2Roots,
+		engine:                  engine,
+		operationsPool:          operationsPool,
+		anchorPublicKeys:        anchorPublicKeys,
+		beaconCfg:               anchorState.BeaconConfig(),
+		preverifiedSizes:        preverifiedSizes,
+		finalityCheckpoints:     finalityCheckpoints,
+		totalActiveBalances:     totalActiveBalances,
+		randaoMixesLists:        randaoMixesLists,
+		randaoDeltas:            randaoDeltas,
+		headSet:                 headSet,
+		weights:                 make(map[libcommon.Hash]uint64),
+		participation:           participation,
+		emitters:                emitters,
+		genesisTime:             anchorState.GenesisTime(),
+		syncedDataManager:       syncedDataManager,
+		nextBlockProposers:      nextBlockProposers,
+		genesisValidatorsRoot:   anchorState.GenesisValidatorsRoot(),
+		hotSidecars:             make(map[libcommon.Hash][]*cltypes.BlobSidecar),
+		blobStorage:             blobStorage,
+		ethClock:                ethClock,
+		optimisticStore:         optimistic.NewOptimisticStore(),
+		validatorMonitor:        validatorMonitor,
+		probabilisticHeadGetter: probabilisticHeadGetter,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)

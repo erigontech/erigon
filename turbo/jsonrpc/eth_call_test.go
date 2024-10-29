@@ -578,10 +578,10 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSet, "", pruneTo, logEvery, ctx)
 	assert.NoError(t, err)
 
-	err = rawdb.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32)
+	err = rawdb.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32, time.Hour)
 	assert.NoError(t, err)
 
-	err = rawdb.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32)
+	err = rawdb.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32, time.Hour)
 	assert.NoError(t, err)
 
 	err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, "", pruneTo, logEvery, ctx)
