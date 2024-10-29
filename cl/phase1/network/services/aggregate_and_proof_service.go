@@ -98,6 +98,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *cltypes.SignedAggregateAndProofData,
 ) error {
+	return ErrIgnore
 	headState, cn := a.syncedDataManager.HeadState()
 	defer cn()
 	if headState == nil {
