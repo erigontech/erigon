@@ -24,6 +24,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -689,4 +690,22 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	}
 
 	return s.OpenFolder()
+}
+
+func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Sprintf("Get(%s, %d), %s, %s\n", tbl, slot, rec, debug.Stack()))
+		}
+	}()
+
+	view := s.View()
+	defer view.Close()
+
+	seg, ok := view.VisibleSegment(slot, tbl)
+	if !ok {
+		return nil, nil
+	}
+
+	return seg.Get(slot)
 }
