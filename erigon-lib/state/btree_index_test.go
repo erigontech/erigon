@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"path"
 	"path/filepath"
 	"sort"
@@ -391,21 +392,21 @@ func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []by
 func Test_Btrie_Insert(t *testing.T) {
 	bt := NewBtrie()
 
-	keys := [][]byte{
-		{0xce, 0xad},
-		{0xde, 0xad},
-		{0xde, 1, 2, 3, 4, 0xbd},
-		{0xde, 1, 2, 3, 5, 0xbd},
-		{0xde, 1, 2, 4, 5, 0xbd},
-		{0xde, 1, 2, 0xbd},
-	}
-
-	// keys := make([][]byte, 0)
-	// for i := 0; i < 400; i++ {
-	// 	b := make([]byte, 10)
-	// 	_, _ = rand.Read(b)
-	// 	keys = append(keys, b)
+	// keys := [][]byte{
+	// 	{0xce, 0xad},
+	// 	{0xde, 0xad},
+	// 	{0xde, 1, 2, 3, 4, 0xbd},
+	// 	{0xde, 1, 2, 3, 5, 0xbd},
+	// 	{0xde, 1, 2, 4, 5, 0xbd},
+	// 	{0xde, 1, 2, 0xbd},
 	// }
+
+	keys := make([][]byte, 0)
+	for i := 0; i < 400; i++ {
+		b := make([]byte, 10)
+		_, _ = rand.Read(b)
+		keys = append(keys, b)
+	}
 
 	sort.Slice(keys, func(i, j int) bool {
 		return bytes.Compare(keys[i], keys[j]) < 0
@@ -422,15 +423,15 @@ func Test_Btrie_Insert(t *testing.T) {
 	}
 
 	for ki, key := range keys {
-		found, li, ri := bt.SeekLR(key)
-		fmt.Printf("%x -> %v [%d, %d]\n", key, found, li, ri)
-		require.Truef(t, found, "key=%x", key)
+		li, ri := bt.SeekLR(key)
+		fmt.Printf("%x -> [%d, %d]\n", key, li, ri)
+		// require.Truef(t, found, "key=%x", key)
 		require.EqualValuesf(t, ki, li, "key=%x", key)
 		require.InDelta(t, ki, ri, 1, "key=%x", key)
 
 		key[len(key)-1]++
-		found, li, ri = bt.SeekLR(key)
-		require.True(t, found)
+		li, ri = bt.SeekLR(key)
+		// require.True(t, found)
 		require.GreaterOrEqual(t, uint64(ki), li)
 		require.GreaterOrEqual(t, uint64(ki), ri)
 	}

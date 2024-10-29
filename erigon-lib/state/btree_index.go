@@ -1287,9 +1287,10 @@ func (bt *Btrie) nextChildTo(nibble byte) (byte, bool) {
 // Main need of this btrie - we need to figure L and R values for given prefix.
 type nibbler struct {
 	stack [5]*trieNode
+	path  []byte
 }
 
-func (bt *Btrie) SeekLR(key []byte) (found bool, Li, Ri uint64) {
+func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 	if bt.trace {
 		fmt.Printf("SeekLR '%x'\n", key)
 	}
@@ -1303,9 +1304,9 @@ func (bt *Btrie) SeekLR(key []byte) (found bool, Li, Ri uint64) {
 			fmt.Printf("not found nib=%x next=%x\n", nib, nnib)
 		}
 		if !ok {
-			return false, 0, 0
+			return 0, 0
 		}
-		return true, 0, bt.child[nnib].minDi
+		return 0, bt.child[nnib].minDi
 	}
 
 	next := bt.child[nib]
@@ -1314,92 +1315,59 @@ func (bt *Btrie) SeekLR(key []byte) (found bool, Li, Ri uint64) {
 	ni := 0
 	for {
 		nibbler.stack[ni] = next
+		nibbler.path = append(nibbler.path, nib)
 		ni++
 
 		Li = max(Li, next.minDi)
 		Ri = min(Ri, next.maxDi)
 
-		if ni > len(nibbler.stack) {
-			panic("stack overflow")
-			return true, Li, Ri
-		}
 		fmt.Printf("[%2x] next depth=%d %s\n", nib, depth, next.String())
-		for nn := 0; nn <= 255; nn++ {
-			if nd := next.child[byte(nn)]; nd != nil {
-				fmt.Printf("   %2x: %p %s\n", nn, nd, nd.String())
-			}
-		}
+		// for nn := 0; nn <= 255; nn++ {
+		// 	if nd := next.child[byte(nn)]; nd != nil {
+		// 		fmt.Printf("   %2x: %p %s\n", nn, nd, nd.String())
+		// 	}
+		// }
 
 		cpl := commonPrefixLength(key[depth:], next.ext)
-		if cpl == 0 && len(next.ext) == 0 {
-			nib = key[depth]
-			nx := next.child[nib]
-			if nx != nil {
-				next = nx
-				if len(next.child) == 0 && len(next.ext) == 0 {
-					return true, next.minDi, next.maxDi
-				}
-			} else {
-				nnib, ok := next.nextChildTo(key[depth])
-				if !ok {
-					return false, 0, 0
-				}
-				return true, next.minDi, next.child[nnib].minDi
-			}
-			depth++
-
-			continue
-		}
-		if cpl == len(next.ext) {
-			if cpl == len(key[depth:]) { // full match
-				// fmt.Printf("full match %x\n", key)
-				return true, next.minDi, next.maxDi
-			}
-			nib = key[depth+cpl]
-			fmt.Printf("ext match nib=%x depth=%d\n", nib, depth+cpl)
-			nx := next.child[nib]
-			if nx != nil {
-				next = nx
-				if len(next.child) == 0 && len(next.ext) == 0 { // is leaf without ext
-					return true, next.minDi, next.maxDi
-				}
-			} else {
-				nnib, ok := next.nextChildTo(key[depth+cpl])
-				if !ok {
-					return false, 0, 0
-				}
-				return true, next.minDi, next.child[nnib].minDi
-			}
-			depth += cpl + 1
-
-			continue
-			// nnib, ok := next.nextChildTo(key[depth+cpl])
-			// if !ok {
-			// 	return false, 0, 0
-			// }
-			// fmt.Printf("partial match %x nib=%x next=%x\n", key, key[depth+cpl], nnib)
-			// return true, next.child[nnib].minDi, next.child[nnib].maxDi
-		}
 		if cpl < len(next.ext) {
 			fmt.Printf("smallest child %x\n", key[:depth+cpl])
 			smallestChild := next.child[0]
 			if smallestChild == nil {
 				sn, ok := next.nextChildTo(0)
 				if ok {
-					return true, next.minDi, next.child[sn].minDi
+					return next.minDi, next.child[sn].minDi
 				}
-				return true, next.minDi, next.maxDi
+				return next.minDi, next.maxDi
 			}
 
 			fmt.Printf("pat match %x cpl=%d\n", key, cpl)
-			return true, next.minDi, smallestChild.minDi
+			return next.minDi, smallestChild.minDi
 		}
-		fmt.Printf("wtf %x %x\n", key, next.ext)
-		next = next.child[key[depth+cpl]]
-		depth += cpl
+		if cpl == len(next.ext) {
+			if cpl == len(key[depth:]) && cpl > 0 { // full match
+				return next.minDi, next.maxDi
+			}
+			nib = key[depth+cpl]
+			fmt.Printf("ext match nib=%x depth=%d\n", nib, depth+cpl)
+			if nx := next.child[nib]; nx != nil {
+				if len(nx.child) == 0 && len(nx.ext) == 0 { // is leaf without ext
+					return nx.minDi, nx.maxDi
+				}
+				next = nx
+				depth += cpl + 1
+				continue
+			}
+
+			nnib, ok := next.nextChildTo(key[depth+cpl])
+			if !ok {
+				// ni--
+				return 0, 0
+			}
+			return next.minDi, next.child[nnib].minDi
+		}
 	}
 
-	return false, 0, 0
+	return 0, 0
 }
 
 // Get seeks exact match to the key.
@@ -1501,6 +1469,7 @@ func (bt *Btrie) Insert(key []byte, di uint64) {
 
 	next := bt.child[nib]
 	rows := 0
+	rowLimit := 5
 	for {
 		rows++
 		if bt.trace {
@@ -1514,6 +1483,11 @@ func (bt *Btrie) Insert(key []byte, di uint64) {
 				depth++
 				continue
 			}
+			if rows > rowLimit {
+				next.minDi = min(next.minDi, di)
+				next.maxDi = max(next.maxDi, di)
+				return
+			}
 
 			// fmt.Printf("-depth=%d insert [%d] %x\n", depth, di, key[depth:])
 			next.split(key[depth:], cpl, di)
@@ -1526,12 +1500,22 @@ func (bt *Btrie) Insert(key []byte, di uint64) {
 				next = nx
 				continue
 			}
+			if rows > rowLimit {
+				next.minDi = min(next.minDi, di)
+				next.maxDi = max(next.maxDi, di)
+				return
+			}
 
 			fmt.Printf("depth=%d insert [%d] %x\n", depth, di, key[depth:])
 			next.child[nib] = newTrieNode(di, key[depth:])
 			return
 		}
 
+		if rows > rowLimit {
+			next.minDi = min(next.minDi, di)
+			next.maxDi = max(next.maxDi, di)
+			return
+		}
 		next.split(key[depth:], cpl, di)
 		depth += cpl
 		return
