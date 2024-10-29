@@ -103,6 +103,17 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	var mu sync.Mutex
 
 	debug.PrintStack()
+	st := debug.Stack()
+
+	ch := make(chan struct{})
+	go func() {
+		select {
+		case <-ch:
+			return
+		case <-time.After(100 * time.Second):
+			panic(string(st))
+		}
+	}()
 
 	s.mu.RLock()
 	return s.headState, func() {
@@ -111,6 +122,7 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 		if isCanceled {
 			return
 		}
+		ch <- struct{}{}
 		isCanceled = true
 		s.mu.RUnlock()
 	}
