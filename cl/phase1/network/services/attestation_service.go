@@ -211,6 +211,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
 	}
+	cn()
 	signingRoot, err := computeSigningRoot(att.Attestation.Data, domain)
 	if err != nil {
 		return fmt.Errorf("unable to get signing root: %v", err)
@@ -239,7 +240,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
 		return ErrIgnore
 	}
-	cn()
 
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{signature[:]},
