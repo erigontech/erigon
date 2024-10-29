@@ -17,7 +17,6 @@
 package synced_data
 
 import (
-	"fmt"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -87,11 +86,7 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	isCanceled := false
 	var mu sync.Mutex
 
-	stack := debug.Stack()
-	if _, ok := dbMap.Load(string(stack)); !ok {
-		fmt.Println("HeadState called from", string(stack))
-	}
-	dbMap.Store(string(stack), true)
+	debug.PrintStack()
 
 	s.mu.RLock()
 	return s.headState, func() {

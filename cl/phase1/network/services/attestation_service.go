@@ -117,6 +117,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		}
 		committeeIndex = index
 	}
+	return ErrIgnore
 
 	headState, cn := s.syncedDataManager.HeadStateReader()
 	defer cn()
@@ -124,7 +125,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if headState == nil {
 		return ErrIgnore
 	}
-	return ErrIgnore
 	key, err := att.Attestation.HashSSZ()
 	if err != nil {
 		return err
