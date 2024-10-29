@@ -136,6 +136,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	) != finalizedCheckpoint.Root {
 		return ErrIgnore
 	}
+	return ErrIgnore
 
 	// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
 	if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot); !ok {
@@ -160,8 +161,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if aggregateData.Target.Epoch != epoch {
 		return errors.New("invalid target epoch in aggregate and proof")
 	}
-
-	return ErrIgnore
 
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
