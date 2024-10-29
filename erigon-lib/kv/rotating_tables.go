@@ -6,19 +6,21 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
-type PartitionsID [2]string
+// RotatingTable - is partitioned Table with only 2 partitions: primary/secondary (hot/cold)
+// - new writes must go to `primary`
+// - do prune only `secondary`
+// - rotate when prune of `secondary` is done
+type RotatingTable string
 
-type PartitionedTable string
-
-func (table PartitionedTable) Partitions(tx Getter) (primary string, secondary string, err error) {
+func (table RotatingTable) Partitions(tx Getter) (primary string, secondary string, err error) {
 	primaryID, secondaryID, err := table.PartitionsID(tx)
 	if err != nil {
 		return "", "", err
 	}
-	return Partitions[table][primaryID], Partitions[table][secondaryID], nil
+	return RotatingTablePartitions[table][primaryID], RotatingTablePartitions[table][secondaryID], nil
 }
 
-func (table PartitionedTable) GetOne(tx Getter, k []byte) (v []byte, err error) {
+func (table RotatingTable) GetOne(tx Getter, k []byte) (v []byte, err error) {
 	primary, secondary, err := table.Partitions(tx)
 	if err != nil {
 		return nil, err
@@ -39,7 +41,7 @@ func (table PartitionedTable) GetOne(tx Getter, k []byte) (v []byte, err error) 
 	}
 	return nil, nil
 }
-func (table PartitionedTable) PartitionsID(tx Getter) (primary uint8, secondary uint8, err error) {
+func (table RotatingTable) PartitionsID(tx Getter) (primary uint8, secondary uint8, err error) {
 	val, err := tx.GetOne(TblPruningProgress, []byte(string(table)+"_primary"))
 	if err != nil || len(val) < 1 {
 		return 0, 1, err
@@ -50,7 +52,7 @@ func (table PartitionedTable) PartitionsID(tx Getter) (primary uint8, secondary 
 	return 1, 0, nil
 }
 
-func (table PartitionedTable) Rotate(tx RwTx) (bool, error) {
+func (table RotatingTable) Rotate(tx RwTx) (bool, error) {
 	{ //assert secondary must be empty
 		_, secondary, err := table.Partitions(tx)
 		if err != nil {
@@ -76,14 +78,14 @@ func (table PartitionedTable) Rotate(tx RwTx) (bool, error) {
 	return true, nil
 }
 
-func putPrimaryPartition(tx RwTx, table PartitionedTable, newActivePartitionNum uint8) error {
+func putPrimaryPartition(tx RwTx, table RotatingTable, newActivePartitionNum uint8) error {
 	return tx.Put(TblPruningProgress, []byte(string(table)+"_primary"), []byte{newActivePartitionNum})
 }
 
-func (table PartitionedTable) PutPrimaryPartitionMax(tx RwTx, _max uint64) error {
+func (table RotatingTable) PutPrimaryPartitionMax(tx RwTx, _max uint64) error {
 	return tx.Put(TblPruningProgress, []byte(string(table)+"_primary_max"), hexutility.EncodeTs(_max))
 }
-func (table PartitionedTable) Max(tx RwTx) (primaryMax, secondaryMax uint64, err error) {
+func (table RotatingTable) Max(tx RwTx) (primaryMax, secondaryMax uint64, err error) {
 	fst, err := tx.GetOne(TblPruningProgress, []byte(string(table)+"_primary_max"))
 	if err != nil {
 		return 0, 0, err
@@ -101,16 +103,14 @@ func (table PartitionedTable) Max(tx RwTx) (primaryMax, secondaryMax uint64, err
 	return
 }
 
-var (
-	TxLookupPartitions = PartitionsID{txLookup0, txLookup1}
-)
+type RotatingTablePartitionsList [2]string
 
 var (
-	Partitions = map[PartitionedTable]PartitionsID{
-		TxLookup: TxLookupPartitions,
+	RotatingTablePartitions = map[RotatingTable]RotatingTablePartitionsList{
+		TxLookup: {txLookup0, txLookup1},
 	}
 )
 
 var (
-	TxLookup PartitionedTable
+	TxLookup RotatingTable
 )

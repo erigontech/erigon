@@ -40,8 +40,8 @@ func TestRotate(t *testing.T) {
 
 	primary, secondary, err := kv.TxLookup.Partitions(tx)
 	require.NoError(err)
-	require.Equal(kv.Partitions[kv.TxLookup][0], primary)
-	require.Equal(kv.Partitions[kv.TxLookup][1], secondary)
+	require.Equal(kv.RotatingTablePartitionsList[kv.TxLookup][0], primary)
+	require.Equal(kv.RotatingTablePartitionsList[kv.TxLookup][1], secondary)
 
 	done, err := kv.TxLookup.Rotate(tx)
 	require.NoError(err)
@@ -49,8 +49,8 @@ func TestRotate(t *testing.T) {
 
 	primary, secondary, err = kv.TxLookup.Partitions(tx)
 	require.NoError(err)
-	require.Equal(kv.Partitions[kv.TxLookup][1], primary)
-	require.Equal(kv.Partitions[kv.TxLookup][0], secondary)
+	require.Equal(kv.RotatingTablePartitionsList[kv.TxLookup][1], primary)
+	require.Equal(kv.RotatingTablePartitionsList[kv.TxLookup][0], secondary)
 
 	//write to primary
 	err = tx.Put(primary, []byte{1}, []byte{1})
