@@ -72,7 +72,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 		return err
 	}
 	s.headSlot.Store(newState.Slot())
-	s.headRoot.Store(common.Hash(blkRoot))
+	s.headRoot.Store(blkRoot)
 	return err
 }
 
