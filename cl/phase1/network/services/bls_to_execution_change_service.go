@@ -101,6 +101,8 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 
 	// assert bls.Verify(address_change.from_bls_pubkey, signing_root, signed_address_change.signature)
 	genesisValidatorRoot := stateReader.GenesisValidatorsRoot()
+	cn()
+
 	domain, err := fork.ComputeDomain(s.beaconCfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(uint32(s.beaconCfg.GenesisForkVersion)), genesisValidatorRoot)
 	if err != nil {
 		return err
@@ -109,7 +111,6 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	if err != nil {
 		return err
 	}
-	cn()
 
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{msg.SignedBLSToExecutionChange.Signature[:]},
