@@ -148,7 +148,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 
 		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 		for _, txn := range body.Transactions {
-			if err := next(k, txn.Hash().Bytes(), blockNumBytes); err != nil {
+			v := append(txn.Hash().Bytes()[:], blockNumBytes...)
+			if err := next(k, hexutility.EncodeTs(blocknum/100), v); err != nil {
 				return err
 			}
 		}
