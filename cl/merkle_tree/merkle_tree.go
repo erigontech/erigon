@@ -211,6 +211,10 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	}
 	other.leavesCount = m.leavesCount
 	other.limit = m.limit
+	other.dirtyLeaves = make([]atomic.Bool, len(m.dirtyLeaves))
+	for i := 0; i < len(m.dirtyLeaves); i++ {
+		other.dirtyLeaves[i].Store(m.dirtyLeaves[i].Load())
+	}
 }
 
 func (m *MerkleTree) finishHashing(lastLayerIdx int, root []byte) {

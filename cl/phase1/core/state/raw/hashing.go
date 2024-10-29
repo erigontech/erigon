@@ -17,7 +17,6 @@
 package raw
 
 import (
-	"fmt"
 	"sync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -32,7 +31,6 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	if err = b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
-	fmt.Println("Hashing BeaconState")
 	// for i := 0; i < len(b.leaves); i += 32 {
 	// 	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
 	// }
