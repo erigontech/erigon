@@ -23,7 +23,7 @@ func (table RotatingTable) Partitions(tx Getter) (primary string, secondary stri
 	if err != nil {
 		return "", "", err
 	}
-	return rotatingTablePartitions[table][primaryID], rotatingTablePartitions[table][secondaryID], nil
+	return RotatingTablePartitions[table][primaryID], RotatingTablePartitions[table][secondaryID], nil
 }
 
 func (table RotatingTable) partitionsID(tx Getter) (primary uint8, secondary uint8, err error) {
@@ -162,7 +162,7 @@ func (table RotatingTable) PartitionsMax(tx RwTx) (primaryMax, secondaryMax uint
 type rotatingTablePartitionsList [2]string
 
 var (
-	rotatingTablePartitions = map[RotatingTable]rotatingTablePartitionsList{
+	RotatingTablePartitions = map[RotatingTable]rotatingTablePartitionsList{
 		TxLookup: {txLookup0, txLookup1},
 	}
 )
