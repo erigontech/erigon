@@ -386,11 +386,15 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		headState, cn := a.syncedDataManager.HeadState()
-		if headState == nil {
-			continue
-		}
+
 		a.aggregatesScheduledForLaterExecution.Range(func(key, value any) bool {
+			headState, cn := a.syncedDataManager.HeadState()
+			if headState == nil {
+				// Discard the job if we can't get the head state
+				a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
+				return false
+			}
+			defer cn()
 			job := value.(*aggregateJob)
 			// check if it has expired
 			if time.Since(job.creationTime) > attestationJobExpiry {
@@ -409,6 +413,5 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 			a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
 		})
-		cn()
 	}
 }
