@@ -203,6 +203,10 @@ func (m *MerkleTree) ComputeRoot() libcommon.Hash {
 }
 
 func (m *MerkleTree) CopyInto(other *MerkleTree) {
+	other.mu.Lock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	defer other.mu.Unlock()
 	other.computeLeaf = m.computeLeaf
 	other.layers = make([][]byte, len(m.layers))
 	for i := 0; i < len(m.layers); i++ {
@@ -212,6 +216,7 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	other.leavesCount = m.leavesCount
 	other.limit = m.limit
 	other.dirtyLeaves = make([]atomic.Bool, len(m.dirtyLeaves))
+
 	for i := 0; i < len(m.dirtyLeaves); i++ {
 		other.dirtyLeaves[i].Store(m.dirtyLeaves[i].Load())
 	}
