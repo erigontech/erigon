@@ -29,10 +29,11 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/holiman/uint256"
 )
 
 var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
@@ -60,7 +61,7 @@ func TestKeccak256HasherNew(t *testing.T) {
 	exp, _ := hex.DecodeString("3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
 	hasher := sha3.New256()
 	hasher.Write(msg)
-	var h libcommon.Hash
+	var h common.Hash
 	if !bytes.Equal(exp, hasher.Sum(h[:0])) {
 		t.Fatalf("hash %s mismatch: want: %x have: %x", "new", exp, h[:])
 	}
@@ -76,10 +77,10 @@ func TestKeccak256HasherMulti(t *testing.T) {
 	hasher.Write(d2)
 	d3, _ := hex.DecodeString("babe")
 	hasher.Write(d3)
-	checkhash(t, "multi1", func(in []byte) []byte { var h libcommon.Hash; return hasher.Sum(h[:0]) }, []byte{}, exp1)
+	checkhash(t, "multi1", func(in []byte) []byte { var h common.Hash; return hasher.Sum(h[:0]) }, []byte{}, exp1)
 	d4, _ := hex.DecodeString("5678")
 	hasher.Write(d4)
-	checkhash(t, "multi2", func(in []byte) []byte { var h libcommon.Hash; return hasher.Sum(h[:0]) }, []byte{}, exp2)
+	checkhash(t, "multi2", func(in []byte) []byte { var h common.Hash; return hasher.Sum(h[:0]) }, []byte{}, exp2)
 }
 
 func TestToECDSAErrors(t *testing.T) {
@@ -147,7 +148,7 @@ func TestMarshalPubkey(t *testing.T) {
 
 func TestSign(t *testing.T) {
 	key, _ := HexToECDSA(testPrivHex)
-	addr := libcommon.HexToAddress(testAddrHex)
+	addr := common.HexToAddress(testAddrHex)
 
 	msg := Keccak256([]byte("foo"))
 	sig, err := Sign(msg, key)
@@ -186,7 +187,7 @@ func TestInvalidSign(t *testing.T) {
 
 func TestNewContractAddress(t *testing.T) {
 	key, _ := HexToECDSA(testPrivHex)
-	addr := libcommon.HexToAddress(testAddrHex)
+	addr := common.HexToAddress(testAddrHex)
 	genAddr := PubkeyToAddress(key.PublicKey)
 	// sanity check before using addr to create contract address
 	checkAddr(t, genAddr, addr)
@@ -194,9 +195,9 @@ func TestNewContractAddress(t *testing.T) {
 	caddr0 := CreateAddress(addr, 0)
 	caddr1 := CreateAddress(addr, 1)
 	caddr2 := CreateAddress(addr, 2)
-	checkAddr(t, libcommon.HexToAddress("333c3310824b7c685133f2bedb2ca4b8b4df633d"), caddr0)
-	checkAddr(t, libcommon.HexToAddress("8bda78331c916a08481428e4b07c96d3e916d165"), caddr1)
-	checkAddr(t, libcommon.HexToAddress("c9ddedf451bc62ce88bf9292afb13df35b670699"), caddr2)
+	checkAddr(t, common.HexToAddress("333c3310824b7c685133f2bedb2ca4b8b4df633d"), caddr0)
+	checkAddr(t, common.HexToAddress("8bda78331c916a08481428e4b07c96d3e916d165"), caddr1)
+	checkAddr(t, common.HexToAddress("c9ddedf451bc62ce88bf9292afb13df35b670699"), caddr2)
 }
 
 func TestLoadECDSA(t *testing.T) {
@@ -277,6 +278,52 @@ func TestSaveECDSA(t *testing.T) {
 	}
 }
 
+func TestTransactionSignatureIsValid(t *testing.T) {
+	check := func(expected bool, v byte, r, s *uint256.Int) {
+		if TransactionSignatureIsValid(v, r, s, true) != expected {
+			t.Errorf("mismatch for v: %d r: %d s: %d want: %v", v, r, s, expected)
+		}
+	}
+	minusOne := uint256.NewInt(0).SetAllOne()
+	one := u256.N1
+	zero := u256.N0
+	secp256k1nMinus1 := new(uint256.Int).Sub(secp256k1N, u256.N1)
+
+	// correct v,r,s
+	check(true, 0, one, one)
+	check(true, 1, one, one)
+	// incorrect v, correct r,s,
+	check(false, 2, one, one)
+	check(false, 3, one, one)
+
+	// incorrect v, combinations of incorrect/correct r,s at lower limit
+	check(false, 2, zero, zero)
+	check(false, 2, zero, one)
+	check(false, 2, one, zero)
+	check(false, 2, one, one)
+
+	// correct v for any combination of incorrect r,s
+	check(false, 0, zero, zero)
+	check(false, 0, zero, one)
+	check(false, 0, one, zero)
+
+	check(false, 1, zero, zero)
+	check(false, 1, zero, one)
+	check(false, 1, one, zero)
+
+	// correct sig with max r,s
+	check(true, 0, secp256k1nMinus1, secp256k1nMinus1)
+	// correct v, combinations of incorrect r,s at upper limit
+	check(false, 0, secp256k1N, secp256k1nMinus1)
+	check(false, 0, secp256k1nMinus1, secp256k1N)
+	check(false, 0, secp256k1N, secp256k1N)
+
+	// current callers ensures r,s cannot be negative, but let's test for that too
+	// as crypto package could be used stand-alone
+	check(false, 0, minusOne, one)
+	check(false, 0, one, minusOne)
+}
+
 func checkhash(t *testing.T, name string, f func([]byte) []byte, msg, exp []byte) {
 	sum := f(msg)
 	if !bytes.Equal(exp, sum) {
@@ -284,7 +331,7 @@ func checkhash(t *testing.T, name string, f func([]byte) []byte, msg, exp []byte
 	}
 }
 
-func checkAddr(t *testing.T, addr0, addr1 libcommon.Address) {
+func checkAddr(t *testing.T, addr0, addr1 common.Address) {
 	if addr0 != addr1 {
 		t.Fatalf("address mismatch: want: %x have: %x", addr0, addr1)
 	}
@@ -299,7 +346,7 @@ func TestPythonIntegration(t *testing.T) {
 	msg0 := Keccak256([]byte("foo"))
 	sig0, _ := Sign(msg0, k0)
 
-	msg1 := common.FromHex("00000000000000000000000000000000")
+	msg1 := hexutility.FromHex("00000000000000000000000000000000")
 	sig1, _ := Sign(msg0, k0)
 
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg0, kh, sig0)
