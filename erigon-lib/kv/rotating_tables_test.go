@@ -54,6 +54,8 @@ func TestRotate(t *testing.T) {
 	//write to primary
 	err = tx.Put(primary, []byte{1}, []byte{1})
 	require.NoError(err)
+	err = TxLookup.PutPrimaryPartitionMax(tx, 1)
+	require.NoError(err)
 	cnt, err := tx.Count(primary)
 	require.NoError(err)
 	require.Equal(1, int(cnt))
@@ -77,4 +79,9 @@ func TestRotate(t *testing.T) {
 	cnt, err = tx.Count(primary)
 	require.NoError(err)
 	require.Equal(0, int(cnt))
+
+	_max, _maxS, err := TxLookup.PartitionsMax(tx)
+	require.NoError(err)
+	require.Equal(0, int(_max))
+	require.Equal(0, int(_maxS))
 }

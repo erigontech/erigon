@@ -3,6 +3,7 @@ package kv
 import (
 	"encoding/binary"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
@@ -103,9 +104,36 @@ func (table RotatingTable) ClearTables(tx RwTx) error {
 	if err := putPrimaryPartition(tx, table, 0); err != nil {
 		return err
 	}
+	if err := swapVals(tx, TblPruningProgress, []byte(string(table)+"_primary_max"), []byte(string(table)+"_secondary_max")); err != nil {
+		return err
+	}
 	return nil
 }
 
+func swapVals(tx RwTx, table string, k1, k2 []byte) error {
+	v1, err := tx.GetOne(table, k1)
+	if err != nil {
+		return err
+	}
+	if v1 != nil {
+		v1 = common.Copy(v1)
+	}
+	v2, err := tx.GetOne(table, k2)
+	if err != nil {
+		return err
+	}
+	if v2 != nil {
+		v2 = common.Copy(v2)
+	}
+
+	if err := tx.Put(table, k2, v1); err != nil {
+		return err
+	}
+	if err := tx.Put(table, k1, v2); err != nil {
+		return err
+	}
+	return nil
+}
 func putPrimaryPartition(tx RwTx, table RotatingTable, newActivePartitionNum uint8) error {
 	return tx.Put(TblPruningProgress, []byte(string(table)+"_primary"), []byte{newActivePartitionNum})
 }
@@ -113,7 +141,7 @@ func putPrimaryPartition(tx RwTx, table RotatingTable, newActivePartitionNum uin
 func (table RotatingTable) PutPrimaryPartitionMax(tx RwTx, _max uint64) error {
 	return tx.Put(TblPruningProgress, []byte(string(table)+"_primary_max"), hexutility.EncodeTs(_max))
 }
-func (table RotatingTable) Max(tx RwTx) (primaryMax, secondaryMax uint64, err error) {
+func (table RotatingTable) PartitionsMax(tx RwTx) (primaryMax, secondaryMax uint64, err error) {
 	fst, err := tx.GetOne(TblPruningProgress, []byte(string(table)+"_primary_max"))
 	if err != nil {
 		return 0, 0, err

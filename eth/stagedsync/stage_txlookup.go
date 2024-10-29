@@ -369,7 +369,7 @@ func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uin
 
 // pruneTxLookup - [blockFrom, blockTo)
 func pruneTxLookup(tx kv.RwTx, blockTo uint64, ctx context.Context, limit int, timeout time.Duration) (deleted int, done bool, err error) {
-	_, secondaryMax, err := kv.TxLookup.Max(tx)
+	_, secondaryMax, err := kv.TxLookup.PartitionsMax(tx)
 	if err != nil {
 		return 0, false, err
 	}
