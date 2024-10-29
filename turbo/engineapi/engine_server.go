@@ -271,13 +271,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	// possibleStatus, err := s.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// if possibleStatus != nil {
-	// 	return possibleStatus, nil
-	// }
+	possibleStatus, err := s.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	if possibleStatus != nil {
+		return possibleStatus, nil
+	}
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -392,14 +392,17 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-
-		if parent == nil && s.hd.PosStatus() == headerdownload.Syncing {
-			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
+		if shouldWait, _ := waitForStuff(func() (bool, error) {
+			return parent == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
+		}); shouldWait {
+			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if header == nil && s.hd.PosStatus() == headerdownload.Syncing {
-			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
+		if shouldWait, _ := waitForStuff(func() (bool, error) {
+			return header == nil && s.hd.PosStatus() == headerdownload.Syncing, nil
+		}); shouldWait {
+			s.logger.Info(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
@@ -410,11 +413,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	executionReady, err := s.chainRW.Ready(ctx)
+	waitingForExecutionReady, err := waitForStuff(func() (bool, error) { 
+		isReady, err := s.chainRW.Ready(ctx)
+		return !isReady, err
+	})	
 	if err != nil {
 		return nil, err
 	}
-	if !executionReady {
+	if waitingForExecutionReady {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 
@@ -548,11 +554,19 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
 	}
 
-	resp, err := s.executionService.AssembleBlock(ctx, req)
+	var resp *execution.AssembleBlockResponse
+
+	execBusy, err := waitForStuff(func() (bool, error) {
+		resp, err = s.executionService.AssembleBlock(ctx, req)
+		if err != nil {
+			return false, err
+		}
+		return resp.Busy, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if resp.Busy {
+	if execBusy {
 		s.logger.Warn("[ForkChoiceUpdated] Execution Service busy, could not fulfil Assemble Block request", "req.parentHash", req.ParentHash)
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, PayloadId: nil}, nil
 	}
@@ -943,4 +957,20 @@ func (e *EngineServer) HandlesForkChoice(
 		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 	return payloadStatus, nil
+}
+
+
+func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {
+	shouldWait, err := waitCondnF()
+	if err != nil || !shouldWait {
+		return false, err
+	}
+	for i := 0; i < 1000; i++ {
+		time.Sleep(10 * time.Millisecond)
+		shouldWait, err = waitCondnF()
+		if err != nil || !shouldWait {
+			return shouldWait, err
+		}
+	}
+	return true, nil
 }
