@@ -201,6 +201,7 @@ func (l *JsonStreamLogger_ZkEvm) writeStorage(contract *vm.Contract) {
 	}
 	l.stream.WriteObjectEnd()
 }
+
 func (l *JsonStreamLogger_ZkEvm) writeMemory(memory *vm.Memory) {
 	if !l.cfg.DisableMemory {
 		memData := memory.Data()
@@ -217,11 +218,11 @@ func (l *JsonStreamLogger_ZkEvm) writeMemory(memory *vm.Memory) {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
-		for i := len(memData); i-32 >= 0; i -= 32 {
-			if i != len(memData) { // first 32 bytes, don't add a comma
+		for i := 0; i+32 <= len(memData); i += 32 {
+			if i != 0 { // add a comma for all but the first 32 bytes
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], memData[i-32:i])]))
+			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], memData[i:i+32])]))
 		}
 
 		l.stream.WriteArrayEnd()
@@ -245,7 +246,7 @@ func (l *JsonStreamLogger_ZkEvm) writeStack(stack *stack.Stack) {
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(stackValue.String())
+			l.stream.WriteString(stackValue.Hex())
 		}
 		l.stream.WriteArrayEnd()
 	}
