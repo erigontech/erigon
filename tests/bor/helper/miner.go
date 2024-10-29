@@ -17,7 +17,6 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"

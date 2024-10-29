@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
-
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"

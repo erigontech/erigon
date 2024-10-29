@@ -26,7 +26,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/cl/merkle_tree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
