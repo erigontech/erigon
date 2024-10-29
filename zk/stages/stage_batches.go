@@ -31,7 +31,6 @@ import (
 )
 
 const (
-	HIGHEST_KNOWN_FORK     = 12
 	STAGE_PROGRESS_SAVE    = 3000000
 	NEW_BLOCKS_ON_DS_LIMIT = 10000
 )

@@ -1782,6 +1782,21 @@ func (db *HermezDbReader) GetBatchEnd(blockNo uint64) (bool, error) {
 	return len(v) > 0, nil
 }
 
+func (db *HermezDbReader) GetLatestBatchEndBlock() (uint64, error) {
+	c, err := db.tx.Cursor(BATCH_ENDS)
+	if err != nil {
+		return 0, nil
+	}
+	defer c.Close()
+
+	k, _, err := c.Last()
+	if err != nil {
+		return 0, err
+	}
+
+	return BytesToUint64(k), nil
+}
+
 func (db *HermezDb) DeleteBatchEnds(from, to uint64) error {
 	return db.deleteFromBucketWithUintKeysRange(BATCH_ENDS, from, to)
 }
