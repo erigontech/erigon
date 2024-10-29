@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package partitions
+package kv
 
 import (
 	"context"
@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -38,19 +37,19 @@ func TestRotate(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	primary, secondary, err := kv.TxLookup.Partitions(tx)
+	primary, secondary, err := TxLookup.Partitions(tx)
 	require.NoError(err)
-	require.Equal(kv.RotatingTablePartitionsList[kv.TxLookup][0], primary)
-	require.Equal(kv.RotatingTablePartitionsList[kv.TxLookup][1], secondary)
+	require.Equal(rotatingTablePartitions[TxLookup][0], primary)
+	require.Equal(rotatingTablePartitions[TxLookup][1], secondary)
 
-	done, err := kv.TxLookup.Rotate(tx)
+	done, err := TxLookup.Rotate(tx)
 	require.NoError(err)
 	require.True(done)
 
-	primary, secondary, err = kv.TxLookup.Partitions(tx)
+	primary, secondary, err = TxLookup.Partitions(tx)
 	require.NoError(err)
-	require.Equal(kv.RotatingTablePartitionsList[kv.TxLookup][1], primary)
-	require.Equal(kv.RotatingTablePartitionsList[kv.TxLookup][0], secondary)
+	require.Equal(rotatingTablePartitions[TxLookup][1], primary)
+	require.Equal(rotatingTablePartitions[TxLookup][0], secondary)
 
 	//write to primary
 	err = tx.Put(primary, []byte{1}, []byte{1})
@@ -59,20 +58,20 @@ func TestRotate(t *testing.T) {
 	require.NoError(err)
 	require.Equal(1, int(cnt))
 
-	v, err := kv.TxLookup.GetOne(tx, []byte{1})
+	v, err := TxLookup.GetOne(tx, []byte{1})
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
 	//see after rotate
-	done, err = kv.TxLookup.Rotate(tx)
+	done, err = TxLookup.Rotate(tx)
 	require.NoError(err)
 	require.True(done)
 
-	v, err = kv.TxLookup.GetOne(tx, []byte{1})
+	v, err = TxLookup.GetOne(tx, []byte{1})
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
-	primary, secondary, err = kv.TxLookup.Partitions(tx)
+	primary, secondary, err = TxLookup.Partitions(tx)
 	require.NoError(err)
 
 	cnt, err = tx.Count(primary)

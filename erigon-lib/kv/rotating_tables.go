@@ -9,7 +9,10 @@ import (
 // RotatingTable - is partitioned Table with only 2 partitions: primary/secondary (hot/cold)
 // - new writes must go to `primary`
 // - do prune only `secondary`
-// - rotate when prune of `secondary` is done
+// - rotate partitions when prune of `secondary` is done
+//
+// Primary use-case: table with random updates (for example: `hash` -> `blockNumber`).
+// Such table suffer from slow random writes and deletes.
 type RotatingTable string
 
 func (table RotatingTable) Partitions(tx Getter) (primary string, secondary string, err error) {
@@ -17,7 +20,7 @@ func (table RotatingTable) Partitions(tx Getter) (primary string, secondary stri
 	if err != nil {
 		return "", "", err
 	}
-	return RotatingTablePartitions[table][primaryID], RotatingTablePartitions[table][secondaryID], nil
+	return rotatingTablePartitions[table][primaryID], rotatingTablePartitions[table][secondaryID], nil
 }
 
 func (table RotatingTable) GetOne(tx Getter, k []byte) (v []byte, err error) {
@@ -103,10 +106,10 @@ func (table RotatingTable) Max(tx RwTx) (primaryMax, secondaryMax uint64, err er
 	return
 }
 
-type RotatingTablePartitionsList [2]string
+type rotatingTablePartitionsList [2]string
 
 var (
-	RotatingTablePartitions = map[RotatingTable]RotatingTablePartitionsList{
+	rotatingTablePartitions = map[RotatingTable]rotatingTablePartitionsList{
 		TxLookup: {txLookup0, txLookup1},
 	}
 )
