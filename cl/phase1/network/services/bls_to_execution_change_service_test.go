@@ -109,8 +109,8 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 			name: "version is less than CapellaVersion",
 			mock: func() {
 				mockStateReader := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion - 1).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).Times(1)
+				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion - 1).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).AnyTimes()
 			},
 			msg:         mockMsg,
 			wantErr:     true,
@@ -120,9 +120,9 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 			name: "unable to retrieve validator",
 			mock: func() {
 				mockStateReader := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).Times(1)
-				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(nil, errors.New("not found")).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).Times(1)
+				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
+				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(nil, errors.New("not found")).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).AnyTimes()
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -133,9 +133,9 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				mockStateReader := mockState.NewMockBeaconStateReader(t.gomockCtrl)
 				mockValidator := solid.NewValidator()
 				mockValidator.SetWithdrawalCredentials([32]byte{1, 1, 1}) // should be equal to BLS_WITHDRAWAL_PREFIX
-				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).Times(1)
-				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).Times(1)
+				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
+				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).AnyTimes()
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -146,9 +146,9 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				mockStateReader := mockState.NewMockBeaconStateReader(t.gomockCtrl)
 				mockValidator := solid.NewValidator()
 				mockValidator.SetWithdrawalCredentials([32]byte{0}) // first byte is equal to BLS_WITHDRAWAL_PREFIX
-				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).Times(1)
-				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).Times(1)
+				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
+				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).AnyTimes()
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -162,12 +162,12 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				wc := [32]byte{0}
 				copy(wc[1:], hashedFrom[1:])
 				mockValidator.SetWithdrawalCredentials(wc)
-				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).Times(1)
-				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).Times(1)
-				mockStateReader.EXPECT().GenesisValidatorsRoot().Return([32]byte{}).Times(1)
+				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
+				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).AnyTimes()
+				mockStateReader.EXPECT().GenesisValidatorsRoot().Return([32]byte{}).AnyTimes()
 				// bls verify
-				t.gomockCtrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).Times(1)
+				t.gomockCtrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).AnyTimes()
 				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
 			},
 			msg:         mockMsg,
@@ -183,17 +183,17 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				wc := [32]byte{0}
 				copy(wc[1:], hashedFrom[1:])
 				mockValidator.SetWithdrawalCredentials(wc)
-				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).Times(1)
-				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).Times(1)
-				mockStateReader.EXPECT().GenesisValidatorsRoot().Return([32]byte{}).Times(1)
+				mockStateReader.EXPECT().Version().Return(clparams.CapellaVersion).AnyTimes()
+				mockStateReader.EXPECT().ValidatorForValidatorIndex(int(mockMsg.SignedBLSToExecutionChange.Message.ValidatorIndex)).Return(mockValidator, nil).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(mockStateReader, synced_data.EmptyCancel).AnyTimes()
+				mockStateReader.EXPECT().GenesisValidatorsRoot().Return([32]byte{}).AnyTimes()
 				// bls verify
-				t.gomockCtrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).Times(1)
+				t.gomockCtrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.SignedBLSToExecutionChange.Message, gomock.Any()).Return([32]byte{}, nil).AnyTimes()
 				// update withdrawal credentials
 				mockNewWc := common.Hash{byte(t.beaconCfg.ETH1AddressWithdrawalPrefixByte)}
 				copy(mockNewWc[1:], make([]byte, 11))
 				copy(mockNewWc[12:], mockMsg.SignedBLSToExecutionChange.Message.To[:])
-				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
+				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 			},
 			msg: mockMsg,
 			// specificErr: ErrInvalidBlsSignature,

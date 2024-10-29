@@ -75,7 +75,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	}
 
 	// [IGNORE] current_epoch >= CAPELLA_FORK_EPOCH, where current_epoch is defined by the current wall-clock time.
-	if !(stateReader.Version() >= clparams.CapellaVersion) {
+	if stateReader.Version() < clparams.CapellaVersion {
 		return ErrIgnore
 	}
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/beacon-chain.md#new-process_bls_to_execution_change
@@ -109,6 +109,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	if err != nil {
 		return err
 	}
+	cn()
 
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{msg.SignedBLSToExecutionChange.Signature[:]},
