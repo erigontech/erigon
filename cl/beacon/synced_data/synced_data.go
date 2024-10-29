@@ -102,7 +102,7 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	isCanceled := false
 	var mu sync.Mutex
 
-	a := debug.Stack()
+	debug.PrintStack()
 
 	s.mu.RLock()
 	return s.headState, func() {
