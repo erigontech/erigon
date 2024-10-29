@@ -30,6 +30,7 @@ import (
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/partitions"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -95,7 +96,7 @@ func ValidateTxLookups(chaindata string, logger log.Logger) error {
 		bn := blockBytes.Bytes()
 
 		for _, txn := range body.Transactions {
-			val, err := tx.GetOne(kv.TxLookup, txn.Hash().Bytes())
+			val, err := partitions.ReadFromPartitions(tx, kv.TxLookup, txn.Hash().Bytes())
 			iterations++
 			if iterations%100000 == 0 {
 				logger.Info("Validated", "entries", iterations, "number", blockNum)

@@ -7,7 +7,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-func Tables(tx kv.Getter, table string) (primary string, secondary string, err error) {
+func Tables(tx kv.Getter, table kv.PartitionedTable) (primary string, secondary string, err error) {
 	primaryID, secondaryID, err := ID(tx, table)
 	if err != nil {
 		return "", "", err
@@ -15,7 +15,7 @@ func Tables(tx kv.Getter, table string) (primary string, secondary string, err e
 	return kv.Partitions[table][primaryID], kv.Partitions[table][secondaryID], nil
 }
 
-func ReadFromPartitions(tx kv.Getter, table string, k []byte) (v []byte, err error) {
+func ReadFromPartitions(tx kv.Getter, table kv.PartitionedTable, k []byte) (v []byte, err error) {
 	primary, secondary, err := Tables(tx, table)
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func ReadFromPartitions(tx kv.Getter, table string, k []byte) (v []byte, err err
 	return nil, nil
 }
 
-func Rotate(tx kv.RwTx, table string) (bool, error) {
+func Rotate(tx kv.RwTx, table kv.PartitionedTable) (bool, error) {
 	{ //assert secondary must be empty
 		_, secondary, err := Tables(tx, table)
 		if err != nil {
@@ -63,7 +63,7 @@ func Rotate(tx kv.RwTx, table string) (bool, error) {
 	return true, nil
 }
 
-func ID(tx kv.Getter, table string) (primary uint8, secondary uint8, err error) {
+func ID(tx kv.Getter, table kv.PartitionedTable) (primary uint8, secondary uint8, err error) {
 	val, err := tx.GetOne(kv.TblPruningProgress, []byte(string(table)+"_primary"))
 	if err != nil || len(val) < 1 {
 		return 0, 1, err
@@ -73,14 +73,14 @@ func ID(tx kv.Getter, table string) (primary uint8, secondary uint8, err error) 
 	}
 	return 1, 0, nil
 }
-func putPrimaryPartition(tx kv.RwTx, table string, newActivePartitionNum uint8) error {
+func putPrimaryPartition(tx kv.RwTx, table kv.PartitionedTable, newActivePartitionNum uint8) error {
 	return tx.Put(kv.TblPruningProgress, []byte(string(table)+"_primary"), []byte{newActivePartitionNum})
 }
 
-func PutPrimaryPartitionMax(tx kv.RwTx, table string, _max uint64) error {
+func PutPrimaryPartitionMax(tx kv.RwTx, table kv.PartitionedTable, _max uint64) error {
 	return tx.Put(kv.TblPruningProgress, []byte(string(table)+"_primary_max"), hexutility.EncodeTs(_max))
 }
-func Max(tx kv.RwTx, table string) (primaryMax, secondaryMax uint64, err error) {
+func Max(tx kv.RwTx, table kv.PartitionedTable) (primaryMax, secondaryMax uint64, err error) {
 	fst, err := tx.GetOne(kv.TblPruningProgress, []byte(string(table)+"_primary_max"))
 	if err != nil {
 		return 0, 0, err

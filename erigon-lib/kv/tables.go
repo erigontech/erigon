@@ -292,9 +292,9 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
-	TxLookup  = "BlockTransactionLookup"  // hash -> transaction/receipt lookup metadata
-	txLookup0 = "BlockTransactionLookup0" // bn/100 -> txnHash+blockNum
-	txLookup1 = "BlockTransactionLookup1" // bn/100 -> txnHash+blockNum
+	TxLookupOld = "BlockTransactionLookup"  // hash -> transaction/receipt lookup metadata
+	txLookup0   = "BlockTransactionLookup0" // bn/100 -> txnHash+blockNum
+	txLookup1   = "BlockTransactionLookup1" // bn/100 -> txnHash+blockNum
 
 	ConfigTable = "Config" // config prefix for the db
 
@@ -505,7 +505,7 @@ var ChaindataTables = []string{
 	BlockBody,
 	Receipts,
 
-	TxLookup,
+	TxLookupOld,
 	txLookup0,
 	txLookup1,
 
@@ -970,11 +970,16 @@ func String2Appendable(in string) (Appendable, error) {
 	}
 }
 
-type PartitionsList [2]string
+type PartitionsID [2]string
+type PartitionedTable string
 
 var (
-	TxLookupPartitions = PartitionsList{txLookup0, txLookup1}
-	Partitions         = map[string]PartitionsList{
+	TxLookup PartitionedTable
+)
+
+var (
+	TxLookupPartitions = PartitionsID{txLookup0, txLookup1}
+	Partitions         = map[PartitionedTable]PartitionsID{
 		TxLookup: TxLookupPartitions,
 	}
 )
