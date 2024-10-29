@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -15,21 +17,23 @@ import (
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 type serialExecutor struct {
 	cfg                ExecuteBlockCfg
+	execStage          *StageState
+	agg                *state2.Aggregator
 	rs                 *state.StateV3
 	doms               *state2.SharedDomains
+	accumulator        *shards.Accumulator
 	u                  Unwinder
 	isMining           bool
 	inMemExec          bool
-	isInitialCycle     bool
 	skipPostEvaluation bool
-	kvTx               kv.RwTx
+	applyTx            kv.RwTx
 	worker             *exec3.Worker
 	outputTxNum        *atomic.Uint64
-	logPrefix          string
 	logger             log.Logger
 
 	// outputs
@@ -70,10 +74,10 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				se.blobGasUsed += txTask.Tx.GetBlobGas()
 			}
 
-			txTask.CreateReceipt(se.kvTx)
+			txTask.CreateReceipt(se.applyTx)
 
 			if txTask.Final {
-				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.isInitialCycle {
+				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
 					// add this to the executor
@@ -92,7 +96,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			if errors.Is(err, context.Canceled) {
 				return false, err
 			}
-			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
+			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.execStage.LogPrefix()),
 				"block", txTask.BlockNum, "txNum", txTask.TxNum, "hash", txTask.Header.Hash().String(), "err", err)
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
@@ -102,13 +106,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			}
 			if errors.Is(err, consensus.ErrInvalidBlock) {
 				if se.u != nil {
-					if err := se.u.UnwindTo(txTask.BlockNum-1, BadBlock(txTask.Header.Hash(), err), se.kvTx); err != nil {
+					if err := se.u.UnwindTo(txTask.BlockNum-1, BadBlock(txTask.Header.Hash(), err), se.applyTx); err != nil {
 						return false, err
 					}
 				}
 			} else {
 				if se.u != nil {
-					if err := se.u.UnwindTo(txTask.BlockNum-1, ExecUnwind, se.kvTx); err != nil {
+					if err := se.u.UnwindTo(txTask.BlockNum-1, ExecUnwind, se.applyTx); err != nil {
 						return false, err
 					}
 				}
@@ -135,4 +139,52 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 	}
 
 	return true, nil
+}
+
+func (se *serialExecutor) tx() kv.RwTx {
+	return se.applyTx
+}
+
+func (se *serialExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header) {
+	var err error
+	h, err = se.cfg.blockReader.Header(ctx, se.applyTx, hash, number)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+
+func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uint64, useExternalTx bool) (t2 time.Duration, err error) {
+	se.doms.Close()
+	if err = se.execStage.Update(se.applyTx, blockNum); err != nil {
+		return 0, err
+	}
+
+	se.applyTx.CollectMetrics()
+
+	if !useExternalTx {
+		tt := time.Now()
+		if err = se.applyTx.Commit(); err != nil {
+			return 0, err
+		}
+
+		t2 = time.Since(tt)
+		se.agg.BuildFilesInBackground(se.outputTxNum.Load())
+
+		se.applyTx, err = se.cfg.db.BeginRw(context.Background()) //nolint
+		if err != nil {
+			return t2, err
+		}
+	}
+	se.doms, err = state2.NewSharedDomains(se.applyTx, se.logger)
+	if err != nil {
+		return t2, err
+	}
+	se.doms.SetTxNum(txNum)
+	se.rs = state.NewStateV3(se.doms, se.logger)
+
+	se.worker.ResetTx(se.applyTx)
+	se.worker.ResetState(se.rs, se.accumulator)
+
+	return t2, nil
 }
