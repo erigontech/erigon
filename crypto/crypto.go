@@ -37,8 +37,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/crypto/cryptopool"
 	"github.com/erigontech/erigon/rlp"
 )
