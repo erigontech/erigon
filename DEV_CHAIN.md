@@ -82,7 +82,7 @@ You might face a conflict with ports if you run it on the same machine. To speci
     
 To check if the nodes are connected, you can go to the log of both nodes and look for the line
     
-  ```  [p2p] GoodPeers    eth66=1 ```
+  ```  [p2p] GoodPeers    eth68=1 ```
     
 Note: this might take a while it is not instantaneous, also if you see a 1 on either one of the two the node is fine.
     

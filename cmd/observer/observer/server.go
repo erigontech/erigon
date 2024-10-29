@@ -50,7 +50,7 @@ type Server struct {
 }
 
 func NewServer(ctx context.Context, flags CommandFlags, logger log.Logger) (*Server, error) {
-	nodeDBPath := filepath.Join(flags.DataDir, "nodes", "eth66")
+	nodeDBPath := filepath.Join(flags.DataDir, "nodes", "eth68")
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
 	privateKey, err := nodeKeyConfig.LoadOrParseOrGenerateAndSave(flags.NodeKeyFile, flags.NodeKeyHex, flags.DataDir)

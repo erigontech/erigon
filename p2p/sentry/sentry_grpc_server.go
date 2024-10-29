@@ -454,20 +454,6 @@ func runPeer(
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
-		case eth.GetNodeDataMsg:
-			if protocol >= direct.ETH67 {
-				msg.Discard()
-				return p2p.NewPeerError(p2p.PeerErrorMessageObsolete, p2p.DiscSubprotocolError, nil, fmt.Sprintf("unexpected GetNodeDataMsg from %s in eth/%d", peerID, protocol))
-			}
-			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
-				continue
-			}
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
-			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
-			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -626,76 +612,69 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 	if dialCandidates != nil {
 		disc = dialCandidates()
 	}
-	protocols := []uint{protocol}
-	if protocol == direct.ETH67 {
-		protocols = append(protocols, direct.ETH66)
-	}
-	for _, p := range protocols {
-		protocol := p
-		ss.Protocols = append(ss.Protocols, p2p.Protocol{
-			Name:           eth.ProtocolName,
-			Version:        protocol,
-			Length:         17,
-			DialCandidates: disc,
-			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
-				peerID := peer.Pubkey()
-				printablePeerID := hex.EncodeToString(peerID[:])[:20]
-				if ss.getPeer(peerID) != nil {
-					return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
-				}
-				logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
+	ss.Protocols = append(ss.Protocols, p2p.Protocol{
+		Name:           eth.ProtocolName,
+		Version:        protocol,
+		Length:         17,
+		DialCandidates: disc,
+		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
+			peerID := peer.Pubkey()
+			printablePeerID := hex.EncodeToString(peerID[:])[:20]
+			if ss.getPeer(peerID) != nil {
+				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
+			}
+			logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
 
-				peerInfo := NewPeerInfo(peer, rw)
-				peerInfo.protocol = protocol
-				defer peerInfo.Close()
+			peerInfo := NewPeerInfo(peer, rw)
+			peerInfo.protocol = protocol
+			defer peerInfo.Close()
 
-				defer ss.GoodPeers.Delete(peerID)
+			defer ss.GoodPeers.Delete(peerID)
 
-				status := ss.GetStatus()
+			status := ss.GetStatus()
 
-				if status == nil {
-					return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
-				}
+			if status == nil {
+				return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
+			}
 
-				peerBestHash, err := handShake(ctx, status, rw, protocol, protocol)
-				if err != nil {
-					return err
-				}
+			peerBestHash, err := handShake(ctx, status, rw, protocol, protocol)
+			if err != nil {
+				return err
+			}
 
-				// handshake is successful
-				logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
+			// handshake is successful
+			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
 
-				ss.GoodPeers.Store(peerID, peerInfo)
-				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
-				defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
-				getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
-				if getBlockHeadersErr != nil {
-					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
-				}
+			ss.GoodPeers.Store(peerID, peerInfo)
+			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
+			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
+			getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
+			if getBlockHeadersErr != nil {
+				return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
+			}
 
-				cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
+			cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
 
-				return runPeer(
-					ctx,
-					peerID,
-					cap,
-					rw,
-					peerInfo,
-					ss.send,
-					ss.hasSubscribers,
-					logger,
-				)
-			},
-			NodeInfo: func() interface{} {
-				return readNodeInfo()
-			},
-			PeerInfo: func(peerID [64]byte) interface{} {
-				// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
-				return nil
-			},
-			//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
-		})
-	}
+			return runPeer(
+				ctx,
+				peerID,
+				cap,
+				rw,
+				peerInfo,
+				ss.send,
+				ss.hasSubscribers,
+				logger,
+			)
+		},
+		NodeInfo: func() interface{} {
+			return readNodeInfo()
+		},
+		PeerInfo: func(peerID [64]byte) interface{} {
+			// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
+			return nil
+		},
+		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+	})
 
 	return ss
 }
@@ -1008,8 +987,6 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *proto_sentry.Ou
 func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
 	reply := &proto_sentry.HandShakeReply{}
 	switch ss.Protocols[0].Version {
-	case direct.ETH66:
-		reply.Protocol = proto_sentry.Protocol_ETH66
 	case direct.ETH67:
 		reply.Protocol = proto_sentry.Protocol_ETH67
 	case direct.ETH68:
