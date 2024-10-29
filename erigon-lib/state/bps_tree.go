@@ -130,34 +130,24 @@ func (it *BpsTreeIterator) Next() bool {
 	return true
 }
 
-//// If data[i] == key, returns 0 (equal) and value, nil err
-//// if data[i] <> key, returns comparation result and nil value and error -- to be able to compare later
-//func (b *BpsTree) matchKeyValue(g ArchiveGetter, i uint64, key []byte) (int, []byte, error) {
-//	if i >= b.offt.Count() {
-//		return 0, nil, ErrBtIndexLookupBounds
-//	}
-//	if b.trace {
-//		fmt.Printf("match %d-%x count %d\n", i, key, b.offt.Count())
-//	}
-//	g.Reset(b.offt.Get(i))
-//	buf, _ := g.Next(nil)
-//	if !bytes.Equal(buf, key) {
-//		return bytes.Compare(buf, key), nil, nil
-//	}
-//	val, _ := g.Next(nil)
-//	return 0, val, nil
-//}
+// // If data[i] == key, returns 0 (equal) and value, nil err
+// // if data[i] <> key, returns comparation result and nil value and error -- to be able to compare later
 //
-//func (b *BpsTree) lookupKeyWGetter(g ArchiveGetter, i uint64) ([]byte, uint64) {
-//	if i >= b.offt.Count() {
-//		return nil, 0
+//	func (b *BpsTree) matchKeyValue(g ArchiveGetter, i uint64, key []byte) (int, []byte, error) {
+//		if i >= b.offt.Count() {
+//			return 0, nil, ErrBtIndexLookupBounds
+//		}
+//		if b.trace {
+//			fmt.Printf("match %d-%x count %d\n", i, key, b.offt.Count())
+//		}
+//		g.Reset(b.offt.Get(i))
+//		buf, _ := g.Next(nil)
+//		if !bytes.Equal(buf, key) {
+//			return bytes.Compare(buf, key), nil, nil
+//		}
+//		val, _ := g.Next(nil)
+//		return 0, val, nil
 //	}
-//	o := b.offt.Get(i)
-//	g.Reset(o)
-//	buf, _ := g.Next(nil)
-//	return buf, o
-//}
-
 type Node struct {
 	key []byte
 	off uint64 // offset in kv file to key

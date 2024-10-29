@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
@@ -389,28 +390,63 @@ func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []by
 
 func Test_Btrie_Insert(t *testing.T) {
 	bt := NewBtrie()
-	bt.Insert([]byte{0xde, 0xad}, 0)
-	bt.Insert([]byte{0xce, 0xad}, 1)
-	bt.Insert([]byte{0xde, 0, 0, 0, 0, 0xbd}, 2)
-	bt.Insert([]byte{0xde, 0, 0, 1, 0, 0xbd}, 3)
-	bt.Insert([]byte{0xde, 0, 0, 0xbd}, 4)
-	bt.printRoot()
 
 	keys := [][]byte{
-		[]byte{0xde, 0xad},
-		[]byte{0xce, 0xad},
-		[]byte{0xfe, 0xad},
-		[]byte{0xde, 0, 0, 0, 0, 0xbd},
+		{0xce, 0xad},
+		{0xde, 0xad},
+		{0xde, 1, 2, 3, 4, 0xbd},
+		{0xde, 1, 2, 3, 5, 0xbd},
+		{0xde, 1, 2, 4, 5, 0xbd},
+		{0xde, 1, 2, 0xbd},
 	}
 
-	for _, key := range keys {
-		di := bt.Get(key)
-		fmt.Printf("%x -> %d\n", key, di)
+	// keys := make([][]byte, 0)
+	// for i := 0; i < 400; i++ {
+	// 	b := make([]byte, 10)
+	// 	_, _ = rand.Read(b)
+	// 	keys = append(keys, b)
+	// }
+
+	sort.Slice(keys, func(i, j int) bool {
+		return bytes.Compare(keys[i], keys[j]) < 0
+	})
+
+	bt.trace = true
+	for i, key := range keys {
+		t.Logf("Inserting %x - %d", key, i)
+		bt.Insert(key, uint64(i))
 	}
 
-	// bt.Insert([]byte("app"), 0)
-	// bt.Insert([]byte("apangu"), 1)
-	// bt.Insert([]byte("appolo"), 2)
-	// bt.Insert([]byte("ban"), 3)
-	// bt.Insert([]byte("banjo"), 4)
+	if bt.trace {
+		bt.printRoot()
+	}
+
+	for ki, key := range keys {
+		found, li, ri := bt.SeekLR(key)
+		fmt.Printf("%x -> %v [%d, %d]\n", key, found, li, ri)
+		require.Truef(t, found, "key=%x", key)
+		require.EqualValuesf(t, ki, li, "key=%x", key)
+		require.InDelta(t, ki, ri, 1, "key=%x", key)
+
+		key[len(key)-1]++
+		found, li, ri = bt.SeekLR(key)
+		require.True(t, found)
+		require.GreaterOrEqual(t, uint64(ki), li)
+		require.GreaterOrEqual(t, uint64(ki), ri)
+	}
+
+	// keysNotExist := [][]byte{
+	// 	// []byte{0xde, 0xad},
+	// 	// []byte{0xce, 0xad},
+	// 	{0xfe, 0xad},
+	// 	{0xde, 0, 0, 0, 0, 0xbd},
+	// }
+	// for _, key := range keysNotExist {
+	// 	found, li, ri := bt.SeekLR(key)
+	// 	// require.False(t, found)
+	// 	// require.EqualValues(t, 0, li)
+	// 	// require.EqualValues(t, 0, ri)
+
+	// 	fmt.Printf("%x -> %v [%d, %d]\n", key, found, li, ri)
+	// }
 }
