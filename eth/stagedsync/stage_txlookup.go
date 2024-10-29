@@ -283,7 +283,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			}
 		}
 
-		if err = s.DoneAt(tx, blockTo); err != nil {
+		if err = s.DoneAt(tx, bn); err != nil {
 			return err
 		}
 	}
