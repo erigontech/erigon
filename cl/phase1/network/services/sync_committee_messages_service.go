@@ -72,6 +72,8 @@ func NewSyncCommitteeMessagesService(
 
 // ProcessMessage processes a sync committee message
 func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessage) error {
+	return ErrIgnore
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	headState, cn := s.syncedDataManager.HeadState()
