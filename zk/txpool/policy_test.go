@@ -441,6 +441,9 @@ func TestLastPolicyTransactions(t *testing.T) {
 	SetMode(ctx, db, BlocklistMode)
 
 	// Create a test address and policy
+	addrInit := common.HexToAddress("0x0000000000000000")
+	policyInit := SendTx
+
 	addrOne := common.HexToAddress("0x1234567890abcdef")
 	policyOne := SendTx
 
@@ -448,10 +451,12 @@ func TestLastPolicyTransactions(t *testing.T) {
 	policyTwo := SendTx
 
 	// Add the policy to the ACL
+	require.NoError(t, AddPolicy(ctx, db, "blocklist", addrInit, policyInit))
 	require.NoError(t, AddPolicy(ctx, db, "blocklist", addrOne, policyOne))
 	require.NoError(t, AddPolicy(ctx, db, "blocklist", addrTwo, policyTwo))
 
 	// Create expected policyTransaction output and append to []PolicyTransaction
+	policyTransactionInit := PolicyTransaction{addr: common.HexToAddress("0x0000000000000000"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(ModeChange.ToByte())}
 	policyTransactionOne := PolicyTransaction{addr: common.HexToAddress("0x1234567890abcdef"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(Add.ToByte())}
 	policyTransactionTwo := PolicyTransaction{addr: common.HexToAddress("0xabcdef1234567890"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(Add.ToByte())}
 
@@ -459,14 +464,20 @@ func TestLastPolicyTransactions(t *testing.T) {
 	// No element in PolicyTransaction slice
 	var policyTransactionSliceNone []PolicyTransaction
 
-	// Single element in PolicyTransaction slice
+	// Single element in PolicyTransaction slice, always starting with policyTransactionInit
 	var policyTransactionSliceSingle []PolicyTransaction
-	policyTransactionSliceSingle = append(policyTransactionSliceSingle, policyTransactionTwo)
+	policyTransactionSliceSingle = append(policyTransactionSliceSingle, policyTransactionInit)
 
-	// Two elements in PolicyTransaction slice
+	// Two elements in PolicyTransaction slice, always starting with policyTransactionInit
 	var policyTransactionSliceDouble []PolicyTransaction
+	policyTransactionSliceDouble = append(policyTransactionSliceDouble, policyTransactionInit)
 	policyTransactionSliceDouble = append(policyTransactionSliceDouble, policyTransactionTwo)
-	policyTransactionSliceDouble = append(policyTransactionSliceDouble, policyTransactionOne)
+
+	// Three elements in PolicyTransaction slice, always starting with policyTransactionInit
+	var policyTransactionSliceTriple []PolicyTransaction
+	policyTransactionSliceTriple = append(policyTransactionSliceTriple, policyTransactionInit)
+	policyTransactionSliceTriple = append(policyTransactionSliceTriple, policyTransactionTwo)
+	policyTransactionSliceTriple = append(policyTransactionSliceTriple, policyTransactionOne)
 
 	// Table driven test
 	var tests = []struct {
@@ -476,6 +487,7 @@ func TestLastPolicyTransactions(t *testing.T) {
 		{0, policyTransactionSliceNone},
 		{1, policyTransactionSliceSingle},
 		{2, policyTransactionSliceDouble},
+		{3, policyTransactionSliceTriple},
 	}
 	for _, tt := range tests {
 		t.Run("LastPolicyTransactions", func(t *testing.T) {

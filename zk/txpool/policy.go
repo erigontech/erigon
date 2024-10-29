@@ -45,6 +45,8 @@ func OperationFromByte(b byte) Operation {
 		return Remove
 	case byte(Update):
 		return Update
+	case byte(ModeChange):
+		return ModeChange
 	default:
 		return Add // Default or error handling can be added here
 	}
