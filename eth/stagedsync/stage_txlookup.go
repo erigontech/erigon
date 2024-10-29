@@ -263,7 +263,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if blockFrom < blockTo {
 		t := time.Now()
 		deletedTotal := 0
-		for bn := blockFrom; bn < blockTo; bn++ {
+		var bn = blockFrom
+		for ; bn < blockTo; bn++ {
 			deleted, err := deleteTxLookupRange(tx, logPrefix, bn, bn+1, ctx, cfg, logger)
 			if err != nil {
 				return fmt.Errorf("prune TxLookUp: %w", err)
@@ -274,7 +275,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 				break
 			}
 		}
-		log.Warn("[dbg] TxLookup", "pruned_txs", deletedTotal, "took", time.Since(t), "cfg.prune.History.Enabled()", cfg.prune.History.Enabled(), "cfg.prune.History.PruneTo(s.ForwardProgress)", cfg.prune.History.PruneTo(s.ForwardProgress), "cfg.blockReader.CanPruneTo(s.ForwardProgress)", cfg.blockReader.CanPruneTo(s.ForwardProgress))
+		log.Warn("[dbg] TxLookup", "pruned_blks", bn-blockFrom+1, "pruned_txs", deletedTotal, "took", time.Since(t), "cfg.prune.History.Enabled()", cfg.prune.History.Enabled(), "cfg.prune.History.PruneTo(s.ForwardProgress)", cfg.prune.History.PruneTo(s.ForwardProgress), "cfg.blockReader.CanPruneTo(s.ForwardProgress)", cfg.blockReader.CanPruneTo(s.ForwardProgress))
 
 		if cfg.borConfig != nil && pruneBor {
 			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
