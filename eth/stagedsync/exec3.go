@@ -623,16 +623,14 @@ Loop:
 				if errors.Is(err, context.Canceled) {
 					return err
 				}
-				logger.Info(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
+				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
 				if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 				}
 				if cfg.badBlockHalt {
-					println("bad block halt")
 					return err
 				}
 				if errors.Is(err, consensus.ErrInvalidBlock) {
-					println("unwind")
 					if u != nil {
 						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
 							return err

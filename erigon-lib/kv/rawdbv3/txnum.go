@@ -145,7 +145,6 @@ func (t TxNumsReader) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) 
 	}
 	if len(lastK) != 0 {
 		lastBlockNum := binary.BigEndian.Uint64(lastK)
-		println("lastBlockNum", lastBlockNum, blockNum)
 		if lastBlockNum > 1 && lastBlockNum+1 != blockNum { //allow genesis
 			return ErrTxNumsAppendWithGap{appendBlockNum: blockNum, lastBlockNum: lastBlockNum, stack: dbg.Stack()}
 		}
