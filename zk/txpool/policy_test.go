@@ -189,6 +189,51 @@ func TestRemovePolicy(t *testing.T) {
 	})
 }
 
+func TestPolicyMapping(t *testing.T) {
+	// All policies
+	var policiesAll []byte
+	var pListAll []Policy
+	policiesAll = append(policiesAll, SendTx.ToByte())
+	policiesAll = append(policiesAll, Deploy.ToByte())
+	pListAll = append(pListAll, SendTx)
+	pListAll = append(pListAll, Deploy)
+
+	// Only sendTx policy
+	var policiesSendTx []byte
+	var pListSendTx []Policy
+	policiesSendTx = append(policiesSendTx, SendTx.ToByte())
+	pListSendTx = append(pListSendTx, SendTx)
+
+	// Only deploy policy
+	var policiesDeploy []byte
+	var pListDeploy []Policy
+	policiesDeploy = append(policiesDeploy, Deploy.ToByte())
+	pListDeploy = append(pListDeploy, Deploy)
+
+	// No policy
+	var policiesNone []byte
+	var pListNone []Policy
+
+	var tests = []struct {
+		policies []byte
+		pList    []Policy
+		want     string
+	}{
+		{policiesAll, pListAll, "\tsendTx: true\n\tdeploy: true"},
+		{policiesSendTx, pListSendTx, "\tsendTx: true"},
+		{policiesDeploy, pListDeploy, "\tdeploy: true"},
+		{policiesNone, pListNone, ""},
+	}
+	for _, tt := range tests {
+		t.Run("PolicyMapping", func(t *testing.T) {
+			ans := policyMapping(tt.policies, tt.pList)
+			if ans != tt.want {
+				t.Errorf("got %v, want %v", ans, tt.want)
+			}
+		})
+	}
+}
+
 func TestAddPolicy(t *testing.T) {
 	t.Parallel()
 
