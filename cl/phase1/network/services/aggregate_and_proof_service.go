@@ -98,7 +98,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *cltypes.SignedAggregateAndProofData,
 ) error {
-	return ErrIgnore
 	headState, cn := a.syncedDataManager.HeadState()
 	defer cn()
 	if headState == nil {
@@ -161,6 +160,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if aggregateData.Target.Epoch != epoch {
 		return errors.New("invalid target epoch in aggregate and proof")
 	}
+
+	return ErrIgnore
+
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err

@@ -109,6 +109,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
 		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
+	return ErrIgnore
 
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
 		index, err := att.Attestation.ElectraSingleCommitteeIndex()
@@ -158,7 +159,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return err
 	}
-	return ErrIgnore
 
 	bits := att.Attestation.AggregationBits.Bytes()
 	expectedAggregationBitsLength := len(beaconCommittee)
