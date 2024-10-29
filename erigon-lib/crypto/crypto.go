@@ -35,7 +35,7 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
@@ -52,8 +52,9 @@ const RecoveryIDOffset = 64
 const DigestLength = 32
 
 var (
-	secp256k1N    = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
-	secp256k1NBig = secp256k1N.ToBig()
+	secp256k1N     = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
+	secp256k1NBig  = secp256k1N.ToBig()
+	secp256k1halfN = new(uint256.Int).Rsh(secp256k1N, 1)
 )
 
 var errInvalidPubkey = errors.New("invalid secp256k1 public key")
@@ -72,7 +73,7 @@ func NewKeccakState() KeccakState {
 }
 
 // HashData hashes the provided data using the KeccakState and returns a 32 byte hash
-func HashData(kh KeccakState, data []byte) (h libcommon.Hash) {
+func HashData(kh KeccakState, data []byte) (h common.Hash) {
 	kh.Reset()
 	//nolint:errcheck
 	kh.Write(data)
@@ -95,7 +96,7 @@ func Keccak256(data ...[]byte) []byte {
 
 // Keccak256Hash calculates and returns the Keccak256 hash of the input data,
 // converting it to an internal Hash data structure.
-func Keccak256Hash(data ...[]byte) (h libcommon.Hash) {
+func Keccak256Hash(data ...[]byte) (h common.Hash) {
 	d := NewKeccakState()
 	for _, b := range data {
 		d.Write(b)
@@ -116,20 +117,20 @@ func Keccak512(data ...[]byte) []byte {
 
 // CreateAddress creates an ethereum address given the bytes and the nonce
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func CreateAddress(a libcommon.Address, nonce uint64) libcommon.Address {
+func CreateAddress(a common.Address, nonce uint64) common.Address {
 	len := 21 + rlp.U64Len(nonce)
 	data := make([]byte, len+1)
 	pos := rlp.EncodeListPrefix(len, data)
 	pos += rlp.EncodeAddress(a[:], data[pos:])
 	rlp.EncodeU64(nonce, data[pos:])
-	return libcommon.BytesToAddress(Keccak256(data)[12:])
+	return common.BytesToAddress(Keccak256(data)[12:])
 }
 
 // CreateAddress2 creates an ethereum address given the address bytes, initial
 // contract code hash and a salt.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func CreateAddress2(b libcommon.Address, salt [32]byte, inithash []byte) libcommon.Address {
-	return libcommon.BytesToAddress(Keccak256([]byte{0xff}, b.Bytes(), salt[:], inithash)[12:])
+func CreateAddress2(b common.Address, salt [32]byte, inithash []byte) common.Address {
+	return common.BytesToAddress(Keccak256([]byte{0xff}, b.Bytes(), salt[:], inithash)[12:])
 }
 
 // ToECDSA creates a private key with the given D value.
@@ -302,8 +303,22 @@ func GenerateKey() (*ecdsa.PrivateKey, error) {
 	return ecdsa.GenerateKey(S256(), rand.Reader)
 }
 
+// See Appendix F "Signing Transactions" of the Yellow Paper
+func TransactionSignatureIsValid(v byte, r, s *uint256.Int, allowPreEip2s bool) bool {
+	if r.IsZero() || s.IsZero() {
+		return false
+	}
+
+	// See EIP-2: Homestead Hard-fork Changes
+	if !allowPreEip2s && s.Gt(secp256k1halfN) {
+		return false
+	}
+
+	return r.Lt(secp256k1N) && s.Lt(secp256k1N) && (v == 0 || v == 1)
+}
+
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func PubkeyToAddress(p ecdsa.PublicKey) libcommon.Address {
+func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 	pubBytes := MarshalPubkey(&p)
-	return libcommon.BytesToAddress(Keccak256(pubBytes)[12:])
+	return common.BytesToAddress(Keccak256(pubBytes)[12:])
 }

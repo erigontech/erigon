@@ -26,9 +26,8 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
-
-	"github.com/erigontech/erigon/crypto"
 )
 
 type bytesBacked interface {
