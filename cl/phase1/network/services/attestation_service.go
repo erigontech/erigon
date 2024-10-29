@@ -158,7 +158,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if err != nil {
 		return err
 	}
-	return ErrIgnore
 
 	bits := att.Attestation.AggregationBits.Bytes()
 	expectedAggregationBitsLength := len(beaconCommittee)
@@ -237,6 +236,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != s.forkchoiceStore.FinalizedCheckpoint().Root {
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
+
+	return ErrIgnore
 
 	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
 		return ErrIgnore
