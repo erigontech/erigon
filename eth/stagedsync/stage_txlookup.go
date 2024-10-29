@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv/partitions"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -135,7 +134,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 
 // txnLookupTransform - [startKey, endKey)
 func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
-	_, secondaryPartition, err := partitions.Tables(tx, kv.TxLookup)
+	_, secondaryPartition, err := kv.TxLookup.Partitions(tx)
 	if err != nil {
 		return err
 	}
@@ -172,7 +171,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		return err
 	}
 
-	if err := partitions.PutPrimaryPartitionMax(tx, kv.TxLookup, blockTo); err != nil {
+	if err := kv.TxLookup.PutPrimaryPartitionMax(tx, blockTo); err != nil {
 		return err
 	}
 	return nil
