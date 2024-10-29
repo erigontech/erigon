@@ -100,6 +100,9 @@ func (table RotatingTable) ClearTables(tx RwTx) error {
 	if err := table.PutPrimaryPartitionMax(tx, 0); err != nil {
 		return err
 	}
+	if err := putPrimaryPartition(tx, table, 0); err != nil {
+		return err
+	}
 	return nil
 }
 
