@@ -118,7 +118,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		committeeIndex = index
 	}
 
-	headState, cn := s.syncedDataManager.HeadStateReader()
+	headState, cn := s.syncedDataManager.HeadState()
 	defer cn()
 
 	if headState == nil {
@@ -132,7 +132,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return ErrIgnore
 	}
 	s.attestationProcessed.Add(key, struct{}{})
-	return ErrIgnore
 
 	// [REJECT] The committee index is within the expected range
 	committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
@@ -155,10 +154,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return errors.New("epoch mismatch")
 	}
 	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
-	beaconCommittee, err := s.forkchoiceStore.GetBeaconCommitee(slot, committeeIndex)
+	beaconCommittee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
 	}
+	return ErrIgnore
 
 	bits := att.Attestation.AggregationBits.Bytes()
 	expectedAggregationBitsLength := len(beaconCommittee)
