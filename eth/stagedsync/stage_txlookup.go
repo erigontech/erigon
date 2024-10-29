@@ -286,6 +286,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		if err = s.DoneAt(tx, bn); err != nil {
 			return err
 		}
+	} else {
+		log.Warn("[dbg] TxLookup skip1", "blockFrom", blockFrom, "blockTo", blockTo, "s.ForwardProgress", s.ForwardProgress)
 	}
 
 	if !useExternalTx {
