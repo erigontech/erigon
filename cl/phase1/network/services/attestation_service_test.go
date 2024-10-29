@@ -108,11 +108,11 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Test attestation with committee index out of range",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 1
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -123,14 +123,14 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Test attestation with wrong subnet",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 2
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -141,15 +141,15 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Test attestation with wrong slot (current_slot < slot)",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
-				t.ethClock.EXPECT().GetCurrentSlot().Return(uint64(1)).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(uint64(1)).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -160,15 +160,15 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Attestation is aggregated",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
-				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -183,15 +183,15 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "Attestation is empty",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
-				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
@@ -206,17 +206,17 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "invalid signature",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 5
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
-				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
-				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).AnyTimes()
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
@@ -230,17 +230,17 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "block header not found",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 8
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
-				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
-				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).AnyTimes()
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
@@ -254,17 +254,17 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "invalid target block",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 8
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
-				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
-				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).AnyTimes()
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
@@ -281,17 +281,17 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "invalid finality checkpoint",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 8
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
-				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
-				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).AnyTimes()
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
@@ -314,17 +314,17 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		{
 			name: "success",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).AnyTimes()
+				t.syncedData.EXPECT().HeadStateReader().Return(t.beaconStateReader, synced_data.EmptyCancel).Times(1)
 				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
 					return 8
 				}
 				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
 					return 1
 				}
-				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
-				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
-				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).AnyTimes()
-				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).AnyTimes()
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+				t.beaconStateReader.EXPECT().ValidatorPublicKey(gomock.Any()).Return(common.Bytes48{}, nil).Times(1)
+				t.beaconStateReader.EXPECT().GetDomain(t.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
@@ -341,8 +341,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: mockFinalizedCheckPoint.Root,
 				}
 				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
-				t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).AnyTimes()
-				t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).AnyTimes()
+				t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
+				t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
 			},
 			args: args{
 				ctx:    context.Background(),
