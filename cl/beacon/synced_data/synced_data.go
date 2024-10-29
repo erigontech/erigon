@@ -20,6 +20,7 @@ import (
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
@@ -38,7 +39,8 @@ type SyncedDataManager struct {
 
 	headState *state.CachingBeaconState
 
-	mu sync.RWMutex
+	mu              sync.RWMutex
+	isTryingToWrite atomic.Bool
 }
 
 func NewSyncedDataManager(enabled bool, cfg *clparams.BeaconChainConfig) *SyncedDataManager {
@@ -52,6 +54,10 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
+	s.isTryingToWrite.Store(true)
+	defer func() {
+		s.isTryingToWrite.Store(false)
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -74,11 +80,21 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	return err
 }
 
+func (s *SyncedDataManager) waitUntilNotWriting() {
+	for {
+		if !s.isTryingToWrite.Load() {
+			return
+		}
+		time.Sleep(100 * time.Microsecond)
+	}
+}
+
 func EmptyCancel() {}
 
 var dbMap sync.Map
 
 func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
+	s.waitUntilNotWriting()
 	_, synced := s.headRoot.Load().(common.Hash)
 	if !s.enabled || !synced {
 		return nil, EmptyCancel
