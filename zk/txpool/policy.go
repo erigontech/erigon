@@ -25,6 +25,7 @@ const (
 	Add Operation = iota
 	Remove
 	Update
+	ModeChange
 )
 
 func (p Operation) ToByte() byte {
@@ -58,6 +59,8 @@ func (p Operation) String() string {
 		return "remove"
 	case Update:
 		return "update"
+	case ModeChange:
+		return "mode change"
 	default:
 		return "unknown operation"
 	}
@@ -69,6 +72,7 @@ type ACLTypeBinary byte
 const (
 	AllowListTypeB ACLTypeBinary = iota
 	BlockListTypeB
+	DisabledModeB
 )
 
 func (p ACLTypeBinary) ToByte() byte {
@@ -86,6 +90,8 @@ func ResolveACLTypeToBinary(aclType string) ACLTypeBinary {
 		return AllowListTypeB
 	case string(BlockListType):
 		return BlockListTypeB
+	case string(DisabledMode):
+		return DisabledModeB
 	}
 	return BlockListTypeB
 }
@@ -97,6 +103,8 @@ func ACLTypeBinaryFromByte(b byte) ACLTypeBinary {
 		return AllowListTypeB
 	case byte(BlockListTypeB):
 		return BlockListTypeB
+	case byte(DisabledModeB):
+		return DisabledModeB
 	default:
 		return BlockListTypeB // Default or error handling can be added here
 	}
@@ -109,6 +117,8 @@ func (p ACLTypeBinary) String() string {
 		return "allowlist"
 	case BlockListTypeB:
 		return "blocklist"
+	case DisabledModeB:
+		return "disabled"
 	default:
 		return "Unknown ACLTypeBinary"
 	}
@@ -393,6 +403,15 @@ func LastPolicyTransactions(ctx context.Context, aclDB kv.RwDB, count int) ([]Po
 }
 
 func byteToPolicyTransaction(value []byte) (PolicyTransaction, error) {
+	// if the length is the size of mode change = 9, then it is a mode change transaction
+	if len(value) == 9 {
+		return PolicyTransaction{
+			aclType:   ACLTypeBinary(value[0]),
+			timeTx:    bytesToTimestamp(value[1:9]),
+			operation: ModeChange,
+		}, nil
+	}
+
 	// Check for expected length:
 	// 1 byte for aclType,
 	// 1 byte for operation,
@@ -431,6 +450,15 @@ func byteToPolicyTransaction(value []byte) (PolicyTransaction, error) {
 }
 
 func (pt PolicyTransaction) ToString() string {
+	// on mode change we only have aclType and timeTx
+	// so we need to check if the operation is ModeChange
+	// to print the correct information to display
+	if pt.operation == ModeChange {
+		return fmt.Sprintf("ACLType: %s, Operation: %s, Time: %s",
+			pt.aclType.String(),
+			pt.operation.String(),
+			pt.timeTx.Format(time.RFC3339)) // Use RFC3339 format for the
+	}
 	return fmt.Sprintf("ACLType: %s, Address: %s, Policy: %s, Operation: %s, Time: %s",
 		pt.aclType.String(),
 		hex.EncodeToString(pt.addr[:]), // Convert address to hexadecimal string representation
@@ -608,7 +636,18 @@ func SetMode(ctx context.Context, aclDB kv.RwDB, mode string) error {
 	}
 
 	return aclDB.Update(ctx, func(tx kv.RwTx) error {
-		return tx.Put(Config, []byte(modeKey), []byte(m))
+		err := tx.Put(Config, []byte(modeKey), []byte(m))
+
+		// Timestamp bytes + single byte.
+		mb := ResolveACLTypeToBinary(mode)
+		unixBytes := timestampToBytes(time.Now())
+		addressMode := append(mb.ToByteArray(), unixBytes...)
+		value := append([]byte{mb.ToByte()}, unixBytes...)
+		if err = tx.Put(PolicyTransactions, addressMode, value); err != nil {
+			return err
+		}
+
+		return err
 	})
 }
 

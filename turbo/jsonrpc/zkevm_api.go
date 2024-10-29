@@ -16,6 +16,7 @@ import (
 
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
@@ -32,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	smtUtils "github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
@@ -44,8 +46,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
-	"github.com/ledgerwatch/erigon/zk/datastream/server"
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 )
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
@@ -557,10 +557,17 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		// sequenced, genesis or injected batch 1 - special batches 0,1 will always be closed, if next batch has blocks, bn must be closed
 		batch.Closed = batchNo == 0 || batchNo == 1 || batchNo <= highestClosed
 	} else {
-		if _, found, err = hermezDb.GetLowestBlockInBatch(batchNo + 1); err != nil {
+		latestClosedBlock, err := hermezDb.GetLatestBatchEndBlock()
+		if err != nil {
 			return nil, err
 		}
-		batch.Closed = batchNo == 0 || batchNo == 1 || found
+
+		latestClosedbatchNum, err := hermezDb.GetBatchNoByL2Block(latestClosedBlock)
+		if err != nil {
+			return nil, err
+		}
+
+		batch.Closed = batchNo <= latestClosedbatchNum
 	}
 
 	// verification - if we can't find one, maybe this batch was verified along with a higher batch number
