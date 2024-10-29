@@ -23,17 +23,18 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/hex"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/holiman/uint256"
 )
 
 var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
@@ -101,11 +102,11 @@ func BenchmarkSha3(b *testing.B) {
 
 func TestUnmarshalPubkey(t *testing.T) {
 	key, err := UnmarshalPubkey(nil)
-	if err != errInvalidPubkey || key != nil {
+	if !errors.Is(err, errInvalidPubkey) || key != nil {
 		t.Fatalf("expected error, got %v, %v", err, key)
 	}
 	key, err = UnmarshalPubkey([]byte{1, 2, 3})
-	if err != errInvalidPubkey || key != nil {
+	if !errors.Is(err, errInvalidPubkey) || key != nil {
 		t.Fatalf("expected error, got %v, %v", err, key)
 	}
 
@@ -325,6 +326,7 @@ func TestTransactionSignatureIsValid(t *testing.T) {
 }
 
 func checkhash(t *testing.T, name string, f func([]byte) []byte, msg, exp []byte) {
+	t.Helper()
 	sum := f(msg)
 	if !bytes.Equal(exp, sum) {
 		t.Fatalf("hash %s mismatch: want: %x have: %x", name, exp, sum)
@@ -332,6 +334,7 @@ func checkhash(t *testing.T, name string, f func([]byte) []byte, msg, exp []byte
 }
 
 func checkAddr(t *testing.T, addr0, addr1 common.Address) {
+	t.Helper()
 	if addr0 != addr1 {
 		t.Fatalf("address mismatch: want: %x have: %x", addr0, addr1)
 	}

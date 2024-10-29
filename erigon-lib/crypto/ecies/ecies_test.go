@@ -164,12 +164,12 @@ func TestTooBigSharedKey(t *testing.T) {
 	}
 
 	_, err = prv1.GenerateShared(&prv2.PublicKey, 32, 32)
-	if err != ErrSharedKeyTooBig {
+	if !errors.Is(err, ErrSharedKeyTooBig) {
 		t.Fatal("ecdh: shared key should be too large for curve")
 	}
 
 	_, err = prv2.GenerateShared(&prv1.PublicKey, 32, 32)
-	if err != ErrSharedKeyTooBig {
+	if !errors.Is(err, ErrSharedKeyTooBig) {
 		t.Fatal("ecdh: shared key should be too large for curve")
 	}
 }
@@ -310,6 +310,7 @@ func TestParamSelection(t *testing.T) {
 }
 
 func testParamSelection(t *testing.T, c testCase) {
+	t.Helper()
 	params := ParamsFromCurve(c.Curve)
 	if params == nil {
 		t.Fatal("ParamsFromCurve returned nil")
@@ -368,7 +369,7 @@ func TestBasicKeyValidation(t *testing.T) {
 	for _, b := range badBytes {
 		ct[0] = b
 		_, err := prv.Decrypt(ct, nil, nil)
-		if err != ErrInvalidPublicKey {
+		if !errors.Is(err, ErrInvalidPublicKey) {
 			t.Fatal("ecies: validated an invalid key")
 		}
 	}
