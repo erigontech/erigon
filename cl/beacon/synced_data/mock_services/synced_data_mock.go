@@ -12,6 +12,7 @@ package mock_services
 import (
 	reflect "reflect"
 
+	common "github.com/erigontech/erigon-lib/common"
 	abstract "github.com/erigontech/erigon/cl/abstract"
 	state "github.com/erigontech/erigon/cl/phase1/core/state"
 	gomock "go.uber.org/mock/gomock"
@@ -21,7 +22,6 @@ import (
 type MockSyncedData struct {
 	ctrl     *gomock.Controller
 	recorder *MockSyncedDataMockRecorder
-	isgomock struct{}
 }
 
 // MockSyncedDataMockRecorder is the mock recorder for MockSyncedData.
@@ -39,6 +39,44 @@ func NewMockSyncedData(ctrl *gomock.Controller) *MockSyncedData {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockSyncedData) EXPECT() *MockSyncedDataMockRecorder {
 	return m.recorder
+}
+
+// HeadRoot mocks base method.
+func (m *MockSyncedData) HeadRoot() common.Hash {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HeadRoot")
+	ret0, _ := ret[0].(common.Hash)
+	return ret0
+}
+
+// HeadRoot indicates an expected call of HeadRoot.
+func (mr *MockSyncedDataMockRecorder) HeadRoot() *MockSyncedDataHeadRootCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeadRoot", reflect.TypeOf((*MockSyncedData)(nil).HeadRoot))
+	return &MockSyncedDataHeadRootCall{Call: call}
+}
+
+// MockSyncedDataHeadRootCall wrap *gomock.Call
+type MockSyncedDataHeadRootCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataHeadRootCall) Return(arg0 common.Hash) *MockSyncedDataHeadRootCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataHeadRootCall) Do(f func() common.Hash) *MockSyncedDataHeadRootCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataHeadRootCall) DoAndReturn(f func() common.Hash) *MockSyncedDataHeadRootCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // HeadSlot mocks base method.
@@ -194,17 +232,17 @@ func (c *MockSyncedDataHeadStateReaderCall) DoAndReturn(f func() abstract.Beacon
 }
 
 // OnHeadState mocks base method.
-func (m *MockSyncedData) OnHeadState(newState *state.CachingBeaconState) error {
+func (m *MockSyncedData) OnHeadState(arg0 *state.CachingBeaconState) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "OnHeadState", newState)
+	ret := m.ctrl.Call(m, "OnHeadState", arg0)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // OnHeadState indicates an expected call of OnHeadState.
-func (mr *MockSyncedDataMockRecorder) OnHeadState(newState any) *MockSyncedDataOnHeadStateCall {
+func (mr *MockSyncedDataMockRecorder) OnHeadState(arg0 any) *MockSyncedDataOnHeadStateCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnHeadState", reflect.TypeOf((*MockSyncedData)(nil).OnHeadState), newState)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnHeadState", reflect.TypeOf((*MockSyncedData)(nil).OnHeadState), arg0)
 	return &MockSyncedDataOnHeadStateCall{Call: call}
 }
 

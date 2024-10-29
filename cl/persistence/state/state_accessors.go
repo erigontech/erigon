@@ -25,14 +25,14 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 type GetValFn func(table string, key []byte) ([]byte, error)
 
-func GetValFnTxAndSnapshot(tx kv.Tx, snapshotRoTx *freezeblocks.CaplinStateView) GetValFn {
+func GetValFnTxAndSnapshot(tx kv.Tx, snapshotRoTx *snapshotsync.CaplinStateView) GetValFn {
 	return func(table string, key []byte) ([]byte, error) {
 		if snapshotRoTx != nil {
 			slot := uint64(binary.BigEndian.Uint32(key))

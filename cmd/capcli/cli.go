@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -569,8 +570,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	var bor *freezeblocks.BorRoSnapshots
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
@@ -583,8 +583,8 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	snTypes := freezeblocks.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := freezeblocks.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
+	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1223,8 +1223,8 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	snTypes := freezeblocks.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := freezeblocks.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
+	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}

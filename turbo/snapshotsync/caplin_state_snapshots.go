@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package freezeblocks
+package snapshotsync
 
 import (
 	"context"
@@ -38,7 +38,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/seg"
@@ -47,6 +46,33 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/eth/ethconfig"
 )
+
+func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+	num := make([]byte, binary.MaxVarintLen64)
+	cfg := recsplit.RecSplitArgs{
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		Salt:       &salt,
+		BaseDataID: sn.From,
+	}
+	if err := snaptype.BuildIndex(ctx, sn, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+		if i%20_000 == 0 {
+			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
+		}
+		p.Processed.Add(1)
+		n := binary.PutUvarint(num, i)
+		if err := idx.AddKey(num[:n], offset); err != nil {
+			return err
+		}
+		return nil
+	}, logger); err != nil {
+		return fmt.Errorf("idx: %w", err)
+	}
+
+	return nil
+}
 
 func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 	return func(numId uint64) ([]byte, []byte, error) {
@@ -179,7 +205,7 @@ func (s *CaplinStateSnapshots) LS() {
 
 	for _, roTx := range view.roTxs {
 		if roTx != nil {
-			for _, seg := range roTx.segments {
+			for _, seg := range roTx.Segments {
 				s.logger.Info("[agg] ", "f", seg.src.filePath, "words", seg.src.Decompressor.Count())
 			}
 		}
@@ -196,7 +222,7 @@ func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
 		if roTx == nil {
 			continue
 		}
-		for _, seg := range roTx.segments {
+		for _, seg := range roTx.Segments {
 			if seg.from >= to || seg.to <= from {
 				continue
 			}
@@ -479,7 +505,7 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 
 type CaplinStateView struct {
 	s      *CaplinStateSnapshots
-	roTxs  map[string]*segmentsRotx
+	roTxs  map[string]*RoTx
 	closed bool
 }
 
@@ -490,13 +516,13 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	s.visibleSegmentsLock.RLock()
 	defer s.visibleSegmentsLock.RUnlock()
 
-	v := &CaplinStateView{s: s, roTxs: make(map[string]*segmentsRotx)}
+	v := &CaplinStateView{s: s, roTxs: make(map[string]*RoTx)}
 	// BeginRo increments refcount - which is contended
 	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
 
 	for k, segments := range s.visible {
-		v.roTxs[k] = segments.BeginRotx()
+		v.roTxs[k] = segments.BeginRo()
 	}
 	return v
 }
@@ -663,22 +689,4 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	}
 
 	return s.OpenFolder()
-}
-
-func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("Get(%s, %d), %s, %s\n", tbl, slot, rec, dbg.Stack()))
-		}
-	}()
-
-	view := s.View()
-	defer view.Close()
-
-	seg, ok := view.VisibleSegment(slot, tbl)
-	if !ok {
-		return nil, nil
-	}
-
-	return seg.Get(slot)
 }

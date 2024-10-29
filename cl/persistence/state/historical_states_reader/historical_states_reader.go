@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/klauspost/compress/zstd"
 )
@@ -45,7 +46,7 @@ type HistoricalStatesReader struct {
 	cfg            *clparams.BeaconChainConfig
 	validatorTable *state_accessors.StaticValidatorTable // We can save 80% of the I/O by caching the validator table
 	blockReader    freezeblocks.BeaconSnapshotReader
-	stateSn        *freezeblocks.CaplinStateSnapshots
+	stateSn        *snapshotsync.CaplinStateSnapshots
 	genesisState   *state.CachingBeaconState
 }
 
@@ -53,7 +54,7 @@ func NewHistoricalStatesReader(
 	cfg *clparams.BeaconChainConfig,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	validatorTable *state_accessors.StaticValidatorTable,
-	genesisState *state.CachingBeaconState, stateSn *freezeblocks.CaplinStateSnapshots) *HistoricalStatesReader {
+	genesisState *state.CachingBeaconState, stateSn *snapshotsync.CaplinStateSnapshots) *HistoricalStatesReader {
 
 	return &HistoricalStatesReader{
 		cfg:            cfg,

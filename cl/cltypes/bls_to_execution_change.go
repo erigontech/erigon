@@ -63,6 +63,7 @@ func (*BLSToExecutionChange) Static() bool {
 type SignedBLSToExecutionChangeWithGossipData struct {
 	SignedBLSToExecutionChange *SignedBLSToExecutionChange
 	GossipData                 *sentinel.GossipData
+	ImmediateVerification      bool
 }
 
 type SignedBLSToExecutionChange struct {

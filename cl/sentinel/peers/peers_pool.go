@@ -20,8 +20,10 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common/ring"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -54,10 +56,9 @@ type Pool struct {
 	// allowedPeers are the peers that are allowed.
 	// peers not on this list will be silently discarded
 	// when returned, and skipped when requesting
-	peerData         map[peer.ID]*Item
-	bannedPeersCount atomic.Int32
+	peerData map[peer.ID]*Item
 
-	bannedPeers sync.Map
+	bannedPeers *lru.CacheWithTTL[peer.ID, struct{}]
 	queue       *ring.Buffer[*Item]
 
 	mu sync.Mutex
@@ -65,25 +66,26 @@ type Pool struct {
 
 func NewPool() *Pool {
 	return &Pool{
-		peerData: make(map[peer.ID]*Item),
-		queue:    ring.NewBuffer[*Item](0, 1024),
+		peerData:    make(map[peer.ID]*Item),
+		queue:       ring.NewBuffer[*Item](0, 1024),
+		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 5*time.Minute),
 	}
 }
 
 func (p *Pool) BanStatus(pid peer.ID) bool {
-	_, ok := p.bannedPeers.Load(pid)
+	_, ok := p.bannedPeers.Get(pid)
 	return ok
 }
 
 func (p *Pool) LenBannedPeers() int {
-	return int(p.bannedPeersCount.Load())
+	return p.bannedPeers.Len()
 }
 
 func (p *Pool) AddPeer(pid peer.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// if peer banned, return immediately
-	if _, ok := p.bannedPeers.Load(pid); ok {
+	if _, ok := p.bannedPeers.Get(pid); ok {
 		return
 	}
 	// if peer already here, return immediately
@@ -102,11 +104,10 @@ func (p *Pool) SetBanStatus(pid peer.ID, banned bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if banned {
-		p.bannedPeers.Store(pid, struct{}{})
-		p.bannedPeersCount.Add(1)
+		p.bannedPeers.Add(pid, struct{}{})
 		delete(p.peerData, pid)
 	} else {
-		p.bannedPeers.Delete(pid)
+		p.bannedPeers.Remove(pid)
 	}
 }
 
@@ -133,7 +134,7 @@ func (p *Pool) nextPeer() (i *Item, ok bool) {
 		return nil, false
 	}
 	// if peer been banned, get next peer
-	if _, ok := p.bannedPeers.Load(val.id); ok {
+	if p.bannedPeers.Contains(val.id) {
 		return p.nextPeer()
 	}
 	// if peer not in set, get next peer

@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 // pool for buffers
@@ -125,7 +125,7 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	return
 }
 
-func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *freezeblocks.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) (bool, error) {
+func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *snapshotsync.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) (bool, error) {
 	if stateSn == nil || validatorsTable.Slot() != 0 {
 		return false, nil
 	}
