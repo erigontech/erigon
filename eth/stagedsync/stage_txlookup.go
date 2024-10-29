@@ -369,14 +369,14 @@ func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uin
 
 // pruneTxLookup - [blockFrom, blockTo)
 func pruneTxLookup(tx kv.RwTx, blockTo uint64, ctx context.Context, limit int, timeout time.Duration) (deleted int, done bool, err error) {
-	_, secondaryMax, err := partitions.Max(tx, kv.TxLookup)
+	_, secondaryMax, err := kv.TxLookup.Max(tx)
 	if err != nil {
 		return 0, false, err
 	}
 	if blockTo >= secondaryMax {
 		return 0, false, err
 	}
-	_, secondaryPartition, err := partitions.Tables(tx, kv.TxLookup)
+	_, secondaryPartition, err := kv.TxLookup.Partitions(tx)
 	if err != nil {
 		return 0, false, err
 	}
@@ -391,7 +391,7 @@ func pruneTxLookup(tx kv.RwTx, blockTo uint64, ctx context.Context, limit int, t
 	}
 	done = cnt == 0
 	if done {
-		done, err = partitions.Rotate(tx, kv.TxLookup)
+		done, err = kv.TxLookup.Rotate(tx)
 		if err != nil {
 			return 0, false, err
 		}
