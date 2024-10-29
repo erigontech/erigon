@@ -128,7 +128,7 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 				panic(err)
 			}
 
-			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, stateReceiver, logger, polygonBridge, heimdallService)
+			eng = bor.New(chainConfig, db, blockReader, spanner, heimdallClient, stateReceiver, logger, polygonBridge, heimdallService, heimdallService)
 		}
 	}
 
