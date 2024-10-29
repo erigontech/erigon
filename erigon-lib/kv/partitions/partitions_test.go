@@ -55,6 +55,9 @@ func TestRotate(t *testing.T) {
 	//write to primary
 	err = tx.Put(primary, []byte{1}, []byte{1})
 	require.NoError(err)
+	cnt, err := tx.Count(primary)
+	require.NoError(err)
+	require.Equal(1, int(cnt))
 
 	v, err := ReadFromPartitions(tx, kv.TxLookup, []byte{1})
 	require.NoError(err)
@@ -65,4 +68,14 @@ func TestRotate(t *testing.T) {
 	require.NoError(err)
 	require.True(done)
 
+	v, err = ReadFromPartitions(tx, kv.TxLookup, []byte{1})
+	require.NoError(err)
+	require.Equal([]byte{1}, v)
+
+	primary, secondary, err = Tables(tx, kv.TxLookup)
+	require.NoError(err)
+
+	cnt, err = tx.Count(primary)
+	require.NoError(err)
+	require.Equal(0, int(cnt))
 }
