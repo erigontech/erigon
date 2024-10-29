@@ -127,11 +127,11 @@ func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests []he
 			return &rpc.InvalidParamsError{Message: "requests before Prague"}
 		}
 	}
-	if s.config.IsPrague(time) {
-		if len(executionRequests) < 3 {
-			return &rpc.InvalidParamsError{Message: "missing requests list"}
-		}
-	}
+	// if s.config.IsPrague(time) {
+	//   if len(executionRequests) < 3 {
+	// 		return &rpc.InvalidParamsError{Message: "missing requests list"}
+	// 	}
+	// }
 	return nil
 }
 
@@ -271,13 +271,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	possibleStatus, err := s.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
-	if err != nil {
-		return nil, err
-	}
-	if possibleStatus != nil {
-		return possibleStatus, nil
-	}
+	// possibleStatus, err := s.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// if possibleStatus != nil {
+	// 	return possibleStatus, nil
+	// }
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
