@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -254,9 +255,21 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes
 	blockTo = min(blockTo, blockFrom+10)
 
+	pruneTimeout := 250 * time.Millisecond
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneTimeout = time.Hour
+	}
+
 	if blockFrom < blockTo {
-		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
-			return fmt.Errorf("prune TxLookUp: %w", err)
+		t := time.Now()
+		for bn := blockFrom; bn < blockTo; bn++ {
+			if err = deleteTxLookupRange(tx, logPrefix, bn, bn+1, ctx, cfg, logger); err != nil {
+				return fmt.Errorf("prune TxLookUp: %w", err)
+			}
+
+			if time.Since(t) > pruneTimeout {
+				break
+			}
 		}
 
 		if cfg.borConfig != nil && pruneBor {
