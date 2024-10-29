@@ -136,10 +136,8 @@ func (s *SyncedDataManager) HeadStateReader() (abstract.BeaconStateReader, Cance
 }
 
 func (s *SyncedDataManager) Syncing() bool {
-	if !s.enabled {
-		return false
-	}
-	return s.headState == nil
+	_, synced := s.headRoot.Load().(common.Hash)
+	return !synced
 }
 
 func (s *SyncedDataManager) HeadSlot() uint64 {

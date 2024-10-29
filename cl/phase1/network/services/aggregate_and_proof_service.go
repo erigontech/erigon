@@ -137,7 +137,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if aggregateData.Target.Epoch != epoch {
 		return errors.New("invalid target epoch in aggregate and proof")
 	}
-	cn()
 	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 	finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
@@ -162,12 +161,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return ErrIgnore
 	}
 
-	headState, cn = a.syncedDataManager.HeadState()
-	defer cn()
-	if headState == nil {
-		return ErrIgnore
-	}
-
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
@@ -180,7 +173,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if len(attestingIndices) == 0 {
 		return errors.New("no attesting indicies")
 	}
-	cn()
 
 	monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
 
@@ -204,18 +196,12 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		log.Warn("receveived aggregate and proof from invalid aggregator")
 		return errors.New("invalid aggregate and proof")
 	}
-	headState, cn = a.syncedDataManager.HeadState()
-	defer cn()
-	if headState == nil {
-		return ErrIgnore
-	}
 
 	// aggregate signatures for later verification
 	aggregateVerificationData, err := GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 	if err != nil {
 		return err
 	}
-	cn()
 
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
@@ -388,13 +374,11 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 		}
 
 		a.aggregatesScheduledForLaterExecution.Range(func(key, value any) bool {
-			headState, cn := a.syncedDataManager.HeadState()
-			if headState == nil {
+			if a.syncedDataManager.Syncing() {
 				// Discard the job if we can't get the head state
 				a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
 				return false
 			}
-			defer cn()
 			job := value.(*aggregateJob)
 			// check if it has expired
 			if time.Since(job.creationTime) > attestationJobExpiry {
@@ -402,14 +386,14 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 				return true
 			}
 			aggregateData := job.aggregate.SignedAggregateAndProof.Message.Aggregate.Data
-			if aggregateData.Slot > headState.Slot() {
+			if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
 				return true
 			}
-			cn()
 			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
 				log.Trace("blob sidecar verification failed", "err", err)
 				return true
 			}
+
 			a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
 		})
