@@ -127,6 +127,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
 		return ErrIgnore
 	}
+	cn()
 	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 	finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
@@ -198,12 +199,18 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		log.Warn("receveived aggregate and proof from invalid aggregator")
 		return errors.New("invalid aggregate and proof")
 	}
+	headState, cn = a.syncedDataManager.HeadState()
+	defer cn()
+	if headState == nil {
+		return ErrIgnore
+	}
 
 	// aggregate signatures for later verification
 	aggregateVerificationData, err := GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 	if err != nil {
 		return err
 	}
+	cn()
 
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
