@@ -96,12 +96,6 @@ func NewBlockService(
 
 // ProcessMessage processes a block message according to https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedBeaconBlock) error {
-	headState, cn := b.syncedData.HeadState()
-	defer cn()
-	if headState == nil {
-		b.scheduleBlockForLaterProcessing(msg)
-		return ErrIgnore
-	}
 
 	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 
@@ -112,11 +106,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
 		return ErrIgnore
 	}
-	// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
-	// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
-	if blockEpoch <= headState.FinalizedCheckpoint().Epoch {
-		return ErrIgnore
-	}
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
 	seenCacheKey := proposerIndexAndSlot{
@@ -124,6 +113,19 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		slot:          msg.Block.Slot,
 	}
 	if b.seenBlocksCache.Contains(seenCacheKey) {
+		return ErrIgnore
+	}
+
+	headState, cn := b.syncedData.HeadState()
+	defer cn()
+	if headState == nil {
+		b.scheduleBlockForLaterProcessing(msg)
+		return ErrIgnore
+	}
+
+	// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
+	// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
+	if blockEpoch <= headState.FinalizedCheckpoint().Epoch {
 		return ErrIgnore
 	}
 
@@ -147,8 +149,8 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlock) {
 		return ErrInvalidCommitmentsCount
 	}
+	cn()
 	b.publishBlockGossipEvent(msg)
-
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
 		if err == forkchoice.ErrEIP4844DataNotAvailable {
