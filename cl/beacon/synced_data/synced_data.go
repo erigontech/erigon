@@ -18,6 +18,7 @@ package synced_data
 
 import (
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 
@@ -52,10 +53,8 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	fmt.Println("Start lock")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fmt.Println("Unlock lock")
 
 	var blkRoot common.Hash
 
@@ -78,14 +77,21 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 
 func EmptyCancel() {}
 
+var dbMap sync.Map
+
 func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	_, synced := s.headRoot.Load().(common.Hash)
 	if !s.enabled || !synced {
 		return nil, EmptyCancel
 	}
-	fmt.Println("Start Rlock")
 	isCanceled := false
 	var mu sync.Mutex
+
+	stack := debug.Stack()
+	if _, ok := dbMap.Load(string(stack)); !ok {
+		fmt.Println("HeadState called from", string(stack))
+	}
+	dbMap.Store(string(stack), true)
 
 	s.mu.RLock()
 	return s.headState, func() {
@@ -94,7 +100,6 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 		if isCanceled {
 			return
 		}
-		fmt.Println("stop lock")
 		isCanceled = true
 		s.mu.RUnlock()
 	}
