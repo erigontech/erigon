@@ -23,7 +23,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/partitions"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -135,13 +135,13 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 
 // txnLookupTransform - [startKey, endKey)
 func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
-	_, secondaryPartition, err := rawdbv3.Partitions(tx, kv.TxLookup)
+	_, secondaryPartition, err := partitions.Tables(tx, kv.TxLookup)
 	if err != nil {
 		return err
 	}
 
 	bigNum := new(big.Int)
-	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, secondaryPartition, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
 		if err != nil {
@@ -154,9 +154,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 
 		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 		for _, txn := range body.Transactions {
-			v := append(txn.Hash().Bytes()[:], blockNumBytes...)
-			step := blocknum / 1_000
-			if err := next(k, hexutility.EncodeTs(step), v); err != nil {
+			if err := next(k, txn.Hash().Bytes()[:], blockNumBytes); err != nil {
 				return err
 			}
 		}
@@ -174,7 +172,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		return err
 	}
 
-	if err := rawdbv3.PutPrimaryPartitionMax(tx, kv.TxLookup, blockTo); err != nil {
+	if err := partitions.PutPrimaryPartitionMax(tx, kv.TxLookup, blockTo); err != nil {
 		return err
 	}
 	return nil
@@ -279,7 +277,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if blockFrom < blockTo {
 		t := time.Now()
 		deletedTotal := 0
-		deleted, err := deleteTxLookupRange2(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger)
+		deleted, done, err := deleteTxLookupRange2(tx, blockTo, ctx, 100_000, pruneTimeout)
 		if err != nil {
 			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
@@ -293,8 +291,10 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			}
 		}
 
-		if err = s.DoneAt(tx, blockTo); err != nil {
-			return err
+		if done {
+			if err = s.DoneAt(tx, blockTo); err != nil {
+				return err
+			}
 		}
 	} else {
 		log.Warn("[dbg] TxLookup skip1", "blockFrom", blockFrom, "blockTo", blockTo, "s.ForwardProgress", s.ForwardProgress)
@@ -363,13 +363,72 @@ func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uin
 	}, logger)
 }
 
-func deleteTxLookupRange2(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (deleted int, err error) {
-	step := blockTo / 1_000
-	_, secondarysPartition, err := rawdbv3.Partitions(tx, kv.TxLookup)
-
-	primaryMax, secondaryMax, err := rawdbv3.PartitionsMax(tx, kv.TxLookup)
+// deleteTxLookupRange2 - [blockFrom, blockTo)
+func deleteTxLookupRange2(tx kv.RwTx, blockTo uint64, ctx context.Context, limit int, timeout time.Duration) (deleted int, done bool, err error) {
+	_, secondaryMax, err := partitions.Max(tx, kv.TxLookup)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
+	if blockTo >= secondaryMax {
+		return 0, false, err
+	}
+	_, secondaryPartition, err := partitions.Tables(tx, kv.TxLookup)
+	if err != nil {
+		return 0, false, err
+	}
+
+	deleted, err = clearTable(ctx, tx, secondaryPartition, limit, timeout)
+	if err != nil {
+		return 0, false, err
+	}
+	cnt, err := tx.Count(secondaryPartition)
+	if err != nil {
+		return 0, false, err
+	}
+	done = cnt == 0
+	if done {
+		done, err = partitions.Rotate(tx, kv.TxLookup)
+		if err != nil {
+			return 0, false, err
+		}
+	}
+
+	return deleted, done, nil
+}
+
+func clearTable(ctx context.Context, tx kv.RwTx, table string, limit int, timeout time.Duration) (deleted int, err error) {
+	c, err := tx.RwCursor(table)
+	if err != nil {
+		return deleted, err
+	}
+	defer c.Close()
+
+	t := time.Now()
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return deleted, err
+		}
+		if err := c.DeleteCurrent(); err != nil {
+			return deleted, err
+		}
+		deleted++
+		limit--
+		if limit == 0 {
+			break
+		}
+
+		if limit%1000 == 0 {
+			select {
+			case <-ctx.Done():
+				return deleted, ctx.Err()
+			default:
+			}
+
+			if time.Since(t) > timeout {
+				break
+			}
+		}
+	}
+
 	return deleted, nil
 }

@@ -504,7 +504,11 @@ var ChaindataTables = []string{
 	BadHeaderNumber,
 	BlockBody,
 	Receipts,
+
 	TxLookup,
+	txLookup0,
+	txLookup1,
+
 	ConfigTable,
 	DatabaseInfo,
 	IncarnationMap,

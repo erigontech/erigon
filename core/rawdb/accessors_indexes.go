@@ -24,7 +24,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/partitions"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
@@ -41,7 +41,7 @@ type TxLookupEntry struct {
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
 func ReadTxLookupEntry(db kv.Tx, txnHash libcommon.Hash) (*uint64, error) {
-	v, err := rawdbv3.ReadFromPartitions(db, kv.TxLookup, txnHash.Bytes())
+	v, err := partitions.ReadFromPartitions(db, kv.TxLookup, txnHash.Bytes())
 	if err != nil {
 		return nil, err
 	}
