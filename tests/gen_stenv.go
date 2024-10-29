@@ -8,8 +8,9 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
+
 	common0 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 )
 
 var _ = (*stEnvMarshaling)(nil)
