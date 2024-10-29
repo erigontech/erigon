@@ -225,7 +225,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	blockFrom, blockTo = max(blockFrom, smallestInDB), max(blockTo, smallestInDB)
 
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
-	if _, err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
+	if _, err := unwindTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
 		return fmt.Errorf("unwind TxLookUp: %w", err)
 	}
 	if cfg.borConfig != nil {
@@ -276,7 +276,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if blockFrom < blockTo {
 		t := time.Now()
 		deletedTotal := 0
-		deleted, done, err := deleteTxLookupRange2(tx, blockTo, ctx, 100_000, pruneTimeout)
+		deleted, done, err := pruneTxLookup(tx, blockTo, ctx, 100_000, pruneTimeout)
 		if err != nil {
 			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
@@ -307,14 +307,14 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	return nil
 }
 
-// deleteTxLookupRange - [blockFrom, blockTo)
-func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (deleted int, err error) {
-	_, secondaryPartition, err := partitions.Tables(tx, kv.TxLookup)
+// unwindTxLookupRange - [blockFrom, blockTo)
+func unwindTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (deleted int, err error) {
+	_, secondaryPartition, err := kv.TxLookup.Partitions(tx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, secondaryPartition, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
 		if err != nil {
@@ -346,7 +346,7 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 	return deleted, nil
 }
 
-// deleteTxLookupRange - [blockFrom, blockTo)
+// unwindTxLookupRange - [blockFrom, blockTo)
 func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
@@ -367,8 +367,8 @@ func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uin
 	}, logger)
 }
 
-// deleteTxLookupRange2 - [blockFrom, blockTo)
-func deleteTxLookupRange2(tx kv.RwTx, blockTo uint64, ctx context.Context, limit int, timeout time.Duration) (deleted int, done bool, err error) {
+// pruneTxLookup - [blockFrom, blockTo)
+func pruneTxLookup(tx kv.RwTx, blockTo uint64, ctx context.Context, limit int, timeout time.Duration) (deleted int, done bool, err error) {
 	_, secondaryMax, err := partitions.Max(tx, kv.TxLookup)
 	if err != nil {
 		return 0, false, err
