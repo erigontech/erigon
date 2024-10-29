@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/blake2b"
 	"github.com/erigontech/erigon-lib/crypto/bn256"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/secp256r1"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 

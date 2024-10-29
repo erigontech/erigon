@@ -40,6 +40,7 @@ type PolygonBridgeReader interface {
 type Service interface {
 	PolygonBridge
 	Run(ctx context.Context) error
+	Ready(ctx context.Context) <-chan error
 }
 
 type ReaderService interface {
