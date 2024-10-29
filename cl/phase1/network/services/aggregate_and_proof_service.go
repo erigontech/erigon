@@ -142,7 +142,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot); !ok {
 		return ErrIgnore
 	}
-	return ErrIgnore
 
 	// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
 	seenIndex := seenAggregateIndex{
