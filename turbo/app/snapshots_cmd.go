@@ -69,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/eth/integrity"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	erigoncli "github.com/erigontech/erigon/turbo/cli"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
@@ -492,7 +493,11 @@ func doDebugKey(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	_, _, _, _, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	from := cliCtx.Uint64(SnapshotFromFlag.Name)
+
+	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -523,7 +528,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	from := cliCtx.Uint64(SnapshotFromFlag.Name)
+
+	_, _, _, blockRetire, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1002,7 +1011,10 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	chainConfig := fromdb.ChainConfig(chainDB)
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	from := cliCtx.Uint64(SnapshotFromFlag.Name)
+
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -1031,31 +1043,32 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
+	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
+	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, dirs, chainDB, logger)
+	blockSnaps, borSnaps, caplinSnaps, _, agg, clean, err := openSnaps(ctx, cfg, dirs, from, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer clean()
 
-	blockSnaps.LS()
-	borSnaps.LS()
+	blockSnaps.Ls()
+	borSnaps.Ls()
 	caplinSnaps.LS()
 	agg.LS()
 
 	return nil
 }
 
-func openSnaps(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, from uint64, chainDB kv.RwDB, logger log.Logger) (
 	blockSnaps *freezeblocks.RoSnapshots,
-	borSnaps *freezeblocks.BorRoSnapshots,
+	borSnaps *heimdall.RoSnapshots,
 	csn *freezeblocks.CaplinSnapshots,
 	br *freezeblocks.BlockRetire,
 	agg *libstate.Aggregator,
 	clean func(), err error,
 ) {
 	chainConfig := fromdb.ChainConfig(chainDB)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = blockSnaps.OpenFolder(); err != nil {
@@ -1063,7 +1076,7 @@ func openSnaps(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger l
 	}
 	blockSnaps.LogStat("block")
 
-	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, 0, logger)
+	borSnaps = heimdall.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.OpenFolder(); err != nil {
 		return
 	}
@@ -1079,10 +1092,10 @@ func openSnaps(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger l
 	}
 
 	borSnaps.LogStat("bor")
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps, nil, nil)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, blockSnapBuildSema, logger)
+	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, nil, nil, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
 
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
@@ -1248,9 +1261,10 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-
 	chainConfig := fromdb.ChainConfig(db)
-	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, dirs, db, logger)
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+
+	_, _, caplinSnaps, br, agg, clean, err := openSnaps(ctx, cfg, dirs, from, db, logger)
 	if err != nil {
 		return err
 	}

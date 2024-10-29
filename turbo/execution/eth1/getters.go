@@ -118,13 +118,7 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	if errors.Is(err, errNotFound) {
 		return &execution.GetHeaderResponse{Header: nil}, nil
 	}
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: ReadTd error %w", err)
-	}
-	if td == nil {
-		return &execution.GetHeaderResponse{Header: nil}, nil
-	}
+
 	header, err := e.getHeader(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: getHeader error %w", err)

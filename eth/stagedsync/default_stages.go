@@ -542,6 +542,30 @@ func PolygonSyncStages(
 	}
 }
 
+func DownloadSyncStages(
+	ctx context.Context,
+	snapshots SnapshotsCfg,
+) []*Stage {
+	return []*Stage{
+		{
+			ID:          stages.Snapshots,
+			Description: "Download snapshots",
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				if badBlockUnwind {
+					return nil
+				}
+				return SpawnStageSnapshots(s, ctx, txc.Tx, snapshots, logger)
+			},
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+				return nil
+			},
+			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return nil
+			},
+		},
+	}
+}
+
 var DefaultForwardOrder = UnwindOrder{
 	stages.Snapshots,
 	stages.Headers,

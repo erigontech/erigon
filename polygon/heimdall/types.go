@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package snaptype
+package heimdall
 
 import (
 	"bytes"
@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 func init() {
@@ -51,7 +50,7 @@ func init() {
 }
 
 func initTypes() {
-	borTypes := append(coresnaptype.BlockSnapshotTypes, BorSnapshotTypes()...)
+	borTypes := append(coresnaptype.BlockSnapshotTypes, SnapshotTypes()...)
 	borTypes = append(borTypes, coresnaptype.E3StateTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.Amoy, borTypes)
@@ -60,16 +59,16 @@ func initTypes() {
 
 var Enums = struct {
 	snaptype.Enums
-	BorEvents,
-	BorSpans,
-	BorCheckpoints,
-	BorMilestones snaptype.Enum
+	Events,
+	Spans,
+	Checkpoints,
+	Milestones snaptype.Enum
 }{
-	Enums:          snaptype.Enums{},
-	BorEvents:      snaptype.MinBorEnum,
-	BorSpans:       snaptype.MinBorEnum + 1,
-	BorCheckpoints: snaptype.MinBorEnum + 2,
-	BorMilestones:  snaptype.MinBorEnum + 3,
+	Enums:       snaptype.Enums{},
+	Events:      snaptype.MinBorEnum,
+	Spans:       snaptype.MinBorEnum + 1,
+	Checkpoints: snaptype.MinBorEnum + 2,
+	Milestones:  snaptype.MinBorEnum + 3,
 }
 
 var Indexes = struct {
@@ -84,61 +83,80 @@ var Indexes = struct {
 	BorMilestoneId:  snaptype.Index{Name: "bormilestones"},
 }
 
+type EventRangeExtractor struct {
+	EventsDb func() kv.RoDB
+}
+
+func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, chainDb kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	from := hexutility.EncodeTs(blockFrom)
+	startEventId := firstEventId(ctx)
+	var lastEventId uint64
+
+	chainTx, err := chainDb.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer chainTx.Rollback()
+
+	var eventsDb kv.RoDB
+
+	if e.EventsDb != nil {
+		eventsDb = e.EventsDb()
+	} else {
+		eventsDb = chainDb
+	}
+
+	if err := kv.BigChunks(eventsDb, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
+		endEventId := binary.BigEndian.Uint64(eventIdBytes) + 1
+		blockNum := binary.BigEndian.Uint64(blockNumBytes)
+		blockHash, e := rawdb.ReadCanonicalHash(chainTx, blockNum)
+		if e != nil {
+			return false, e
+		}
+
+		if blockNum >= blockTo {
+			return false, nil
+		}
+
+		if e := extractEventRange(startEventId, endEventId, tx, blockNum, blockHash, collect); e != nil {
+			return false, e
+		}
+		startEventId = endEventId
+
+		lastEventId = binary.BigEndian.Uint64(eventIdBytes)
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			if lvl >= log.LvlInfo {
+				dbg.ReadMemStats(&m)
+			}
+			logger.Log(lvl, "[bor snapshots] Dumping bor events", "block num", blockNum,
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
+			)
+		default:
+		}
+		return true, nil
+	}); err != nil {
+		return 0, err
+	}
+
+	return lastEventId, nil
+}
+
 var (
-	BorEvents = snaptype.RegisterType(
-		Enums.BorEvents,
+	Events = snaptype.RegisterType(
+		Enums.Events,
 		"borevents",
 		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
 		},
-		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, blockFrom, blockTo uint64, firstEventId snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				logEvery := time.NewTicker(20 * time.Second)
-				defer logEvery.Stop()
-
-				from := hexutility.EncodeTs(blockFrom)
-				startEventId := firstEventId(ctx)
-				var lastEventId uint64
-
-				if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
-					endEventId := binary.BigEndian.Uint64(eventIdBytes) + 1
-					blockNum := binary.BigEndian.Uint64(blockNumBytes)
-					blockHash, e := rawdb.ReadCanonicalHash(tx, blockNum)
-					if e != nil {
-						return false, e
-					}
-
-					if blockNum >= blockTo {
-						return false, nil
-					}
-
-					if e := extractEventRange(startEventId, endEventId, tx, blockNum, blockHash, collect); e != nil {
-						return false, e
-					}
-					startEventId = endEventId
-
-					lastEventId = binary.BigEndian.Uint64(eventIdBytes)
-					select {
-					case <-ctx.Done():
-						return false, ctx.Err()
-					case <-logEvery.C:
-						var m runtime.MemStats
-						if lvl >= log.LvlInfo {
-							dbg.ReadMemStats(&m)
-						}
-						logger.Log(lvl, "[bor snapshots] Dumping bor events", "block num", blockNum,
-							"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-						)
-					default:
-					}
-					return true, nil
-				}); err != nil {
-					return 0, err
-				}
-
-				return lastEventId, nil
-			}),
+		EventRangeExtractor{},
 		[]snaptype.Index{Indexes.BorTxnHash},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
@@ -182,7 +200,7 @@ var (
 					BucketSize: 2000,
 					LeafSize:   8,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, Enums.BorEvents.String())),
+					IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, Enums.Events.String())),
 					BaseDataID: baseEventId,
 				}, logger)
 				if err != nil {
@@ -228,8 +246,8 @@ var (
 				}
 			}))
 
-	BorSpans = snaptype.RegisterType(
-		Enums.BorSpans,
+	Spans = snaptype.RegisterType(
+		Enums.Spans,
 		"borspans",
 		snaptype.Versions{
 			Current:      1, //2,
@@ -237,8 +255,8 @@ var (
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				spanFrom := uint64(heimdall.SpanIdAt(blockFrom))
-				spanTo := uint64(heimdall.SpanIdAt(blockTo))
+				spanFrom := uint64(SpanIdAt(blockFrom))
+				spanTo := uint64(SpanIdAt(blockTo))
 				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{Indexes.BorSpanId},
@@ -251,14 +269,14 @@ var (
 				}
 				defer d.Close()
 
-				baseSpanId := uint64(heimdall.SpanIdAt(sn.From))
+				baseSpanId := uint64(SpanIdAt(sn.From))
 
 				return buildValueIndex(ctx, sn, salt, d, baseSpanId, tmpDir, p, lvl, logger)
 			}),
 	)
 
-	BorCheckpoints = snaptype.RegisterType(
-		Enums.BorCheckpoints,
+	Checkpoints = snaptype.RegisterType(
+		Enums.Checkpoints,
 		"borcheckpoints",
 		snaptype.Versions{
 			Current:      1, //2,
@@ -266,23 +284,33 @@ var (
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				var checkpointTo, checkpointFrom heimdall.CheckpointId
+				var checkpointTo, checkpointFrom CheckpointId
+
+				checkpointId := func(rangeIndex RangeIndex, blockNum uint64) (CheckpointId, error) {
+					checkpointId, _, err := rangeIndex.Lookup(ctx, blockNum)
+					return CheckpointId(checkpointId), err
+				}
 
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
-					checkpointFrom, err = heimdall.CheckpointIdAt(tx, blockFrom)
+					rangeIndex := NewTxRangeIndex(db, kv.BorCheckpointEnds, tx)
+
+					checkpointFrom, err = checkpointId(rangeIndex, blockFrom)
+
+					//checkpointFrom, err = CheckpointIdAt(tx, blockFrom)
 
 					if err != nil {
 						return err
 					}
 
-					checkpointTo, err = heimdall.CheckpointIdAt(tx, blockTo)
+					checkpointTo, err = checkpointId(rangeIndex, blockTo)
+					//checkpointTo, err = CheckpointIdAt(tx, blockTo)
 
 					if err != nil {
 						return err
 					}
 
 					if blockFrom > 0 {
-						if prevTo, err := heimdall.CheckpointIdAt(tx, blockFrom-1); err == nil {
+						if prevTo, err := checkpointId(rangeIndex, blockFrom-1); err == nil {
 							if prevTo == checkpointFrom {
 								if prevTo == checkpointTo {
 									checkpointFrom = 0
@@ -319,7 +347,7 @@ var (
 
 				if gg.HasNext() {
 					buf, _ := d.MakeGetter().Next(nil)
-					var firstCheckpoint heimdall.Checkpoint
+					var firstCheckpoint Checkpoint
 
 					if err = json.Unmarshal(buf, &firstCheckpoint); err != nil {
 						return err
@@ -332,8 +360,8 @@ var (
 			}),
 	)
 
-	BorMilestones = snaptype.RegisterType(
-		Enums.BorMilestones,
+	Milestones = snaptype.RegisterType(
+		Enums.Milestones,
 		"bormilestones",
 		snaptype.Versions{
 			Current:      1, //2,
@@ -341,23 +369,29 @@ var (
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, _ *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				var milestoneFrom, milestoneTo heimdall.MilestoneId
+				var milestoneFrom, milestoneTo MilestoneId
 
+				milestoneId := func(rangeIndex RangeIndex, blockNum uint64) (MilestoneId, error) {
+					milestoneId, _, err := rangeIndex.Lookup(ctx, blockNum)
+					return MilestoneId(milestoneId), err
+				}
 				err := db.View(ctx, func(tx kv.Tx) (err error) {
-					milestoneFrom, err = heimdall.MilestoneIdAt(tx, blockFrom)
+					rangeIndex := NewTxRangeIndex(db, kv.BorMilestoneEnds, tx)
 
-					if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+					milestoneFrom, err = milestoneId(rangeIndex, blockFrom)
+
+					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
-					milestoneTo, err = heimdall.MilestoneIdAt(tx, blockTo)
+					milestoneTo, err = milestoneId(rangeIndex, blockTo)
 
-					if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+					if err != nil && !errors.Is(err, ErrMilestoneNotFound) {
 						return err
 					}
 
 					if milestoneFrom > 0 && blockFrom > 0 {
-						if prevTo, err := heimdall.MilestoneIdAt(tx, blockFrom-1); err == nil && prevTo == milestoneFrom {
+						if prevTo, err := milestoneId(rangeIndex, blockFrom-1); err == nil && prevTo == milestoneFrom {
 							if prevTo == milestoneFrom {
 								if prevTo == milestoneTo {
 									milestoneFrom = 0
@@ -395,7 +429,7 @@ var (
 				if gg.HasNext() {
 					buf, _ := gg.Next(nil)
 					if len(buf) > 0 {
-						var firstMilestone heimdall.Milestone
+						var firstMilestone Milestone
 						if err = json.Unmarshal(buf, &firstMilestone); err != nil {
 							return err
 						}
@@ -415,17 +449,17 @@ func RecordWayPoints(value bool) {
 	initTypes()
 }
 
-func BorSnapshotTypes() []snaptype.Type {
+func SnapshotTypes() []snaptype.Type {
 	if recordWaypoints {
-		return []snaptype.Type{BorEvents, BorSpans, BorCheckpoints, BorMilestones}
+		return []snaptype.Type{Events, Spans, Checkpoints, Milestones}
 	}
 
-	return []snaptype.Type{BorEvents, BorSpans}
+	return []snaptype.Type{Events, Spans}
 }
 
 func CheckpointsEnabled() bool {
-	for _, snapType := range BorSnapshotTypes() {
-		if snapType.Enum() == BorCheckpoints.Enum() {
+	for _, snapType := range SnapshotTypes() {
+		if snapType.Enum() == Checkpoints.Enum() {
 			return true
 		}
 	}
@@ -434,8 +468,8 @@ func CheckpointsEnabled() bool {
 }
 
 func MilestonesEnabled() bool {
-	for _, snapType := range BorSnapshotTypes() {
-		if snapType.Enum() == BorMilestones.Enum() {
+	for _, snapType := range SnapshotTypes() {
+		if snapType.Enum() == Milestones.Enum() {
 			return true
 		}
 	}
