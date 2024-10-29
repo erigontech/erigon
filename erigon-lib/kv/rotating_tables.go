@@ -8,7 +8,7 @@ import (
 
 // RotatingTable - is partitioned Table with only 2 partitions: primary/secondary (hot/cold)
 // - write new data only on `primary`
-// - prune only on `secondary`
+// - prune only on `secondary`: then all deletes become sequential
 // - rotate partitions when prune of `secondary` is done
 //
 // Primary use-case: table with random updates (for example: `hash` -> `blockNumber`).
