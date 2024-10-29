@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	rand2 "golang.org/x/exp/rand"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -615,19 +616,20 @@ Loop:
 					}
 					usedGas, blobGasUsed = 0, 0
 				}
-				//if !execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%100 == 0 && txIndex == 0 {
-				//	err = fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
-				//}
-				return err
+				if !execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1530 == 0 && txIndex == 0 && !cfg.badBlockHalt {
+					return fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
+				}
+				return nil
 			}(); err != nil {
 				if errors.Is(err, context.Canceled) {
 					return err
 				}
-				logger.Error(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
+				logger.Info(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
 				if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 				}
 				if cfg.badBlockHalt {
+					println("bad block halt")
 					return err
 				}
 				if errors.Is(err, consensus.ErrInvalidBlock) {
