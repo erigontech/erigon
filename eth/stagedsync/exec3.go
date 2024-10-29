@@ -603,7 +603,6 @@ Loop:
 				}
 
 				txTask.CreateReceipt(applyTx)
-
 				if txTask.Final {
 					if !isMining && !inMemExec && !skipPostEvaluation && !execStage.CurrentSyncCycle.IsInitialCycle {
 						cfg.notifications.RecentLogs.Add(blockReceipts)
@@ -616,12 +615,15 @@ Loop:
 					}
 					usedGas, blobGasUsed = 0, 0
 				}
-				return nil
+				//if !execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%100 == 0 && txIndex == 0 {
+				//	err = fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
+				//}
+				return err
 			}(); err != nil {
 				if errors.Is(err, context.Canceled) {
 					return err
 				}
-				logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
+				logger.Error(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
 				if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 					cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 				}
@@ -629,6 +631,7 @@ Loop:
 					return err
 				}
 				if errors.Is(err, consensus.ErrInvalidBlock) {
+					println("unwind")
 					if u != nil {
 						if err := u.UnwindTo(blockNum-1, BadBlock(header.Hash(), err), applyTx); err != nil {
 							return err

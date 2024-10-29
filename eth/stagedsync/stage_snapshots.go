@@ -357,6 +357,7 @@ func getPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
 }
 
 func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, blockReader services.FullBlockReader, agg *state.Aggregator, logger log.Logger) error {
+	println("filling db from snapshots")
 	startTime := time.Now()
 	blocksAvailable := blockReader.FrozenBlocks()
 	logEvery := time.NewTicker(logInterval)
@@ -486,7 +487,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 				}
 				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
+					println("appending:", blockNum, maxTxNum)
 					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+						println("error!")
 						return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
 					}
 				}
