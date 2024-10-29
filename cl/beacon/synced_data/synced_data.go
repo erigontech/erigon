@@ -91,6 +91,8 @@ func (s *SyncedDataManager) waitUntilNotWriting() {
 
 func EmptyCancel() {}
 
+var x atomic.Int64
+
 func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	s.waitUntilNotWriting()
 	_, synced := s.headRoot.Load().(common.Hash)
@@ -100,7 +102,7 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	isCanceled := false
 	var mu sync.Mutex
 
-	debug.PrintStack()
+	a := debug.Stack()
 
 	s.mu.RLock()
 	return s.headState, func() {

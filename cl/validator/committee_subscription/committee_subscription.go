@@ -107,6 +107,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 
 	log.Debug("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
 	commiteePerSlot := headState.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
+	cn()
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
 	c.validatorSubsMutex.Lock()
