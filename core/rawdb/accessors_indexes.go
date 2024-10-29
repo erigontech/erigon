@@ -24,6 +24,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
@@ -39,21 +40,22 @@ type TxLookupEntry struct {
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, error) {
-	data, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
+func ReadTxLookupEntry(db kv.Tx, txnHash libcommon.Hash) (*uint64, error) {
+	v, err := rawdbv3.ReadFromPartitions(db, kv.TxLookup, txnHash.Bytes())
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
-		return nil, nil
+	if len(v) != 0 {
+		number := new(big.Int).SetBytes(v).Uint64()
+		return &number, nil
 	}
-	number := new(big.Int).SetBytes(data).Uint64()
-	return &number, nil
+	return nil, nil
 }
 
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
 func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
+	panic("todo: implement me")
 	for _, txn := range block.Transactions() {
 		data := block.Number().Bytes()
 		if err := db.Put(kv.TxLookup, txn.Hash().Bytes(), data); err != nil {
@@ -64,5 +66,6 @@ func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
 func DeleteTxLookupEntry(db kv.Putter, hash libcommon.Hash) error {
+	panic("todo: implement me")
 	return db.Delete(kv.TxLookup, hash.Bytes())
 }

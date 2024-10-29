@@ -292,7 +292,9 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
-	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
+	TxLookup  = "BlockTransactionLookup"  // hash -> transaction/receipt lookup metadata
+	txLookup0 = "BlockTransactionLookup0" // bn/100 -> txnHash+blockNum
+	txLookup1 = "BlockTransactionLookup1" // bn/100 -> txnHash+blockNum
 
 	ConfigTable = "Config" // config prefix for the db
 
@@ -963,3 +965,12 @@ func String2Appendable(in string) (Appendable, error) {
 		return Appendable(MaxUint16), fmt.Errorf("unknown Appendable name: %s", in)
 	}
 }
+
+type PartitionsList [2]string
+
+var (
+	TxLookupPartitions = PartitionsList{txLookup0, txLookup1}
+	Partitions         = map[string]PartitionsList{
+		TxLookup: TxLookupPartitions,
+	}
+)

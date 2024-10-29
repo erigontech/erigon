@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -134,8 +135,13 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 
 // txnLookupTransform - [startKey, endKey)
 func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
+	_, secondaryPartition, err := rawdbv3.Partitions(tx, kv.TxLookup)
+	if err != nil {
+		return err
+	}
+
 	bigNum := new(big.Int)
-	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
 		if err != nil {
@@ -149,7 +155,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 		for _, txn := range body.Transactions {
 			v := append(txn.Hash().Bytes()[:], blockNumBytes...)
-			if err := next(k, hexutility.EncodeTs(blocknum/100), v); err != nil {
+			step := blocknum / 1_000
+			if err := next(k, hexutility.EncodeTs(step), v); err != nil {
 				return err
 			}
 		}
@@ -163,6 +170,14 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
 	}, logger)
+	if err != nil {
+		return err
+	}
+
+	if err := rawdbv3.PutPrimaryPartitionMax(tx, kv.TxLookup, blockTo); err != nil {
+		return err
+	}
+	return nil
 }
 
 // txnLookupTransform - [startKey, endKey)
@@ -264,19 +279,13 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if blockFrom < blockTo {
 		t := time.Now()
 		deletedTotal := 0
-		var bn = blockFrom
-		for ; bn < blockTo; bn++ {
-			deleted, err := deleteTxLookupRange(tx, logPrefix, bn, bn+1, ctx, cfg, logger)
-			if err != nil {
-				return fmt.Errorf("prune TxLookUp: %w", err)
-			}
-			deletedTotal += deleted
-
-			if time.Since(t) > pruneTimeout {
-				break
-			}
+		deleted, err := deleteTxLookupRange2(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger)
+		if err != nil {
+			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
-		log.Warn("[dbg] TxLookup", "pruned_blks", bn-blockFrom+1, "pruned_txs", deletedTotal, "took", time.Since(t), "cfg.prune.History.Enabled()", cfg.prune.History.Enabled(), "cfg.prune.History.PruneTo(s.ForwardProgress)", cfg.prune.History.PruneTo(s.ForwardProgress), "cfg.blockReader.CanPruneTo(s.ForwardProgress)", cfg.blockReader.CanPruneTo(s.ForwardProgress))
+		deletedTotal += deleted
+
+		log.Warn("[dbg] TxLookup", "pruned_txs", deletedTotal, "took", time.Since(t), "cfg.prune.History.Enabled()", cfg.prune.History.Enabled(), "cfg.prune.History.PruneTo(s.ForwardProgress)", cfg.prune.History.PruneTo(s.ForwardProgress), "cfg.blockReader.CanPruneTo(s.ForwardProgress)", cfg.blockReader.CanPruneTo(s.ForwardProgress))
 
 		if cfg.borConfig != nil && pruneBor {
 			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
@@ -284,7 +293,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			}
 		}
 
-		if err = s.DoneAt(tx, bn); err != nil {
+		if err = s.DoneAt(tx, blockTo); err != nil {
 			return err
 		}
 	} else {
@@ -352,4 +361,15 @@ func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uin
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
 	}, logger)
+}
+
+func deleteTxLookupRange2(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (deleted int, err error) {
+	step := blockTo / 1_000
+	_, secondarysPartition, err := rawdbv3.Partitions(tx, kv.TxLookup)
+
+	primaryMax, secondaryMax, err := rawdbv3.PartitionsMax(tx, kv.TxLookup)
+	if err != nil {
+		return 0, err
+	}
+	return deleted, nil
 }
