@@ -91,8 +91,6 @@ func (s *SyncedDataManager) waitUntilNotWriting() {
 
 func EmptyCancel() {}
 
-var dbMap sync.Map
-
 func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	s.waitUntilNotWriting()
 	_, synced := s.headRoot.Load().(common.Hash)
