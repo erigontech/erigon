@@ -174,7 +174,8 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.TxLookup); err != nil {
+	err := kv.TxLookup.ClearTables(tx)
+	if err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.TxLookup, 0); err != nil {

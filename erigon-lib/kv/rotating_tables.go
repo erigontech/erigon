@@ -86,6 +86,23 @@ func (table RotatingTable) Rotate(tx RwTx) (bool, error) {
 	return true, nil
 }
 
+func (table RotatingTable) ClearTables(tx RwTx) error {
+	primary, secondary, err := table.Partitions(tx)
+	if err != nil {
+		return err
+	}
+	if err := tx.ClearBucket(primary); err != nil {
+		return err
+	}
+	if err := tx.ClearBucket(secondary); err != nil {
+		return err
+	}
+	if err := table.PutPrimaryPartitionMax(tx, 0); err != nil {
+		return err
+	}
+	return nil
+}
+
 func putPrimaryPartition(tx RwTx, table RotatingTable, newActivePartitionNum uint8) error {
 	return tx.Put(TblPruningProgress, []byte(string(table)+"_primary"), []byte{newActivePartitionNum})
 }
