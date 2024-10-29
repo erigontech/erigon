@@ -81,7 +81,6 @@ func (t *attestationTestSuite) SetupTest() {
 	netConfig := &clparams.NetworkConfig{}
 	emitters := beaconevents.NewEventEmitter()
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
-	batchCheckInterval = 1 * time.Millisecond
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
 	go batchSignatureVerifier.Start()
 	ctx, cn := context.WithCancel(context.Background())
@@ -100,9 +99,10 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		msg    *solid.Attestation
 	}
 	tests := []struct {
-		name string
-		mock func()
-		args args
+		name    string
+		wantErr bool
+		mock    func()
+		args    args
 	}{
 		{
 			name: "Test attestation with committee index out of range",
@@ -118,6 +118,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: nil,
 				msg:    att,
 			},
+			wantErr: true,
 		},
 		{
 			name: "Test attestation with wrong subnet",
@@ -136,6 +137,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
+			wantErr: true,
 		},
 		{
 			name: "Test attestation with wrong slot (current_slot < slot)",
@@ -155,6 +157,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
+			wantErr: true,
 		},
 		{
 			name: "Attestation is aggregated",
@@ -178,6 +181,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					Signature:       [96]byte{0, 1, 2, 3, 4, 5},
 				},
 			},
+			wantErr: true,
 		},
 		{
 			name: "Attestation is empty",
@@ -201,6 +205,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					Signature:       [96]byte{0, 1, 2, 3, 4, 5},
 				},
 			},
+			wantErr: true,
 		},
 		{
 			name: "invalid signature",
@@ -225,6 +230,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
+			wantErr: true,
 		},
 		{
 			name: "block header not found",
@@ -249,6 +255,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
+			wantErr: true,
 		},
 		{
 			name: "invalid target block",
@@ -276,6 +283,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
+			wantErr: true,
 		},
 		{
 			name: "invalid finality checkpoint",
@@ -309,6 +317,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				subnet: uint64Ptr(1),
 				msg:    att,
 			},
+			wantErr: true,
 		},
 		{
 			name: "success",
@@ -355,9 +364,14 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		log.Printf("test case: %s", tt.name)
 		t.SetupTest()
 		tt.mock()
-		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationWithGossipData{Attestation: tt.args.msg, GossipData: nil})
+		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationWithGossipData{Attestation: tt.args.msg, GossipData: nil, ImmediateProcess: true})
 		time.Sleep(time.Millisecond * 60)
-		t.Require().Error(err, ErrIgnore)
+		if tt.wantErr {
+			t.Require().Error(err)
+		} else {
+			t.Require().NoError(err)
+		}
+
 		t.True(t.gomockCtrl.Satisfied())
 	}
 }

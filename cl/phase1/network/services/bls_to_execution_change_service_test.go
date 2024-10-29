@@ -59,7 +59,6 @@ func (t *blsToExecutionChangeTestSuite) SetupTest() {
 	t.emitters = beaconevents.NewEventEmitter()
 	t.beaconCfg = &clparams.BeaconChainConfig{}
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
-	batchCheckInterval = 1 * time.Millisecond
 	go batchSignatureVerifier.Start()
 	t.service = NewBLSToExecutionChangeService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, batchSignatureVerifier)
 	// mock global functions
