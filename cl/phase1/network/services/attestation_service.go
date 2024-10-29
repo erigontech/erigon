@@ -132,6 +132,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return ErrIgnore
 	}
 	s.attestationProcessed.Add(key, struct{}{})
+	return ErrIgnore
 
 	// [REJECT] The committee index is within the expected range
 	committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
