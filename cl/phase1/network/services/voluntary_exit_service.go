@@ -121,6 +121,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	if err != nil {
 		return err
 	}
+	cn()
 	if valid, err := blsVerify(msg.Signature[:], signingRoot[:], pk[:]); err != nil {
 		return err
 	} else if !valid {
