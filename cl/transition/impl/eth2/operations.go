@@ -862,7 +862,6 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 
 		if (sSlot+1)%beaconConfig.SlotsPerEpoch == 0 {
 			start := time.Now()
-
 			if err := statechange.ProcessEpoch(s); err != nil {
 				return err
 			}
@@ -873,7 +872,6 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 				"process_epoch_elpsed",
 				time.Since(start),
 			)
-			monitor.ObserveEpochProcessingTime(start)
 		}
 
 		sSlot += 1
