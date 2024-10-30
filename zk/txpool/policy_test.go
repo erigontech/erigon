@@ -69,6 +69,31 @@ func newTestTxPoolDB(tb testing.TB, dir string) kv.RwDB {
 	return txPoolDB
 }
 
+func policyTransactionSliceEqual(a, b []PolicyTransaction) bool {
+	// Check if lengths are different
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Check each element, excluding timeTx
+	for i := range a {
+		if a[i].aclType != b[i].aclType {
+			return false
+		}
+		if ACLTypeBinary(a[i].operation) != ACLTypeBinary(b[i].operation) {
+			return false
+		}
+		if a[i].addr != b[i].addr {
+			return false
+		}
+		if a[i].policy != b[i].policy {
+			return false
+		}
+	}
+
+	return true
+}
+
 func TestCheckDBsCreation(t *testing.T) {
 	t.Parallel()
 
@@ -407,6 +432,74 @@ func TestUpdatePolicies(t *testing.T) {
 		err := UpdatePolicies(ctx, db, "unknown_acl_type", []common.Address{addr1, addr2}, policies)
 		require.ErrorIs(t, err, errUnsupportedACLType)
 	})
+}
+
+func TestLastPolicyTransactions(t *testing.T) {
+	db := newTestACLDB(t, "")
+	ctx := context.Background()
+
+	SetMode(ctx, db, BlocklistMode)
+
+	// Create a test address and policy
+	addrInit := common.HexToAddress("0x0000000000000000")
+	policyInit := SendTx
+
+	addrOne := common.HexToAddress("0x1234567890abcdef")
+	policyOne := SendTx
+
+	addrTwo := common.HexToAddress("0xabcdef1234567890")
+	policyTwo := SendTx
+
+	// Add the policy to the ACL
+	require.NoError(t, AddPolicy(ctx, db, "blocklist", addrInit, policyInit))
+	require.NoError(t, AddPolicy(ctx, db, "blocklist", addrOne, policyOne))
+	require.NoError(t, AddPolicy(ctx, db, "blocklist", addrTwo, policyTwo))
+
+	// Create expected policyTransaction output and append to []PolicyTransaction
+	policyTransactionInit := PolicyTransaction{addr: common.HexToAddress("0x0000000000000000"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(ModeChange.ToByte())}
+	policyTransactionOne := PolicyTransaction{addr: common.HexToAddress("0x1234567890abcdef"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(Add.ToByte())}
+	policyTransactionTwo := PolicyTransaction{addr: common.HexToAddress("0xabcdef1234567890"), aclType: ResolveACLTypeToBinary("blocklist"), policy: Policy(SendTx.ToByte()), operation: Operation(Add.ToByte())}
+
+	// LastPolicyTransactions seems to append in reverse order than this test function. So the order of elements is also reversed
+	// No element in PolicyTransaction slice
+	var policyTransactionSliceNone []PolicyTransaction
+
+	// Single element in PolicyTransaction slice, always starting with policyTransactionInit
+	var policyTransactionSliceSingle []PolicyTransaction
+	policyTransactionSliceSingle = append(policyTransactionSliceSingle, policyTransactionInit)
+
+	// Two elements in PolicyTransaction slice, always starting with policyTransactionInit
+	var policyTransactionSliceDouble []PolicyTransaction
+	policyTransactionSliceDouble = append(policyTransactionSliceDouble, policyTransactionInit)
+	policyTransactionSliceDouble = append(policyTransactionSliceDouble, policyTransactionTwo)
+
+	// Three elements in PolicyTransaction slice, always starting with policyTransactionInit
+	var policyTransactionSliceTriple []PolicyTransaction
+	policyTransactionSliceTriple = append(policyTransactionSliceTriple, policyTransactionInit)
+	policyTransactionSliceTriple = append(policyTransactionSliceTriple, policyTransactionTwo)
+	policyTransactionSliceTriple = append(policyTransactionSliceTriple, policyTransactionOne)
+
+	// Table driven test
+	var tests = []struct {
+		count int
+		want  []PolicyTransaction
+	}{
+		{0, policyTransactionSliceNone},
+		{1, policyTransactionSliceSingle},
+		{2, policyTransactionSliceDouble},
+		{3, policyTransactionSliceTriple},
+	}
+	for _, tt := range tests {
+		t.Run("LastPolicyTransactions", func(t *testing.T) {
+			ans, err := LastPolicyTransactions(ctx, db, tt.count)
+			if err != nil {
+				t.Errorf("LastPolicyTransactions did not execute successfully: %v", err)
+			}
+			if !policyTransactionSliceEqual(ans, tt.want) {
+				t.Errorf("got %v, want %v", ans, tt.want)
+			}
+		})
+	}
 }
 
 func TestIsActionAllowed(t *testing.T) {

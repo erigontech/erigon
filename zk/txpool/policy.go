@@ -45,6 +45,8 @@ func OperationFromByte(b byte) Operation {
 		return Remove
 	case byte(Update):
 		return Update
+	case byte(ModeChange):
+		return ModeChange
 	default:
 		return Add // Default or error handling can be added here
 	}
@@ -365,6 +367,9 @@ func bytesToTimestamp(b []byte) time.Time {
 func LastPolicyTransactions(ctx context.Context, aclDB kv.RwDB, count int) ([]PolicyTransaction, error) {
 	var pts []PolicyTransaction
 	err := aclDB.View(ctx, func(tx kv.Tx) error {
+		if count == 0 {
+			return nil
+		}
 		c, err := tx.Cursor(PolicyTransactions)
 		if err != nil {
 			return err
@@ -381,7 +386,7 @@ func LastPolicyTransactions(ctx context.Context, aclDB kv.RwDB, count int) ([]Po
 		}
 		pts = append(pts, pt)
 
-		for i := 0; i < count; i++ {
+		for i := 1; i < count; i++ {
 			_, value, err = c.Prev()
 			if err != nil {
 				return err
