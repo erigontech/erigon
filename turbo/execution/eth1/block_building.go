@@ -207,7 +207,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 				requests[i] = r.RequestData
 			}
 		} else {
-			for i:=0; i<len(types.KnownRequestTypes); i++{
+			for i := 0; i < len(types.KnownRequestTypes); i++ {
 				requests[i] = make([]byte, 0)
 			}
 		}

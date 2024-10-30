@@ -413,10 +413,10 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForStuff(func() (bool, error) { 
+	waitingForExecutionReady, err := waitForStuff(func() (bool, error) {
 		isReady, err := s.chainRW.Ready(ctx)
 		return !isReady, err
-	})	
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -958,7 +958,6 @@ func (e *EngineServer) HandlesForkChoice(
 	}
 	return payloadStatus, nil
 }
-
 
 func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {
 	shouldWait, err := waitCondnF()
