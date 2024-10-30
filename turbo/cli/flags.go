@@ -442,7 +442,11 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 	apis := ctx.String(utils.HTTPApiFlag.Name)
 
 	wsEnabled := ctx.IsSet(utils.WSEnabledFlag.Name)
-	wsApis := strings.Split(ctx.String(utils.WSApiFlag.Name), ",")
+	wsApisCtx := ctx.String(utils.WSApiFlag.Name)
+	wsApis := []string{}
+	if len(wsApisCtx) > 0 {
+		wsApis = strings.Split(wsApisCtx, ",")
+	}
 	if wsEnabled {
 		log.Info("starting WS APIs", "APIs", wsApis)
 	}
