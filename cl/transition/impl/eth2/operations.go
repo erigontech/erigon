@@ -866,7 +866,7 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 			if err := statechange.ProcessEpoch(s); err != nil {
 				return err
 			}
-			log.Info(
+			log.Debug(
 				"Processed new epoch successfully",
 				"epoch",
 				state.Epoch(s),
