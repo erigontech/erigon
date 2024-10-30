@@ -228,20 +228,6 @@ jobs:
           eth_submitWork/test_1.json,\
           net_peerCount/test_1.json,\
           net_version/test_1.json,\
-          ots_getBlockDetails/test_01.json,\
-          ots_getBlockDetails/test_02.json,\
-          ots_getBlockDetails/test_03.json,\
-          ots_getBlockDetails/test_04.json,\
-          ots_getBlockDetails/test_05.json,\
-          ots_getBlockDetailsByHash/test_01.json,\
-          ots_getBlockDetailsByHash/test_02.json,\
-          ots_getBlockDetailsByHash/test_03.json,\
-          ots_getBlockDetailsByHash/test_04.json,\
-          ots_getBlockTransactions/test_01.json,\
-          ots_getBlockTransactions/test_02.json,\
-          ots_getBlockTransactions/test_03.json,\
-          ots_getBlockTransactions/test_04.json,\
-          ots_getBlockTransactions/test_05.json,\
           trace_call/test_05.json,\
           trace_call/test_07.json,\
           trace_call/test_12.json,\
