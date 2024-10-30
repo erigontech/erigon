@@ -51,12 +51,12 @@ func TestStateSync(t *testing.T) {
 	})
 	t.Run("DeployChildChainReceiver", func(t *testing.T) {
 		var err error
-		ctx, err = contracts_steps.DeployChildChainReceiver(ctx, "child-funder")
+		ctx, err = contracts_steps.DeployChildChainReceiver(ctx, "child-funder") //nolint
 		require.Nil(t, err)
 	})
 	t.Run("DeployRootChainSender", func(t *testing.T) {
 		var err error
-		ctx, err = contracts_steps.DeployRootChainSender(ctx, "root-funder")
+		ctx, err = contracts_steps.DeployRootChainSender(ctx, "root-funder") //nolint
 		require.Nil(t, err)
 	})
 	t.Run("GenerateSyncEvents", func(t *testing.T) {
@@ -87,12 +87,12 @@ func TestChildChainExit(t *testing.T) {
 	})
 	t.Run("DeployRootChainReceiver", func(t *testing.T) {
 		var err error
-		ctx, err = contracts_steps.DeployRootChainReceiver(ctx, "root-funder")
+		ctx, err = contracts_steps.DeployRootChainReceiver(ctx, "root-funder") //nolint
 		require.Nil(t, err)
 	})
 	t.Run("DeployChildChainSender", func(t *testing.T) {
 		var err error
-		ctx, err = contracts_steps.DeployChildChainSender(ctx, "child-funder")
+		ctx, err = contracts_steps.DeployChildChainSender(ctx, "child-funder") //nolint
 		require.Nil(t, err)
 	})
 	t.Run("ProcessChildTransfers", func(t *testing.T) {

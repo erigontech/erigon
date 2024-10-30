@@ -39,7 +39,7 @@ type minimizeQueuedValidator struct {
 	activationEligibilityEpoch uint64
 }
 
-// ProcessRegistyUpdates updates every epoch the activation status of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#registry-updates.
+// ProcessRegistryUpdates updates every epoch the activation status of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#registry-updates.
 func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	beaconConfig := s.BeaconConfig()
 	currentEpoch := state.Epoch(s)

@@ -42,7 +42,7 @@ func (m *MockBLSToExecutionChangeService) EXPECT() *MockBLSToExecutionChangeServ
 }
 
 // ProcessMessage mocks base method.
-func (m *MockBLSToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedBLSToExecutionChange) error {
+func (m *MockBLSToExecutionChangeService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedBLSToExecutionChangeWithGossipData) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
@@ -68,13 +68,13 @@ func (c *MockBLSToExecutionChangeServiceProcessMessageCall) Return(arg0 error) *
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBLSToExecutionChangeServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SignedBLSToExecutionChange) error) *MockBLSToExecutionChangeServiceProcessMessageCall {
+func (c *MockBLSToExecutionChangeServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SignedBLSToExecutionChangeWithGossipData) error) *MockBLSToExecutionChangeServiceProcessMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBLSToExecutionChangeServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedBLSToExecutionChange) error) *MockBLSToExecutionChangeServiceProcessMessageCall {
+func (c *MockBLSToExecutionChangeServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedBLSToExecutionChangeWithGossipData) error) *MockBLSToExecutionChangeServiceProcessMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

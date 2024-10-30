@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
-	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -151,14 +150,12 @@ func Send[I Info](info I) {
 
 	cval := ctx.Value(ckChan)
 
-	if cp, ok := cval.(*atomic.Pointer[chan I]); ok {
-		if c := (*cp).Load(); c != nil {
-			select {
-			case *c <- info:
-			default:
-				// drop the diagnostic message if the receiver is busy
-				// so the sender is not blocked on non critcal actions
-			}
+	if c, ok := cval.(chan I); ok {
+		select {
+		case c <- info:
+		default:
+			// drop the diagnostic message if the receiver is busy
+			// so the sender is not blocked on non critcal actions
 		}
 	} else {
 		if cval == nil {
@@ -171,16 +168,17 @@ func Send[I Info](info I) {
 
 func Context[I Info](ctx context.Context, buffer int) (context.Context, <-chan I, context.CancelFunc) {
 	c := make(chan I, buffer)
-	cp := atomic.Pointer[chan I]{}
-	cp.Store(&c)
+	l := sync.Mutex{}
 
-	ctx = context.WithValue(ctx, ckChan, &cp)
+	ctx = context.WithValue(ctx, ckChan, c)
 	ctx, cancel := context.WithCancel(ctx)
 
-	return ctx, *cp.Load(), func() {
+	return ctx, c, func() {
 		cancel()
 
-		if cp.CompareAndSwap(&c, nil) {
+		l.Lock()
+		defer l.Unlock()
+		if c != nil {
 			ch := c
 			c = nil
 			close(ch)

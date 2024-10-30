@@ -30,11 +30,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/erigontech/erigon/crypto"
+	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 // Tree is a merkle tree of node records.

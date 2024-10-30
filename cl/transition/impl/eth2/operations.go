@@ -544,7 +544,7 @@ func (I *impl) processAttestationPostAltair(
 	return attestingIndicies, state.IncreaseBalance(s, proposer, reward)
 }
 
-// processAttestationsPhase0 implements the rules for phase0 processing.
+// processAttestationPhase0 implements the rules for phase0 processing.
 func (I *impl) processAttestationPhase0(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
@@ -862,10 +862,11 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 
 		if (sSlot+1)%beaconConfig.SlotsPerEpoch == 0 {
 			start := time.Now()
+
 			if err := statechange.ProcessEpoch(s); err != nil {
 				return err
 			}
-			log.Trace(
+			log.Debug(
 				"Processed new epoch successfully",
 				"epoch",
 				state.Epoch(s),

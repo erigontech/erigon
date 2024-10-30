@@ -85,7 +85,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEventEmitter()
 	validatorMonitor := monitor.NewValidatorMonitor(false, nil, nil, nil)
-	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters), emitters, sd, nil, validatorMonitor)
+	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters), emitters, sd, nil, validatorMonitor, false)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -96,7 +96,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0xc9bd7bcb6dfa49dc4e5a67ca75e89062c36b5c300bc25a1b31db4e1a89306071"))
 	require.Equal(t, store.JustifiedCheckpoint(), *expectedCheckpoint)
 	require.Equal(t, store.FinalizedCheckpoint(), *expectedCheckpoint)
-	headRoot, headSlot, err := store.GetHead()
+	headRoot, headSlot, err := store.GetHead(nil)
 	require.NoError(t, err)
 	require.Equal(t, headRoot, libcommon.HexToHash("0xc9bd7bcb6dfa49dc4e5a67ca75e89062c36b5c300bc25a1b31db4e1a89306071"))
 	require.Equal(t, headSlot, uint64(1))
@@ -108,7 +108,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	require.Equal(t, store.JustifiedCheckpoint(), *expectedCheckpoint)
 	require.Equal(t, store.FinalizedCheckpoint(), *expectedCheckpoint)
-	headRoot, headSlot, err = store.GetHead()
+	headRoot, headSlot, err = store.GetHead(nil)
 	require.NoError(t, err)
 	require.Equal(t, headSlot, uint64(3))
 	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
@@ -118,7 +118,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	require.Equal(t, store.JustifiedCheckpoint(), *expectedCheckpoint)
 	require.Equal(t, store.FinalizedCheckpoint(), *expectedCheckpoint)
-	headRoot, headSlot, err = store.GetHead()
+	headRoot, headSlot, err = store.GetHead(nil)
 	require.NoError(t, err)
 	require.Equal(t, headSlot, uint64(3))
 	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
@@ -153,7 +153,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
 	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
 		Beacon: true,
-	}, emitters), emitters, sd, nil, nil)
+	}, emitters), emitters, sd, nil, nil, false)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {
