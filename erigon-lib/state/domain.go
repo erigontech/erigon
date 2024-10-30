@@ -794,7 +794,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		return v, true, 0, nil
 	}
 
-	_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
+	v, offset, ok, err = dt.statelessBtree(i).Get2(filekey, g)
 	if err != nil || !ok {
 		return nil, false, 0, err
 	}

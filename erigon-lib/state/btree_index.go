@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
@@ -45,6 +46,7 @@ import (
 )
 
 var UseBpsTree = true
+var UseBTrie = true
 
 const BtreeLogPrefix = "btree"
 
@@ -609,7 +611,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	return btw, nil
 }
 
-func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
+func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, mustKeep bool) error {
 	if btw.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
@@ -619,8 +621,8 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 		btw.maxOffset = offset
 	}
 
-	keepKey := false
-	if btw.keysWritten > 0 {
+	keepKey := mustKeep
+	if !mustKeep && btw.keysWritten > 0 {
 		delta := offset - btw.prevOffset
 		if btw.keysWritten == 1 || delta < btw.minDelta {
 			btw.minDelta = delta
@@ -662,6 +664,7 @@ func (btw *BtIndexWriter) Build() error {
 
 		nodes := make([]Node, 0, btw.keysWritten/btw.args.M)
 		var ki uint64
+
 		if err = btw.collector.Load(nil, "", func(offt, k []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			btw.ef.AddOffset(binary.BigEndian.Uint64(offt))
 
@@ -736,6 +739,8 @@ type BtIndex struct {
 	file     *os.File
 	alloc    *btAlloc // pointless?
 	bplus    *BpsTree
+	trie     *Btrie
+	trace    bool
 	size     int64
 	modTime  time.Time
 	filePath string
@@ -799,9 +804,17 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	key := make([]byte, 0, 64)
 	var pos uint64
 
+	prev0 := byte(0)
+	var prevSet bool
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
-		err = iw.AddKey(key, pos)
+		keep := false
+		if !prevSet || prev0 != key[0] {
+			prev0 = key[0]
+			prevSet = true
+			keep = true
+		}
+		err = iw.AddKey(key, pos, keep)
 		if err != nil {
 			return err
 		}
@@ -873,6 +886,59 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	defer kv.EnableMadvNormal().DisableReadAhead()
 	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
 
+	if UseBTrie {
+
+		idx.trie = NewBtrie(idx.KeyCount())
+		added := false
+		if len(idx.data[pos:]) >= 0 {
+			nodes, err := decodeListNodes(idx.data[pos:])
+			if err != nil {
+				return nil, err
+			}
+			for _, n := range nodes {
+				idx.trie.Insert(n.key, n.di)
+				added = true
+			}
+		}
+		if !added {
+			t := time.Now()
+			N := idx.ef.Count()
+			if N == 0 {
+				return nil, nil
+			}
+
+			step := M
+			if N < M { // cache all keys if less than M
+				step = 1
+			}
+
+			// extremely stupid picking of needed nodes:
+			cachedBytes := uint64(0)
+			nsz := uint64(unsafe.Sizeof(Node{}))
+			var key []byte
+			var count int
+			for i := step; i < N; i += step {
+				di := i - 1
+				_, key, err = idx.keyCmp(nil, di, kvGetter, key[:0])
+				if err != nil {
+					return nil, err
+				}
+				idx.trie.Insert(key, di)
+				count++
+				// b.mx = append(b.mx, Node{off: idx.ef.Get(di), key: common.Copy(key), di: di})
+				cachedBytes += nsz + uint64(len(key))
+			}
+
+			log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", M, "N", common.PrettyCounter(N),
+				"cached", fmt.Sprintf("%d %.2f%%", count, 100*(float64(count)/float64(N))),
+				"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
+				"took", time.Since(t))
+
+		}
+		validationPassed = true
+		return idx, nil
+	}
+
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
 	case true:
@@ -916,6 +982,27 @@ func (b *BtIndex) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint
 	}
 	v, _ = g.Next(nil)
 	return k, v, offset, nil
+}
+
+func (b *BtIndex) skipMatchLoop(di, maxDi uint64, g *seg.Reader, key, resBuf []byte) bool {
+	resBuf = resBuf[:0]
+	offset := b.ef.Get(di)
+	maxOffset := b.ef.Get(maxDi)
+	g.Reset(offset)
+
+	for offset < maxOffset || di < maxDi {
+		if !g.HasNext() {
+			return false
+		}
+		if g.MatchPrefix(key) {
+			resBuf, _ = g.Next(resBuf)
+			return true
+		}
+
+		offset, _ = g.Skip()
+		di++
+	}
+	return false
 }
 
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
@@ -1042,51 +1129,69 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 	return k, v, offsetInFile, true, nil
 }
 
-// func (b *BtIndex) Get2(g *seg.Reader, key []byte) (k []byte, ok bool, i uint64, err error) {
-// 	if b.trace {
-// 		fmt.Printf("get   %x\n", key)
-// 	}
-// 	if len(key) == 0 && b.offt.Count() > 0 {
-// 		k0, v0, _, err := b.dataLookupFunc(0, g)
-// 		if err != nil || k0 != nil {
-// 			return nil, false, 0, err
-// 		}
-// 		return v0, true, 0, nil
-// 	}
-// 	n, l, r := b.bs(key) // l===r when key is found
-// 	if b.trace {
-// 		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-// 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
-// 	}
+func (b *BtIndex) Get2(key []byte, g *seg.Reader) (v []byte, offsetInFile uint64, found bool, err error) {
+	if b.trace {
+		fmt.Printf("get   %x\n", key)
+	}
+	if len(key) == 0 && b.ef.Count() > 0 {
+		k0, v0, offt, err := b.dataLookup(0, g)
+		if err != nil || k0 != nil {
+			return nil, 0, false, err
+		}
+		return v0, offt, true, nil
+	}
+	var l, r uint64
+	if b.bplus != nil {
+		_, l, r = b.bplus.bs(key) // l===r when key is found
+	} else {
+		l, r = b.trie.SeekLR(key)
+	}
 
-// 	var cmp int
-// 	var m uint64
-// 	for l < r {
-// 		m = (l + r) >> 1
-// 		cmp, k, err = b.keyCmpFunc(key, m, g, k[:0])
-// 		if err != nil {
-// 			return nil, false, 0, err
-// 		}
-// 		if b.trace {
-// 			fmt.Printf("fs [%d %d]\n", l, r)
-// 		}
+	if b.trace {
+		fmt.Printf("di(LR): [%d %d] found: %t\n", l, r, l == r)
+		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	}
 
-// 		switch cmp {
-// 		case 0:
-// 			return k, true, m, nil
-// 		case 1:
-// 			r = m
-// 		case -1:
-// 			l = m + 1
-// 		}
-// 	}
+	var cmp int
+	var m uint64
+	for l < r {
+		m = (l + r) >> 1
+		if r-l <= DefaultBtreeStartSkip {
+			m = l
+			if b.skipMatchLoop(m, r, g, key, v[:0]) {
+				return
+			}
+			return nil, 0, false, err
+		}
 
-// 	cmp, k, err = b.keyCmpFunc(key, l, g, k[:0])
-// 	if err != nil || cmp != 0 {
-// 		return nil, false, 0, err
-// 	}
-// 	return k, true, l, nil
-// }
+		cmp, v, err = b.keyCmp(key, m, g, v[:0])
+		if err != nil {
+			return nil, 0, false, err
+		}
+		if b.trace {
+			fmt.Printf("fs [%d %d]\n", l, r)
+		}
+
+		switch cmp {
+		case 0:
+			if g.HasNext() {
+				v, _ = g.Next(v[:0])
+				return v, b.ef.Get(m), true, nil
+			}
+			l, r = m, m
+		case 1:
+			r = m
+		case -1:
+			l = m + 1
+		}
+	}
+
+	k0, v0, offt, err := b.dataLookup(l, g)
+	if err != nil || bytes.Equal(k0, key) {
+		return nil, 0, false, err
+	}
+	return v0, offt, true, nil
+}
 
 // Seek moves cursor to position where key >= x.
 // Then if x == nil - first key returned
@@ -1094,6 +1199,47 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 //	if x is larger than any other key in index, nil cursor is returned.
 func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 	if b.Empty() {
+		return nil, nil
+	}
+	if UseBTrie {
+		l, r := b.trie.SeekLR(x)
+		var v []byte
+		var cmp int
+		var err error
+		for l < r {
+			m := (l + r) >> 1
+
+			cmp, v, err = b.keyCmp(x, m, g, v[:0])
+			if err != nil {
+				return nil, err
+			}
+			if b.trace {
+				fmt.Printf("fs [%d %d]\n", l, r)
+			}
+
+			switch cmp {
+			case 0:
+				// if g.HasNext() {
+				// 	v, _ = g.Next(v[:0])
+				// 	return b.newCursor(context.Background(), x, v, m, g), nil
+				// }
+				l, r = m, m
+			case 1:
+				r = m
+			case -1:
+				l = m + 1
+			}
+		}
+		k, v, _, err := b.dataLookup(l, g)
+		if err != nil {
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if bytes.Compare(k, x) >= 0 {
+			return b.newCursor(context.Background(), k, v, l, g), nil
+		}
 		return nil, nil
 	}
 	if UseBpsTree {
@@ -1142,8 +1288,8 @@ func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() 
 func commonPrefixLength(b1, b2 []byte) int {
 	var i int
 
-	fmt.Printf("CPL %x | %x", b1, b2)
-	defer func() { fmt.Printf(" -> %x len=%d\n", b1[:i], i) }()
+	// fmt.Printf("CPL %x | %x", b1, b2)
+	// defer func() { fmt.Printf(" -> %x len=%d\n", b1[:i], i) }()
 	for i < len(b1) && i < len(b2) {
 		if b1[i] != b2[i] {
 			break
@@ -1155,6 +1301,7 @@ func commonPrefixLength(b1, b2 []byte) int {
 
 type Btrie struct {
 	child [256]*trieNode
+	maxDi uint64
 	trace bool
 }
 
@@ -1177,7 +1324,7 @@ func newTrieNode(di uint64, ext []byte) *trieNode {
 }
 
 func (tn *trieNode) nextChildTo(nibble byte) (byte, bool) {
-	if len(tn.child) == 0 {
+	if len(tn.child) == 0 || nibble == 0xff {
 		return 0, false
 	}
 	for b := int(nibble + 1); b <= 255; b++ {
@@ -1233,8 +1380,8 @@ func (tn *trieNode) split(ext2 []byte, cpl int, di uint64) {
 	// fmt.Printf("left parent %x [%d-%d]\n", tn.ext, tn.minDi, tn.maxDi)
 }
 
-func NewBtrie() *Btrie {
-	return &Btrie{}
+func NewBtrie(maxDi uint64) *Btrie {
+	return &Btrie{maxDi: maxDi}
 }
 
 func (bt *Btrie) printRoot() {
@@ -1271,10 +1418,22 @@ func (n *trieNode) String() string {
 }
 
 func (bt *Btrie) nextChildTo(nibble byte) (byte, bool) {
-	if len(bt.child) == 0 {
+	if len(bt.child) == 0 || nibble == 0xff {
 		return 0, false
 	}
 	for b := int(nibble + 1); b <= 255; b++ {
+		if bt.child[b] != nil {
+			return byte(b), true
+		}
+	}
+	return 0, false
+}
+
+func (bt *Btrie) prevChildTo(nibble byte) (byte, bool) {
+	if len(bt.child) == 0 || nibble == 0 {
+		return 0, false
+	}
+	for b := int(nibble - 1); b >= 0; b-- {
 		if bt.child[b] != nil {
 			return byte(b), true
 		}
@@ -1286,42 +1445,58 @@ func (bt *Btrie) nextChildTo(nibble byte) (byte, bool) {
 //
 // Main need of this btrie - we need to figure L and R values for given prefix.
 type nibbler struct {
-	stack [5]*trieNode
-	path  []byte
+	stack  [5]*trieNode
+	nibbls [5]byte
+	path   []byte
 }
 
 func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 	if bt.trace {
 		fmt.Printf("SeekLR '%x'\n", key)
 	}
+	if len(key) == 0 {
+		return 0, 0
+	}
 
 	depth, nib := 1, key[0]
-	Ri = 2<<63 - 1
+	Ri = bt.maxDi
 
+	nnib, ok := bt.nextChildTo(nib)
+	if bt.trace {
+		fmt.Printf("not found nib=%x next=%x\n", nib, nnib)
+	}
+	if ok {
+		Ri = bt.child[nnib].minDi
+	}
 	if bt.child[nib] == nil {
-		nnib, ok := bt.nextChildTo(nib)
-		if bt.trace {
-			fmt.Printf("not found nib=%x next=%x\n", nib, nnib)
-		}
 		if !ok {
-			return 0, 0
+			pn, ok := bt.prevChildTo(nib)
+			if ok {
+				Li = bt.child[pn].maxDi
+			}
+			return
 		}
 		return 0, bt.child[nnib].minDi
+	}
+	if bytes.HasPrefix(key, []byte{0x5, 0x6, 0x15, 0x2a, 0x25, 0x20, 0xa, 0xa9, 0x11, 0x55, 0x20}) {
+		fmt.Printf("SeekLR %x\n", key)
+		bt.printRoot()
 	}
 
 	next := bt.child[nib]
 	nibbler := nibbler{}
+	Li = next.minDi
 
 	ni := 0
 	for {
 		nibbler.stack[ni] = next
-		nibbler.path = append(nibbler.path, nib)
+		nibbler.nibbls[ni] = nib
 		ni++
+		nibbler.path = append(nibbler.path, nib)
 
-		Li = max(Li, next.minDi)
-		Ri = min(Ri, next.maxDi)
-
-		fmt.Printf("[%2x] next depth=%d %s\n", nib, depth, next.String())
+		if bt.trace {
+			fmt.Printf("[%2x] next depth=%d %s\n", nib, depth, next.String())
+		}
 		// for nn := 0; nn <= 255; nn++ {
 		// 	if nd := next.child[byte(nn)]; nd != nil {
 		// 		fmt.Printf("   %2x: %p %s\n", nn, nd, nd.String())
@@ -1330,25 +1505,28 @@ func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 
 		cpl := commonPrefixLength(key[depth:], next.ext)
 		if cpl < len(next.ext) {
-			fmt.Printf("smallest child %x\n", key[:depth+cpl])
-			smallestChild := next.child[0]
-			if smallestChild == nil {
-				sn, ok := next.nextChildTo(0)
-				if ok {
-					return next.minDi, next.child[sn].minDi
-				}
-				return next.minDi, next.maxDi
+			if bt.trace {
+				fmt.Printf("smallest child %x\n", key[:depth+cpl])
 			}
-
-			fmt.Printf("pat match %x cpl=%d\n", key, cpl)
-			return next.minDi, smallestChild.minDi
+			return Li, Ri
 		}
 		if cpl == len(next.ext) {
 			if cpl == len(key[depth:]) && cpl > 0 { // full match
 				return next.minDi, next.maxDi
 			}
+
+			Li = max(Li, next.minDi)
+
 			nib = key[depth+cpl]
-			fmt.Printf("ext match nib=%x depth=%d\n", nib, depth+cpl)
+			if bt.trace {
+				fmt.Printf("ext match nib=%x depth=%d\n", nib, depth+cpl)
+			}
+			nnib, haveNext := next.nextChildTo(nib)
+			if haveNext {
+				Ri = next.child[nnib].minDi
+			}
+
+			nibbler.path = append(nibbler.path, key[depth:depth+cpl+1]...)
 			if nx := next.child[nib]; nx != nil {
 				if len(nx.child) == 0 && len(nx.ext) == 0 { // is leaf without ext
 					return nx.minDi, nx.maxDi
@@ -1357,17 +1535,11 @@ func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 				depth += cpl + 1
 				continue
 			}
-
-			nnib, ok := next.nextChildTo(key[depth+cpl])
-			if !ok {
-				// ni--
-				return 0, 0
-			}
-			return next.minDi, next.child[nnib].minDi
+			return
 		}
 	}
 
-	return 0, 0
+	return
 }
 
 // Get seeks exact match to the key.
@@ -1469,7 +1641,7 @@ func (bt *Btrie) Insert(key []byte, di uint64) {
 
 	next := bt.child[nib]
 	rows := 0
-	rowLimit := 5
+	rowLimit := 50
 	for {
 		rows++
 		if bt.trace {
@@ -1506,7 +1678,9 @@ func (bt *Btrie) Insert(key []byte, di uint64) {
 				return
 			}
 
-			fmt.Printf("depth=%d insert [%d] %x\n", depth, di, key[depth:])
+			if bt.trace {
+				fmt.Printf("depth=%d insert [%d] %x\n", depth, di, key[depth:])
+			}
 			next.child[nib] = newTrieNode(di, key[depth:])
 			return
 		}

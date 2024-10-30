@@ -141,6 +141,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	for i := 0; i < len(keys); i++ {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
+		require.NotNilf(t, cur, "i=%d", i)
 		require.EqualValuesf(t, keys[i], cur.key, "i=%d", i)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
 		// require.EqualValues(t, uint64(i), cur.Value())
@@ -196,7 +197,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	for i := 0; i < 10000; i++ {
 		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
-		require.EqualValues(t, keys[i], c.Key())
+		require.EqualValuesf(t, keys[i], c.Key(), "i=%d", i)
 	}
 }
 
@@ -216,7 +217,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 1_200_000, 1024
+	keyCount, M := 1_200_0, 1024
 
 	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
@@ -390,7 +391,6 @@ func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []by
 }
 
 func Test_Btrie_Insert(t *testing.T) {
-	bt := NewBtrie()
 
 	// keys := [][]byte{
 	// 	{0xce, 0xad},
@@ -402,17 +402,20 @@ func Test_Btrie_Insert(t *testing.T) {
 	// }
 
 	keys := make([][]byte, 0)
+	rnd := rand.New(rand.NewSource(0))
 	for i := 0; i < 400; i++ {
 		b := make([]byte, 10)
-		_, _ = rand.Read(b)
+		_, _ = rnd.Read(b)
 		keys = append(keys, b)
 	}
+
+	bt := NewBtrie(uint64(len(keys)))
 
 	sort.Slice(keys, func(i, j int) bool {
 		return bytes.Compare(keys[i], keys[j]) < 0
 	})
 
-	bt.trace = true
+	// bt.trace = true
 	for i, key := range keys {
 		t.Logf("Inserting %x - %d", key, i)
 		bt.Insert(key, uint64(i))
@@ -424,7 +427,7 @@ func Test_Btrie_Insert(t *testing.T) {
 
 	for ki, key := range keys {
 		li, ri := bt.SeekLR(key)
-		fmt.Printf("%x -> [%d, %d]\n", key, li, ri)
+		// fmt.Printf("%x -> [%d, %d]\n", key, li, ri)
 		// require.Truef(t, found, "key=%x", key)
 		require.EqualValuesf(t, ki, li, "key=%x", key)
 		require.InDelta(t, ki, ri, 1, "key=%x", key)
@@ -432,8 +435,10 @@ func Test_Btrie_Insert(t *testing.T) {
 		key[len(key)-1]++
 		li, ri = bt.SeekLR(key)
 		// require.True(t, found)
-		require.GreaterOrEqual(t, uint64(ki), li)
-		require.GreaterOrEqual(t, uint64(ki), ri)
+		require.Truef(t, li <= uint64(ki), "key=%x li=%d ki=%d", key, li, ki)
+		require.Truef(t, ri >= uint64(ki), "key=%x li=%d ri=%d ki=%d", key, li, ri, ki)
+		// require.GreaterOrEqual(t, li, uint64(ki))
+		// require.GreaterOrEqual(t, ri, uint64(ki))
 	}
 
 	// keysNotExist := [][]byte{
