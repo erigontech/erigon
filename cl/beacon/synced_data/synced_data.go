@@ -17,6 +17,7 @@
 package synced_data
 
 import (
+	"fmt"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -101,7 +102,7 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 			case <-ch:
 				return
 			case <-time.After(100 * time.Second):
-				panic(string(st))
+				fmt.Println("Deadlock detected", string(st))
 			}
 		}()
 	}
