@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-const EnableDeadlockDetector = false
+const EnableDeadlockDetector = true
 
 var _ SyncedData = (*SyncedDataManager)(nil)
 
