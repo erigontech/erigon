@@ -27,16 +27,16 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/ssz"
-	"github.com/erigontech/erigon/cl/abstract"
-	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	mockCommittee "github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	mockState "github.com/erigontech/erigon/v3/cl/abstract/mock_services"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconevents"
+	mockSync "github.com/erigontech/erigon/v3/cl/beacon/synced_data/mock_services"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
+	mockCommittee "github.com/erigontech/erigon/v3/cl/validator/committee_subscription/mock_services"
 )
 
 var (

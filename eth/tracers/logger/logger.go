@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/core/vm"
 )
 
 var ErrTraceLimitReached = errors.New("the number of logs reached the specified limit")

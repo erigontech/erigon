@@ -17,7 +17,7 @@
 package cltypes
 
 import (
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 type ParticipationFlags byte

@@ -20,8 +20,8 @@ import (
 	"testing"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
+	"github.com/erigontech/erigon/v3/polygon/bor/valset"
+	"github.com/erigontech/erigon/v3/polygon/heimdall/heimdalltest"
 )
 
 func TestSpanJsonMarshall(t *testing.T) {

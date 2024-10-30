@@ -33,14 +33,14 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
 
-	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
-	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/prune"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/v3/core/rawdb/rawdbhelpers"
+	reset2 "github.com/erigontech/erigon/v3/core/rawdb/rawdbreset"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/v3/ethdb/prune"
+	"github.com/erigontech/erigon/v3/turbo/debug"
 )
 
 var cmdResetState = &cobra.Command{

@@ -21,8 +21,8 @@ import (
 	"testing"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/persistence/base_encoding"
 	"github.com/stretchr/testify/require"
 )
 

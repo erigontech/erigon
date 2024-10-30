@@ -23,10 +23,10 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/v3/turbo/services"
 
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/consensus"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 // BodyHashes is to be used for the mapping between TxHash, UncleHash, and WithdrawalsHash to the block header

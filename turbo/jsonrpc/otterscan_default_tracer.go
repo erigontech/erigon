@@ -21,7 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/v3/core/vm"
 )
 
 // Helper implementation of vm.Tracer; since the interface is big and most

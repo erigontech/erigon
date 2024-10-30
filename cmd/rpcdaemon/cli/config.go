@@ -56,41 +56,41 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/paths"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/aura"
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
-	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/graphql"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/health"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcservices"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/cmd/utils/flags"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/common/paths"
+	"github.com/erigontech/erigon/v3/consensus"
+	"github.com/erigontech/erigon/v3/consensus/aura"
+	"github.com/erigontech/erigon/v3/consensus/ethash"
+	"github.com/erigontech/erigon/v3/consensus/merge"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/core/vm/evmtypes"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/node"
+	"github.com/erigontech/erigon/v3/node/nodecfg"
+	"github.com/erigontech/erigon/v3/polygon/bor"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/v3/polygon/bor/valset"
+	"github.com/erigontech/erigon/v3/polygon/bridge"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/rpc/rpccfg"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	"github.com/erigontech/erigon/v3/turbo/logging"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/services"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
 
 	// Force-load native and js packages, to trigger registration
-	_ "github.com/erigontech/erigon/eth/tracers/js"
-	_ "github.com/erigontech/erigon/eth/tracers/native"
+	_ "github.com/erigontech/erigon/v3/eth/tracers/js"
+	_ "github.com/erigontech/erigon/v3/eth/tracers/native"
 )
 
 var rootCmd = &cobra.Command{
@@ -143,7 +143,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake for GRPC")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCACert, "tls.cacert", "", "CA certificate for client side TLS handshake for GRPC")
 
-	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/v3/tree/main/cmd/rpcdaemon")
 
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpServerEnabled, "http.enabled", true, "enable http server")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP server listening interface")
@@ -572,7 +572,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				}
 			}
 
-			// NOTE: bor_* RPCs are not fully supported when using polygon.sync (https://github.com/erigontech/erigon/issues/11171)
+			// NOTE: bor_* RPCs are not fully supported when using polygon.sync (https://github.com/erigontech/erigon/v3/issues/11171)
 			var borKv kv.RoDB
 
 			// bor (consensus) specific db

@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/erigontech/erigon/dataflow"
+	"github.com/erigontech/erigon/v3/dataflow"
 )
 
 func SetupBlockBodyDownload(metricsMux *http.ServeMux) {

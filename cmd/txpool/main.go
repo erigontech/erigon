@@ -41,15 +41,15 @@ import (
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon-lib/txpool/txpoolutil"
 	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	common2 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/consensus/misc"
-	"github.com/erigontech/erigon/ethdb/privateapi"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcdaemontest"
+	common2 "github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/consensus/misc"
+	"github.com/erigontech/erigon/v3/ethdb/privateapi"
 
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common/paths"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/common/paths"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 )
 
 var (

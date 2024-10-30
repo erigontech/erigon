@@ -17,11 +17,11 @@
 package consensus_tests
 
 import (
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/spectest"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/spectest"
 )
 
 var TestFormats = spectest.Appendix{}

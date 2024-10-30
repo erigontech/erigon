@@ -25,7 +25,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // A message broadcast by authorities when it's their turn to seal a block but there are no

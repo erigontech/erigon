@@ -19,7 +19,7 @@ package utils_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 func TestIsPowerOf2(t *testing.T) {

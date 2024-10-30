@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // Prove constructs a merkle proof for key. The result contains all encoded nodes

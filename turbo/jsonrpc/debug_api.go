@@ -30,15 +30,15 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
+	tracersConfig "github.com/erigontech/erigon/v3/eth/tracers/config"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned
@@ -311,7 +311,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		return &AccountResult{}, err
 	}
 	if number == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/v3/issues/1645
 	}
 	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
 	if err != nil {

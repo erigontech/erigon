@@ -21,8 +21,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/utils"
 	"github.com/stretchr/testify/require"
 )
 

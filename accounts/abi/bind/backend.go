@@ -26,8 +26,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon/core/types"
+	ethereum "github.com/erigontech/erigon/v3"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 var (

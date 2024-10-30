@@ -25,8 +25,8 @@ import (
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 func TestMsgID(t *testing.T) {

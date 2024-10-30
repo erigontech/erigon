@@ -19,9 +19,9 @@ package services
 import (
 	"context"
 
-	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/services/accounts"
-	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/v3/cmd/devnet/services/accounts"
+	"github.com/erigontech/erigon/v3/cmd/devnet/services/polygon"
 )
 
 type ctxKey int

@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/v3/core/vm"
 )
 
 func (api *OtterscanAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error) {

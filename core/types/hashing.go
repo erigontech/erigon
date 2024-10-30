@@ -29,9 +29,9 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/rlphacks"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/turbo/rlphacks"
+	"github.com/erigontech/erigon/v3/turbo/trie"
 )
 
 type DerivableList interface {

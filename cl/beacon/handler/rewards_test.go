@@ -28,9 +28,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/common"
 )
 
 func TestGetBlockRewards(t *testing.T) {

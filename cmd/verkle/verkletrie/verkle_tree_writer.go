@@ -30,10 +30,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/trie/vtree"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
+	"github.com/erigontech/erigon/v3/turbo/trie/vtree"
 )
 
 func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {

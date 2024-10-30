@@ -34,11 +34,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/forkid"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/core/forkid"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/p2p"
 )
 
 func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash libcommon.Hash) *GrpcServer {

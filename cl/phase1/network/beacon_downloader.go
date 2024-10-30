@@ -23,8 +23,8 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/rpc"
 )
 
 // Input: the currently highest slot processed and the list of blocks we want to know process

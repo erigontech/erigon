@@ -24,7 +24,7 @@ import (
 	"testing"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/v3/common"
 )
 
 func BenchmarkCutOriginal(b *testing.B) {

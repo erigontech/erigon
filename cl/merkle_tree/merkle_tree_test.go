@@ -6,7 +6,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/v3/cl/merkle_tree"
 	"github.com/stretchr/testify/require"
 )
 

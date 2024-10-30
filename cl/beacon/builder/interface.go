@@ -20,8 +20,8 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/turbo/engineapi/engine_types"
 )
 
 //go:generate mockgen -typed=true -destination=./mock_services/builder_client_mock.go -package=mock_services . BuilderClient

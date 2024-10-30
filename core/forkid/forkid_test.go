@@ -27,8 +27,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // TestCreation tests that different genesis and fork rule combinations result in

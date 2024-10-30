@@ -21,9 +21,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/polygon/bor"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
 )
 
 type HeaderValidator struct {

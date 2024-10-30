@@ -27,12 +27,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/dataflow"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/adapter"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/dataflow"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/v3/turbo/adapter"
+	"github.com/erigontech/erigon/v3/turbo/services"
 	"github.com/holiman/uint256"
 )
 

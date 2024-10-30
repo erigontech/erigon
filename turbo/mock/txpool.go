@@ -22,9 +22,9 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/event"
 )
 
 // TestTxPool is a mock transaction pool that blindly accepts all transactions.

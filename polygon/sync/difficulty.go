@@ -22,9 +22,9 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/polygon/bor"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
 )
 
 type DifficultyCalculator struct {

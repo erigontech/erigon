@@ -32,10 +32,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/migrations"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/migrations"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 )
 
 func expandHomeDir(dirpath string) string {

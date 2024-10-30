@@ -23,15 +23,15 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon/cmd/devnet/accounts"
-	"github.com/erigontech/erigon/cmd/devnet/args"
-	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	account_services "github.com/erigontech/erigon/cmd/devnet/services/accounts"
-	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/v3/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/v3/cmd/devnet/args"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnet"
+	account_services "github.com/erigontech/erigon/v3/cmd/devnet/services/accounts"
+	"github.com/erigontech/erigon/v3/cmd/devnet/services/polygon"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
 )
 
 func NewBorDevnetWithoutHeimdall(

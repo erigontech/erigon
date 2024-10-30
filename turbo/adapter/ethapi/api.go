@@ -34,10 +34,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/v3/accounts/abi"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/core/vm/evmtypes"
+	"github.com/erigontech/erigon/v3/eth/tracers/logger"
 )
 
 // CallArgs represents the arguments for a call.

@@ -29,12 +29,12 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/tracing"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/core/vm/evmtypes"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local

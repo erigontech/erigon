@@ -22,10 +22,10 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/state/exec3"
+	"github.com/erigontech/erigon/v3/cmd/state/exec3"
 
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/core/vm"
 )
 
 type GenericTracer interface {

@@ -25,9 +25,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/v3/turbo/services"
 )
 
 func NoGapsInCanonicalHeaders(tx kv.Tx, ctx context.Context, br services.FullBlockReader) {

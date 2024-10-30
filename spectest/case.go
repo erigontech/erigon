@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/transition/machine"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/transition/machine"
 
 	"gfx.cafe/util/go/generic"
 )

@@ -22,8 +22,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/polygon/bridge"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

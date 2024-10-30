@@ -30,8 +30,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/stack"
+	"github.com/erigontech/erigon/v3/core/tracing"
+	"github.com/erigontech/erigon/v3/core/vm/stack"
 )
 
 // Config are the configuration options for the Interpreter

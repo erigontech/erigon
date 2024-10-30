@@ -32,12 +32,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/paths"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/common/paths"
+	"github.com/erigontech/erigon/v3/p2p"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/rpc/rpccfg"
 )
 
 const (

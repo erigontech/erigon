@@ -16,9 +16,9 @@ import (
 
 	common "github.com/erigontech/erigon-lib/common"
 	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	types "github.com/erigontech/erigon/core/types"
-	eth "github.com/erigontech/erigon/eth/protocols/eth"
-	polygoncommon "github.com/erigontech/erigon/polygon/polygoncommon"
+	types "github.com/erigontech/erigon/v3/core/types"
+	eth "github.com/erigontech/erigon/v3/eth/protocols/eth"
+	polygoncommon "github.com/erigontech/erigon/v3/polygon/polygoncommon"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -30,14 +30,14 @@ import (
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/rawdb/blockio"
-	"github.com/erigontech/erigon/dataflow"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/adapter"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/bodydownload"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/rawdb/blockio"
+	"github.com/erigontech/erigon/v3/dataflow"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/v3/turbo/adapter"
+	"github.com/erigontech/erigon/v3/turbo/services"
+	"github.com/erigontech/erigon/v3/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/v3/turbo/stages/headerdownload"
 )
 
 const requestLoopCutOff int = 1

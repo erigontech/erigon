@@ -17,8 +17,8 @@
 package statechange
 
 import (
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 // ProcessSyncCommitteeUpdate implements processing for the sync committee update. unfortunately there is no easy way to test it.

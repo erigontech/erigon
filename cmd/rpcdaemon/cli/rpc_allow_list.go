@@ -22,7 +22,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 type allowListFile struct {

@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/core/state"
 )
 
 func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {

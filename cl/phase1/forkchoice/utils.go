@@ -19,13 +19,13 @@ package forkchoice
 import (
 	"errors"
 
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/v3/cl/transition"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 // Slot calculates the current slot number using the time and genesis slot.

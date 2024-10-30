@@ -24,7 +24,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/utils"
 
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap/buffer"
@@ -35,10 +35,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/verkle/verkletrie"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/v3/cmd/verkle/verkletrie"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
 )
 
 type optionsCfg struct {

@@ -21,11 +21,11 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/cmd/devnet/scenarios"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnetutils"
+	"github.com/erigontech/erigon/v3/cmd/devnet/requests"
+	"github.com/erigontech/erigon/v3/cmd/devnet/scenarios"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 func init() {

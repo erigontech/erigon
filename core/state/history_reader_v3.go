@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
 )
 
 // HistoryReaderV3 Implements StateReader and StateWriter

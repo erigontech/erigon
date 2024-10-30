@@ -41,14 +41,14 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/v3/turbo/services"
 
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/v3/consensus"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/v3/node"
+	"github.com/erigontech/erigon/v3/p2p/sentry"
 )
 
 const (

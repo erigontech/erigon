@@ -33,13 +33,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
-	"github.com/erigontech/erigon/cmd/utils"
-	snaptype2 "github.com/erigontech/erigon/core/snaptype"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	snaptype2 "github.com/erigontech/erigon/v3/core/snaptype"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
 )
 
 type Sqeeze string

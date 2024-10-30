@@ -19,11 +19,11 @@ package bodydownload_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/turbo/stages/bodydownload"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/v3/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/v3/turbo/stages/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/v3/consensus/ethash"
 )
 
 func TestCreateBodyDownload(t *testing.T) {

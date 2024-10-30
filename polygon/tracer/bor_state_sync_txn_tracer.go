@@ -22,9 +22,9 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/vm"
+	"github.com/erigontech/erigon/v3/eth/tracers"
 )
 
 func NewBorStateSyncTxnTracer(

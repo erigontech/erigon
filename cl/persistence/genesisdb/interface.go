@@ -1,6 +1,6 @@
 package genesisdb
 
-import "github.com/erigontech/erigon/cl/phase1/core/state"
+import "github.com/erigontech/erigon/v3/cl/phase1/core/state"
 
 type GenesisDB interface {
 	// Initialize initializes the genesis database, with either a given genesis state or the hardcoded databases.

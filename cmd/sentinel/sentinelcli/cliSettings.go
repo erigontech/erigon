@@ -19,13 +19,13 @@ package sentinelcli
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/v3/cmd/sentinel/sentinelflags"
 
 	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )

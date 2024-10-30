@@ -9,7 +9,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 var _ = (*btHeaderMarshaling)(nil)

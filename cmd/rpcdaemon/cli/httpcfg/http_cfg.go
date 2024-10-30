@@ -19,12 +19,12 @@ package httpcfg
 import (
 	"time"
 
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/rpc/rpccfg"
 )
 
 type HttpCfg struct {

@@ -25,11 +25,11 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/antiquary/tests"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/cl/antiquary/tests"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/v3/cl/phase1/execution_client/block_collector"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 func TestBlockCollectorAccumulateAndFlush(t *testing.T) {

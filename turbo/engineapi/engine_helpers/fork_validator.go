@@ -31,14 +31,14 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/v3/consensus"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/v3/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/v3/turbo/services"
+	"github.com/erigontech/erigon/v3/turbo/shards"
 )
 
 type BlockTimings [2]time.Duration

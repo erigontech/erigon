@@ -21,10 +21,10 @@ import (
 	_ "embed"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/v3/cl/utils"
 	"github.com/stretchr/testify/require"
 )
 

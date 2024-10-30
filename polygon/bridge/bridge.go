@@ -27,12 +27,12 @@ import (
 
 	liberrors "github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/log/v3"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	bortypes "github.com/erigontech/erigon/v3/polygon/bor/types"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
 )
 
 type eventFetcher interface {

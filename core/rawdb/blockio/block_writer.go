@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/rawdb"
 )
 
 //Naming:

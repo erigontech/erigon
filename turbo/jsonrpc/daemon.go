@@ -21,13 +21,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/clique"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/v3/consensus"
+	"github.com/erigontech/erigon/v3/consensus/clique"
+	"github.com/erigontech/erigon/v3/polygon/bor"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/services"
 )
 
 // APIList describes the list of available RPC apis

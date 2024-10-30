@@ -21,8 +21,8 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/transition/machine"
-	"github.com/erigontech/erigon/spectest"
+	"github.com/erigontech/erigon/v3/cl/transition/machine"
+	"github.com/erigontech/erigon/v3/spectest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

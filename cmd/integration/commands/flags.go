@@ -19,10 +19,10 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/v3/turbo/cli"
 
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
 )
 
 var (

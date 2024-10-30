@@ -21,8 +21,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/v3/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/v3/cl/ssz"
 )
 
 const AttestationDataSize = 128

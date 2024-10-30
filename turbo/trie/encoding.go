@@ -22,7 +22,7 @@ package trie
 import (
 	"io"
 
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // Trie keys are dealt with in three distinct encodings:

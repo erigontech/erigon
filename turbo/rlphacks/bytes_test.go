@@ -22,7 +22,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 func TestFastDoubleRlpForByteArrays(t *testing.T) {

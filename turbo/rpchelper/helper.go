@@ -26,14 +26,14 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	borfinality "github.com/erigontech/erigon/polygon/bor/finality"
-	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
+	borfinality "github.com/erigontech/erigon/v3/polygon/bor/finality"
+	"github.com/erigontech/erigon/v3/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/services"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
 )
 
 // unable to decode supplied params, or an invalid number of parameters

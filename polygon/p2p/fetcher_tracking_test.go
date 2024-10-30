@@ -31,7 +31,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {

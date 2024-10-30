@@ -29,10 +29,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/evm/internal/t8ntool"
-	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/params"
-	cli2 "github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/v3/cmd/evm/internal/t8ntool"
+	"github.com/erigontech/erigon/v3/cmd/utils/flags"
+	"github.com/erigontech/erigon/v3/params"
+	cli2 "github.com/erigontech/erigon/v3/turbo/cli"
 )
 
 var (

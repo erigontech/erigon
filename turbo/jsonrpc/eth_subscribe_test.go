@@ -30,15 +30,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/ethdb/privateapi"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/builder"
-	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/stages"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcservices"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/eth/protocols/eth"
+	"github.com/erigontech/erigon/v3/ethdb/privateapi"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/turbo/builder"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/stages"
+	"github.com/erigontech/erigon/v3/turbo/stages/mock"
 )
 
 func TestEthSubscribe(t *testing.T) {

@@ -28,15 +28,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/devnet/accounts"
-	"github.com/erigontech/erigon/cmd/devnet/args"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/diagnostics"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/debug"
-	enode "github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/v3/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/v3/cmd/devnet/args"
+	"github.com/erigontech/erigon/v3/cmd/devnet/requests"
+	"github.com/erigontech/erigon/v3/diagnostics"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/node/nodecfg"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	enode "github.com/erigontech/erigon/v3/turbo/node"
 )
 
 type Node interface {

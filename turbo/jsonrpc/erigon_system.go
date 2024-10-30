@@ -24,11 +24,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/forkid"
-	borfinality "github.com/erigontech/erigon/polygon/bor/finality"
-	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/core/forkid"
+	borfinality "github.com/erigontech/erigon/v3/polygon/bor/finality"
+	"github.com/erigontech/erigon/v3/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 )
 
 // Forks is a data type to record a list of forks passed by this node

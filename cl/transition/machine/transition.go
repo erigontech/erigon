@@ -17,8 +17,8 @@
 package machine
 
 import (
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
 )
 
 // TransitionState will call impl..ProcessSlots, then impl.VerifyBlockSignature, then ProcessBlock, then impl.VerifyTransition

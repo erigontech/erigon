@@ -20,8 +20,8 @@ import (
 	_ "embed"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/beacon/beacontest"
-	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/beacon/beacontest"
+	"github.com/erigontech/erigon/v3/cl/clparams"
 )
 
 func TestHarnessPhase0(t *testing.T) {

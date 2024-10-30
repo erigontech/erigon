@@ -40,11 +40,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/common/debug"
+	"github.com/erigontech/erigon/v3/consensus"
+	"github.com/erigontech/erigon/v3/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/v3/core/vm/evmtypes"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 const doNotStoreCachesOnDisk = ""

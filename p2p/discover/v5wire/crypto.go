@@ -32,7 +32,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/enode"
 )
 
 const (

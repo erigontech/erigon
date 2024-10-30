@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/v3/polygon/polygoncommon"
 )
 
 type scraper[TEntity Entity] struct {

@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/ring"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state/lru"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 

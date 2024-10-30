@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/v3/core/vm"
+	"github.com/erigontech/erigon/v3/eth/tracers/logger"
 )
 
 func TestState(t *testing.T) {

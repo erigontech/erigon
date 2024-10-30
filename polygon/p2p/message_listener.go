@@ -27,9 +27,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/eth/protocols/eth"
+	"github.com/erigontech/erigon/v3/polygon/polygoncommon"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 type DecodedInboundMessage[TPacket any] struct {

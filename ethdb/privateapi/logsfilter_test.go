@@ -26,7 +26,7 @@ import (
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/v3/turbo/shards"
 )
 
 var (

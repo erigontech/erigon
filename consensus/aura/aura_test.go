@@ -17,10 +17,11 @@
 package aura_test
 
 import (
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"math/big"
 	"strings"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
 
 	"github.com/stretchr/testify/require"
 
@@ -28,13 +29,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/consensus/aura"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/v3/accounts/abi"
+	"github.com/erigontech/erigon/v3/consensus/aura"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/turbo/stages/mock"
+	"github.com/erigontech/erigon/v3/turbo/trie"
 )
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,

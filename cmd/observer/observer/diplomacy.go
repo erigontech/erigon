@@ -29,9 +29,9 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cmd/observer/database"
-	"github.com/erigontech/erigon/cmd/observer/observer/node_utils"
-	"github.com/erigontech/erigon/cmd/observer/utils"
+	"github.com/erigontech/erigon/v3/cmd/observer/database"
+	"github.com/erigontech/erigon/v3/cmd/observer/observer/node_utils"
+	"github.com/erigontech/erigon/v3/cmd/observer/utils"
 )
 
 type Diplomacy struct {

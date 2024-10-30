@@ -31,15 +31,15 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/state/exec3"
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/ethutils"
-	"github.com/erigontech/erigon/eth/filters"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/cmd/state/exec3"
+	"github.com/erigontech/erigon/v3/core/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/eth/ethutils"
+	"github.com/erigontech/erigon/v3/eth/filters"
+	bortypes "github.com/erigontech/erigon/v3/polygon/bor/types"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
@@ -445,7 +445,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/v3/issues/1645
 	}
 
 	var txnIndex uint64

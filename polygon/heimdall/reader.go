@@ -10,8 +10,8 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/v3/polygon/bor/valset"
 )
 
 type Reader struct {

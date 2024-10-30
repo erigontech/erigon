@@ -23,14 +23,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/v3/rpc/rpccfg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)

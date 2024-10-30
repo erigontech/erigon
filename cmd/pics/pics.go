@@ -25,7 +25,7 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/cmd/pics/visual"
+	"github.com/erigontech/erigon/v3/cmd/pics/visual"
 )
 
 var pic = flag.String("pic", "", "specifies picture to regenerate")

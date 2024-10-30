@@ -29,9 +29,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
+	"github.com/erigontech/erigon/v3/turbo/trie"
 )
 
 type Dumper struct {

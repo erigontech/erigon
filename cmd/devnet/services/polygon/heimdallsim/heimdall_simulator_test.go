@@ -29,8 +29,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/devnet/services/polygon/heimdallsim"
-	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/cmd/devnet/services/polygon/heimdallsim"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
 )
 
 //go:embed testdata/v1-000000-000500-borevents.seg

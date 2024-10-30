@@ -32,11 +32,11 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/tracers"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/vm"
+	"github.com/erigontech/erigon/v3/core/vm/evmtypes"
+	"github.com/erigontech/erigon/v3/eth/tracers"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 type account struct{}

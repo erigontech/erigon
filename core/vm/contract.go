@@ -29,7 +29,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/v3/core/tracing"
 )
 
 // ContractRef is a reference to the contract's backing object

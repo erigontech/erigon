@@ -24,8 +24,8 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/consensus"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 var (

@@ -29,7 +29,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	types2 "github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 const RUNS = 100 // for local tests increase this number

@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
 )
 
 // CachedReader3 is a wrapper for an instance of type StateReader

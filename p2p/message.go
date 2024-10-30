@@ -28,10 +28,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/common/debug"
+	"github.com/erigontech/erigon/v3/event"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // Msg defines the structure of a p2p message.

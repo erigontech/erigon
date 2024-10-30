@@ -25,14 +25,14 @@ import (
 
 	"github.com/Giulio2002/bls"
 
-	"github.com/erigontech/erigon/cl/beacon/synced_data"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/network/subnets"
-	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/v3/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/v3/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/v3/cl/validator/sync_contribution_pool"
 )
 
 type seenSyncCommitteeMessage struct {

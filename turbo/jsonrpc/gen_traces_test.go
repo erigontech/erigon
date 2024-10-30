@@ -27,15 +27,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcdaemontest"
+	tracersConfig "github.com/erigontech/erigon/v3/eth/tracers/config"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/rpc/rpccfg"
 
 	// Force-load native and js packages, to trigger registration
-	_ "github.com/erigontech/erigon/eth/tracers/js"
-	_ "github.com/erigontech/erigon/eth/tracers/native"
+	_ "github.com/erigontech/erigon/v3/eth/tracers/js"
+	_ "github.com/erigontech/erigon/v3/eth/tracers/native"
 )
 
 /*

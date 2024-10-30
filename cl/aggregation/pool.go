@@ -18,7 +18,7 @@ package aggregation
 
 import (
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
 )
 
 //go:generate mockgen -typed=true -destination=./mock_services/aggregation_pool_mock.go -package=mock_services . AggregationPool

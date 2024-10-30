@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/transition/machine"
+	"github.com/erigontech/erigon/v3/cl/transition/machine"
 
 	"gfx.cafe/util/go/generic"
 	"github.com/stretchr/testify/require"

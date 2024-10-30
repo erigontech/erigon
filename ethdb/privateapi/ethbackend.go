@@ -31,12 +31,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/builder"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/turbo/builder"
+	"github.com/erigontech/erigon/v3/turbo/services"
+	"github.com/erigontech/erigon/v3/turbo/shards"
 )
 
 // EthBackendAPIVersion

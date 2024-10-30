@@ -23,10 +23,10 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
-	"github.com/erigontech/erigon/cl/persistence/base_encoding"
-	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
-	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/v3/cl/persistence/base_encoding"
+	state_accessors "github.com/erigontech/erigon/v3/cl/persistence/state"
+	shuffling2 "github.com/erigontech/erigon/v3/cl/phase1/core/state/shuffling"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"

@@ -23,8 +23,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 type BlockBuilderFunc func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error)

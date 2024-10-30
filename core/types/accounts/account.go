@@ -27,7 +27,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // Account is the Ethereum consensus representation of accounts.

@@ -25,9 +25,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/turbo/engineapi/engine_helpers"
 )
 
 type FinishCfg struct {

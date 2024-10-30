@@ -44,13 +44,13 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/v3/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/v3/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync"
 )
 
 var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()

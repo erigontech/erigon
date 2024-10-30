@@ -25,8 +25,8 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cmd/diag/flags"
-	"github.com/erigontech/erigon/cmd/diag/util"
+	"github.com/erigontech/erigon/v3/cmd/diag/flags"
+	"github.com/erigontech/erigon/v3/cmd/diag/util"
 )
 
 type DBInfo struct {

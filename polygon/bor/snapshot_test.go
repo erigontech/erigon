@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/v3/polygon/bor"
+	"github.com/erigontech/erigon/v3/polygon/bor/valset"
 )
 
 const (

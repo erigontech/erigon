@@ -19,7 +19,7 @@ package solid_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
 )
 

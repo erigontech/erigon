@@ -26,12 +26,12 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 // TestNotFoundMustReturnNil - next methods - when record not found in db - must return nil instead of error
-// see https://github.com/erigontech/erigon/issues/1645
+// see https://github.com/erigontech/erigon/v3/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)

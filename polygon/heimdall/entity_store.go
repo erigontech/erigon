@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/v3/polygon/polygoncommon"
 )
 
 var databaseTablesCfg = kv.TableCfg{

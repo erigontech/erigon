@@ -32,7 +32,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 )
 
 func SetupLogsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {

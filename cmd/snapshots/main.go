@@ -30,16 +30,16 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon/cmd/snapshots/cmp"
-	"github.com/erigontech/erigon/cmd/snapshots/copy"
-	"github.com/erigontech/erigon/cmd/snapshots/manifest"
-	"github.com/erigontech/erigon/cmd/snapshots/sync"
-	"github.com/erigontech/erigon/cmd/snapshots/torrents"
-	"github.com/erigontech/erigon/cmd/snapshots/verify"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/cmd/snapshots/cmp"
+	"github.com/erigontech/erigon/v3/cmd/snapshots/copy"
+	"github.com/erigontech/erigon/v3/cmd/snapshots/manifest"
+	"github.com/erigontech/erigon/v3/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/v3/cmd/snapshots/torrents"
+	"github.com/erigontech/erigon/v3/cmd/snapshots/verify"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 )
 
 func main() {

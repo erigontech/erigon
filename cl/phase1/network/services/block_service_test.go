@@ -24,13 +24,13 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon/cl/antiquary/tests"
-	"github.com/erigontech/erigon/cl/beacon/synced_data"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/v3/cl/antiquary/tests"
+	"github.com/erigontech/erigon/v3/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
 )
 
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {

@@ -23,10 +23,10 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/erigontech/erigon/common/mclock"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/common/mclock"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/enr"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // Packet is implemented by all message types.

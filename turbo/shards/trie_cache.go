@@ -27,7 +27,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
 )
 
 // An optional addition to the state cache, helping to calculate state root

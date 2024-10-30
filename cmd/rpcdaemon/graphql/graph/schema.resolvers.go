@@ -13,9 +13,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/graphql/graph/model"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.

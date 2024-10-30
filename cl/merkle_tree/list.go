@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 // MerkleizeVector uses our optimized routine to hash a list of 32-byte

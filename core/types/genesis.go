@@ -32,8 +32,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 
-	common2 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/params"
+	common2 "github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go

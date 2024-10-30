@@ -52,12 +52,12 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/simulations"
-	"github.com/erigontech/erigon/p2p/simulations/adapters"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/p2p"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/simulations"
+	"github.com/erigontech/erigon/v3/p2p/simulations/adapters"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 )
 
 var client *simulations.Client

@@ -2814,7 +2814,7 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 	// - "sig-bus" at disk-full - may happen anyway, because DB is mmap
 	// - MMAP - means less GC pressure, more zero-copy
 	// - MMAP files are pre-allocated - which is not cool, but: 1. we can live with it 2. maybe can just resize MMAP in future
-	// See also: https://github.com/erigontech/erigon/pull/10074
+	// See also: https://github.com/erigontech/erigon/v3/pull/10074
 	m = storage.NewMMapWithCompletion(snapDir, c)
 	//m = storage.NewFileOpts(storage.NewFileClientOpts{
 	//	ClientBaseDir:   snapDir,

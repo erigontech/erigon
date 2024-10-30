@@ -23,7 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/v3/common"
 )
 
 // calcMemSize64 calculates the required memory size, and returns

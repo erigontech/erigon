@@ -19,7 +19,7 @@ package cltypes_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
 	"github.com/stretchr/testify/require"
 )
 

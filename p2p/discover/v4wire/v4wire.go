@@ -32,8 +32,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/p2p/enr"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // RPC packet types

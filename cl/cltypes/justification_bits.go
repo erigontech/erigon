@@ -21,7 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 const JustificationBitsLength = 4

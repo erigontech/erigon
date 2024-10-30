@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/v3/turbo/node"
 )
 
 func SetupNodeInfoAccess(metricsMux *http.ServeMux, node *node.ErigonNode) {

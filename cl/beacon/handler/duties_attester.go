@@ -24,9 +24,9 @@ import (
 	"strconv"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
-	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconhttp"
+	state_accessors "github.com/erigontech/erigon/v3/cl/persistence/state"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 type attesterDutyResponse struct {

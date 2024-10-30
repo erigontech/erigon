@@ -31,9 +31,9 @@ import (
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/consensus/ethash"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // MiningAPIVersion

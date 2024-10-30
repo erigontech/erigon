@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
 )
 
 func TestCreateLoadingPrefixes(t *testing.T) {

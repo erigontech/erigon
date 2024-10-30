@@ -30,7 +30,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 // NotFound is returned by API methods if the requested item does not exist.

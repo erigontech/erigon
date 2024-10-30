@@ -26,8 +26,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/cmd/rpctest/rpctest"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 )
 
 func main() {

@@ -27,10 +27,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/clparams/initial_state"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/v3/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {

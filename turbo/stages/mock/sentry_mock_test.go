@@ -29,14 +29,14 @@ import (
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/wrap"
 
-	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/stages"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/v3/common/u256"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/eth/protocols/eth"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/turbo/stages"
+	"github.com/erigontech/erigon/v3/turbo/stages/mock"
 )
 
 func TestEmptyStageSync(t *testing.T) {

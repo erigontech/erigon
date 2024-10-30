@@ -44,12 +44,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	types2 "github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
-	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
-	state2 "github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/core"
+	reset2 "github.com/erigontech/erigon/v3/core/rawdb/rawdbreset"
+	state2 "github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 // if fpath is empty, tempDir is used, otherwise fpath is reused

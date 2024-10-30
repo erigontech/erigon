@@ -26,7 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -37,14 +37,14 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/adapter"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/bodydownload"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/turbo/adapter"
+	"github.com/erigontech/erigon/v3/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/v3/turbo/services"
+	"github.com/erigontech/erigon/v3/turbo/stages/bodydownload"
+	"github.com/erigontech/erigon/v3/turbo/stages/headerdownload"
 )
 
 const (

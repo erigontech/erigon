@@ -18,9 +18,9 @@ package misc
 
 import (
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/consensus"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) *types.FlatRequest {

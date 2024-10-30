@@ -34,13 +34,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/turbo/stages/mock"
 )
 
 func TestSetupGenesis(t *testing.T) {

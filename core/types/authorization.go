@@ -12,9 +12,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/common/u256"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 type Authorization struct {

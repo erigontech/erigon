@@ -24,8 +24,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
 	"io"
 	"math/big"
 	"os"
@@ -33,6 +31,9 @@ import (
 	"runtime/pprof"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 
@@ -48,16 +49,16 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/runtime"
-	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/cmd/evm/internal/compiler"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/cmd/utils/flags"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/core/vm"
+	"github.com/erigontech/erigon/v3/core/vm/runtime"
+	"github.com/erigontech/erigon/v3/eth/tracers/logger"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 var runCommand = cli.Command{

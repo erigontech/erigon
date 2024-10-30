@@ -27,7 +27,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/core/asm"
+	"github.com/erigontech/erigon/v3/core/asm"
 )
 
 var disasmCommand = cli.Command{

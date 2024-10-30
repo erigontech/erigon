@@ -36,8 +36,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 var (

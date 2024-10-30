@@ -16,7 +16,7 @@
 
 package state
 
-import "github.com/erigontech/erigon/cl/cltypes/solid"
+import "github.com/erigontech/erigon/v3/cl/cltypes/solid"
 
 // Below are setters.
 

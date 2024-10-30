@@ -16,7 +16,7 @@
 
 package engine_helpers
 
-import "github.com/erigontech/erigon/rpc"
+import "github.com/erigontech/erigon/v3/rpc"
 
 const MaxBuilders = 128
 

@@ -25,7 +25,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 
-	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/v3/rpc/rpccfg"
 
 	"github.com/stretchr/testify/assert"
 
@@ -34,10 +34,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/eth/filters"
-	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/v3/eth/filters"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/stages/mock"
 )
 
 func TestNewFilters(t *testing.T) {

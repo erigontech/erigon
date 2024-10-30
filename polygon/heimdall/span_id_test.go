@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
 )
 
 func TestSpanIDAt(t *testing.T) {

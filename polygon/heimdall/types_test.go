@@ -19,7 +19,7 @@ package heimdall_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
 )
 
 func TestEnumeration(t *testing.T) {

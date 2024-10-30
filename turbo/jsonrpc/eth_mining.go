@@ -26,7 +26,7 @@ import (
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"google.golang.org/grpc/status"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 // Coinbase implements eth_coinbase. Returns the current client coinbase address.

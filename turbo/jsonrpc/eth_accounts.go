@@ -28,12 +28,12 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.

@@ -31,16 +31,16 @@ import (
 
 	"github.com/valyala/fastjson"
 
-	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	ethereum "github.com/erigontech/erigon/v3"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnetutils"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/p2p"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/v3/turbo/jsonrpc"
 )
 
 type callResult struct {

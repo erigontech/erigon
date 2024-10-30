@@ -29,15 +29,15 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/rpc/rpccfg"
+	"github.com/erigontech/erigon/v3/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/v3/turbo/stages/mock"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcdaemontest"
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {

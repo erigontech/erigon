@@ -28,8 +28,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/core/types"
-	eth1utils "github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/v3/core/types"
+	eth1utils "github.com/erigontech/erigon/v3/turbo/execution/eth1/eth1_utils"
 )
 
 var ErrForkChoiceUpdateFailure = errors.New("fork choice update failure")

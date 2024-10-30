@@ -18,8 +18,8 @@ package p2p
 
 import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/v3/eth/protocols/eth"
+	"github.com/erigontech/erigon/v3/polygon/polygoncommon"
 )
 
 //go:generate mockgen -typed=true -source=./peer_event_registrar.go -destination=./peer_event_registrar_mock.go -package=p2p

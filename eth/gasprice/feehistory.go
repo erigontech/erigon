@@ -30,9 +30,9 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/consensus/misc"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/consensus/misc"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 var (

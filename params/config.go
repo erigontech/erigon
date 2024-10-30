@@ -29,9 +29,9 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
 
-	"github.com/erigontech/erigon/common/paths"
+	"github.com/erigontech/erigon/v3/common/paths"
 )
 
 //go:embed chainspecs

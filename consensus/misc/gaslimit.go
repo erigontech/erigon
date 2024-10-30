@@ -22,7 +22,7 @@ package misc
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 // VerifyGaslimit verifies the header gas limit according increase/decrease

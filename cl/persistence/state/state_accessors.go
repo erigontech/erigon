@@ -20,10 +20,10 @@ import (
 	"bytes"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/base_encoding"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 )

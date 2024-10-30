@@ -32,12 +32,12 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/v3/cl/persistence/blob_storage"
+	state_accessors "github.com/erigontech/erigon/v3/cl/persistence/state"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
 )
 
 const safetyMargin = 20_000 // We retire snapshots 10k blocks after the finalized head

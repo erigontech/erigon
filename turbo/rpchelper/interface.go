@@ -25,8 +25,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/p2p"
 )
 
 // ApiBackend - interface which must be used by API layer

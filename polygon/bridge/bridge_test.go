@@ -13,10 +13,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/turbo/testlog"
 )
 
 var defaultBorConfig = borcfg.BorConfig{

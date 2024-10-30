@@ -30,8 +30,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 
-	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon/rpc"
+	ethereum "github.com/erigontech/erigon/v3"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 // FilterCriteria represents a request to create a new filter.

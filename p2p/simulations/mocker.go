@@ -28,8 +28,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/simulations/adapters"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/simulations/adapters"
 )
 
 // a map of mocker names to its function

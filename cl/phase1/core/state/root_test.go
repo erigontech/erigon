@@ -19,8 +19,8 @@ package state_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 // Curr: 4358340

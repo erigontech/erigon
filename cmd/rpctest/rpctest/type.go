@@ -24,7 +24,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/v3/core/state"
 )
 
 const Geth = "geth"

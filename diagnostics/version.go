@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 const Version = 3

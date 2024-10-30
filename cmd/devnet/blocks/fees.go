@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 func BaseFeeFromBlock(ctx context.Context) (uint64, error) {

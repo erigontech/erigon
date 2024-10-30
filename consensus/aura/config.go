@@ -26,8 +26,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/v3/common/u256"
+	"github.com/erigontech/erigon/v3/consensus"
 )
 
 // Draws an validator nonce modulo number of validators.

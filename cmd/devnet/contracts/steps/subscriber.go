@@ -23,21 +23,21 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/log/v3"
+	ethereum "github.com/erigontech/erigon/v3"
 
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/cmd/devnet/accounts"
-	"github.com/erigontech/erigon/cmd/devnet/contracts"
-	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/cmd/devnet/scenarios"
-	"github.com/erigontech/erigon/cmd/devnet/transactions"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/accounts/abi/bind"
+	"github.com/erigontech/erigon/v3/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/v3/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnetutils"
+	"github.com/erigontech/erigon/v3/cmd/devnet/requests"
+	"github.com/erigontech/erigon/v3/cmd/devnet/scenarios"
+	"github.com/erigontech/erigon/v3/cmd/devnet/transactions"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 func init() {

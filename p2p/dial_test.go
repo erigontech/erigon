@@ -31,10 +31,10 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common/mclock"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/netutil"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon/v3/common/mclock"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/netutil"
+	"github.com/erigontech/erigon/v3/turbo/testlog"
 )
 
 // This test checks that dynamic dials are launched from discovery results.

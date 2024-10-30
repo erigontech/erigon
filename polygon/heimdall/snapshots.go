@@ -28,12 +28,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
+	bortypes "github.com/erigontech/erigon/v3/polygon/bor/types"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync"
 )
 
 // Bor Events

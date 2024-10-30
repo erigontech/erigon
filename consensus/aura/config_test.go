@@ -24,7 +24,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 func TestGnosisBlockRewardContractTransitions(t *testing.T) {

@@ -21,12 +21,12 @@ import (
 	"os"
 	"testing"
 
-	"github.com/erigontech/erigon/spectest"
+	"github.com/erigontech/erigon/v3/spectest"
 
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/transition/impl/eth2/statechange"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

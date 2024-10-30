@@ -30,9 +30,9 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/v3/accounts/abi"
+	"github.com/erigontech/erigon/v3/core/vm"
+	"github.com/erigontech/erigon/v3/eth/tracers"
 )
 
 //go:generate gencodec -type callFrame -field-override callFrameMarshaling -out gen_callframe_json.go

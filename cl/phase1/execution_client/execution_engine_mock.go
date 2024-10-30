@@ -15,9 +15,9 @@ import (
 	reflect "reflect"
 
 	common "github.com/erigontech/erigon-lib/common"
-	cltypes "github.com/erigontech/erigon/cl/cltypes"
-	types "github.com/erigontech/erigon/core/types"
-	engine_types "github.com/erigontech/erigon/turbo/engineapi/engine_types"
+	cltypes "github.com/erigontech/erigon/v3/cl/cltypes"
+	types "github.com/erigontech/erigon/v3/core/types"
+	engine_types "github.com/erigontech/erigon/v3/turbo/engineapi/engine_types"
 	gomock "go.uber.org/mock/gomock"
 )
 

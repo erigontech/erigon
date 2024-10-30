@@ -28,17 +28,17 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/base_encoding"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	diffstorage "github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph/diff_storage"
-	"github.com/erigontech/erigon/cl/transition"
-	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/v3/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes/lightclient_utils"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	diffstorage "github.com/erigontech/erigon/v3/cl/phase1/forkchoice/fork_graph/diff_storage"
+	"github.com/erigontech/erigon/v3/cl/transition"
+	"github.com/erigontech/erigon/v3/cl/transition/impl/eth2"
 )
 
 const dumpSlotFrequency = 4

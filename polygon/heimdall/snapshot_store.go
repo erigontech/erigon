@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync"
 	"golang.org/x/sync/errgroup"
 )
 

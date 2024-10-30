@@ -31,7 +31,7 @@ import (
 	"github.com/huin/goupnp/dcps/internetgateway1"
 	"github.com/huin/goupnp/dcps/internetgateway2"
 
-	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/v3/common/debug"
 )
 
 const (

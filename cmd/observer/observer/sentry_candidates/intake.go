@@ -24,11 +24,11 @@ import (
 	"github.com/nxadm/tail"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/observer/database"
-	"github.com/erigontech/erigon/cmd/observer/observer/node_utils"
-	"github.com/erigontech/erigon/cmd/observer/utils"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/cmd/observer/database"
+	"github.com/erigontech/erigon/v3/cmd/observer/observer/node_utils"
+	"github.com/erigontech/erigon/v3/cmd/observer/utils"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 type Intake struct {

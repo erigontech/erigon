@@ -21,7 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/v3/polygon/polygoncommon"
 
 	"github.com/erigontech/erigon-lib/kv"
 )

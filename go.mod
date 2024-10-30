@@ -1,4 +1,4 @@
-module github.com/erigontech/erigon
+module github.com/erigontech/erigon/v3
 
 go 1.22.0
 

@@ -17,7 +17,7 @@
 package commands
 
 import (
-	"github.com/erigontech/erigon/cmd/state/verify"
+	"github.com/erigontech/erigon/v3/cmd/state/verify"
 	"github.com/spf13/cobra"
 )
 

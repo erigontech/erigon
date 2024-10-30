@@ -25,13 +25,13 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/turbo/debug"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/node"
 )
 
 var initCommand = cli.Command{

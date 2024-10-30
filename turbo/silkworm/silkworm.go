@@ -21,7 +21,7 @@ import (
 	"math/big"
 	"unsafe"
 
-	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/v3/consensus"
 	silkworm_go "github.com/erigontech/silkworm-go"
 
 	"github.com/erigontech/erigon-lib/kv"

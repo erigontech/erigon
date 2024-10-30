@@ -18,8 +18,8 @@ package cltypes
 
 import (
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/v3/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/v3/cl/ssz"
 )
 
 // SyncAggregatorSelectionData data, contains if we were on bellatrix/alteir/phase0 and transition epoch.

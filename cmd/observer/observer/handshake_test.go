@@ -25,8 +25,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 func TestHandshake(t *testing.T) {

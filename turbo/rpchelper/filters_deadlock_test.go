@@ -26,9 +26,9 @@ import (
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/filters"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/eth/filters"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 )
 
 func TestFiltersDeadlock_Test(t *testing.T) {

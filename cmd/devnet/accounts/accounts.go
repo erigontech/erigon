@@ -21,7 +21,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/v3/core"
 )
 
 const DevAddress = "0x67b1d87101671b127f5f8714789C7192f7ad340e"

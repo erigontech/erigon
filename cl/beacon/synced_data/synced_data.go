@@ -21,9 +21,9 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 var _ SyncedData = (*SyncedDataManager)(nil)

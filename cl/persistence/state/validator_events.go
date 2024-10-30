@@ -22,7 +22,7 @@ import (
 	"sync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
 )
 
 // THIS IS EXPERMIENTAL, IT MAY CHANGE

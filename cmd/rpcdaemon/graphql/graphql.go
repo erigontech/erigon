@@ -23,9 +23,9 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/playground"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/graphql/graph"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/jsonrpc"
 )
 
 const (

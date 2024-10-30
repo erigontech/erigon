@@ -17,11 +17,11 @@
 package statechange
 
 import (
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 // ProcessHistoricalRootsUpdate updates the historical root data structure by computing a new historical root batch when it is time to do so.

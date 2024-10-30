@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/v3/core/vm"
+	"github.com/erigontech/erigon/v3/eth/tracers"
 )
 
 //go:generate gencodec -type account -field-override accountMarshaling -out gen_account_json.go

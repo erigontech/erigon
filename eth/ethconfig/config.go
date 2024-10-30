@@ -36,14 +36,14 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
-	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/ethdb/prune"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/v3/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/v3/ethdb/prune"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.

@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	libstate "github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
 )
 
 type StateReconWriterInc struct {

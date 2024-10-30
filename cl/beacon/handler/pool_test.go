@@ -26,12 +26,12 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	sync_mock_services "github.com/erigontech/erigon/v3/cl/beacon/synced_data/mock_services"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state/raw"
 )
 
 func TestPoolAttesterSlashings(t *testing.T) {

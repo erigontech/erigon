@@ -29,11 +29,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/ethdb/prune"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/ethdb/prune"
+	"github.com/erigontech/erigon/v3/polygon/bor/borcfg"
+	bortypes "github.com/erigontech/erigon/v3/polygon/bor/types"
+	"github.com/erigontech/erigon/v3/turbo/services"
 )
 
 type TxLookupCfg struct {

@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	heimdall "github.com/erigontech/erigon/polygon/heimdall"
+	heimdall "github.com/erigontech/erigon/v3/polygon/heimdall"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -25,9 +25,9 @@ import (
 	"io"
 	"time"
 
-	"github.com/erigontech/erigon/cl/sentinel/communication"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/v3/cl/sentinel/communication"
+	"github.com/erigontech/erigon/v3/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
@@ -38,10 +38,10 @@ import (
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 const maxMessageLength = 18 * datasize.MB

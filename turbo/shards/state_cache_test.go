@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
 )
 
 func TestCacheBtreeOrderAccountStorage2(t *testing.T) {

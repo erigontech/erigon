@@ -21,10 +21,10 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/fork"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/fork"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.BeaconBlock) error {

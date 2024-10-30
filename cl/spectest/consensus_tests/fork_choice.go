@@ -23,24 +23,24 @@ import (
 	"math"
 	"testing"
 
-	"github.com/erigontech/erigon/spectest"
+	"github.com/erigontech/erigon/v3/spectest"
 
 	"github.com/spf13/afero"
 
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/erigontech/erigon/cl/beacon/synced_data"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/clparams/initial_state"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
-	"github.com/erigontech/erigon/cl/phase1/network/services"
-	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/v3/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/monitor"
+	"github.com/erigontech/erigon/v3/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/v3/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/v3/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/v3/cl/phase1/network/services"
+	"github.com/erigontech/erigon/v3/cl/pool"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +48,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
 )
 
 func (f *ForkChoiceStep) StepType() string {

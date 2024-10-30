@@ -23,10 +23,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/core/types"
+	ethereum "github.com/erigontech/erigon/v3"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 func Compare(expected types.Log, actual types.Log) ([]error, bool) {

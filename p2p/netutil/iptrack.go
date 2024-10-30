@@ -22,7 +22,7 @@ package netutil
 import (
 	"time"
 
-	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/v3/common/mclock"
 )
 
 // IPTracker predicts the external endpoint, i.e. IP address and port, of the local host

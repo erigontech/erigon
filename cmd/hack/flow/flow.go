@@ -32,9 +32,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 
-	"github.com/erigontech/erigon/cmd/hack/tool"
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/v3/cmd/hack/tool"
+	"github.com/erigontech/erigon/v3/common/debug"
+	"github.com/erigontech/erigon/v3/core/vm"
 )
 
 const (

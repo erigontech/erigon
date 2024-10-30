@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 )
 
 // NetAPI the interface for the net_ RPC commands

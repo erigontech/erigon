@@ -1,8 +1,8 @@
 package monitor
 
 import (
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 //go:generate mockgen -typed=true -destination=mock_services/validator_monitor_mock.go -package=mock_services . ValidatorMonitor

@@ -6,7 +6,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
+	"github.com/erigontech/erigon/v3/eth/ethconfig/estimate"
 )
 
 func Sqeeze(ctx context.Context, dirs datadir.Dirs, from, to string, logger log.Logger) error {

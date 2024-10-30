@@ -17,7 +17,7 @@
 package sentinel
 
 import (
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/utils"
 	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 )
 

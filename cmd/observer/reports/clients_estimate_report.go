@@ -22,7 +22,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/erigontech/erigon/cmd/observer/database"
+	"github.com/erigontech/erigon/v3/cmd/observer/database"
 )
 
 type ClientsEstimateReportEntry struct {

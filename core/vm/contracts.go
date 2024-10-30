@@ -39,8 +39,8 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/bn256"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/crypto/secp256r1"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/params"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"

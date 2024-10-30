@@ -26,7 +26,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
+	"github.com/erigontech/erigon/v3/cmd/evm/internal/compiler"
 )
 
 var compileCommand = cli.Command{

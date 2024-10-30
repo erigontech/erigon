@@ -17,7 +17,7 @@
 package main
 
 import (
-	"github.com/erigontech/erigon/cmd/state/commands"
+	"github.com/erigontech/erigon/v3/cmd/state/commands"
 )
 
 func main() {

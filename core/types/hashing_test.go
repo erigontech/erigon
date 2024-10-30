@@ -25,8 +25,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/turbo/trie"
 )
 
 func genTransactions(n uint64) Transactions {

@@ -26,11 +26,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
 
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 var latestTag = libcommon.BytesToHash([]byte("latest"))

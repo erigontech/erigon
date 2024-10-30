@@ -23,7 +23,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/enode"
 )
 
 var (

@@ -32,7 +32,7 @@ import (
 
 	"github.com/erigontech/erigonwatch"
 
-	"github.com/erigontech/erigon/cmd/diag/flags"
+	"github.com/erigontech/erigon/v3/cmd/diag/flags"
 )
 
 var (

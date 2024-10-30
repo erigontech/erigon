@@ -35,8 +35,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 type allocItem struct{ Addr, Balance *big.Int }

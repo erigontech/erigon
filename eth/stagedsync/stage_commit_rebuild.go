@@ -19,16 +19,17 @@ package stagedsync
 import (
 	"context"
 	"errors"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/turbo/stages/headerdownload"
 
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/v3/turbo/services"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/v3/turbo/trie"
 )
 
 type TrieCfg struct {

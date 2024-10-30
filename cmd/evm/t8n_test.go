@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon/internal/reexec"
-	"github.com/erigontech/erigon/turbo/cmdtest"
+	"github.com/erigontech/erigon/v3/internal/reexec"
+	"github.com/erigontech/erigon/v3/turbo/cmdtest"
 )
 
 func TestMain(m *testing.M) {

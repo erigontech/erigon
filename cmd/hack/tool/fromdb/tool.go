@@ -21,8 +21,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/cmd/hack/tool"
-	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/v3/cmd/hack/tool"
+	"github.com/erigontech/erigon/v3/ethdb/prune"
 )
 
 func ChainConfig(db kv.RoDB) (cc *chain.Config) {

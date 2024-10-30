@@ -25,25 +25,25 @@ import (
 
 	"github.com/spf13/afero"
 
-	"github.com/erigontech/erigon/cl/antiquary/tests"
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	"github.com/erigontech/erigon/cl/beacon/synced_data"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
-	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/v3/cl/antiquary/tests"
+	"github.com/erigontech/erigon/v3/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/v3/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/monitor"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/v3/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/v3/cl/pool"
+	"github.com/erigontech/erigon/v3/cl/transition"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 //go:embed test_data/anchor_state.ssz_snappy

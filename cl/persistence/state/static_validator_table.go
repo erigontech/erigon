@@ -22,8 +22,8 @@ import (
 	"sync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/ethdb/cbor"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/ethdb/cbor"
 )
 
 // class Validator(Container):

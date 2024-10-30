@@ -23,9 +23,9 @@ import (
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/v3/cl/ssz"
 )
 
 const (

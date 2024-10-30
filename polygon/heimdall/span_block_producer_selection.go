@@ -17,7 +17,7 @@
 package heimdall
 
 import (
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/v3/polygon/bor/valset"
 )
 
 // SpanBlockProducerSelection represents the block producer selection at each epoch

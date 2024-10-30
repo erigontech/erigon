@@ -25,13 +25,13 @@ import (
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/fork"
-	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/fork"
+	"github.com/erigontech/erigon/v3/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/utils/threading"
 )
 
 const PreAllocatedRewardsAndPenalties = 8192

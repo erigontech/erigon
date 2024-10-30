@@ -28,8 +28,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
-	node2 "github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/node/nodecfg"
+	node2 "github.com/erigontech/erigon/v3/node"
+	"github.com/erigontech/erigon/v3/node/nodecfg"
 )
 
 // Tests that datadirs can be successfully created, be them manually configured

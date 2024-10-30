@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 //go:generate mockgen -typed=true -destination=./store_mock.go -package=sync . Store

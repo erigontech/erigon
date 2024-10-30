@@ -23,10 +23,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/consensus"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/builder"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/v3/consensus"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/turbo/builder"
+	"github.com/erigontech/erigon/v3/turbo/services"
 )
 
 type MiningFinishCfg struct {

@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/polygon/bor/finality/whitelist"
 )
 
 var (

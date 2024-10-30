@@ -21,8 +21,8 @@ import (
 	"testing"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/core/vm/evmtypes"
+	"github.com/erigontech/erigon/v3/params"
 	"github.com/holiman/uint256"
 	"pgregory.net/rapid"
 )

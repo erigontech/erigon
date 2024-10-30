@@ -23,8 +23,8 @@ import (
 	"encoding/json"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/v3/eth/tracers/logger"
+	"github.com/erigontech/erigon/v3/turbo/adapter/ethapi"
 )
 
 // TraceConfig holds extra parameters to trace functions.

@@ -19,7 +19,7 @@ package cli
 import (
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/v3/cmd/utils"
 )
 
 // DefaultFlags contains all flags that are used and supported by Erigon binary.

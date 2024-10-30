@@ -29,10 +29,10 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cmd/observer/utils"
-	"github.com/erigontech/erigon/core/forkid"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/v3/cmd/observer/utils"
+	"github.com/erigontech/erigon/v3/core/forkid"
+	"github.com/erigontech/erigon/v3/eth/protocols/eth"
+	"github.com/erigontech/erigon/v3/p2p/enode"
 )
 
 type DiscV4Transport interface {

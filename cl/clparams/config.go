@@ -33,8 +33,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 var LatestStateFileName = "latest.ssz_snappy"

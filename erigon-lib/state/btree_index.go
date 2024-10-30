@@ -932,7 +932,7 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int
 
 	resBuf, _ = g.Next(resBuf)
 
-	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/issues/7855
+	//TODO: use `b.getter.Match` after https://github.com/erigontech/erigon/v3/issues/7855
 	return bytes.Compare(resBuf, k), resBuf, nil
 	//return b.getter.Match(k), result, nil
 }

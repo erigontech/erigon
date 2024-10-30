@@ -26,8 +26,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/polygon/bor/borabi"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/polygon/bor/borabi"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 // EventRecord represents state record

@@ -24,17 +24,17 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/cmd/devnet/accounts"
-	"github.com/erigontech/erigon/cmd/devnet/blocks"
-	"github.com/erigontech/erigon/cmd/devnet/contracts"
-	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/cmd/devnet/scenarios"
-	"github.com/erigontech/erigon/cmd/devnet/services"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/v3/accounts/abi"
+	"github.com/erigontech/erigon/v3/accounts/abi/bind"
+	"github.com/erigontech/erigon/v3/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/v3/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/v3/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/v3/cmd/devnet/requests"
+	"github.com/erigontech/erigon/v3/cmd/devnet/scenarios"
+	"github.com/erigontech/erigon/v3/cmd/devnet/services"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/adapter/ethapi"
 )
 
 func init() {

@@ -17,10 +17,10 @@
 package handlers
 
 import (
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/v3/cl/utils"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 

@@ -19,8 +19,8 @@ package raw
 import (
 	_ "embed"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 //go:embed testdata/state.ssz_snappy

@@ -20,7 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/v3/core/vm"
 )
 
 type CallTracer struct {

@@ -27,15 +27,15 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon/turbo/logging"
-	enode "github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/v3/turbo/logging"
+	enode "github.com/erigontech/erigon/v3/turbo/node"
 
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
-	cli2 "github.com/erigontech/erigon/turbo/cli"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/node"
+	"github.com/erigontech/erigon/v3/node/nodecfg"
+	"github.com/erigontech/erigon/v3/params"
+	cli2 "github.com/erigontech/erigon/v3/turbo/cli"
+	"github.com/erigontech/erigon/v3/turbo/debug"
 )
 
 // MakeApp creates a cli application (based on `github.com/urlfave/cli` package).

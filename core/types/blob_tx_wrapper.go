@@ -32,7 +32,7 @@ import (
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 const (

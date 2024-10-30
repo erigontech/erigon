@@ -20,8 +20,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
 	"github.com/stretchr/testify/require"
 )
 

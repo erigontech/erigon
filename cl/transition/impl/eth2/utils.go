@@ -21,8 +21,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 func computeSigningRootEpoch(epoch uint64, domain []byte) (libcommon.Hash, error) {

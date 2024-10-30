@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	types2 "github.com/erigontech/erigon-lib/types"
 
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/tracing"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 // BlockContext provides the EVM with auxiliary information. Once provided

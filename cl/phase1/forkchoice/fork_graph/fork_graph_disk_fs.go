@@ -28,7 +28,7 @@ import (
 	"github.com/spf13/afero"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 func getBeaconStateFilename(blockRoot libcommon.Hash) string {

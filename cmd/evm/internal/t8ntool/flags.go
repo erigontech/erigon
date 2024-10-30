@@ -25,8 +25,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/tests"
+	"github.com/erigontech/erigon/v3/core/vm"
+	"github.com/erigontech/erigon/v3/tests"
 )
 
 var (

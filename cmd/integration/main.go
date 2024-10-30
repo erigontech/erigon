@@ -20,11 +20,11 @@ import (
 	"fmt"
 	"os"
 
-	_ "github.com/erigontech/erigon/core/snaptype"    //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
+	_ "github.com/erigontech/erigon/v3/core/snaptype"    //hack
+	_ "github.com/erigontech/erigon/v3/polygon/heimdall" //hack
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cmd/integration/commands"
+	"github.com/erigontech/erigon/v3/cmd/integration/commands"
 )
 
 func main() {

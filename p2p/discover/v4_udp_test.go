@@ -38,11 +38,11 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon/v3/turbo/testlog"
 
-	"github.com/erigontech/erigon/p2p/discover/v4wire"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/v3/p2p/discover/v4wire"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/enr"
 )
 
 // shared test variables
@@ -553,7 +553,7 @@ func TestUDPv4_EIP868(t *testing.T) {
 
 // This test verifies that a small network of nodes can boot up into a healthy state.
 func TestUDPv4_smallNetConvergence(t *testing.T) {
-	t.Skip("FIXME: https://github.com/erigontech/erigon/issues/8731")
+	t.Skip("FIXME: https://github.com/erigontech/erigon/v3/issues/8731")
 
 	t.Parallel()
 	logger := log.New()

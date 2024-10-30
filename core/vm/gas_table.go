@@ -28,8 +28,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/core/vm/stack"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 // memoryGasCost calculates the quadratic gas for memory expansion. It does so

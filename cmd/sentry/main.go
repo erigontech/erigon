@@ -24,12 +24,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common/paths"
-	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
-	node2 "github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/common/paths"
+	"github.com/erigontech/erigon/v3/p2p/sentry"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	"github.com/erigontech/erigon/v3/turbo/logging"
+	node2 "github.com/erigontech/erigon/v3/turbo/node"
 )
 
 // generate the messages

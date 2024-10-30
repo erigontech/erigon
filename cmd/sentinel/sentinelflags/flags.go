@@ -17,7 +17,7 @@
 package sentinelflags
 
 import (
-	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/v3/cmd/utils"
 	"github.com/urfave/cli/v2"
 )
 

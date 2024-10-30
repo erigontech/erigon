@@ -26,11 +26,11 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon/cmd/devnet/devnet"
-	"github.com/erigontech/erigon/cmd/devnet/networks"
-	"github.com/erigontech/erigon/cmd/devnet/services"
-	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/v3/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/v3/cmd/devnet/networks"
+	"github.com/erigontech/erigon/v3/cmd/devnet/services"
+	"github.com/erigontech/erigon/v3/cmd/devnet/services/polygon"
+	"github.com/erigontech/erigon/v3/turbo/debug"
 )
 
 func initDevnet(chainName string, dataDir string, producerCount int, gasLimit uint64, logger log.Logger, consoleLogLevel log.Lvl, dirLogLevel log.Lvl) (devnet.Devnet, error) {

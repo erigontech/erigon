@@ -3,7 +3,7 @@ package checkpoint_sync
 import (
 	"context"
 
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 type CheckpointSyncer interface {

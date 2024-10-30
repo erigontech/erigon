@@ -26,7 +26,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 func TestUnmarshalJSONNewFilterArgs(t *testing.T) {

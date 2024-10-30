@@ -21,7 +21,7 @@ import (
 	"net/http"
 
 	diaglib "github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/v3/turbo/node"
 	"github.com/urfave/cli/v2"
 )
 

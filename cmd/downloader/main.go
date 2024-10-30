@@ -30,8 +30,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
-	_ "github.com/erigontech/erigon/core/snaptype"    //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
+	_ "github.com/erigontech/erigon/v3/core/snaptype"    //hack
+	_ "github.com/erigontech/erigon/v3/polygon/heimdall" //hack
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
@@ -58,14 +58,14 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
-	"github.com/erigontech/erigon/cmd/hack/tool"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common/paths"
-	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/v3/cmd/hack/tool"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/common/paths"
+	"github.com/erigontech/erigon/v3/p2p/nat"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 )
 
 func main() {

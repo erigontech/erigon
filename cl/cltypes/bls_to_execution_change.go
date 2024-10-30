@@ -22,8 +22,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/types/ssz"
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/v3/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/v3/cl/ssz"
 )
 
 // Change to EL engine

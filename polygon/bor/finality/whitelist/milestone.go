@@ -20,9 +20,9 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/bor/finality/flags"
-	"github.com/erigontech/erigon/polygon/bor/finality/rawdb"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/polygon/bor/finality/flags"
+	"github.com/erigontech/erigon/v3/polygon/bor/finality/rawdb"
 )
 
 type milestone struct {

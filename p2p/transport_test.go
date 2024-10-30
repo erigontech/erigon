@@ -29,8 +29,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/p2p/simulations/pipes"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/p2p/simulations/pipes"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 func TestProtocolHandshake(t *testing.T) {

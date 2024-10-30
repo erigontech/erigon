@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/sync"
+	"github.com/erigontech/erigon/v3/polygon/sync"
 )
 
 func TestEventChannelOptions(t *testing.T) {

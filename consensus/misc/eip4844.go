@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844

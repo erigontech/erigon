@@ -36,10 +36,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/downloader"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon/cmd/snapshots/manifest"
-	"github.com/erigontech/erigon/cmd/snapshots/sync"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/cmd/snapshots/manifest"
+	"github.com/erigontech/erigon/v3/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 )
 
 var Command = cli.Command{

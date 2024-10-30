@@ -21,8 +21,8 @@ import (
 	"net/http"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/v3/cl/persistence/beacon_indicies"
 )
 
 func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

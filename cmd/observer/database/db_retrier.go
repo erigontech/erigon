@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/observer/utils"
+	"github.com/erigontech/erigon/v3/cmd/observer/utils"
 )
 
 type DBRetrier struct {

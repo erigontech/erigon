@@ -23,9 +23,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/cmd/devnet/contracts"
-	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/accounts/abi/bind"
+	"github.com/erigontech/erigon/v3/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
 )
 
 // Maximum allowed event record data size

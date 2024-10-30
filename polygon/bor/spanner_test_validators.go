@@ -19,7 +19,7 @@ package bor
 import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/v3/polygon/bor/valset"
 )
 
 // NetworkNameVals is a map of network name to validator set for tests/devnets

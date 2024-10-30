@@ -20,8 +20,8 @@
 package eth
 
 import (
-	"github.com/erigontech/erigon/p2p/dnsdisc"
-	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/dnsdisc"
+	"github.com/erigontech/erigon/v3/p2p/enode"
 )
 
 // setupDiscovery creates the node discovery source for the `eth` and `snap`

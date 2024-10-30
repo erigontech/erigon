@@ -22,8 +22,8 @@ package vm
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/core/vm/stack"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 type (

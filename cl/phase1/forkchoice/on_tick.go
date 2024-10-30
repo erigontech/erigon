@@ -18,7 +18,7 @@ package forkchoice
 
 import (
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
 )
 
 // OnTick executes on_tick operation for forkchoice.

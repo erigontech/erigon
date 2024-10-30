@@ -26,18 +26,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/v3/cmd/utils"
 
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	devnet_args "github.com/erigontech/erigon/cmd/devnet/args"
-	"github.com/erigontech/erigon/cmd/devnet/requests"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/params"
-	erigonapp "github.com/erigontech/erigon/turbo/app"
-	erigoncli "github.com/erigontech/erigon/turbo/cli"
+	devnet_args "github.com/erigontech/erigon/v3/cmd/devnet/args"
+	"github.com/erigontech/erigon/v3/cmd/devnet/requests"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/params"
+	erigonapp "github.com/erigontech/erigon/v3/turbo/app"
+	erigoncli "github.com/erigontech/erigon/v3/turbo/cli"
 )
 
 type Network struct {

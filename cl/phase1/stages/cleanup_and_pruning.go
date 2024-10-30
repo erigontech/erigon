@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/v3/cl/persistence/beacon_indicies"
 )
 
 // cleanupAndPruning cleans up the database and prunes old data.

@@ -26,13 +26,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
-	erigoncli "github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/eth"
+	"github.com/erigontech/erigon/v3/eth/ethconfig"
+	"github.com/erigontech/erigon/v3/node"
+	"github.com/erigontech/erigon/v3/node/nodecfg"
+	"github.com/erigontech/erigon/v3/params"
+	erigoncli "github.com/erigontech/erigon/v3/turbo/cli"
 )
 
 // ErigonNode represents a single node, that runs sync and p2p network.

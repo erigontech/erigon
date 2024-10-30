@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/forkid"
-	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/forkid"
+	"github.com/erigontech/erigon/v3/core/rawdb"
+	"github.com/erigontech/erigon/v3/core/types"
 )
 
 var ErrNoHead = errors.New("ReadChainHead: ReadCurrentHeader error")

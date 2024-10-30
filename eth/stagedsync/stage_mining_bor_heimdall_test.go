@@ -24,9 +24,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/eth/stagedsync/stagedsynctest"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stagedsynctest"
+	"github.com/erigontech/erigon/v3/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
 )
 
 func TestMiningBorHeimdallForwardPersistsSpans(t *testing.T) {

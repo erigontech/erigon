@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/temporal/historyv2"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/v3/common"
 )
 
 func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, indexBucket string) error {

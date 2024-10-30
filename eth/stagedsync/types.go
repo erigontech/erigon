@@ -16,7 +16,7 @@
 
 package stagedsync
 
-import "github.com/erigontech/erigon/turbo/stages/bodydownload"
+import "github.com/erigontech/erigon/v3/turbo/stages/bodydownload"
 
 type DownloaderGlue interface {
 	SpawnHeaderDownloadStage([]func() error, *StageState, Unwinder) error

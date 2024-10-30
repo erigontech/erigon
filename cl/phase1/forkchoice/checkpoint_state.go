@@ -21,18 +21,18 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor"
-	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
-	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/monitor"
+	"github.com/erigontech/erigon/v3/cl/monitor/shuffling_metrics"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/fork"
 )
 
 const randaoMixesLength = 65536

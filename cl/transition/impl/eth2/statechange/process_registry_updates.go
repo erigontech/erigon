@@ -21,12 +21,12 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/utils/threading"
 
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 
-	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/clparams"
 )
 
 // computeActivationExitEpoch is Implementation of compute_activation_exit_epoch. Defined in https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#compute_activation_exit_epoch.

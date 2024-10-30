@@ -23,17 +23,17 @@ import (
 	"math"
 	"runtime"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
-	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
-	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/merkle_tree"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state/raw"
+	shuffling2 "github.com/erigontech/erigon/v3/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/v3/cl/utils/threading"
 
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 const (

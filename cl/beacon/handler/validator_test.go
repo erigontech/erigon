@@ -24,11 +24,11 @@ import (
 	"testing"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	mockaggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/common"
+	mockaggregation "github.com/erigontech/erigon/v3/cl/aggregation/mock_services"
+	"github.com/erigontech/erigon/v3/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/pool"
+	"github.com/erigontech/erigon/v3/common"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )

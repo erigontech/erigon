@@ -26,8 +26,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/sysutils"
-	"github.com/erigontech/erigon/cmd/diag/flags"
-	"github.com/erigontech/erigon/cmd/diag/util"
+	"github.com/erigontech/erigon/v3/cmd/diag/flags"
+	"github.com/erigontech/erigon/v3/cmd/diag/util"
 )
 
 var (

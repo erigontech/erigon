@@ -17,7 +17,7 @@
 package handler
 
 import (
-	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconhttp"
 )
 
 func newBeaconResponse(data any) *beaconhttp.BeaconResponse {

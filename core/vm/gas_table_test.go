@@ -39,12 +39,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/v3/core/vm"
 
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/vm/evmtypes"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {

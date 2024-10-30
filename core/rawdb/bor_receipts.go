@@ -22,8 +22,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/core/types"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/v3/core/types"
+	bortypes "github.com/erigontech/erigon/v3/polygon/bor/types"
 )
 
 // HasBorReceipts verifies the existence of all block receipt belonging to a block.

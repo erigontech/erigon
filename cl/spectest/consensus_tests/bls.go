@@ -20,7 +20,7 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/erigontech/erigon/spectest"
+	"github.com/erigontech/erigon/v3/spectest"
 )
 
 type BlsAggregateVerify struct {

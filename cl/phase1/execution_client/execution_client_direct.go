@@ -25,10 +25,10 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon/v3/turbo/execution/eth1/eth1_chain_reader.go"
 )
 
 type ExecutionClientDirect struct {

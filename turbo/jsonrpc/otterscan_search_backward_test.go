@@ -24,7 +24,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/stretchr/testify/require"
 )
 

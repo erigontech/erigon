@@ -23,7 +23,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/polygon/heimdall/heimdalltest"
+	"github.com/erigontech/erigon/v3/polygon/heimdall/heimdalltest"
 )
 
 func TestMilestoneJsonMarshall(t *testing.T) {

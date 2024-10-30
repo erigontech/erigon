@@ -36,8 +36,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/ecies"
-	"github.com/erigontech/erigon/p2p/simulations/pipes"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/p2p/simulations/pipes"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 type message struct {

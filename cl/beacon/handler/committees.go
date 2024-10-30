@@ -22,10 +22,10 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/v3/cl/persistence/beacon_indicies"
+	state_accessors "github.com/erigontech/erigon/v3/cl/persistence/state"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
 )
 
 type committeeResponse struct {

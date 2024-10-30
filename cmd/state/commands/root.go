@@ -24,15 +24,15 @@ import (
 
 	chain2 "github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/types"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/core"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 var (

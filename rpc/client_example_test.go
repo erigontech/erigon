@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 // In this example, our client wishes to track the latest 'block number'

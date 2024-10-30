@@ -19,9 +19,9 @@ package statechange
 import (
 	"runtime"
 
-	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/v3/cl/abstract"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/utils/threading"
 )
 
 // ProcessInactivityScores will updates the inactivity registry of each validator.

@@ -21,13 +21,13 @@ import (
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/fdlimit"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/node"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/tests/bor/helper"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/common/fdlimit"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/eth"
+	"github.com/erigontech/erigon/v3/node"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/tests/bor/helper"
 )
 
 const (
@@ -52,7 +52,7 @@ var (
 )
 
 // CGO_CFLAGS="-D__BLST_PORTABLE__" : flag required for go test.
-// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/erigontech/erigon/tests/bor -v -count=1
+// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/erigontech/erigon/v3/tests/bor -v -count=1
 // In TestMiningBenchmark, we will test the mining performance. We will initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advcanced by increasing blockLimit and txsInTxpool.
 func TestMiningBenchmark(t *testing.T) {
 	//usually 15sec is enough

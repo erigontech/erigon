@@ -35,10 +35,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/node/nodecfg"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/turbo/debug"
 
 	"github.com/gofrs/flock"
 
@@ -47,7 +47,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon/migrations"
+	"github.com/erigontech/erigon/v3/migrations"
 )
 
 // Node is a container on which services can be registered.

@@ -29,7 +29,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/v3/common"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.

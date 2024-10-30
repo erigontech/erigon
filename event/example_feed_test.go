@@ -22,7 +22,7 @@ package event_test
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/v3/event"
 )
 
 func ExampleFeed_acknowledgedEvents() {

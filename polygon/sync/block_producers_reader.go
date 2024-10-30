@@ -19,7 +19,7 @@ package sync
 import (
 	"context"
 
-	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/v3/polygon/bor/valset"
 )
 
 type blockProducersReader interface {

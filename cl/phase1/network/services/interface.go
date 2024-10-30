@@ -19,7 +19,7 @@ package services
 import (
 	"context"
 
-	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
 )
 
 // Note: BlobSidecarService and BlockService are tested in spectests

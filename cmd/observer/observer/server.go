@@ -26,17 +26,17 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/core/forkid"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/discover"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/p2p/netutil"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/common/debug"
+	"github.com/erigontech/erigon/v3/core/forkid"
+	"github.com/erigontech/erigon/v3/eth/protocols/eth"
+	"github.com/erigontech/erigon/v3/p2p"
+	"github.com/erigontech/erigon/v3/p2p/discover"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/enr"
+	"github.com/erigontech/erigon/v3/p2p/nat"
+	"github.com/erigontech/erigon/v3/p2p/netutil"
+	"github.com/erigontech/erigon/v3/params"
 )
 
 type Server struct {

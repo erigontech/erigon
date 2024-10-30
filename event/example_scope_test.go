@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/v3/event"
 )
 
 // This example demonstrates how SubscriptionScope can be used to control the lifetime of

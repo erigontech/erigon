@@ -17,8 +17,8 @@
 package caplin1
 
 import (
-	"github.com/erigontech/erigon/cl/beacon/builder"
-	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/beacon/builder"
+	"github.com/erigontech/erigon/v3/cl/clparams"
 )
 
 type option struct {

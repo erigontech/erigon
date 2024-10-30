@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
 
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 )
 
 // Web3API provides interfaces for the web3_ RPC commands

@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/v3/cmd/rpcdaemon/rpcdaemontest"
 )
 
 func TestGetChainConfig(t *testing.T) {

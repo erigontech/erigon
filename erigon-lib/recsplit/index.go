@@ -60,7 +60,7 @@ const (
 	//      general-purpose-filter: 9bits/key, 0.3% false-positives, 3 mem access
 	//      first-bytes-array: 8bits/key, 1/256=0.4% false-positives, 1 mem access
 	//
-	// See also: https://github.com/erigontech/erigon/issues/9486
+	// See also: https://github.com/erigontech/erigon/v3/issues/9486
 	LessFalsePositives Features = 0b10 //
 )
 

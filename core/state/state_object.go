@@ -29,10 +29,10 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon/v3/core/tracing"
+	"github.com/erigontech/erigon/v3/core/types/accounts"
+	"github.com/erigontech/erigon/v3/rlp"
+	"github.com/erigontech/erigon/v3/turbo/trie"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)

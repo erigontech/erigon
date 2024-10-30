@@ -29,8 +29,8 @@ import (
 	"github.com/golang/snappy"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
 )
 
 var writerPool = sync.Pool{

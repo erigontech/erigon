@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/v3/eth/protocols/eth"
 	"github.com/nxadm/tail"
 )
 

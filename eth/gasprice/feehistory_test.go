@@ -26,11 +26,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/gasprice"
-	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
-	"github.com/erigontech/erigon/turbo/jsonrpc"
+	"github.com/erigontech/erigon/v3/eth/gasprice"
+	"github.com/erigontech/erigon/v3/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/rpc/rpccfg"
+	"github.com/erigontech/erigon/v3/turbo/jsonrpc"
 )
 
 func TestFeeHistory(t *testing.T) {

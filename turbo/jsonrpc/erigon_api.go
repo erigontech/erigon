@@ -23,14 +23,14 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/v3/eth/filters"
 
 	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/p2p"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 )
 
 // ErigonAPI Erigon specific routines

@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/erigontech/erigon/cmd/observer/database"
-	"github.com/erigontech/erigon/cmd/observer/observer"
+	"github.com/erigontech/erigon/v3/cmd/observer/database"
+	"github.com/erigontech/erigon/v3/cmd/observer/observer"
 )
 
 type ClientsReportEntry struct {

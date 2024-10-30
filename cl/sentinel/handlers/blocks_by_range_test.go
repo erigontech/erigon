@@ -31,14 +31,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/antiquary/tests"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/erigontech/erigon/cl/sentinel/communication"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/antiquary/tests"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/v3/cl/sentinel/communication"
+	"github.com/erigontech/erigon/v3/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/v3/cl/sentinel/peers"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 func TestBlocksByRootHandler(t *testing.T) {

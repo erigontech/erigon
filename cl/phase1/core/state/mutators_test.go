@@ -19,10 +19,10 @@ package state_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	state2 "github.com/erigontech/erigon/v3/cl/phase1/core/state"
 
-	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/clparams"
 	"github.com/stretchr/testify/require"
 )
 

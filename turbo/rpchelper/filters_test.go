@@ -22,7 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/v3/core/types"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -31,7 +31,7 @@ import (
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/v3/eth/filters"
 )
 
 func createLog() *remote.SubscribeLogsReply {

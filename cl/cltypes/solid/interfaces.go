@@ -21,7 +21,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/types/ssz"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	ssz2 "github.com/erigontech/erigon/v3/cl/ssz"
 )
 
 type IterableSSZ[T any] interface {

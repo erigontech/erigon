@@ -23,8 +23,8 @@ import (
 
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/eth/protocols/eth"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 var ErrPeerNotFound = errors.New("peer not found")

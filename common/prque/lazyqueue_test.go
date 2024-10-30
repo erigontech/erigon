@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/v3/common/mclock"
 )
 
 const (

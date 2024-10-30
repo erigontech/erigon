@@ -26,7 +26,7 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 
-	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/v3/turbo/shards"
 )
 
 type LogsFilterAggregator struct {

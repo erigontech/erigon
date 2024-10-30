@@ -19,7 +19,7 @@ package sync
 import (
 	"context"
 
-	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/v3/polygon/heimdall"
 )
 
 //go:generate mockgen -typed=true -source=./waypoint_reader.go -destination=./waypoint_reader_mock.go -package=sync

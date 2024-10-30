@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal/historyv2"
 
-	"github.com/erigontech/erigon/ethdb"
+	"github.com/erigontech/erigon/v3/ethdb"
 )
 
 // GetModifiedAccounts returns a list of addresses that were modified in the block range

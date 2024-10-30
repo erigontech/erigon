@@ -24,10 +24,10 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/adapter/ethapi"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 )
 
 // GetUncleByBlockNumberAndIndex implements eth_getUncleByBlockNumberAndIndex. Returns information about an uncle given a block's number and the index of the uncle.
@@ -47,7 +47,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/v3/issues/1645
 	}
 	additionalFields := make(map[string]interface{})
 
@@ -73,7 +73,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/v3/issues/1645
 	}
 	additionalFields := make(map[string]interface{})
 
@@ -107,7 +107,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/v3/issues/1645
 	}
 	n = hexutil.Uint(len(block.Uncles()))
 	return &n, nil
@@ -127,7 +127,7 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 		return nil, err
 	}
 	if number == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/v3/issues/1645
 	}
 
 	block, err := api.blockWithSenders(ctx, tx, hash, *number)
@@ -135,7 +135,7 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		return nil, nil // not error, see https://github.com/erigontech/erigon/v3/issues/1645
 	}
 	n = hexutil.Uint(len(block.Uncles()))
 	return &n, nil

@@ -23,9 +23,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cmd/observer/database"
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/v3/cmd/observer/database"
+	"github.com/erigontech/erigon/v3/p2p"
+	"github.com/erigontech/erigon/v3/p2p/enode"
 )
 
 type Diplomat struct {

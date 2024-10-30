@@ -28,7 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon/v3/turbo/testlog"
 )
 
 type emptyBodyReadCloser struct{}

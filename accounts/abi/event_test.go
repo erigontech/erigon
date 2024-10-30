@@ -33,7 +33,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/v3/common"
 )
 
 var jsonEventTransfer = []byte(`{
@@ -358,7 +358,7 @@ func unpackTestEventData(dest interface{}, hexData string, jsonEvent []byte, ass
 
 /*
 Taken from
-https://github.com/erigontech/erigon/pull/15568
+https://github.com/erigontech/erigon/v3/pull/15568
 */
 
 // TestEventUnpackIndexed verifies that indexed field will be skipped by event decoder.

@@ -28,17 +28,17 @@ import (
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/clparams"
-	execution_client2 "github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/v3/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	execution_client2 "github.com/erigontech/erigon/v3/cl/phase1/execution_client"
 
-	"github.com/erigontech/erigon/cmd/caplin/caplin1"
-	"github.com/erigontech/erigon/cmd/caplin/caplincli"
-	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
-	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/turbo/app"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/v3/cmd/caplin/caplin1"
+	"github.com/erigontech/erigon/v3/cmd/caplin/caplincli"
+	"github.com/erigontech/erigon/v3/cmd/caplin/caplinflags"
+	"github.com/erigontech/erigon/v3/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/turbo/app"
+	"github.com/erigontech/erigon/v3/turbo/debug"
 )
 
 func main() {

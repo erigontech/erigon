@@ -23,20 +23,20 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/disk"
 	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
-	"github.com/erigontech/erigon/cl/sentinel"
-	"github.com/erigontech/erigon/cl/sentinel/service"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
-	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
-	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/checkpoint_sync"
+	"github.com/erigontech/erigon/v3/cl/sentinel"
+	"github.com/erigontech/erigon/v3/cl/sentinel/service"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/v3/cmd/sentinel/sentinelcli"
+	"github.com/erigontech/erigon/v3/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/v3/cmd/utils"
 
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	sentinelapp "github.com/erigontech/erigon/turbo/app"
+	sentinelapp "github.com/erigontech/erigon/v3/turbo/app"
 )
 
 func main() {

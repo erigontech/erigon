@@ -24,13 +24,13 @@ import (
 	"net/http"
 	"sync"
 
-	communication2 "github.com/erigontech/erigon/cl/sentinel/communication"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	communication2 "github.com/erigontech/erigon/v3/cl/sentinel/communication"
+	"github.com/erigontech/erigon/v3/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/v3/cl/sentinel/httpreqresp"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 

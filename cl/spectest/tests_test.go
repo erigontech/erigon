@@ -20,11 +20,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/erigontech/erigon/spectest"
+	"github.com/erigontech/erigon/v3/spectest"
 
-	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/v3/cl/transition"
 
-	"github.com/erigontech/erigon/cl/spectest/consensus_tests"
+	"github.com/erigontech/erigon/v3/cl/spectest/consensus_tests"
 )
 
 func Test(t *testing.T) {

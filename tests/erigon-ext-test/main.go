@@ -5,7 +5,7 @@ import (
 	// geth_crypto "github.com/ethereum/go-ethereum/crypto"
 	erigon_lib_common "github.com/erigontech/erigon-lib/common"
 	erigon_crypto "github.com/erigontech/erigon-lib/crypto"
-	erigon_params "github.com/erigontech/erigon/params"
+	erigon_params "github.com/erigontech/erigon/v3/params"
 )
 
 func main() {

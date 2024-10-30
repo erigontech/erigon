@@ -22,7 +22,7 @@ package bitutil
 import (
 	"bytes"
 
-	"github.com/erigontech/erigon/common/bitutil"
+	"github.com/erigontech/erigon/v3/common/bitutil"
 )
 
 // Fuzz implements a go-fuzz fuzzer method to test various encoding method

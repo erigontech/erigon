@@ -31,9 +31,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/common/bitutil"
-	"github.com/erigontech/erigon/p2p/rlpx"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/v3/common/bitutil"
+	"github.com/erigontech/erigon/v3/p2p/rlpx"
+	"github.com/erigontech/erigon/v3/rlp"
 )
 
 const (

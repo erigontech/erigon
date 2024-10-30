@@ -23,8 +23,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/erigontech/erigon/cmd/observer/database"
-	"github.com/erigontech/erigon/cmd/observer/observer/sentry_candidates"
+	"github.com/erigontech/erigon/v3/cmd/observer/database"
+	"github.com/erigontech/erigon/v3/cmd/observer/observer/sentry_candidates"
 )
 
 type SentryCandidatesReport struct {

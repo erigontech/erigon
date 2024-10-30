@@ -16,7 +16,7 @@
 
 package execution_client
 
-import "github.com/erigontech/erigon/turbo/engineapi/engine_types"
+import "github.com/erigontech/erigon/v3/turbo/engineapi/engine_types"
 
 type PayloadStatus int
 

@@ -24,7 +24,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/vm/runtime"
+	"github.com/erigontech/erigon/v3/core/vm/runtime"
 )
 
 func ExampleExecute() {

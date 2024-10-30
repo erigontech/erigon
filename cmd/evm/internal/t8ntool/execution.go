@@ -31,12 +31,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	state3 "github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/consensus/ethash"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/v3/common"
+	"github.com/erigontech/erigon/v3/consensus/ethash"
+	"github.com/erigontech/erigon/v3/core/state"
+	"github.com/erigontech/erigon/v3/core/tracing"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/turbo/rpchelper"
 )
 
 type Prestate struct {

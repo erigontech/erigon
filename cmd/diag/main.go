@@ -28,15 +28,15 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cmd/diag/db"
-	"github.com/erigontech/erigon/cmd/diag/downloader"
-	"github.com/erigontech/erigon/cmd/diag/stages"
-	sinfo "github.com/erigontech/erigon/cmd/diag/sysinfo"
-	"github.com/erigontech/erigon/cmd/diag/ui"
-	"github.com/erigontech/erigon/cmd/snapshots/sync"
-	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/v3/cmd/diag/db"
+	"github.com/erigontech/erigon/v3/cmd/diag/downloader"
+	"github.com/erigontech/erigon/v3/cmd/diag/stages"
+	sinfo "github.com/erigontech/erigon/v3/cmd/diag/sysinfo"
+	"github.com/erigontech/erigon/v3/cmd/diag/ui"
+	"github.com/erigontech/erigon/v3/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/v3/cmd/utils"
+	"github.com/erigontech/erigon/v3/params"
+	"github.com/erigontech/erigon/v3/turbo/logging"
 )
 
 func main() {

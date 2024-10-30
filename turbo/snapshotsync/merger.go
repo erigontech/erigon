@@ -17,7 +17,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
-	coresnaptype "github.com/erigontech/erigon/core/snaptype"
+	coresnaptype "github.com/erigontech/erigon/v3/core/snaptype"
 )
 
 type Merger struct {

@@ -10,13 +10,13 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/v3/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state"
+	network2 "github.com/erigontech/erigon/v3/cl/phase1/network"
 )
 
 // shouldProcessBlobs checks if any block in the given list of blocks

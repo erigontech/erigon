@@ -23,14 +23,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon/eth/consensuschain"
+	"github.com/erigontech/erigon/v3/eth/consensuschain"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/v3/core/types"
+	"github.com/erigontech/erigon/v3/rpc"
+	"github.com/erigontech/erigon/v3/turbo/services"
 )
 
 // API is a user facing RPC API to allow controlling the signer and voting

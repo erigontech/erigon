@@ -33,13 +33,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/sentinel"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/gossip"
+	"github.com/erigontech/erigon/v3/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/v3/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/v3/cl/sentinel"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/v3/turbo/snapshotsync/freezeblocks"
 )
 
 const AttestationSubnetSubscriptions = 2

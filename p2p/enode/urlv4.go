@@ -30,7 +30,7 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/p2p/enr"
+	"github.com/erigontech/erigon/v3/p2p/enr"
 )
 
 var (

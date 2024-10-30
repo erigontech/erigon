@@ -39,14 +39,14 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/common/mclock"
-	"github.com/erigontech/erigon/event"
-	"github.com/erigontech/erigon/p2p/discover"
-	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/p2p/netutil"
+	"github.com/erigontech/erigon/v3/common/debug"
+	"github.com/erigontech/erigon/v3/common/mclock"
+	"github.com/erigontech/erigon/v3/event"
+	"github.com/erigontech/erigon/v3/p2p/discover"
+	"github.com/erigontech/erigon/v3/p2p/enode"
+	"github.com/erigontech/erigon/v3/p2p/enr"
+	"github.com/erigontech/erigon/v3/p2p/nat"
+	"github.com/erigontech/erigon/v3/p2p/netutil"
 )
 
 const (

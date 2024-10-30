@@ -21,9 +21,9 @@ import (
 	"log"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/utils/eth_clock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )

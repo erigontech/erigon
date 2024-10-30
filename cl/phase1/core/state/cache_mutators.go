@@ -21,8 +21,8 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
 )
 
 func (b *CachingBeaconState) getSlashingProposerReward(whistleBlowerReward uint64) uint64 {

@@ -25,18 +25,18 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
-	"github.com/erigontech/erigon/cl/phase1/core/caches"
-	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/v3/cl/cltypes/solid"
+	"github.com/erigontech/erigon/v3/cl/monitor/shuffling_metrics"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/caches"
+	"github.com/erigontech/erigon/v3/cl/phase1/core/state/shuffling"
+	shuffling2 "github.com/erigontech/erigon/v3/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/v3/cl/utils/threading"
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/v3/cl/clparams"
+	"github.com/erigontech/erigon/v3/cl/cltypes"
+	"github.com/erigontech/erigon/v3/cl/utils"
 )
 
 // these are view functions for the beacon state cache

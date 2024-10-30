@@ -30,7 +30,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/v3/cl/gossip"
 )
 
 const (

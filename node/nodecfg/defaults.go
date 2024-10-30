@@ -22,9 +22,9 @@ package nodecfg
 import (
 	"github.com/erigontech/erigon-lib/direct"
 
-	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/nat"
-	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/v3/p2p"
+	"github.com/erigontech/erigon/v3/p2p/nat"
+	"github.com/erigontech/erigon/v3/rpc/rpccfg"
 )
 
 const (

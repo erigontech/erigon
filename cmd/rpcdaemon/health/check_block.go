@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/v3/rpc"
 )
 
 func checkBlockNumber(blockNumber rpc.BlockNumber, api EthAPI) error {

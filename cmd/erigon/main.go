@@ -28,12 +28,12 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/diagnostics"
-	"github.com/erigontech/erigon/params"
-	erigonapp "github.com/erigontech/erigon/turbo/app"
-	erigoncli "github.com/erigontech/erigon/turbo/cli"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/node"
+	"github.com/erigontech/erigon/v3/diagnostics"
+	"github.com/erigontech/erigon/v3/params"
+	erigonapp "github.com/erigontech/erigon/v3/turbo/app"
+	erigoncli "github.com/erigontech/erigon/v3/turbo/cli"
+	"github.com/erigontech/erigon/v3/turbo/debug"
+	"github.com/erigontech/erigon/v3/turbo/node"
 )
 
 func main() {
