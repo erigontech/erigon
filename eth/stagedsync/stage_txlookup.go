@@ -212,7 +212,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	blockFrom, blockTo = max(blockFrom, smallestInDB), max(blockTo, smallestInDB)
 
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
-	if _, err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
+	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg, logger); err != nil {
 		return fmt.Errorf("unwind TxLookUp: %w", err)
 	}
 	if cfg.borConfig != nil {
@@ -262,26 +262,22 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 	if blockFrom < blockTo {
 		t := time.Now()
-		deletedTotal := 0
 		var bn = blockFrom
 		for ; bn < blockTo; bn++ {
-			deleted, err := deleteTxLookupRange(tx, logPrefix, bn, bn+1, ctx, cfg, logger)
+			err = deleteTxLookupRange(tx, logPrefix, bn, bn+1, ctx, cfg, logger)
 			if err != nil {
 				return fmt.Errorf("prune TxLookUp: %w", err)
 			}
-			deletedTotal += deleted
+			if cfg.borConfig != nil && pruneBor {
+				if err = deleteBorTxLookupRange(tx, logPrefix, bn, bn+1, ctx, cfg, logger); err != nil {
+					return fmt.Errorf("prune BorTxLookUp: %w", err)
+				}
+			}
 
 			if time.Since(t) > pruneTimeout {
 				break
 			}
 		}
-
-		if cfg.borConfig != nil && pruneBor {
-			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
-				return fmt.Errorf("prune BorTxLookUp: %w", err)
-			}
-		}
-
 		if err = s.DoneAt(tx, bn); err != nil {
 			return err
 		}
@@ -296,7 +292,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 }
 
 // deleteTxLookupRange - [blockFrom, blockTo)
-func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (deleted int, err error) {
+func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
 	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
@@ -324,9 +320,9 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		},
 	}, logger)
 	if err != nil {
-		return 0, err
+		return err
 	}
-	return deleted, nil
+	return nil
 }
 
 // deleteTxLookupRange - [blockFrom, blockTo)
