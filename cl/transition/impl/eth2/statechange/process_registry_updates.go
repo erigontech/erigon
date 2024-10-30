@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/utils/threading"
 
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -41,6 +42,7 @@ type minimizeQueuedValidator struct {
 
 // ProcessRegistryUpdates updates every epoch the activation status of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#registry-updates.
 func ProcessRegistryUpdates(s abstract.BeaconState) error {
+	defer monitor.ObserveElaspedTime(monitor.ProcessRegistryUpdatesTime).End()
 	beaconConfig := s.BeaconConfig()
 	currentEpoch := state.Epoch(s)
 	// start also initializing the activation queue.
