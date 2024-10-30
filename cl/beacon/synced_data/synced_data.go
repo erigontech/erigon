@@ -90,7 +90,6 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 	if !s.enabled || !synced {
 		return nil, EmptyCancel
 	}
-	isCanceled := false
 
 	s.mu.RLock()
 	st := debug.Stack()
@@ -107,18 +106,15 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 		}()
 	}
 
-	var mu sync.Mutex
+	var mu sync.Once
+
 	return s.headState, func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if isCanceled {
-			return
-		}
-		isCanceled = true
-		s.mu.RUnlock()
-		if EnableDeadlockDetector {
-			ch <- struct{}{}
-		}
+		mu.Do(func() {
+			s.mu.RUnlock()
+			if EnableDeadlockDetector {
+				ch <- struct{}{}
+			}
+		})
 	}
 }
 
