@@ -197,8 +197,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
 		return g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
-		obj := &cltypes.SignedContributionAndProof{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := &cltypes.SignedContributionAndProofWithGossipData{
+			GossipData:                 copyOfSentinelData(data),
+			SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
+		}
+		if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)

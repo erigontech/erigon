@@ -20,6 +20,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -57,6 +58,13 @@ func (a *ContributionAndProof) EncodingSizeSSZ() int {
 
 func (a *ContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
+}
+
+// SignedContributionAndProofWithGossipData type represents SignedContributionAndProof with the gossip data where it's coming from.
+type SignedContributionAndProofWithGossipData struct {
+	SignedContributionAndProof *SignedContributionAndProof
+	GossipData                 *sentinel.GossipData
+	ImmediateVerification      bool
 }
 
 type SignedContributionAndProof struct {
