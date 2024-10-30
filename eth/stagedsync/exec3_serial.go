@@ -89,7 +89,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
-				se.usedGas, se.blobGasUsed = 0, 0
 			}
 			return nil
 		}(); err != nil {
@@ -143,6 +142,14 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 
 func (se *serialExecutor) tx() kv.RwTx {
 	return se.applyTx
+}
+
+func (se *serialExecutor) readState() *state.StateV3 {
+	return se.rs
+}
+
+func (se *serialExecutor) domains() *state2.SharedDomains {
+	return se.doms
 }
 
 func (se *serialExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header) {

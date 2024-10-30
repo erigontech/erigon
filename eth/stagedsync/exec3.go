@@ -354,13 +354,9 @@ func ExecV3(ctx context.Context,
 	defer pruneEvery.Stop()
 
 	var logGas uint64
-	var txCount uint64
 	var stepsInDB float64
 
 	processed := NewProgress(blockNum, commitThreshold, workerCount, true, execStage.LogPrefix(), logger)
-	defer func() {
-		processed.Log("Done", rs, in, nil, txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
-	}()
 
 	var executor executor
 
@@ -389,7 +385,7 @@ func ExecV3(ctx context.Context,
 		defer executorCancel()
 
 		defer func() {
-			processed.Log("Done", rs, in, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+			processed.Log("Done", executor.readState(), in, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 		}()
 
 		executor = pe
@@ -413,7 +409,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			processed.Log("Done", rs, in, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+			processed.Log("Done", executor.readState(), in, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 		}()
 
 		executor = se
@@ -449,9 +445,9 @@ Loop:
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
-			doms.SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
+			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
 			// First compute and commit the progress done so far
-			if _, err := doms.ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
+			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
 			ts += time.Since(start)
@@ -460,7 +456,7 @@ Loop:
 		}
 		changeset := &state2.StateChangeSet{}
 		if shouldGenerateChangesets && blockNum > 0 {
-			doms.SetChangesetAccumulator(changeset)
+			executor.domains().SetChangesetAccumulator(changeset)
 		}
 		if !parallel {
 			select {
@@ -469,7 +465,7 @@ Loop:
 			}
 		}
 		inputBlockNum.Store(blockNum)
-		doms.SetBlockNum(blockNum)
+		executor.domains().SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(ctx, chainDb, executor.tx(), blockReader, blockNum)
 		if err != nil {
@@ -557,8 +553,8 @@ Loop:
 				skipPostEvaluation = true
 				continue
 			}
-			doms.SetTxNum(txTask.TxNum)
-			doms.SetBlockNum(txTask.BlockNum)
+			executor.domains().SetTxNum(txTask.TxNum)
+			executor.domains().SetBlockNum(txTask.BlockNum)
 
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
@@ -617,18 +613,18 @@ Loop:
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
-			if _, err := doms.ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
+			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
-			doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+			executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
 			if !inMemExec {
 				if err := state2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
 					return err
 				}
 			}
-			doms.SetChangesetAccumulator(nil)
+			executor.domains().SetChangesetAccumulator(nil)
 		}
 
 		mxExecBlocks.Add(1)
@@ -653,7 +649,7 @@ Loop:
 				}
 
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", rs, in, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+				progress.Log("", executor.readState(), in, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {
@@ -665,7 +661,7 @@ Loop:
 
 				aggregatorRo := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 
-				needCalcRoot := rs.SizeEstimate() >= commitThreshold ||
+				needCalcRoot := executor.readState().SizeEstimate() >= commitThreshold ||
 					skipPostEvaluation || // If we skip post evaluation, then we should compute root hash ASAP for fail-fast
 					aggregatorRo.CanPrune(executor.tx(), outputTxNum.Load()) // if have something to prune - better prune ASAP to keep chaindata smaller
 				if !needCalcRoot {
@@ -679,7 +675,7 @@ Loop:
 					t1, t3 time.Duration
 				)
 
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -703,8 +699,8 @@ Loop:
 					break Loop
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
-					"block", doms.BlockNum(), "txNum", doms.TxNum(),
-					"step", fmt.Sprintf("%.1f", float64(doms.TxNum())/float64(agg.StepSize())),
+					"block", executor.domains().BlockNum(), "txNum", executor.domains().TxNum(),
+					"step", fmt.Sprintf("%.1f", float64(executor.domains().TxNum())/float64(agg.StepSize())),
 					"flush+commitment", t1, "tx.commit", t2, "prune", t3)
 			default:
 			}
@@ -723,7 +719,7 @@ Loop:
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -732,7 +728,7 @@ Loop:
 		}
 	}
 
-	//dumpPlainStateDebug(executor.tx(), doms)
+	//dumpPlainStateDebug(executor.tx(), executor.domains())
 
 	if !useExternalTx && executor.tx() != nil {
 		if err = executor.tx().Commit(); err != nil {

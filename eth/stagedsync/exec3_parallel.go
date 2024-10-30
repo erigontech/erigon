@@ -69,7 +69,11 @@ type executor interface {
 	status(ctx context.Context, commitThreshold uint64) error
 	wait() error
 	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header)
+
+	//these are reset by commit - so need to be read from the executor once its processing
 	tx() kv.RwTx
+	readState() *state.StateV3
+	domains() *state2.SharedDomains
 }
 
 type parallelExecutor struct {
@@ -106,6 +110,14 @@ type parallelExecutor struct {
 
 func (pe *parallelExecutor) tx() kv.RwTx {
 	return pe.applyTx
+}
+
+func (pe *parallelExecutor) readState() *state.StateV3 {
+	return pe.rs
+}
+
+func (pe *parallelExecutor) domains() *state2.SharedDomains {
+	return pe.doms
 }
 
 func (pe *parallelExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header) {
