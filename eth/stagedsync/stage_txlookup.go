@@ -252,12 +252,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	} else {
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
-	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes
-	blockTo = min(blockTo, blockFrom+10)
 
-	pruneTimeout := 250 * time.Millisecond
-	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = time.Hour
+	pruneTimeout := time.Hour // aggressive pruning at non-chain-tip
+	if !s.CurrentSyncCycle.IsInitialCycle {
+		pruneTimeout = 250 * time.Millisecond
+		// can't prune much on non-chain-tip: because tx_lookup has crypto-hashed-keys. 1 block producing hundreds of random deletes: ~2pages updated per delete
+		blockTo = min(blockTo, blockFrom+10)
 	}
 
 	if blockFrom < blockTo {
