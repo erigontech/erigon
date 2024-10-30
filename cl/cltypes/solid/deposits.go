@@ -14,8 +14,8 @@ var (
 )
 
 const (
-	SizePendingDeposit = length.Bytes48 + length.Hash + 8 + length.Bytes96 + 8
 	SizeDepositRequest = length.Bytes48 + length.Hash + 8 + length.Bytes96 + 8
+	SizePendingDeposit = length.Bytes48 + length.Hash + 8 + length.Bytes96 + 8
 )
 
 type DepositRequest struct {
