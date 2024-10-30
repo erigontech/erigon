@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -644,7 +645,7 @@ func (cr *FakeChainReader) FrozenBorBlocks() uint64                             
 func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
-func (cr *FakeChainReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
+func (cr *FakeChainReader) BorStartEventId(hash libcommon.Hash, number uint64) uint64 {
 	return 0
 }
-func (cr *FakeChainReader) BorSpan(spanId uint64) []byte { return nil }
+func (cr *FakeChainReader) BorSpan(spanId uint64) *heimdall.Span { return nil }

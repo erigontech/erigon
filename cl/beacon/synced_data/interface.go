@@ -17,6 +17,7 @@
 package synced_data
 
 import (
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
@@ -29,4 +30,5 @@ type SyncedData interface {
 	HeadStateMutator() abstract.BeaconStateMutator
 	Syncing() bool
 	HeadSlot() uint64
+	HeadRoot() common.Hash
 }

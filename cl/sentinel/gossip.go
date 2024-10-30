@@ -513,9 +513,11 @@ func (g *GossipManager) Start(ctx context.Context) {
 				logArgs := []interface{}{}
 				g.subscriptions.Range(func(key, value any) bool {
 					sub := value.(*GossipSubscription)
+					sub.lock.Lock()
 					if sub.topic != nil {
 						logArgs = append(logArgs, sub.topic.String(), sub.subscribed.Load())
 					}
+					sub.lock.Unlock()
 					return true
 				})
 				log.Trace("[Gossip] Subscriptions", "subscriptions", logArgs)
@@ -651,8 +653,22 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 }
 
 func (g *GossipSubscription) Publish(data []byte) error {
-	if len(g.topic.ListPeers()) == 0 {
-		log.Debug("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
+	if len(g.topic.ListPeers()) < 2 {
+		log.Trace("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
+		go func() {
+			if err := g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(1))); err != nil {
+				g.s.logger.Debug("[Gossip] Published to topic", "topic", g.topic.String(), "err", err)
+			}
+		}()
+		if len(g.topic.ListPeers()) == 0 {
+			return errors.New("not enough peers to publish the message")
+		}
+		return nil
 	}
-	return g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
+
+	err := g.topic.Publish(g.ctx, data)
+	if err != nil {
+		return errors.New("failed to publish to topic due to lack of routing capacity (topic too small)")
+	}
+	return nil
 }

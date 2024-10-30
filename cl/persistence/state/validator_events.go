@@ -19,6 +19,7 @@ package state_accessors
 import (
 	"encoding/binary"
 	"errors"
+	"sync"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -42,6 +43,7 @@ const (
 
 type StateEvents struct {
 	buf []byte
+	mu  sync.Mutex
 }
 
 func NewStateEvents() *StateEvents {
@@ -49,42 +51,56 @@ func NewStateEvents() *StateEvents {
 }
 
 func (se *StateEvents) AddValidator(validatorIndex uint64, validator solid.Validator) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(addValidator))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = append(se.buf, validator...)
 }
 
 func (se *StateEvents) ChangeExitEpoch(validatorIndex uint64, exitEpoch uint64) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeExitEpoch))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = binary.BigEndian.AppendUint64(se.buf, exitEpoch)
 }
 
 func (se *StateEvents) ChangeWithdrawableEpoch(validatorIndex uint64, withdrawableEpoch uint64) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeWithdrawableEpoch))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = binary.BigEndian.AppendUint64(se.buf, withdrawableEpoch)
 }
 
 func (se *StateEvents) ChangeWithdrawalCredentials(validatorIndex uint64, withdrawalCredentials libcommon.Hash) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeWithdrawalCredentials))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = append(se.buf, withdrawalCredentials[:]...)
 }
 
 func (se *StateEvents) ChangeActivationEpoch(validatorIndex uint64, activationEpoch uint64) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeActivationEpoch))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = binary.BigEndian.AppendUint64(se.buf, activationEpoch)
 }
 
 func (se *StateEvents) ChangeActivationEligibilityEpoch(validatorIndex uint64, activationEligibilityEpoch uint64) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeActivationEligibilityEpoch))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = binary.BigEndian.AppendUint64(se.buf, activationEligibilityEpoch)
 }
 
 func (se *StateEvents) ChangeSlashed(validatorIndex uint64, slashed bool) {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = append(se.buf, byte(changeSlashed))
 	se.buf = binary.BigEndian.AppendUint64(se.buf, validatorIndex)
 	se.buf = append(se.buf, byte(0))
@@ -94,10 +110,14 @@ func (se *StateEvents) ChangeSlashed(validatorIndex uint64, slashed bool) {
 }
 
 func (se *StateEvents) CopyBytes() []byte {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	return libcommon.Copy(se.buf)
 }
 
 func (se *StateEvents) Reset() {
+	se.mu.Lock()
+	defer se.mu.Unlock()
 	se.buf = se.buf[:0]
 }
 
@@ -110,6 +130,8 @@ func ReplayEvents(onAddValidator func(validatorIndex uint64, validator solid.Val
 	onChangeActivationEligibilityEpoch func(validatorIndex uint64, activationEligibilityEpoch uint64) error,
 	onChangeSlashed func(validatorIndex uint64, slashed bool) error,
 	e *StateEvents) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	buf := e.buf
 	for len(buf) > 0 {
 		event := stateEvent(buf[0])
