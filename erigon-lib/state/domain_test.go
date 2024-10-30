@@ -628,6 +628,9 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
+	cursor, err := dc.valsCursor(tx)
+	require.NoError(err)
+
 	v, _, ok, err := dc.GetLatest([]byte("key1"), nil, tx)
 	require.NoError(err)
 	require.True(ok)
@@ -644,8 +647,12 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 
 	v, _, ok, err = dc.GetLatest([]byte("key1"), nil, tx)
 	require.NoError(err)
-	// require.True(ok)
+	require.False(ok)
 	require.Empty(v)
+
+	cursor2, err := dc.valsCursor(tx)
+	require.NoError(err)
+	require.NotEqualValues(cursor, cursor2)
 }
 
 func TestDomain_Delete(t *testing.T) {
