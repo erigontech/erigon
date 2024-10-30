@@ -253,7 +253,7 @@ type DirtySegment struct {
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
 	return &DirtySegment{
-		segType: snaptype.BeaconBlocks,
+		segType: segType,
 		version: version,
 		Range:   Range{from, to},
 		frozen:  frozen,
