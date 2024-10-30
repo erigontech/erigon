@@ -30,7 +30,7 @@ var (
 	executionTime                  = metrics.GetOrCreateGauge("execution_time")
 
 	// Epoch processing metrics
-	epochProcessingTime                     = metrics.GetOrCreateGauge("epoch_processing_time")
+	EpochProcessingTime                     = metrics.GetOrCreateGauge("epoch_processing_time")
 	ProcessJustificationBitsAndFinalityTime = metrics.GetOrCreateGauge("process_justification_bits_and_finality_time")
 	ProcessInactivityScoresTime             = metrics.GetOrCreateGauge("process_inactivity_ccores_time")
 	ProcessRewardsAndPenaltiesTime          = metrics.GetOrCreateGauge("process_rewards_and_penalties_time")
@@ -140,11 +140,6 @@ func (m TimeMeasure) End() {
 
 func ObserveElaspedTime(m metrics.Gauge) TimeMeasure {
 	return TimeMeasure{start: time.Now(), metric: m}
-}
-
-// ObserveEpochProcessingTime sets last epoch processing time
-func ObserveEpochProcessingTime(startTime time.Time) {
-	epochProcessingTime.Set(float64(time.Since(startTime).Microseconds()))
 }
 
 // ObserveAggregateAttestation sets the time it took add new attestation to aggregateAndProof

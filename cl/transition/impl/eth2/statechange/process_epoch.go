@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/threading"
 )
@@ -45,6 +46,7 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 
 // ProcessEpoch process epoch transition.
 func ProcessEpoch(s abstract.BeaconState) error {
+	defer monitor.ObserveElaspedTime(monitor.EpochProcessingTime).End()
 	eligibleValidators := state.EligibleValidatorsIndicies(s)
 	var unslashedIndiciesSet [][]bool
 	if s.Version() >= clparams.AltairVersion {
