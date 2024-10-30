@@ -351,27 +351,28 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 			continue
 		}
 		for _, subnet := range publishingSubnets {
-			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, v); err != nil && !errors.Is(err, services.ErrIgnore) {
+
+			var syncCommitteeMessageWithGossipData cltypes.SyncCommitteeMessageWithGossipData
+			syncCommitteeMessageWithGossipData.SyncCommitteeMessage = v
+			syncCommitteeMessageWithGossipData.ImmediateVerification = true
+
+			encodedSSZ, err := syncCommitteeMessageWithGossipData.SyncCommitteeMessage.EncodeSSZ(nil)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			subnetId := subnet
+			syncCommitteeMessageWithGossipData.GossipData = &sentinel.GossipData{
+				Data:     encodedSSZ,
+				Name:     gossip.TopicNamePrefixSyncCommittee,
+				SubnetId: &subnetId,
+			}
+
+			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, &syncCommitteeMessageWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
 				log.Warn("[Beacon REST] failed to process attestation in syncCommittee service", "err", err)
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
-			}
-			// Broadcast to gossip
-			if a.sentinel != nil {
-				encodedSSZ, err := v.EncodeSSZ(nil)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				subnetId := subnet // this effectively makes a copy
-				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
-					Data:     encodedSSZ,
-					Name:     gossip.TopicNamePrefixSyncCommittee,
-					SubnetId: &subnetId,
-				}); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
 			}
 		}
 	}

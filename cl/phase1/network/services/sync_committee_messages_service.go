@@ -18,12 +18,9 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sync"
-
-	"github.com/Giulio2002/bls"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -47,6 +44,7 @@ type syncCommitteeMessagesService struct {
 	beaconChainCfg            *clparams.BeaconChainConfig
 	syncContributionPool      sync_contribution_pool.SyncContributionPool
 	ethClock                  eth_clock.EthereumClock
+	batchSignatureVerifier    *BatchSignatureVerifier
 	test                      bool
 
 	mu sync.Mutex
@@ -58,6 +56,7 @@ func NewSyncCommitteeMessagesService(
 	ethClock eth_clock.EthereumClock,
 	syncedDataManager *synced_data.SyncedDataManager,
 	syncContributionPool sync_contribution_pool.SyncContributionPool,
+	batchSignatureVerifier *BatchSignatureVerifier,
 	test bool,
 ) SyncCommitteeMessagesService {
 	return &syncCommitteeMessagesService{
@@ -66,12 +65,13 @@ func NewSyncCommitteeMessagesService(
 		syncedDataManager:         syncedDataManager,
 		beaconChainCfg:            beaconChainCfg,
 		syncContributionPool:      syncContributionPool,
+		batchSignatureVerifier:    batchSignatureVerifier,
 		test:                      test,
 	}
 }
 
 // ProcessMessage processes a sync committee message
-func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessage) error {
+func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessageWithGossipData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	headState := s.syncedDataManager.HeadState()
@@ -79,20 +79,20 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
-	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Slot) {
+	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot) {
 		return ErrIgnore
 	}
 
 	// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
 	// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
-	subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.ValidatorIndex)
+	subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.SyncCommitteeMessage.ValidatorIndex)
 	if err != nil {
 		return err
 	}
 	seenSyncCommitteeMessageIdentifier := seenSyncCommitteeMessage{
 		subnet:         *subnet,
-		slot:           msg.Slot,
-		validatorIndex: msg.ValidatorIndex,
+		slot:           msg.SyncCommitteeMessage.Slot,
+		validatorIndex: msg.SyncCommitteeMessage.ValidatorIndex,
 	}
 
 	if !slices.Contains(subnets, *subnet) {
@@ -103,13 +103,35 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 	// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
-	if err := verifySyncCommitteeMessageSignature(headState, msg); !s.test && err != nil {
+	signature, signingRoot, pubKey, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
+	if !s.test && err != nil {
 		return err
 	}
-	s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
-	s.cleanupOldSyncCommitteeMessages() // cleanup old messages
-	// Aggregate the message
-	return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg)
+	aggregateVerificationData := &AggregateVerificationData{
+		Signatures: [][]byte{signature},
+		SignRoots:  [][]byte{signingRoot},
+		Pks:        [][]byte{pubKey},
+		GossipData: msg.GossipData,
+		F: func() {
+			s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
+			s.cleanupOldSyncCommitteeMessages() // cleanup old messages
+			// Aggregate the message
+			s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+		},
+	}
+
+	if msg.ImmediateVerification {
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	}
+
+	// push the signatures to verify asynchronously and run final functions after that.
+	s.batchSignatureVerifier.AsyncVerifySyncCommitteeMessage(aggregateVerificationData)
+
+	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
+	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
+	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
+	// gossip ourselves or ban the peer which sent that particular invalid signature.
+	return ErrIgnore
 }
 
 // cleanupOldSyncCommitteeMessages removes old sync committee messages from the cache
@@ -123,26 +145,19 @@ func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 }
 
 // verifySyncCommitteeMessageSignature verifies the signature of a sync committee message
-func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltypes.SyncCommitteeMessage) error {
+func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltypes.SyncCommitteeMessage) ([]byte, []byte, []byte, error) {
 	publicKey, err := s.ValidatorPublicKey(int(msg.ValidatorIndex))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	cfg := s.BeaconConfig()
 	domain, err := s.GetDomain(cfg.DomainSyncCommittee, state.Epoch(s))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	signingRoot, err := utils.Sha256(msg.BeaconBlockRoot[:], domain), nil
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	valid, err := bls.Verify(msg.Signature[:], signingRoot[:], publicKey[:])
-	if err != nil {
-		return errors.New("invalid signature")
-	}
-	if !valid {
-		return errors.New("invalid signature")
-	}
-	return nil
+	return msg.Signature[:], signingRoot[:], publicKey[:], nil
 }
