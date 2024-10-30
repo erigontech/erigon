@@ -262,14 +262,14 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 	if blockFrom < blockTo {
 		t := time.Now()
-		var bn = blockFrom
-		for ; bn < blockTo; bn++ {
-			err = deleteTxLookupRange(tx, logPrefix, bn, bn+1, ctx, cfg, logger)
+		var pruneBlockNum = blockFrom
+		for ; pruneBlockNum < blockTo; pruneBlockNum++ {
+			err = deleteTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger)
 			if err != nil {
 				return fmt.Errorf("prune TxLookUp: %w", err)
 			}
 			if cfg.borConfig != nil && pruneBor {
-				if err = deleteBorTxLookupRange(tx, logPrefix, bn, bn+1, ctx, cfg, logger); err != nil {
+				if err = deleteBorTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger); err != nil {
 					return fmt.Errorf("prune BorTxLookUp: %w", err)
 				}
 			}
@@ -278,7 +278,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 				break
 			}
 		}
-		if err = s.DoneAt(tx, bn); err != nil {
+		if err = s.DoneAt(tx, pruneBlockNum); err != nil {
 			return err
 		}
 	}
