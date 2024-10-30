@@ -1573,7 +1573,8 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.valsC != nil {
-		return dt.valsC, nil
+		dt.valsC.Close()
+		dt.valsC = nil
 	}
 
 	if dt.d.largeVals {
