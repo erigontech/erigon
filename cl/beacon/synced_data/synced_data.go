@@ -82,26 +82,16 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	return err
 }
 
-func (s *SyncedDataManager) waitUntilNotWriting() {
-	for {
-		if !s.isTryingToWrite.Load() {
-			return
-		}
-		time.Sleep(100 * time.Microsecond)
-	}
-}
-
 func EmptyCancel() {}
 
 func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
-	s.waitUntilNotWriting()
 	_, synced := s.headRoot.Load().(common.Hash)
 	if !s.enabled || !synced {
 		return nil, EmptyCancel
 	}
 	isCanceled := false
-	var mu sync.Mutex
 
+	s.mu.RLock()
 	st := debug.Stack()
 
 	ch := make(chan struct{})
@@ -116,18 +106,18 @@ func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
 		}()
 	}
 
-	s.mu.RLock()
+	var mu sync.Mutex
 	return s.headState, func() {
 		mu.Lock()
 		defer mu.Unlock()
 		if isCanceled {
 			return
 		}
+		isCanceled = true
+		s.mu.RUnlock()
 		if EnableDeadlockDetector {
 			ch <- struct{}{}
 		}
-		isCanceled = true
-		s.mu.RUnlock()
 	}
 }
 

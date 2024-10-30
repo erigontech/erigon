@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -81,14 +80,7 @@ func NewBlobSidecarService(
 // ProcessMessage processes a blob sidecar message
 func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint64, msg *cltypes.BlobSidecar) error {
 	if b.test {
-		return b.verifyAndStoreBlobSidecar(nil, msg)
-	}
-
-	headState, cn := b.syncedDataManager.HeadState()
-	defer cn()
-	if headState == nil {
-		b.scheduleBlobSidecarForLaterExecution(msg)
-		return ErrIgnore
+		return b.verifyAndStoreBlobSidecar(msg)
 	}
 
 	// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
@@ -129,14 +121,14 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return ErrInvalidSidecarSlot
 	}
 
-	if err := b.verifyAndStoreBlobSidecar(headState, msg); err != nil {
+	if err := b.verifyAndStoreBlobSidecar(msg); err != nil {
 		return err
 	}
 	b.emitters.Operation().SendBlobSidecar(msg)
 	return nil
 }
 
-func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingBeaconState, msg *cltypes.BlobSidecar) error {
+func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar) error {
 	kzgCtx := kzg.Ctx()
 
 	if !b.test && !cltypes.VerifyCommitmentInclusionProof(msg.KzgCommitment, msg.CommitmentInclusionProof, msg.Index,
@@ -148,8 +140,9 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingB
 	if err := kzgCtx.VerifyBlobKZGProof(gokzg4844.Blob(msg.Blob), gokzg4844.KZGCommitment(msg.KzgCommitment), gokzg4844.KZGProof(msg.KzgProof)); err != nil {
 		return fmt.Errorf("blob KZG proof verification failed: %v", err)
 	}
+
 	if !b.test {
-		if err := b.verifySidecarsSignature(headState, msg.SignedBlockHeader); err != nil {
+		if err := b.verifySidecarsSignature(msg.SignedBlockHeader); err != nil {
 			return err
 		}
 	}
@@ -158,13 +151,20 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(headState *state.CachingB
 	return b.forkchoiceStore.AddPreverifiedBlobSidecar(msg)
 }
 
-func (b *blobSidecarService) verifySidecarsSignature(headState *state.CachingBeaconState, header *cltypes.SignedBeaconBlockHeader) error {
+func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaconBlockHeader) error {
 	parentHeader, ok := b.forkchoiceStore.GetHeader(header.Header.ParentRoot)
 	if !ok {
 		return errors.New("parent header not found")
 	}
 	currentVersion := b.beaconCfg.GetCurrentStateVersion(parentHeader.Slot / b.beaconCfg.SlotsPerEpoch)
 	forkVersion := b.beaconCfg.GetForkVersionByVersion(currentVersion)
+
+	// Load head state
+	headState, cn := b.syncedDataManager.HeadState()
+	defer cn()
+	if headState == nil {
+		return ErrIgnore
+	}
 	domain, err := fork.ComputeDomain(b.beaconCfg.DomainBeaconProposer[:], utils.Uint32ToBytes4(forkVersion), headState.GenesisValidatorsRoot())
 	if err != nil {
 		return err
@@ -173,10 +173,13 @@ func (b *blobSidecarService) verifySidecarsSignature(headState *state.CachingBea
 	if err != nil {
 		return err
 	}
+
 	pk, err := headState.ValidatorPublicKey(int(header.Header.ProposerIndex))
 	if err != nil {
 		return err
 	}
+	cn()
+
 	if ok, err = bls.Verify(header.Signature[:], sigRoot[:], pk[:]); err != nil {
 		return err
 	}
@@ -228,13 +231,7 @@ func (b *blobSidecarService) loop(ctx context.Context) {
 				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
 				return true
 			}
-			headState, cn := b.syncedDataManager.HeadState()
-			defer cn()
-			if headState == nil {
-				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-				return false
-			}
-			if err := b.verifyAndStoreBlobSidecar(headState, job.blobSidecar); err != nil {
+			if err := b.verifyAndStoreBlobSidecar(job.blobSidecar); err != nil {
 				log.Trace("blob sidecar verification failed", "err", err,
 					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
 				return true
