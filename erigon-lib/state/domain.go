@@ -32,6 +32,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/metrics"
 	btree2 "github.com/tidwall/btree"
@@ -757,7 +758,8 @@ type DomainRoTx struct {
 	keyBuf [60]byte // 52b key and 8b for inverted step
 	comBuf []byte
 
-	valsC kv.Cursor
+	valsC       kv.Cursor
+	vcParentPtr atomic.Uintptr
 
 	getFromFileCache *DomainGetFromFileCache
 }
@@ -1857,8 +1859,14 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 }
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	if dt.valsC != nil {
-		return dt.valsC, nil
+	eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
+
+	if dt.valsC != nil { // close cursor opened by different tx
+		if !dt.vcParentPtr.CompareAndSwap(dt.vcParentPtr.Load(), eface[1]) {
+			return dt.valsC, nil
+		}
+		dt.valsC.Close()
+		dt.valsC = nil
 	}
 
 	if dt.d.largeVals {
