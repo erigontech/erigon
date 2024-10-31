@@ -187,7 +187,7 @@ func init() {
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
-	case rules.IsOsaka:
+	case rules.IsVerkle:
 		return PrecompiledAddressesCancun
 	case rules.IsPrague:
 		return PrecompiledAddressesPrague

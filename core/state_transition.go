@@ -406,7 +406,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	st.gasRemaining -= gas
 
-	if rules.IsOsaka {
+	if rules.IsVerkle {
 		statelessGasOrigin := st.evm.TxContext.Accesses.TouchTxOriginAndComputeGas(msg.From().Bytes())
 		if !tryConsumeGas(&st.gasRemaining, statelessGasOrigin) {
 			return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientBalanceWitness, st.gasRemaining, gas)
@@ -492,7 +492,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 	st.state.AddBalance(coinbase, amount)
-	if rules.IsOsaka && amount.Sign() != 0 {
+	if rules.IsVerkle && amount.Sign() != 0 {
 		st.evm.Accesses.TouchFullAccount(st.evm.Context.Coinbase[:], true)
 	}
 	if !msg.IsFree() && rules.IsLondon {

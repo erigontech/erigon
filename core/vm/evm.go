@@ -39,7 +39,7 @@ var emptyCodeHash = crypto.Keccak256Hash(nil)
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
-	case evm.chainRules.IsOsaka:
+	case evm.chainRules.IsVerkle:
 		precompiles = PrecompiledContractsBerlin
 	case evm.chainRules.IsNapoli:
 		precompiles = PrecompiledContractsNapoli
@@ -117,7 +117,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
 	}
-	if txCtx.Accesses == nil && chainConfig.IsOsaka(blockCtx.Time) {
+	if txCtx.Accesses == nil && chainConfig.IsVerkle(blockCtx.Time) {
 		evm.TxContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
 	}
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
@@ -130,7 +130,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
-	if txCtx.Accesses == nil && evm.chainRules.IsOsaka {
+	if txCtx.Accesses == nil && evm.chainRules.IsVerkle {
 		evm.TxContext.Accesses = statedb.NewAccessWitness(vkutils.NewPointCache())
 	}
 	// ensure the evm is reset to be used again
@@ -204,7 +204,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	var creation bool
 	if typ == CALL {
 		if !evm.intraBlockState.Exist(addr) {
-			if !isPrecompile && evm.chainRules.IsOsaka {
+			if !isPrecompile && evm.chainRules.IsVerkle {
 				// add proof of absence to witness
 				wgas := evm.Accesses.TouchFullAccount(addr.Bytes(), false)
 				if gas < wgas {
@@ -412,7 +412,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 	}
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back
-	if evm.chainRules.IsBerlin && !evm.chainRules.IsOsaka {
+	if evm.chainRules.IsBerlin && !evm.chainRules.IsVerkle {
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
 	// Ensure there's no existing contract already at the designated address
@@ -439,7 +439,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		return nil, address, gasRemaining, nil
 	}
 
-	if evm.chainRules.IsOsaka {
+	if evm.chainRules.IsVerkle {
 		if !contract.UseGas(evm.Accesses.TouchAndChargeContractCreateInit(address.Bytes(), value.Sign() != 0)) {
 			err = ErrOutOfGas
 		}
@@ -474,7 +474,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		// }
 
 		// [SPIDERMAN]
-		if !evm.chainRules.IsOsaka {
+		if !evm.chainRules.IsVerkle {
 			createDataGas := uint64(len(ret)) * params.CreateDataGas
 			if !contract.UseGas(createDataGas) {
 				err = ErrCodeStoreOutOfGas
@@ -505,7 +505,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		}
 	}
 
-	// if err == nil && evm.chainRules.IsOsaka {
+	// if err == nil && evm.chainRules.IsVerkle {
 	// 	if !contract.UseGas(evm.TxContext.Accesses.TouchAndChargeContractCreateCompleted(address.Bytes()[:])) {
 	// 		evm.intraBlockState.RevertToSnapshot(snapshot)
 	// 		err = ErrOutOfGas

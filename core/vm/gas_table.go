@@ -387,7 +387,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 	} else if !evm.IntraBlockState().Exist(address) {
 		gas += params.CallNewAccountGas
 	}
-	if transfersValue && !evm.chainRules.IsOsaka {
+	if transfersValue && !evm.chainRules.IsVerkle {
 		gas += params.CallValueTransferGas
 	}
 	memoryGas, err := memoryGasCost(mem, memorySize)
@@ -410,7 +410,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 		return 0, ErrGasUintOverflow
 	}
 
-	if evm.chainRules.IsOsaka {
+	if evm.chainRules.IsVerkle {
 		if transfersValue {
 			gas, overflow = math.SafeAdd(gas, evm.Accesses.TouchAndChargeValueTransfer(contract.Address().Bytes()[:], address.Bytes()[:]))
 			if overflow {
@@ -430,7 +430,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 		gas      uint64
 		overflow bool
 	)
-	if !stack.Back(2).IsZero() && !evm.chainRules.IsOsaka {
+	if !stack.Back(2).IsZero() && !evm.chainRules.IsVerkle {
 		gas += params.CallValueTransferGas
 	}
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
@@ -446,7 +446,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if evm.chainRules.IsOsaka {
+	if evm.chainRules.IsVerkle {
 		address := libcommon.Address(stack.Back(1).Bytes20())
 		transfersValue := !stack.Back(2).IsZero()
 		if transfersValue {

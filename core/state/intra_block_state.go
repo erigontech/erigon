@@ -770,7 +770,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
 	precompiles []libcommon.Address, list types2.AccessList,
 ) {
-	if rules.IsBerlin && !rules.IsOsaka {
+	if rules.IsBerlin && !rules.IsVerkle {
 		// Clear out any leftover from previous executions
 		al := newAccessList()
 		sdb.accessList = al

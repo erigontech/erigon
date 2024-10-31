@@ -69,6 +69,7 @@ type Config struct {
 	CancunTime   *big.Int `json:"cancunTime,omitempty"`
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
+	VerkleTime   *big.Int `json:"verkleTime,omitempty"`
 
 	// Optional EIP-4844 parameters
 	MinBlobGasPrice            *uint64 `json:"minBlobGasPrice,omitempty"`
@@ -248,6 +249,11 @@ func (c *Config) IsPrague(time uint64) bool {
 // IsOsaka returns whether time is either equal to the Osaka fork time or greater.
 func (c *Config) IsOsaka(time uint64) bool {
 	return isForked(c.OsakaTime, time)
+}
+
+// IsVerkle returns whether time is either equal to the Verkle fork time or greater.
+func (c *Config) IsVerkle(time uint64) bool {
+	return isForked(c.VerkleTime, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) *common.Address {
@@ -516,7 +522,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli                                bool
-	IsPrague, IsOsaka                                 bool
+	IsPrague, IsOsaka, IsVerkle                       bool
 	IsAura                                            bool
 }
 

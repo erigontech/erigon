@@ -125,8 +125,8 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
-	case evm.ChainRules().IsOsaka:
-		jt = &osakaInstructionSet
+	case evm.ChainRules().IsVerkle:
+		jt = &verkleInstructionSet
 	case evm.ChainRules().IsPrague:
 		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
@@ -261,7 +261,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 		}
 
-		if in.evm.chainRules.IsOsaka && !contract.IsDeployment {
+		if in.evm.chainRules.IsVerkle && !contract.IsDeployment {
 			// if the PC ends up in a new "chunk" of verkleized code, charge the
 			// associated costs.
 			contractAddr := contract.Address()
