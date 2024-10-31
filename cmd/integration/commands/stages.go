@@ -1280,10 +1280,10 @@ var _allSnapshotsSingleton *freezeblocks.RoSnapshots
 var _allBorSnapshotsSingleton *heimdall.RoSnapshots
 var _allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
 var _aggSingleton *libstate.Aggregator
+var _bridgeStoreSingleton bridge.Store
+var _heimdallStoreSingleton heimdall.Store
 
 func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *heimdall.RoSnapshots, *libstate.Aggregator, *freezeblocks.CaplinSnapshots, bridge.Store, heimdall.Store) {
-	var bridgeStore bridge.Store
-	var heimdallStore heimdall.Store
 
 	openSnapshotOnce.Do(func() {
 		dirs := datadir.New(datadirCli)
@@ -1293,8 +1293,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = heimdall.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
-		bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
-		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
+		_bridgeStoreSingleton = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
+		_heimdallStoreSingleton = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
 		var err error
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, heimdallStore, bridgeStore)
 
