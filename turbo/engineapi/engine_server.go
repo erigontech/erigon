@@ -964,7 +964,9 @@ func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {
 	if err != nil || !shouldWait {
 		return false, err
 	}
-	for i := 0; i < 1000; i++ {
+	// Times out after 8s - loosely based on timeouts of FCU and NewPayload for Ethereum specs
+	// Look for "timeout" in, for instance, https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md
+	for i := 0; i < 800; i++ {
 		time.Sleep(10 * time.Millisecond)
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {
