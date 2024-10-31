@@ -203,19 +203,18 @@ du -hsc /erigon/snapshots/*
 
 ### Erigon3 changes from Erigon2
 
-- Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
-- ExecutionStage - now including many E2 stages: stage_hash_state, stage_trie, stage_log_index, stage_history_index,
-  stage_trace_index
+- Initial sync does download LatestState and it's history - no re-exec from 0 anymore.
+- ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
 - E3 can execute 1 historical transaction - without executing it's block - because history/indices have
   transaction-granularity, instead of block-granularity.
 - E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
   above).
-- `--sync.loop.block.limit` is enabled by default. (Default: `5_000`.
-  Set `--sync.loop.block.limit=10_000 --batchSize=2g` to increase sync speed on good hardware).
-- datadir/chaindata is small now - to prevent it's grow: we recommend set `--batchSize <= 2G`. And it's fine to
-  `rm -rf chaindata`
+- Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
+- `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. To prevent it's grow: recommend `--batchSize <= 1G`
 - can symlink/mount latest state to fast drive and history to cheap drive
-- Archive Node is default. Full Node: `--prune.mode=full`, Minimal Node (EIP-4444): `--prune.mode=minimal`
+- `--internalcl` is enabled by default. to disable use `--externalcl`
+- `--prune` flags changed: default `--prune.mode=archive`, FullNode: `--prune.mode=full`, MinimalNode (EIP-4444):
+  `--prune.mode=minimal`.
 
 ### Logging
 
