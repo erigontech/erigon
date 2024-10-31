@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -67,10 +68,10 @@ func (vt *VerkleTrie) DbNodeResolver(path []byte) ([]byte, error) {
 		return vt.tx.GetOne(kv.VerkleTrie, fullPath)
 	}
 	tx, err := vt.db.BeginRo(context.Background())
-	defer tx.Rollback()
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 	return tx.GetOne(kv.VerkleTrie, fullPath)
 }
 
@@ -106,13 +107,13 @@ func (t *VerkleTrie) GetAccount(addr common.Address) (*accounts.Account, error) 
 		return nil, fmt.Errorf("GetAccount (%x) error: %v", addr, err)
 	}
 
-	emptyAccount := true
-	for i := 0; values != nil && i <= vkutils.CodeHashLeafKey && emptyAccount; i++ {
-		emptyAccount = emptyAccount && values[i] == nil
-	}
-	if emptyAccount {
-		return nil, nil
-	}
+	// emptyAccount := true
+	// for i := 0; values != nil && i <= vkutils.CodeHashLeafKey && emptyAccount; i++ {
+		// emptyAccount = emptyAccount && values[i] == nil
+	// }
+	// if emptyAccount {
+		// return nil, nil
+	// }
 	if len(values[vkutils.NonceLeafKey]) > 0 {
 		acc.Nonce = binary.LittleEndian.Uint64(values[vkutils.NonceLeafKey])
 	}
@@ -153,6 +154,11 @@ func (t *VerkleTrie) UpdateAccount(addr common.Address, acc *accounts.Account) e
 		stem           = t.pointCache.GetTreeKeyVersionCached(addr[:])
 	)
 
+	if addr == [20]byte{ 224,122,101,136,176,109,180,145,163,22,33,147,25,166,86,6,3,128,86,66} {
+		_ = 20
+		log.Info("Nada")
+	}
+
 	// Only evaluate the polynomial once
 	values[vkutils.VersionLeafKey] = zero[:]
 	values[vkutils.NonceLeafKey] = nonce[:]
@@ -174,6 +180,7 @@ func (t *VerkleTrie) UpdateAccount(addr common.Address, acc *accounts.Account) e
 		return errInvalidRootType
 	}
 	if err != nil {
+		log.Error("[SPIDERMAN] Error in UpdateAccount", "error", err, "addr", addr)
 		return fmt.Errorf("UpdateAccount (%x) error: %v", addr, err)
 	}
 	// TODO figure out if the code size needs to be updated, too
@@ -206,25 +213,25 @@ func (vt *VerkleTrie) UpdateStorage(address common.Address, key, value []byte) e
 }
 
 func (t *VerkleTrie) DeleteAccount(addr common.Address) error {
-	var (
-		err    error
-		values = make([][]byte, verkle.NodeWidth)
-		stem   = t.pointCache.GetTreeKeyVersionCached(addr[:])
-	)
+	// var (
+	// 	err    error
+	// 	values = make([][]byte, verkle.NodeWidth)
+	// 	stem   = t.pointCache.GetTreeKeyVersionCached(addr[:])
+	// )
 
-	for i := 0; i < verkle.NodeWidth; i++ {
-		values[i] = zero[:]
-	}
+	// for i := 0; i < verkle.NodeWidth; i++ {
+	// 	values[i] = zero[:]
+	// }
 
-	switch root := t.root.(type) {
-	case *verkle.InternalNode:
-		err = root.InsertValuesAtStem(stem, values, t.DbNodeResolver)
-	default:
-		return errInvalidRootType
-	}
-	if err != nil {
-		return fmt.Errorf("DeleteAccount (%x) error: %v", addr, err)
-	}
+	// switch root := t.root.(type) {
+	// case *verkle.InternalNode:
+	// 	err = root.InsertValuesAtStem(stem, values, t.DbNodeResolver)
+	// default:
+	// 	return errInvalidRootType
+	// }
+	// if err != nil {
+	// 	return fmt.Errorf("DeleteAccount (%x) error: %v", addr, err)
+	// }
 	// TODO figure out if the code size needs to be updated, too
 
 	return nil

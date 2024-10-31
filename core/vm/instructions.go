@@ -408,8 +408,13 @@ func opCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	// codeCopy := getData(scope.Contract.Code, uint64CodeOffset, length.Uint64())
 	paddedCodeCopy, copyOffset, nonPaddedCopyLength := getDataAndAdjustedBounds(scope.Contract.Code, uint64CodeOffset, length.Uint64())
 	if interpreter.evm.chainRules.IsOsaka && !scope.Contract.IsDeployment {
-		scope.Contract.UseGas(interpreter.evm.TxContext.Accesses.(*state.AccessWitness).TouchCodeChunksRangeAndChargeGas(scope.Contract.Address().Bytes(), copyOffset, nonPaddedCopyLength, uint64(len(scope.Contract.Code)), false))
+		statelessGas := interpreter.evm.TxContext.Accesses.(*state.AccessWitness).TouchCodeChunksRangeAndChargeGas(scope.Contract.Address().Bytes(), copyOffset, nonPaddedCopyLength, uint64(len(scope.Contract.Code)), false)
+		if !scope.Contract.UseGas(statelessGas) {
+			scope.Contract.Gas = 0
+			return nil, ErrOutOfGas
+		}
 	}
+
 	scope.Memory.Set(memOffset.Uint64(), uint64(len(paddedCodeCopy)), paddedCodeCopy)
 	return nil, nil
 }
@@ -431,8 +436,11 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 			self: addr,
 		}
 		paddedCodeCopy, copyOffset, nonPaddedCopyLength := getDataAndAdjustedBounds(code, codeOffset.Uint64(), length.Uint64())
-		gas := interpreter.evm.TxContext.Accesses.(*state.AccessWitness).TouchCodeChunksRangeAndChargeGas(addr[:], copyOffset, nonPaddedCopyLength, uint64(len(contract.Code)), false)
-		scope.Contract.UseGas(gas)
+		statelessGas := interpreter.evm.TxContext.Accesses.(*state.AccessWitness).TouchCodeChunksRangeAndChargeGas(addr[:], copyOffset, nonPaddedCopyLength, uint64(len(contract.Code)), false)
+		if !scope.Contract.UseGas(statelessGas) {
+			scope.Contract.Gas = 0
+			return nil, ErrOutOfGas
+		}		
 		scope.Memory.Set(memOffset.Uint64(), length.Uint64(), paddedCodeCopy)
 	} else {
 		codeCopy := getDataBig(interpreter.evm.intraBlockState.GetCode(addr), &codeOffset, length.Uint64())

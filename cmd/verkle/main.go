@@ -566,7 +566,7 @@ func main() {
 	mainDb := flag.String("datadir", "chaindata", "path to the chaindata database file")
 	verkleDb := flag.String("verkle-chaindata", "out", "path to the output chaindata database file")
 	workersCount := flag.Uint("workers", 5, "amount of goroutines")
-	tmpdir := flag.String("tmpdir", "/tmp/etl-temp", "amount of goroutines")
+	tmpdir := flag.String("tmpdir", "/tmp/etl-temp", "temporary directory for temp files")
 	action := flag.String("action", "", "action to execute (hashstate, bucketsizes, verkle)")
 	disableLookups := flag.Bool("disable-lookups", false, "disable lookups generation (more compact database)")
 

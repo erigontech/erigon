@@ -268,3 +268,6 @@ func gasOpBlockhashEIP2935(evm *EVM, contract *Contract, stack *stack.Stack, mem
 	}
 	return params.WarmStorageReadCostEIP2929, nil
 }
+func st() {
+	
+}

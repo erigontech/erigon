@@ -22,7 +22,7 @@ func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState,
 }
 
 func storeHash(num uint64, hash libcommon.Hash, state *state.IntraBlockState) {
-	state.Witness().TouchFullAccount(params.HistoryStorageAddress[:], true)
+	// state.Witness().TouchFullAccount(params.HistoryStorageAddress[:], true)
 	slotNum := num % params.BlockHashHistoryServeWindow
 	storageSlot := libcommon.BytesToHash(uint256.NewInt(slotNum).Bytes())
 	parentHashInt := uint256.NewInt(0).SetBytes32(hash.Bytes())

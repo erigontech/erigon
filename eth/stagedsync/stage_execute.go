@@ -425,6 +425,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 		return nil
 	}
 
+	// [SPIDERMAN]
+	to = s.BlockNumber + 600
+
 	if to > s.BlockNumber+16 {
 		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}

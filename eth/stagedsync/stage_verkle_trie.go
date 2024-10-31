@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
+	"slices"
 
-	// "github.com/ethereum/go-verkle"
+	"github.com/ethereum/go-verkle"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -15,11 +18,16 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	// "github.com/ledgerwatch/erigon/turbo/trie/vtree"
+	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
@@ -70,6 +78,10 @@ func SpawnVerkleTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ct
 	// if to > s.BlockNumber+16 {
 	logger.Info(fmt.Sprintf("[%s] Computing Verkle Root", logPrefix), "from", s.BlockNumber, "to", to)
 	// }
+
+	if s.BlockNumber == 0 {
+		GenerateGenesisTree(tx, core.VerkleGenDevnet6GenesisBlock())
+	}
 
 	rootHash, err := rawdb.ReadVerkleRoot(tx, s.BlockNumber)
 	if err != nil {
@@ -199,6 +211,129 @@ func SpawnVerkleTrieStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ct
 
 	logger.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", to, "Verkle Root", newRoot)
 	return newRoot, nil
+}
+
+func sortedAllocKeys(m types.GenesisAlloc) []string {
+	keys := make([]string, len(m))
+	i := 0
+	for k := range m {
+		keys[i] = string(k.Bytes())
+		i++
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+
+func GenerateGenesisTree(tx kv.RwTx, g *types.Genesis) {
+	// defer tx.Rollback()
+
+		// Construct header
+		head := &types.Header{
+			Number:        new(big.Int).SetUint64(g.Number),
+			Nonce:         types.EncodeNonce(g.Nonce),
+			Time:          g.Timestamp,
+			ParentHash:    g.ParentHash,
+			Extra:         g.ExtraData,
+			GasLimit:      g.GasLimit,
+			GasUsed:       g.GasUsed,
+			Difficulty:    g.Difficulty,
+			MixDigest:     g.Mixhash,
+			Coinbase:      g.Coinbase,
+			BaseFee:       g.BaseFee,
+			BlobGasUsed:   g.BlobGasUsed,
+			ExcessBlobGas: g.ExcessBlobGas,
+			AuRaStep:      g.AuRaStep,
+			AuRaSeal:      g.AuRaSeal,
+		}
+		if g.GasLimit == 0 {
+			head.GasLimit = params.GenesisGasLimit
+		}
+		if g.Difficulty == nil {
+			head.Difficulty = params.GenesisDifficulty
+		}
+		if g.Config != nil && g.Config.IsLondon(0) {
+			if g.BaseFee != nil {
+				head.BaseFee = g.BaseFee
+			} else {
+				head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+			}
+		}
+		if g.Config != nil && g.Config.IsCancun(g.Timestamp) {
+			if g.BlobGasUsed != nil {
+				head.BlobGasUsed = g.BlobGasUsed
+			} else {
+				head.BlobGasUsed = new(uint64)
+			}
+			if g.ExcessBlobGas != nil {
+				head.ExcessBlobGas = g.ExcessBlobGas
+			} else {
+				head.ExcessBlobGas = new(uint64)
+			}
+			if g.ParentBeaconBlockRoot != nil {
+				head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
+			} else {
+				head.ParentBeaconBlockRoot = &libcommon.Hash{}
+			}
+		}
+
+
+	r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+	statedb := state.New(r)
+
+	//Create in-memory instance of verkle trie
+	vTrie := trie.NewVerkleTrie(verkle.New(), nil, tx, vkutils.NewPointCache(), true)
+
+	// Loop through alloc keys
+	keys := sortedAllocKeys(g.Alloc)
+	for _, key := range keys {
+		addr := libcommon.BytesToAddress([]byte(key))
+		account := g.Alloc[addr]
+
+		coreAcc := &accounts.Account{
+			Nonce:    account.Nonce,
+			Balance:  *uint256.MustFromBig(account.Balance),
+			CodeHash: crypto.Keccak256Hash(account.Code),
+		}
+
+		// Update account in verkle trie
+		vTrie.UpdateAccount(addr, coreAcc)
+		if account.Code != nil && len(account.Code) > 0 {
+			vTrie.UpdateContractCode(addr, crypto.Keccak256Hash(account.Code), account.Code)
+		}
+
+		//Update account bits to (temp) statedb
+		statedb.AddBalance(addr, &coreAcc.Balance)
+		statedb.SetCode(addr, account.Code)
+		statedb.SetNonce(addr, account.Nonce)
+
+		// Add storage bits to verkle trie and statedb
+		for storageKey, storageItem := range account.Storage {
+			vTrie.UpdateStorage(addr, storageKey.Bytes(), storageItem.Bytes())
+			statedb.SetState(addr, &storageKey, *uint256.NewInt(0).SetBytes(storageItem.Bytes()))
+		}
+
+		if len(account.Constructor) > 0 {
+			if _, err := core.SysCreate(addr, account.Constructor, *g.Config, statedb, head); err != nil {
+				return
+			}
+		}
+		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
+			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
+		}
+
+	}
+
+	if err := statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
+		return
+	}
+	var err error
+	head.Root, err = vTrie.Commit(true)
+	if err != nil {
+		log.Error("Error calculating verkle trie root", "Msg", err)
+		return
+	}
+	rawdb.WriteVerkleRoot(tx, 0, head.Root)
 }
 
 // TODO @somnathb1
