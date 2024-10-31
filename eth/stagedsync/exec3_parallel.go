@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	rand2 "golang.org/x/exp/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -375,6 +376,9 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			pe.applyWorker.RunTxTask(txTask, pe.isMining)
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
+			}
+			if pe.cfg.chaosMonkey && !pe.execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txTask.TxIndex == 0 && !pe.cfg.badBlockHalt {
+				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("monkey in the datacenter: %w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}
 			// TODO: post-validation of gasUsed and blobGasUsed
 			i++
