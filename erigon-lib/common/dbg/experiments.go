@@ -107,69 +107,6 @@ func DirtySpace() uint64 {
 func MergeTr() int { return mergeTr }
 
 var (
-	bigRoTx    uint
-	getBigRoTx sync.Once
-)
-
-// DEBUG_BIG_RO_TX_KB - print logs with info about large read-only transactions
-// DEBUG_BIG_RW_TX_KB - print logs with info about large read-write transactions
-// DEBUG_SLOW_COMMIT_MS - print logs with commit timing details if commit is slower than this threshold
-func BigRoTxKb() uint {
-	getBigRoTx.Do(func() {
-		v, _ := os.LookupEnv("DEBUG_BIG_RO_TX_KB")
-		if v != "" {
-			i, err := strconv.Atoi(v)
-			if err != nil {
-				panic(err)
-			}
-			bigRoTx = uint(i)
-			log.Info("[Experiment]", "DEBUG_BIG_RO_TX_KB", bigRoTx)
-		}
-	})
-	return bigRoTx
-}
-
-var (
-	bigRwTx    uint
-	getBigRwTx sync.Once
-)
-
-func BigRwTxKb() uint {
-	getBigRwTx.Do(func() {
-		v, _ := os.LookupEnv("DEBUG_BIG_RW_TX_KB")
-		if v != "" {
-			i, err := strconv.Atoi(v)
-			if err != nil {
-				panic(err)
-			}
-			bigRwTx = uint(i)
-			log.Info("[Experiment]", "DEBUG_BIG_RW_TX_KB", bigRwTx)
-		}
-	})
-	return bigRwTx
-}
-
-var (
-	slowCommit     time.Duration
-	slowCommitOnce sync.Once
-)
-
-func SlowCommit() time.Duration {
-	slowCommitOnce.Do(func() {
-		v, _ := os.LookupEnv("SLOW_COMMIT")
-		if v != "" {
-			var err error
-			slowCommit, err = time.ParseDuration(v)
-			if err != nil {
-				panic(err)
-			}
-			log.Info("[Experiment]", "SLOW_COMMIT", slowCommit.String())
-		}
-	})
-	return slowCommit
-}
-
-var (
 	slowTx     time.Duration
 	slowTxOnce sync.Once
 )
@@ -195,38 +132,6 @@ func StopBeforeStage() string { return stopBeforeStage }
 // perform all same the functionality, but due to reverse compatibility reasons we are going to
 // leave it.
 func StopAfterStage() string { return stopAfterStage }
-
-var (
-	stopAfterReconst     bool
-	stopAfterReconstOnce sync.Once
-)
-
-func StopAfterReconst() bool {
-	stopAfterReconstOnce.Do(func() {
-		v, _ := os.LookupEnv("STOP_AFTER_RECONSTITUTE")
-		if v == "true" {
-			stopAfterReconst = true
-			log.Info("[Experiment]", "STOP_AFTER_RECONSTITUTE", stopAfterReconst)
-		}
-	})
-	return stopAfterReconst
-}
-
-var (
-	snapshotVersion     uint8
-	snapshotVersionOnce sync.Once
-)
-
-func SnapshotVersion() uint8 {
-	snapshotVersionOnce.Do(func() {
-		v, _ := os.LookupEnv("SNAPSHOT_VERSION")
-		if i, _ := strconv.ParseUint(v, 10, 8); i > 0 {
-			snapshotVersion = uint8(i)
-			log.Info("[Experiment]", "SNAPSHOT_VERSION", snapshotVersion)
-		}
-	})
-	return snapshotVersion
-}
 
 var (
 	logHashMismatchReason     bool
