@@ -1441,17 +1441,15 @@ func (r *BlockReader) LastFrozenSpanId() uint64 {
 
 func (r *BlockReader) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error) {
 	if r.heimdallStore == nil {
-		fmt.Printf("[dbg] herer2\n")
 		err := fmt.Errorf("span %d not found: no heimdall store", spanId)
+		panic(err)
 		return nil, false, fmt.Errorf("%w: %w", heimdall.ErrSpanNotFound, err)
 	}
 
 	if tx == nil {
-		fmt.Printf("[dbg] herer1\n")
 		return r.heimdallStore.Spans().Entity(ctx, spanId)
 	}
 
-	fmt.Printf("[dbg] herer3: %T\n", r.heimdallStore.Spans())
 	return r.heimdallStore.Spans().(interface {
 		WithTx(kv.Tx) heimdall.EntityStore[*heimdall.Span]
 	}).WithTx(tx).Entity(ctx, spanId)
