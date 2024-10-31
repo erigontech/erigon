@@ -123,13 +123,16 @@ func (m *validatorMonitorImpl) runReportProposerStatus() {
 	ticker := time.NewTicker(time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		headState := m.syncedData.HeadStateReader()
+		headState, cn := m.syncedData.HeadState()
+
 		if headState == nil {
+			cn()
 			continue
 		}
 		// check proposer in previous slot
 		prevSlot := m.ethClock.GetCurrentSlot() - 1
 		proposerIndex, err := headState.GetBeaconProposerIndexForSlot(prevSlot)
+		cn()
 		if err != nil {
 			log.Warn("failed to get proposer index", "slot", prevSlot, "err", err)
 			return
