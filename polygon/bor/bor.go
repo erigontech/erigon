@@ -1452,6 +1452,9 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = s
+		if heimdallSpan == nil {
+			panic("heimdallSpan == nil")
+		}
 	} else if c.spanReader != nil {
 		span, ok, err := c.spanReader.Span(context.Background(), newSpanID)
 		if err != nil {
@@ -1462,8 +1465,14 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = span
+		if heimdallSpan == nil {
+			panic(fmt.Sprintf("heimdallSpan == nil: %T", c.spanReader))
+		}
 	} else {
 		heimdallSpan = chain.Chain.(ChainHeaderReader).BorSpan(newSpanID)
+		if heimdallSpan == nil {
+			panic(fmt.Sprintf("heimdallSpan == nil: %T", chain.Chain))
+		}
 	}
 
 	// check if chain id matches with heimdall span
