@@ -650,7 +650,7 @@ non-root user for security reasons. For more information about how to do this, r
 
 ### Erigon3 perf tricks
 
-- `--sync.loop.block.limit=10_000 --batchSize=2g` - likely will help for sync speed.
+- on BorMainnet may help: `--sync.loop.block.limit=10_000`
 - on cloud-drives (good throughput, bad latency) - can enable OS's brain to pre-fetch: `SNAPSHOT_MADV_RND=false`
 - can lock latest state in RAM - to prevent from eviction (node may face high historical RPC traffic without impacting
   Chain-Tip perf):
