@@ -317,12 +317,10 @@ func (api *ZkEvmAPIImpl) GetBatchDataByNumbers(ctx context.Context, batchNumbers
 	bds := make([]*types.BatchDataSlim, 0, len(batchNumbers.Numbers))
 
 	for _, batchRpcNumber := range batchNumbers.Numbers {
-		// looks weird but we're using the rpc.BlockNumber type to represent the batch number, LatestBlockNumber represents latest batch
-		if batchRpcNumber == rpc.LatestBlockNumber {
-			batchRpcNumber = rpc.BlockNumber(highestBatchNo)
+		batchNo, _, err := rpchelper.GetBatchNumber(batchRpcNumber, tx, nil)
+		if err != nil {
+			return nil, err
 		}
-
-		batchNo := batchRpcNumber.Uint64()
 
 		bd := &types.BatchDataSlim{
 			Number: types.ArgUint64(batchNo),
@@ -419,7 +417,7 @@ func (api *ZkEvmAPIImpl) getBatchBlocksWithSenders(ctx context.Context, tx kv.Tx
 
 // GetBatchByNumber returns a batch from the current canonical chain. If number is nil, the
 // latest known batch is returned.
-func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.BlockNumber, fullTx *bool) (json.RawMessage, error) {
+func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, rpcBatchNumber rpc.BlockNumber, fullTx *bool) (json.RawMessage, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -431,6 +429,11 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 	// unless the node is still syncing - in which case 'current block' is used
 	// this is the batch number of stage progress of the Finish stage
 	highestBatchNo, err := GetHighestBatchSynced(tx, hermezDb)
+	if err != nil {
+		return nil, err
+	}
+
+	batchNo, _, err := rpchelper.GetBatchNumber(rpcBatchNumber, tx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -447,16 +450,9 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.B
 		}
 
 	}
-	if batchNumber.Uint64() > highestBatchNo {
+	if batchNo > highestBatchNo {
 		return nil, nil
 	}
-
-	// looks weird but we're using the rpc.BlockNumber type to represent the batch number, LatestBlockNumber represents latest batch
-	if batchNumber == rpc.LatestBlockNumber {
-		batchNumber = rpc.BlockNumber(highestBatchNo)
-	}
-
-	batchNo := batchNumber.Uint64()
 
 	batch := &types.Batch{
 		Number: types.ArgUint64(batchNo),
@@ -1797,14 +1793,19 @@ func (api *ZkEvmAPIImpl) GetForkById(ctx context.Context, forkId hexutil.Uint64)
 }
 
 // GetForkIdByBatchNumber returns the fork ID given the provided batch number
-func (api *ZkEvmAPIImpl) GetForkIdByBatchNumber(ctx context.Context, batchNumber rpc.BlockNumber) (hexutil.Uint64, error) {
+func (api *ZkEvmAPIImpl) GetForkIdByBatchNumber(ctx context.Context, rpcBatchNumber rpc.BlockNumber) (hexutil.Uint64, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return hexutil.Uint64(0), err
 	}
 	defer tx.Rollback()
 
-	currentForkId, err := getForkIdByBatchNo(tx, uint64(batchNumber))
+	batchNumber, _, err := rpchelper.GetBatchNumber(rpcBatchNumber, tx, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	currentForkId, err := getForkIdByBatchNo(tx, batchNumber)
 	if err != nil {
 		return 0, err
 	}
