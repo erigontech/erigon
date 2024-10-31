@@ -618,7 +618,7 @@ Loop:
 					usedGas, blobGasUsed = 0, 0
 				}
 
-				if !execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txIndex == 0 && !cfg.badBlockHalt {
+				if cfg.chaosMonkey && !execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txIndex == 0 && !cfg.badBlockHalt {
 					return fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
 				}
 
