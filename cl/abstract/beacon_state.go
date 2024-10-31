@@ -60,6 +60,9 @@ type BeaconStateExtension interface {
 	SetPreviousStateRoot(root common.Hash)
 	GetValidatorActivationChurnLimit() uint64
 	GetPendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal]
+	GetDepositBalanceToConsume() uint64
+	GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit]
+	GetDepositRequestsStartIndex() uint64
 }
 
 type BeaconStateBasic interface {
@@ -126,6 +129,8 @@ type BeaconStateMutator interface {
 	SetPreviousEpochParticipationFlags(flags []cltypes.ParticipationFlags)
 	SetPreviousEpochAttestations(attestations *solid.ListSSZ[*solid.PendingAttestation])
 	SetPendingPartialWithdrawals(*solid.ListSSZ[*solid.PendingPartialWithdrawal])
+	SetPendingDeposits(*solid.ListSSZ[*solid.PendingDeposit])
+	SetDepositBalanceToConsume(uint64)
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)

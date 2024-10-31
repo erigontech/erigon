@@ -19,6 +19,7 @@ package state
 import (
 	"sort"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -54,18 +55,17 @@ func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []u
 	}
 }
 
-func GetValidatorFromDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) solid.Validator {
+func GetValidatorFromDeposit(s abstract.BeaconState, pubkey [48]byte, withdrawalCredentials common.Hash, amount uint64) solid.Validator {
 	conf := s.BeaconConfig()
 
 	validator := solid.NewValidator()
-	validator.SetPublicKey(deposit.Data.PubKey)
-	validator.SetWithdrawalCredentials(deposit.Data.WithdrawalCredentials)
+	validator.SetPublicKey(pubkey)
+	validator.SetWithdrawalCredentials(withdrawalCredentials)
 	validator.SetActivationEligibilityEpoch(conf.FarFutureEpoch)
 	validator.SetActivationEpoch(conf.FarFutureEpoch)
 	validator.SetExitEpoch(conf.FarFutureEpoch)
 	validator.SetWithdrawableEpoch(conf.FarFutureEpoch)
 
-	amount := deposit.Data.Amount
 	// maxEffectiveBalance differs based on the version
 	maxEffectiveBalance := GetMaxEffectiveBalanceByVersion(validator, conf, s.Version())
 	effectiveBalance := min(amount-amount%conf.EffectiveBalanceIncrement, maxEffectiveBalance)
@@ -136,4 +136,23 @@ func isPartiallyWithdrawableValidator(b abstract.BeaconState, validator solid.Va
 
 func ComputeActivationExitEpoch(config *clparams.BeaconChainConfig, epoch uint64) uint64 {
 	return epoch + 1 + config.MaxSeedLookahead
+}
+
+func GetActivationExitChurnLimit(s abstract.BeaconState) uint64 {
+	return min(
+		s.BeaconConfig().MaxPerEpochActivationExitChurnLimit,
+		GetBalanceChurnLimit(s),
+	)
+}
+
+func GetBalanceChurnLimit(s abstract.BeaconState) uint64 {
+	// churn = max(
+	//	  MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,
+	//    get_total_active_balance(state) // CHURN_LIMIT_QUOTIENT
+	// )
+	churn := max(
+		s.BeaconConfig().MinPerEpochChurnLimitElectra,
+		s.GetTotalActiveBalance()/s.BeaconConfig().ChurnLimitQuotient,
+	)
+	return churn - churn%s.BeaconConfig().EffectiveBalanceIncrement
 }

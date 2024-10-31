@@ -196,19 +196,13 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 	validatorIndex, has := s.ValidatorIndexByPubkey(publicKey)
 	if !has {
 		// Check if the deposit is valid
-		if valid, err := isValidDepositSignature(deposit.Data, s.BeaconConfig()); err != nil {
+		if valid, err := statechange.IsValidDepositSignature(deposit.Data, s.BeaconConfig()); err != nil {
 			return err
 		} else if !valid {
 			return nil
 		}
 		// Append validator
-		s.AddValidator(state.GetValidatorFromDeposit(s, deposit), amount)
-		if s.Version() >= clparams.AltairVersion {
-			// Altair forward
-			s.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
-			s.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
-			s.AddInactivityScore(0)
-		}
+		statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, amount)
 		if s.Version() >= clparams.ElectraVersion {
 			s.AppendPendingDeposit(&solid.PendingDeposit{
 				PubKey:                publicKey,

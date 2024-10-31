@@ -119,6 +119,9 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		randaoMixes:                  solid.NewHashVector(int(cfg.EpochsPerHistoricalVector)),
 		validators:                   solid.NewValidatorSet(int(cfg.ValidatorRegistryLimit)),
 		leaves:                       make([]byte, 32*32),
+		pendingDeposits:              solid.NewPendingDepositList(cfg),
+		pendingPartialWithdrawals:    solid.NewPendingWithdrawalList(cfg),
+		pendingConsolidations:        solid.NewPendingConsolidationList(cfg),
 	}
 	state.init()
 	return state
@@ -245,4 +248,16 @@ func (b *BeaconState) EarliestExitEpoch() uint64 {
 
 func (b *BeaconState) ExitBalanceToConsume() uint64 {
 	return b.exitBalanceToConsume
+}
+
+func (b *BeaconState) GetDepositBalanceToConsume() uint64 {
+	return b.depositBalanceToConsume
+}
+
+func (b *BeaconState) GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit] {
+	return b.pendingDeposits
+}
+
+func (b *BeaconState) GetDepositRequestsStartIndex() uint64 {
+	return b.depositRequestsStartIndex
 }

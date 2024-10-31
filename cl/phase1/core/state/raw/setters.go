@@ -535,3 +535,13 @@ func (b *BeaconState) AppendPendingDeposit(deposit *solid.PendingDeposit) {
 	b.pendingDeposits.Append(deposit)
 	b.markLeaf(PendingDepositsLeafIndex)
 }
+
+func (b *BeaconState) SetPendingDeposits(deposits *solid.ListSSZ[*solid.PendingDeposit]) {
+	b.pendingDeposits = deposits
+	b.markLeaf(PendingDepositsLeafIndex)
+}
+
+func (b *BeaconState) SetDepositBalanceToConsume(balance uint64) {
+	b.depositBalanceToConsume = balance
+	b.markLeaf(DepositBalanceToConsumeLeafIndex)
+}

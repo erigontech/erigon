@@ -5,6 +5,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
@@ -16,6 +17,7 @@ var (
 
 const (
 	SizeConsolidationRequest = length.Addr + length.Bytes48 + length.Bytes48
+	SizePendingConsolidation = 8 + 8
 )
 
 type ConsolidationRequest struct {
@@ -67,4 +69,8 @@ func (p *PendingConsolidation) Clone() clonable.Clonable {
 
 func (p *PendingConsolidation) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(p.SourceIndex, p.TargetIndex)
+}
+
+func NewPendingConsolidationList(cfg *clparams.BeaconChainConfig) *ListSSZ[*PendingConsolidation] {
+	return NewStaticListSSZ[*PendingConsolidation](int(cfg.PendingConsolidationsLimit), SizePendingConsolidation)
 }

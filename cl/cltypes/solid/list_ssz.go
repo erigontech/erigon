@@ -173,7 +173,7 @@ func (l *ListSSZ[T]) Truncate(length int) {
 }
 
 func (l *ListSSZ[T]) Cut(length int) {
-	if length > len(l.list) {
+	if length >= len(l.list) {
 		l.list = make([]T, 0)
 	} else {
 		l.list = l.list[length:]

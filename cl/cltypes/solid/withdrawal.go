@@ -4,6 +4,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
@@ -68,4 +69,8 @@ func (p *PendingPartialWithdrawal) Clone() clonable.Clonable {
 
 func (p *PendingPartialWithdrawal) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(p.Index, p.Amount, p.WithdrawableEpoch)
+}
+
+func NewPendingWithdrawalList(cfg *clparams.BeaconChainConfig) *ListSSZ[*PendingPartialWithdrawal] {
+	return NewStaticListSSZ[*PendingPartialWithdrawal](int(cfg.PendingPartialWithdrawalsLimit), SizePendingPartialWithdrawal)
 }

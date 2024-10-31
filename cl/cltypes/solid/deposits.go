@@ -4,6 +4,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
@@ -72,4 +73,8 @@ func (p *PendingDeposit) Clone() clonable.Clonable {
 
 func (p *PendingDeposit) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Slot)
+}
+
+func NewPendingDepositList(cfg *clparams.BeaconChainConfig) *ListSSZ[*PendingDeposit] {
+	return NewStaticListSSZ[*PendingDeposit](int(cfg.PendingDepositLimit), SizePendingDeposit)
 }

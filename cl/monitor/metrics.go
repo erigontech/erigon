@@ -40,6 +40,7 @@ var (
 	ProcessHistoricalRootsUpdateTime        = metrics.GetOrCreateGauge("process_historical_roots_update_time")
 	ProcessParticipationFlagUpdatesTime     = metrics.GetOrCreateGauge("process_participation_flag_updates_time")
 	ProcessSyncCommitteeUpdateTime          = metrics.GetOrCreateGauge("process_sync_committee_update_time")
+	ProcessPendingDepositsTime              = metrics.GetOrCreateGauge("process_pending_deposits_time")
 
 	// Network metrics
 	gossipTopicsMetricCounterPrefix = "gossip_topics_seen"

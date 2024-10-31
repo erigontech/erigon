@@ -145,7 +145,7 @@ func (b *CachingBeaconState) computeExitEpochAndUpdateChurn(exitBalance uint64) 
 		b.EarliestExitEpoch(),
 		ComputeActivationExitEpoch(b.BeaconConfig(), Epoch(b)),
 	)
-	perEpochChurn := b.getActivationExitChurnLimit()
+	perEpochChurn := GetActivationExitChurnLimit(b)
 
 	var exitBalanceToConsume uint64
 	if b.EarliestExitEpoch() < earliestExitEpoch {
@@ -164,23 +164,4 @@ func (b *CachingBeaconState) computeExitEpochAndUpdateChurn(exitBalance uint64) 
 	b.SetExitBalanceToConsume(exitBalanceToConsume)
 	b.SetEarliestExitEpoch(earliestExitEpoch)
 	return earliestExitEpoch
-}
-
-func (b *CachingBeaconState) getActivationExitChurnLimit() uint64 {
-	return min(
-		b.BeaconConfig().MaxPerEpochActivationExitChurnLimit,
-		b.getBalanceChurnLimit(),
-	)
-}
-
-func (b *CachingBeaconState) getBalanceChurnLimit() uint64 {
-	// churn = max(
-	//	  MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,
-	//    get_total_active_balance(state) // CHURN_LIMIT_QUOTIENT
-	// )
-	churn := max(
-		b.BeaconConfig().MinPerEpochChurnLimitElectra,
-		b.GetTotalActiveBalance()/b.BeaconConfig().ChurnLimitQuotient,
-	)
-	return churn - churn%b.BeaconConfig().EffectiveBalanceIncrement
 }
