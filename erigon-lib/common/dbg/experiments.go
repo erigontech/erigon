@@ -35,7 +35,6 @@ var (
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	writeMap            = EnvBool("WRITE_MAP", false)
-	noSync              = EnvBool("NO_SYNC", false)
 	mdbxReadahead       = EnvBool("MDBX_READAHEAD", false)
 	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
@@ -65,10 +64,8 @@ var (
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
 
-	SnapshotMadvRnd       = EnvBool("SNAPSHOT_MADV_RND", true)
-	KvMadvNormalNoLastLvl = EnvString("KV_MADV_NORMAL_NO_LAST_LVL", "") //TODO: move this logic - from hacks to app-level
-	KvMadvNormal          = EnvString("KV_MADV_NORMAL", "")
-	OnlyCreateDB          = EnvBool("ONLY_CREATE_DB", false)
+	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
+	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
 
 	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
 )
@@ -80,7 +77,6 @@ func ReadMemStats(m *runtime.MemStats) {
 }
 
 func WriteMap() bool      { return writeMap }
-func NoSync() bool        { return noSync }
 func MdbxReadAhead() bool { return mdbxReadahead }
 func MdbxLockInRam() bool { return mdbxLockInRam }
 
