@@ -18,11 +18,13 @@ package statechange
 
 import (
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 // ProcessSyncCommitteeUpdate implements processing for the sync committee update. unfortunately there is no easy way to test it.
 func ProcessSyncCommitteeUpdate(s abstract.BeaconState) error {
+	defer monitor.ObserveElaspedTime(monitor.ProcessSyncCommitteeUpdateTime).End()
 	if (state.Epoch(s)+1)%s.BeaconConfig().EpochsPerSyncCommitteePeriod != 0 {
 		return nil
 	}

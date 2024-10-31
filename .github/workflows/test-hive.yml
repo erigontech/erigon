@@ -3,7 +3,7 @@ name: Test Hive
 on:
   push:
     branches:
-        # - main
+        - main
         - release/*
         - docker_pectra
   schedule:
@@ -57,10 +57,15 @@ jobs:
                 echo "Exitcode gt 0"
               fi
             }
-            last_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
-            suites=$(echo "$last_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
-            tests=$(echo "$last_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
-            failed=$(echo "$last_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
+            status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+            suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
+            if [ -z "$suites" ]; then
+              status_line=$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+              suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
+            fi 
+            tests=$(echo "$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
+            failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
+
             echo -e "\n"
             echo "-----------   Results for ${1}-${2}    -----------" 
             echo "Tests: $tests, Failed: $failed"
@@ -75,9 +80,9 @@ jobs:
               exit 1
             fi
           }
+          run_suite engine exchange-capabilities 
           run_suite engine withdrawals
           run_suite engine cancun
-          run_suite engine exchange-capabilities 
-          run_suite engine auth
           run_suite engine api
+          run_suite engine auth
           run_suite rpc compat

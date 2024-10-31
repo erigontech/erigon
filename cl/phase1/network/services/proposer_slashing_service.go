@@ -92,7 +92,8 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 	}
 
 	// Verify the proposer is slashable
-	state := s.syncedDataManager.HeadStateReader()
+	state, cn := s.syncedDataManager.HeadStateReader()
+	defer cn()
 	if state == nil {
 		return ErrIgnore
 	}

@@ -176,6 +176,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		proposerSlashingService,
 		nil,
 		mockValidatorMonitor,
+		false,
 	) // TODO: add tests
 	h.Init()
 	return

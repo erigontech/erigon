@@ -281,6 +281,7 @@ func sortedMapKeys(m reflect.Value) []string {
 }
 
 func runTestFunc(runTest interface{}, t *testing.T, name string, m reflect.Value, key string) {
+	t.Parallel()
 	reflect.ValueOf(runTest).Call([]reflect.Value{
 		reflect.ValueOf(t),
 		reflect.ValueOf(name),

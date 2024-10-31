@@ -76,7 +76,7 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 	return hexutility.UnmarshalFixedText("BlockNonce", input, n[:])
 }
 
-// go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
+//()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
 
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree

@@ -234,7 +234,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		return nil, false
 	}
 
-	fullKey, _ = getter.Next(nil)
+	fullKey, _ = getter.Next(fullKey[:0])
 	return fullKey, true
 }
 
