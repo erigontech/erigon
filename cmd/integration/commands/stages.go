@@ -1366,10 +1366,6 @@ var _blockWriterSingleton *blockio.BlockWriter
 func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {
 		sn, borSn, _, _, bridgeStore, heimdallStore := allSnapshots(context.Background(), db, logger)
-		if heimdallStore == nil {
-			panic("heimdallStore == nil")
-		}
-
 		_blockReaderSingleton = freezeblocks.NewBlockReader(sn, borSn, heimdallStore, bridgeStore)
 		_blockWriterSingleton = blockio.NewBlockWriter()
 	})
