@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	rand2 "golang.org/x/exp/rand"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -616,6 +617,11 @@ Loop:
 					}
 					usedGas, blobGasUsed = 0, 0
 				}
+
+				if !execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txIndex == 0 && !cfg.badBlockHalt {
+					return fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
+				}
+
 				return nil
 			}(); err != nil {
 				if errors.Is(err, context.Canceled) {
