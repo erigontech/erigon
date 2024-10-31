@@ -30,9 +30,9 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 
 	common2 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/params"
 )
 
