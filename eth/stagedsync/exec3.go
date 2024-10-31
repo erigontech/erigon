@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	rand2 "golang.org/x/exp/rand"
 	"runtime"
 	"sync"
 	"sync/atomic"
