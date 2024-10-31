@@ -72,9 +72,9 @@ func unpackDepositLog(data []byte) ([]byte, error) {
 // BeaconDepositContract and returns a FlatRequest object ptr
 func ParseDepositLogs(logs []*types.Log, depositContractAddress libcommon.Address) (*types.FlatRequest, error) {
 	reqData := make([]byte, 0, len(logs)*types.DepositRequestDataLen)
-	for _, log := range logs {
-		if log.Address == depositContractAddress {
-			d, err := unpackDepositLog(log.Data)
+	for _, l := range logs {
+		if l.Address == depositContractAddress {
+			d, err := unpackDepositLog(l.Data)
 			if err != nil {
 				return nil, fmt.Errorf("unable to parse deposit data: %v", err)
 			}
