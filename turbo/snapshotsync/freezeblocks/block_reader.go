@@ -1442,7 +1442,6 @@ func (r *BlockReader) LastFrozenSpanId() uint64 {
 func (r *BlockReader) Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error) {
 	if r.heimdallStore == nil {
 		err := fmt.Errorf("span %d not found: no heimdall store", spanId)
-		panic(err)
 		return nil, false, fmt.Errorf("%w: %w", heimdall.ErrSpanNotFound, err)
 	}
 
