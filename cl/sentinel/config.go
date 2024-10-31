@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"net"
 
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
+
 	"github.com/libp2p/go-libp2p"
 	mplex "github.com/libp2p/go-libp2p-mplex"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -107,15 +109,14 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 		libp2p.ListenAddrs(listen),
 		libp2p.UserAgent("erigon/caplin"),
 		libp2p.Transport(tcp.NewTCPTransport),
+		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 		libp2p.DefaultMuxers,
+		libp2p.NATPortMap(),
+		libp2p.Ping(false),
 	}
 
 	options = append(options, libp2p.Security(noise.ID, noise.New), libp2p.DisableRelay())
-
-	if cfg.EnableUPnP {
-		options = append(options, libp2p.NATPortMap()) // Allow to use UPnP
-	}
 
 	if cfg.HostAddress != "" {
 		options = append(options, libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
