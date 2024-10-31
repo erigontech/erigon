@@ -200,10 +200,16 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	}
 
 	var requestsBundle types2.RequestsBundle
-	if blockWithReceipts.Requests != nil && len(*blockWithReceipts.Requests) > 0 {
-		requests := make([][]byte, len(*blockWithReceipts.Requests))
-		for i, r := range *blockWithReceipts.Requests {
-			requests[i] = r.RequestData
+	if blockWithReceipts.Requests != nil {
+		requests := make([][]byte, len(types.KnownRequestTypes))
+		if len(blockWithReceipts.Requests) == len(types.KnownRequestTypes) {
+			for i, r := range blockWithReceipts.Requests {
+				requests[i] = r.RequestData
+			}
+		} else {
+			for i := 0; i < len(types.KnownRequestTypes); i++ {
+				requests[i] = make([]byte, 0)
+			}
 		}
 		requestsBundle = types2.RequestsBundle{Requests: requests}
 	}

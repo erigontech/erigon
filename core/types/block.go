@@ -1433,7 +1433,7 @@ func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txAmount uin
 type BlockWithReceipts struct {
 	Block    *Block
 	Receipts Receipts
-	Requests *FlatRequests
+	Requests FlatRequests
 }
 
 type rlpEncodable interface {

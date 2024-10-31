@@ -14,6 +14,9 @@ func DequeueWithdrawalRequests7002(syscall consensus.SystemCall) *types.FlatRequ
 		log.Warn("Err with syscall to WithdrawalRequestAddress", "err", err)
 		return nil
 	}
+	if res == nil {
+		res = make([]byte, 0)
+	}
 	// Just append the contract outputs
 	return &types.FlatRequest{Type: types.WithdrawalRequestType, RequestData: res}
 }
