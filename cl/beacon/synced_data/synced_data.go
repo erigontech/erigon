@@ -56,7 +56,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	s.isTryingToWrite.Store(true)
+
 	defer func() {
 		s.isTryingToWrite.Store(false)
 	}()
