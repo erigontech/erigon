@@ -42,8 +42,7 @@ type SyncedDataManager struct {
 
 	headState *state.CachingBeaconState
 
-	mu              sync.RWMutex
-	isTryingToWrite atomic.Bool
+	mu sync.RWMutex
 }
 
 func NewSyncedDataManager(enabled bool, cfg *clparams.BeaconChainConfig) *SyncedDataManager {
@@ -58,9 +57,6 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 		return
 	}
 
-	defer func() {
-		s.isTryingToWrite.Store(false)
-	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
