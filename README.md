@@ -30,7 +30,7 @@ by default.
     - [Config Files TOML](#config-files-toml)
     - [Beacon Chain (Consensus Layer)](#beacon-chain-consensus-layer)
     - [Caplin](#caplin)
-      - [Caplin's Usage](#caplins-usage)
+        - [Caplin's Usage](#caplins-usage)
     - [Multiple Instances / One Machine](#multiple-instances--one-machine)
     - [Dev Chain](#dev-chain)
 - [Key features](#key-features)
@@ -39,24 +39,24 @@ by default.
     - [JSON-RPC daemon](#json-rpc-daemon)
     - [Grafana dashboard](#grafana-dashboard)
 - [FAQ](#faq)
-    - [How much RAM do I need](#how-much-ram-do-i-need)
+    - [Use as library](#use-as-library)
     - [Default Ports and Firewalls](#default-ports-and-firewalls)
-      - [`erigon` ports](#erigon-ports)
-      - [`caplin` ports](#caplin-ports)
-      - [`beaconAPI` ports](#beaconapi-ports)
-      - [`shared` ports](#shared-ports)
-      - [`other` ports](#other-ports)
-      - [Hetzner expecting strict firewall rules](#hetzner-expecting-strict-firewall-rules)
+        - [`erigon` ports](#erigon-ports)
+        - [`caplin` ports](#caplin-ports)
+        - [`beaconAPI` ports](#beaconapi-ports)
+        - [`shared` ports](#shared-ports)
+        - [`other` ports](#other-ports)
+        - [Hetzner expecting strict firewall rules](#hetzner-expecting-strict-firewall-rules)
     - [Run as a separate user - `systemd` example](#run-as-a-separate-user---systemd-example)
-    - [How to get diagnostic for bug report?](#how-to-get-diagnostic-for-bug-report)
-    - [How to run local devnet?](#how-to-run-local-devnet)
+    - [Grab diagnostic for bug report](#grab-diagnostic-for-bug-report)
+    - [Run local devnet](#run-local-devnet)
     - [Docker permissions error](#docker-permissions-error)
-    - [How to run public RPC api](#how-to-run-public-rpc-api)
+    - [Public RPC](#public-rpc)
     - [RaspberyPI](#raspberypi)
     - [Run all components by docker-compose](#run-all-components-by-docker-compose)
-      - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
-      - [Environment Variables](#environment-variables)
-      - [Run](#run)
+        - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
+        - [Environment Variables](#environment-variables)
+        - [Run](#run)
     - [How to change db pagesize](#how-to-change-db-pagesize)
     - [Erigon3 perf tricks](#erigon3-perf-tricks)
     - [Windows](#windows)
@@ -404,7 +404,7 @@ DB. That reduces write amplification and DB inserts are orders of magnitude quic
 ### JSON-RPC daemon
 
 Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can work inside Erigon and as
-independent process on same Server (or another Server). Example
+independent process on same Server (or another Server). Example:
 
 ```sh
 make erigon rpcdaemon
@@ -413,8 +413,10 @@ make erigon rpcdaemon
 ./build/bin/rpcdaemon --datadir=/my --http.api=eth,erigon,web3,net,debug,trace,txpool --ws
 ```
 
-Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go)
-, [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
+- Supported JSON-RPC
+  calls: [eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)
+- increase throughput by: `--rpc.batch.concurrency`, `--rpc.batch.limit`, `--db.read.concurrency`
+- increase throughput by disabling: `--http.compression`, `--ws.compression`
 
 <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
 
@@ -425,13 +427,13 @@ Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./
 FAQ
 ================
 
-### How much RAM do I need
+### Use as library
 
-- Baseline (ext4 SSD): 16Gb RAM sync takes 6 days, 32Gb - 5 days, 64Gb - 4 days
-- +1 day on "zfs compression=off". +2 days on "zfs compression=on" (2x compression ratio). +3 days on btrfs.
-- -1 day on NVMe
-
-Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
+```
+# please use exact commit hash - instead of git tags
+go mod edit -replace github.com/erigontech/erigon-lib=github.com/erigontech/erigon/erigon-lib@c9743315b2c8
+go get github.com/erigontech/erigon/v3@c9743315b2c8
+```
 
 ### Default Ports and Firewalls
 
@@ -527,7 +529,7 @@ or `/opt/erigon` as the installation path, for example:
 make DIST=/opt/erigon install
 ```
 
-### How to get diagnostic for bug report?
+### Grab diagnostic for bug report
 
 - Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
 - Get CPU profiling: add `--pprof` flag and run  
@@ -535,7 +537,7 @@ make DIST=/opt/erigon install
 - Get RAM profiling: add `--pprof` flag and run  
   `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
 
-### How to run local devnet?
+### Run local devnet
 
 <code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
 
@@ -547,12 +549,12 @@ UID/GID (1000).
 More details
 in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-filesystem-owner-matching-problem)
 
-### How to run public RPC api
+### Public RPC
 
 - `--txpool.nolocals=true`
 - don't add `admin` in `--http.api` list
-- to increase throughput may need
-  increase/decrease: `--db.read.concurrency`, `--rpc.batch.concurrency`, `--rpc.batch.limit`
+- `--http.corsdomain="*"` is bad-practice: set exact hostname or IP
+- protect from DOS by reducing: `--rpc.batch.concurrency`, `--rpc.batch.limit`
 
 ### RaspberyPI
 
