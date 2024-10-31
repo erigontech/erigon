@@ -696,7 +696,7 @@ var (
 	WitnessFullFlag = cli.BoolFlag{
 		Name:  "zkevm.witness-full",
 		Usage: "Enable/Diable witness full",
-		Value: true,
+		Value: false,
 	}
 	SyncLimit = cli.UintFlag{
 		Name:  "zkevm.sync-limit",
@@ -1433,6 +1433,7 @@ func setNodeUserIdent(ctx *cli.Context, cfg *nodecfg.Config) {
 		cfg.UserIdent = identity
 	}
 }
+
 func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 	if identity := f.String(IdentityFlag.Name, IdentityFlag.Value, IdentityFlag.Usage); identity != nil && len(*identity) > 0 {
 		cfg.UserIdent = *identity
@@ -1741,7 +1742,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 
 	if ctx.String(ChainFlag.Name) == networkname.DevChainName {
 		// --dev mode can't use p2p networking.
-		//cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
+		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
 		if !ctx.IsSet(ListenPortFlag.Name) {
 			cfg.ListenAddr = ":0"
 		}
@@ -1762,7 +1763,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
 
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
 	flags := cmd.Flags()
-	//SetP2PConfig(ctx, &cfg.P2P)
+	// SetP2PConfig(ctx, &cfg.P2P)
 	setNodeUserIdentCobra(flags, cfg)
 	setDataDirCobra(flags, cfg)
 }
@@ -2138,7 +2139,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 
 	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(chain)
-	if ctx.IsSet(SnapshotFlag.Name) { //force override default by cli
+	if ctx.IsSet(SnapshotFlag.Name) { // force override default by cli
 		cfg.Sync.UseSnapshots = ctx.Bool(SnapshotFlag.Name)
 	}
 
@@ -2169,7 +2170,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			webseedsList = append(webseedsList, known...)
 		}
 		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), libcommon.CliString2Array(ctx.String(TorrentStaticPeersFlag.Name)), webseedsList, chain, true)
-
 		if err != nil {
 			panic(err)
 		}

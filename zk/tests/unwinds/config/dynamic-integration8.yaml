@@ -21,7 +21,6 @@ zkevm.l1-first-block: 6411787
 zkevm.datastream-version: 2
 # zkevm.data-stream-host: "127.0.0.1"
 zkevm.executor-strict: false
-zkevm.witness-full: false
 zkevm.sequencer-block-seal-time: "5s"
 zkevm.sequencer-batch-seal-time: "15m"
 zkevm.allow-pre-eip155-transactions: true

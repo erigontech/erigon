@@ -19,7 +19,6 @@ zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 6032365
 zkevm.executor-strict: false
 # zkevm.executor-urls: "zkevm2-stateless-executor:50071"
-zkevm.witness-full: false
 zkevm.sequencer-block-seal-time: "5s"
 zkevm.sequencer-batch-seal-time: "15m"
 zkevm.allow-pre-eip155-transactions: true
