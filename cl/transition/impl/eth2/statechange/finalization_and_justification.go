@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/threading"
 )
@@ -79,6 +80,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 }
 
 func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedParticipatingIndicies [][]bool) error {
+	defer monitor.ObserveElaspedTime(monitor.ProcessJustificationBitsAndFinalityTime).End()
 	currentEpoch := state.Epoch(s)
 	beaconConfig := s.BeaconConfig()
 	// Skip for first 2 epochs
