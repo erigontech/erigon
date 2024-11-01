@@ -417,7 +417,7 @@ func Test_Btrie_Insert(t *testing.T) {
 
 	// bt.trace = true
 	for i, key := range keys {
-		t.Logf("Inserting %x - %d", key, i)
+		// t.Logf("Inserting %x - %d", key, i)
 		bt.Insert(key, uint64(i))
 	}
 

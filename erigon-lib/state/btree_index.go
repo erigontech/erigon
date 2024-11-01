@@ -889,7 +889,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	if UseBTrie {
 		idx.trie = NewBtrie(idx.KeyCount() - 1) // di is 0-based
 		added := false
-		if len(idx.data[pos:]) >= 0 {
+		if len(idx.data[pos:]) > 0 {
 			nodes, err := decodeListNodes(idx.data[pos:])
 			if err != nil {
 				return nil, err
@@ -984,7 +984,6 @@ func (b *BtIndex) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint
 }
 
 func (b *BtIndex) skipMatchLoop(di, maxDi uint64, g *seg.Reader, key, resBuf []byte) bool {
-	resBuf = resBuf[:0]
 	if di > maxDi {
 		panic("di > maxDi")
 	}
@@ -994,20 +993,24 @@ func (b *BtIndex) skipMatchLoop(di, maxDi uint64, g *seg.Reader, key, resBuf []b
 		maxDi = largestDi - 1 // ef addresation is from 0
 	}
 
-	maxOffset := b.ef.Get(maxDi)
+	// maxOffset := b.ef.Get(maxDi)
 	g.Reset(offset)
 
-	for offset <= maxOffset || di <= maxDi {
+	// for offset <= maxOffset || di <= maxDi {
+	for di <= maxDi {
 		if !g.HasNext() {
 			return false
 		}
-		if g.MatchPrefix(key) {
-			resBuf, _ = g.Next(resBuf)
-			return true
+
+		resBuf, _ = g.Next(resBuf[:0])
+		if !bytes.Equal(resBuf, key) {
+			g.Skip()
+			di++
+			continue
 		}
 
-		offset, _ = g.Skip()
-		di++
+		resBuf, _ = g.Next(resBuf[:0]) // nolint
+		return true
 	}
 	return false
 }
@@ -1166,13 +1169,21 @@ func (b *BtIndex) Get2(key []byte, g *seg.Reader) (v []byte, offsetInFile uint64
 	var m uint64
 	for l < r {
 		m = (l + r) >> 1
-		// if r-l <= DefaultBtreeStartSkip {
-		// 	m = l
-		// 	if b.skipMatchLoop(m, r, g, key, v[:0]) {
-		// 		return
-		// 	}
-		// 	return nil, 0, false, err
-		// }
+		if r-l <= DefaultBtreeStartSkip {
+			m = l
+			// if b.skipMatchLoop(m, r, g, key, v[:0]) {
+			// 	fmt.Printf("skip matched key %x -> %x  offt=%d m=%d\n", key, v, b.ef.Get(m), m)
+
+			// 	kk := []byte{}
+			// 	cmp, kk, err := b.keyCmp(key, m, g, kk)
+			// 	if err != nil {
+			// 		panic(err)
+			// 	}
+			// 	fmt.Printf("skip matched key %x: %x  cmp=%d offt=%d m=%d\n", key, kk, cmp, b.ef.Get(m), m)
+			// 	return v, b.ef.Get(m), true, nil
+			// }
+			// return nil, 0, false, err
+		} //
 
 		cmp, v, err = b.keyCmp(key, m, g, v[:0])
 		if err != nil {
@@ -1213,13 +1224,13 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 	}
 	if UseBTrie {
 		l, r := b.trie.SeekLR(x)
-		var v []byte
+		var cmpKey []byte
 		var cmp int
 		var err error
 		for l < r {
 			m := (l + r) >> 1
 
-			cmp, v, err = b.keyCmp(x, m, g, v[:0])
+			cmp, cmpKey, err = b.keyCmp(x, m, g, cmpKey[:0])
 			if err != nil {
 				return nil, err
 			}
@@ -1229,10 +1240,10 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 
 			switch cmp {
 			case 0:
-				// if g.HasNext() {
-				// 	v, _ = g.Next(v[:0])
-				// 	return b.newCursor(context.Background(), x, v, m, g), nil
-				// }
+				if g.HasNext() {
+					cmpKey, _ = g.Next(cmpKey[:0])
+					return b.newCursor(context.Background(), x, cmpKey, m, g), nil
+				}
 				l, r = m, m
 			case 1:
 				r = m
@@ -1467,7 +1478,7 @@ func (bt *Btrie) prevChildTo(nibble byte) (byte, bool) {
 type nibbler struct {
 	stack  [5]*trieNode
 	nibbls [5]byte
-	path   []byte
+	// path   []byte
 }
 
 func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
@@ -1511,7 +1522,7 @@ func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 		nibbler.stack[ni] = next
 		nibbler.nibbls[ni] = nib
 		ni++
-		nibbler.path = append(nibbler.path, nib)
+		// nibbler.path = append(nibbler.path, nib)
 
 		if bt.trace {
 			fmt.Printf("[%2x] next depth=%d %s\n", nib, depth, next.String())
@@ -1524,10 +1535,7 @@ func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 
 		cpl := commonPrefixLength(key[depth:], next.ext)
 		if cpl < len(next.ext) {
-			if bt.trace {
-				fmt.Printf("smallest child %x\n", key[:depth+cpl])
-			}
-			return Li, Ri
+			break
 		}
 		if cpl == len(next.ext) {
 			if cpl == len(key[depth:]) && cpl > 0 { // full match
@@ -1538,14 +1546,14 @@ func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 
 			nib = key[depth+cpl]
 			if bt.trace {
-				fmt.Printf("ext match nib=%x depth=%d\n", nib, depth+cpl)
+				fmt.Printf("ext partial match nib=%x depth=%d\n", nib, depth+cpl)
 			}
 			nnib, haveNext := next.nextChildTo(nib)
 			if haveNext {
 				Ri = next.child[nnib].minDi
 			}
 
-			nibbler.path = append(nibbler.path, key[depth:depth+cpl+1]...)
+			// nibbler.path = append(nibbler.path, key[depth:depth+cpl+1]...)
 			if nx := next.child[nib]; nx != nil {
 				if len(nx.child) == 0 && len(nx.ext) == 0 { // is leaf without ext
 					return nx.minDi, nx.maxDi
@@ -1554,88 +1562,11 @@ func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 				depth += cpl + 1
 				continue
 			}
-			return
+			break
 		}
 	}
 
-	return
-}
-
-// Get seeks exact match to the key.
-// Key not found - di > N
-func (bt *Btrie) Get(key []byte) (di uint64) {
-	depth := 0
-	nib := key[depth]
-
-	fmt.Printf("Get '%x'\n", key)
-
-	if bt.child[nib] == nil {
-		return 2<<63 - 1
-	}
-
-	depth++
-	next := bt.child[nib]
-	traversed := make([]byte, 0, len(key))
-	traversed = append(traversed, key[:depth]...)
-	for {
-		fmt.Printf("next depth %d %x\n", depth, next.ext)
-		cpl := commonPrefixLength(key[depth:], next.ext)
-		if cpl == 0 { // full mismatch
-			if len(next.ext) == 0 {
-				nib := key[depth:][cpl]
-				nx := next.child[nib]
-				fmt.Printf("depth=%d part t=%x nibble %x\n", depth, traversed, nib)
-				if nx != nil { // not found
-					next = nx
-					traversed = append(traversed, nib)
-					// traversed = append(traversed[depth:], key[depth:depth+cpl]...)
-					if depth+1 == len(key) {
-						fmt.Printf("found %x depth=%d\n", traversed, depth)
-						return next.minDi
-					}
-					depth += cpl
-					continue
-				}
-			}
-			fmt.Printf("not found depth=%d key=%x t=%x suff %x\n", depth, key, traversed, next.ext)
-			return 2<<63 - 1
-		}
-		if cpl < len(next.ext) { // partially matched but not found
-			fmt.Printf("not found depth=%d key=%x t=%x rest %x\n", depth, key, traversed, next.ext[cpl:])
-			return 2<<63 - 1
-		}
-		if cpl == len(next.ext) {
-			if cpl == len(key[depth:]) { // full match
-
-				traversed = append(traversed[depth:], key[depth:depth+cpl]...)
-				fmt.Printf("found %x depth=%d\n", traversed, depth)
-				return next.minDi
-			}
-			// next.ext is a prefix of key[depth:]
-			nib := key[depth:][cpl]
-			nx := next.child[nib]
-			fmt.Printf("depth=%d part t=%x nibble %x\n", depth, traversed, nib)
-			if nx == nil { // not found
-				fmt.Printf("not found depth=%d key=%x t=%x\n", depth, key, traversed)
-				return 2<<63 - 1
-			}
-			next = nx
-			traversed = append(traversed[depth:], key[depth:depth+cpl]...)
-			depth += cpl
-			continue
-		}
-
-		panic("wtf")
-		traversed = append(traversed[depth:], key[depth:depth+cpl]...)
-		depth += cpl
-		fmt.Printf("depth=%d t=%x\n", depth, traversed)
-		if cpl != len(next.ext) {
-
-		}
-
-	}
-
-	return 0
+	return Li, Ri
 }
 
 func (bt *Btrie) Insert(key []byte, di uint64) {
@@ -1660,11 +1591,11 @@ func (bt *Btrie) Insert(key []byte, di uint64) {
 
 	next := bt.child[nib]
 	rows := 0
-	rowLimit := 50
+	rowLimit := 50 // can reduce max rows count to say 5, for rows lower we will just update min/max di possible for this prefix
 	for {
 		rows++
 		if bt.trace {
-			fmt.Printf("N[%d]: depth=%d [%d-%d] ext=%x\n", rows, depth, next.minDi, next.maxDi, next.ext[:])
+			fmt.Printf("N[%d]: depth=%d [%d-%d] ext=%x\n", rows, depth, next.minDi, next.maxDi, next.ext)
 		}
 		cpl := commonPrefixLength(key[depth:], next.ext)
 		if cpl == 0 { // no matching prefix
@@ -1710,7 +1641,6 @@ func (bt *Btrie) Insert(key []byte, di uint64) {
 			return
 		}
 		next.split(key[depth:], cpl, di)
-		depth += cpl
 		return
 	}
 }
