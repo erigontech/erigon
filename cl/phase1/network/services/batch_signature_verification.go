@@ -12,12 +12,12 @@ import (
 )
 
 const (
-	batchSignatureVerificationThreshold = 300
+	batchSignatureVerificationThreshold = 50
 	reservedSize                        = 512
 )
 
 var (
-	batchCheckInterval          = 500 * time.Millisecond
+	batchCheckInterval          = 50 * time.Millisecond
 	blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
 )
 
