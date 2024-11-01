@@ -622,7 +622,6 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	require.NoError(err)
 	err = tx.Commit()
 	require.NoError(err)
-	tx = nil
 
 	tx, err = db.BeginRw(ctx)
 	require.NoError(err)
