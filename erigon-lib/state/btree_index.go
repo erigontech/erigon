@@ -983,38 +983,6 @@ func (b *BtIndex) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint
 	return k, v, offset, nil
 }
 
-func (b *BtIndex) skipMatchLoop(di, maxDi uint64, g *seg.Reader, key, resBuf []byte) bool {
-	if di > maxDi {
-		panic("di > maxDi")
-	}
-
-	offset := b.ef.Get(di)
-	if largestDi := b.ef.Count(); maxDi >= largestDi {
-		maxDi = largestDi - 1 // ef addresation is from 0
-	}
-
-	// maxOffset := b.ef.Get(maxDi)
-	g.Reset(offset)
-
-	// for offset <= maxOffset || di <= maxDi {
-	for di <= maxDi {
-		if !g.HasNext() {
-			return false
-		}
-
-		resBuf, _ = g.Next(resBuf[:0])
-		if !bytes.Equal(resBuf, key) {
-			g.Skip()
-			di++
-			continue
-		}
-
-		resBuf, _ = g.Next(resBuf[:0]) // nolint
-		return true
-	}
-	return false
-}
-
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
 func (b *BtIndex) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int, []byte, error) {
 	if di >= b.ef.Count() {
@@ -1171,19 +1139,7 @@ func (b *BtIndex) Get2(key []byte, g *seg.Reader) (v []byte, offsetInFile uint64
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip {
 			m = l
-			// if b.skipMatchLoop(m, r, g, key, v[:0]) {
-			// 	fmt.Printf("skip matched key %x -> %x  offt=%d m=%d\n", key, v, b.ef.Get(m), m)
-
-			// 	kk := []byte{}
-			// 	cmp, kk, err := b.keyCmp(key, m, g, kk)
-			// 	if err != nil {
-			// 		panic(err)
-			// 	}
-			// 	fmt.Printf("skip matched key %x: %x  cmp=%d offt=%d m=%d\n", key, kk, cmp, b.ef.Get(m), m)
-			// 	return v, b.ef.Get(m), true, nil
-			// }
-			// return nil, 0, false, err
-		} //
+		}
 
 		cmp, v, err = b.keyCmp(key, m, g, v[:0])
 		if err != nil {
