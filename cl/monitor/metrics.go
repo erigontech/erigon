@@ -135,7 +135,7 @@ type TimeMeasure struct {
 }
 
 func (m TimeMeasure) End() {
-	m.metric.Set(float64(time.Since(m.start).Microseconds()))
+	//m.metric.Set(float64(time.Since(m.start).Microseconds()))
 }
 
 func ObserveElaspedTime(m metrics.Gauge) TimeMeasure {
