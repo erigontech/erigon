@@ -541,6 +541,11 @@ func (b *BeaconState) SetPendingDeposits(deposits *solid.ListSSZ[*solid.PendingD
 	b.markLeaf(PendingDepositsLeafIndex)
 }
 
+func (b *BeaconState) SetPendingConsolidations(consolidations *solid.ListSSZ[*solid.PendingConsolidation]) {
+	b.pendingConsolidations = consolidations
+	b.markLeaf(PendingConsolidationsLeafIndex)
+}
+
 func (b *BeaconState) SetDepositBalanceToConsume(balance uint64) {
 	b.depositBalanceToConsume = balance
 	b.markLeaf(DepositBalanceToConsumeLeafIndex)

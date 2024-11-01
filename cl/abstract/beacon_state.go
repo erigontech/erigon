@@ -63,6 +63,7 @@ type BeaconStateExtension interface {
 	GetDepositBalanceToConsume() uint64
 	GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit]
 	GetDepositRequestsStartIndex() uint64
+	GetPendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation]
 }
 
 type BeaconStateBasic interface {
@@ -131,6 +132,7 @@ type BeaconStateMutator interface {
 	SetPendingPartialWithdrawals(*solid.ListSSZ[*solid.PendingPartialWithdrawal])
 	SetPendingDeposits(*solid.ListSSZ[*solid.PendingDeposit])
 	SetDepositBalanceToConsume(uint64)
+	SetPendingConsolidations(consolidations *solid.ListSSZ[*solid.PendingConsolidation])
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)

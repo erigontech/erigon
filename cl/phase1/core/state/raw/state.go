@@ -261,3 +261,7 @@ func (b *BeaconState) GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit]
 func (b *BeaconState) GetDepositRequestsStartIndex() uint64 {
 	return b.depositRequestsStartIndex
 }
+
+func (b *BeaconState) GetPendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation] {
+	return b.pendingConsolidations
+}
