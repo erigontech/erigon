@@ -184,6 +184,16 @@ test: test-erigon-lib
 test-integration: test-erigon-lib
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
 
+## test-hive						run the hive tests locally off nektos/act workflows simulator
+test-hive:
+	@if ! command -v act >/dev/null 2>&1; then \
+		echo "act command not found in PATH, please source it in PATH. If nektosact is not installed, install it by visiting https://nektosact.com/installation/index.html"; \
+	elif [ -z "$(GITHUB_TOKEN)"]; then \
+		echo "Please export GITHUB_TOKEN var in the environment"; \
+	else \
+		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
+	fi
+
 ## lint-deps:                         install lint dependencies
 lint-deps:
 	@cd erigon-lib && $(MAKE) lint-deps
