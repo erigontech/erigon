@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -514,30 +513,6 @@ func (d *Decompressor) DisableReadAhead() {
 
 	if !dbg.SnapshotMadvRnd { // all files
 		_ = mmap.MadviseNormal(d.mmapHandle1)
-		return
-	}
-
-	if dbg.KvMadvNormal != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files
-		for _, t := range strings.Split(dbg.KvMadvNormal, ",") {
-			if !strings.Contains(d.FileName(), t) {
-				continue
-			}
-			_ = mmap.MadviseNormal(d.mmapHandle1)
-			return
-		}
-	}
-
-	if dbg.KvMadvNormalNoLastLvl != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files - except last-level `v1-storage.0-1024.kv` - starting from step 0
-		for _, t := range strings.Split(dbg.KvMadvNormalNoLastLvl, ",") {
-			if !strings.Contains(d.FileName(), t) {
-				continue
-			}
-			if strings.Contains(d.FileName(), t+".0-") {
-				continue
-			}
-			_ = mmap.MadviseNormal(d.mmapHandle1)
-			return
-		}
 		return
 	}
 

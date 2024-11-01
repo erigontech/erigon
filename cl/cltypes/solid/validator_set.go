@@ -99,14 +99,14 @@ func (v *ValidatorSet) Append(val Validator) {
 		v.expandBuffer(v.l + 1)
 		v.phase0Data = append(v.phase0Data, Phase0Data{})
 	}
+	if v.MerkleTree != nil {
+		v.MerkleTree.AppendLeaf()
+	}
 	v.zeroTreeHash(v.l)
 	copy(v.buffer[offset:], val)
 	v.phase0Data[v.l] = Phase0Data{} // initialize to empty.
 	v.attesterBits = append(v.attesterBits, 0x0)
 	v.l++
-	if v.MerkleTree != nil {
-		v.MerkleTree.AppendLeaf()
-	}
 }
 
 func (v *ValidatorSet) Cap() int {

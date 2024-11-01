@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -41,9 +40,11 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bor/finality"
 	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/turbo/services"
@@ -62,13 +63,15 @@ type BorHeimdallCfg struct {
 	chainConfig     *chain.Config
 	borConfig       *borcfg.BorConfig
 	heimdallClient  heimdall.HeimdallClient
+	heimdallStore   heimdall.Store
+	bridgeStore     bridge.Store
 	blockReader     services.FullBlockReader
 	hd              *headerdownload.HeaderDownload
 	penalize        func(context.Context, []headerdownload.PenaltyItem)
 	recents         *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures      *lru.ARCCache[libcommon.Hash, libcommon.Address]
 	recordWaypoints bool
-	unwindCfg       HeimdallUnwindCfg
+	unwindCfg       bordb.HeimdallUnwindCfg
 }
 
 func StageBorHeimdallCfg(
@@ -77,6 +80,8 @@ func StageBorHeimdallCfg(
 	miningState MiningState,
 	chainConfig chain.Config,
 	heimdallClient heimdall.HeimdallClient,
+	heimdallStore heimdall.Store,
+	bridgeStore bridge.Store,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
@@ -90,7 +95,7 @@ func StageBorHeimdallCfg(
 		borConfig = chainConfig.Bor.(*borcfg.BorConfig)
 	}
 
-	unwindCfg := HeimdallUnwindCfg{} // unwind everything by default
+	unwindCfg := bordb.HeimdallUnwindCfg{} // unwind everything by default
 	if len(userUnwindTypeOverrides) > 0 {
 		unwindCfg.ApplyUserUnwindTypeOverrides(userUnwindTypeOverrides)
 	}
@@ -102,6 +107,8 @@ func StageBorHeimdallCfg(
 		chainConfig:     &chainConfig,
 		borConfig:       borConfig,
 		heimdallClient:  heimdallClient,
+		heimdallStore:   heimdallStore,
+		bridgeStore:     bridgeStore,
 		blockReader:     blockReader,
 		hd:              hd,
 		penalize:        penalize,
@@ -326,6 +333,7 @@ func BorHeimdallForward(
 					cfg.blockReader,
 					cfg.borConfig,
 					cfg.heimdallClient,
+					cfg.heimdallStore,
 					chainReader,
 					blockNum,
 					lastPersistedBlockNum,
@@ -384,6 +392,7 @@ func BorHeimdallForward(
 					cfg.borConfig,
 					cfg.blockReader,
 					cfg.heimdallClient,
+					cfg.bridgeStore,
 					cfg.chainConfig.ChainID.String(),
 					s.LogPrefix(),
 					logger,
@@ -422,6 +431,8 @@ func BorHeimdallForward(
 	if err = s.Update(tx, headNumber); err != nil {
 		return err
 	}
+
+	lastStateSyncEventID, _, _ = cfg.blockReader.LastEventId(ctx, tx)
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
@@ -641,6 +652,7 @@ func initValidatorSets(
 	blockReader services.FullBlockReader,
 	config *borcfg.BorConfig,
 	heimdallClient heimdall.HeimdallClient,
+	heimdallStore heimdall.Store,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	lastPersistedBlockNum uint64,
@@ -676,27 +688,22 @@ func initValidatorSets(
 
 			if snap = loadSnapshot(0, hash, config, recents, signatures, snapDb, logger); snap == nil {
 				// get validators and current span
-				zeroSpanBytes, err := blockReader.Span(ctx, tx, 0)
+				zeroSpan, _, err := blockReader.Span(ctx, tx, 0)
 
 				if err != nil {
-					if _, err := fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, logPrefix, logger); err != nil {
+					if _, err := fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, heimdallStore, logPrefix, logger); err != nil {
 						return nil, err
 					}
 
-					zeroSpanBytes, err = blockReader.Span(ctx, tx, 0)
+					zeroSpan, _, err = blockReader.Span(ctx, tx, 0)
 
 					if err != nil {
 						return nil, err
 					}
 				}
 
-				if zeroSpanBytes == nil {
+				if zeroSpan == nil {
 					return nil, errors.New("zero span not found")
-				}
-
-				var zeroSpan heimdall.Span
-				if err = json.Unmarshal(zeroSpanBytes, &zeroSpan); err != nil {
-					return nil, err
 				}
 
 				// new snap shot
@@ -784,7 +791,7 @@ func initValidatorSets(
 	return snap, nil
 }
 
-func checkBorHeaderExtraDataIfRequired(chr consensus.ChainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
+func checkBorHeaderExtraDataIfRequired(chr chainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
 	if !cfg.IsSprintEnd(header.Number.Uint64()) {
 		// not last block of a sprint in a span, so no check needed (we only check last block of a sprint)
 		return nil
@@ -793,13 +800,14 @@ func checkBorHeaderExtraDataIfRequired(chr consensus.ChainHeaderReader, header *
 	return checkBorHeaderExtraData(chr, header, cfg)
 }
 
-func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
+type chainHeaderReader interface {
+	// bor span with given ID
+	BorSpan(spanId uint64) *heimdall.Span
+}
+
+func checkBorHeaderExtraData(chr chainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
 	spanID := heimdall.SpanIdAt(header.Number.Uint64() + 1)
-	spanBytes := chr.BorSpan(uint64(spanID))
-	var sp heimdall.Span
-	if err := json.Unmarshal(spanBytes, &sp); err != nil {
-		return err
-	}
+	sp := chr.BorSpan(uint64(spanID))
 
 	producerSet := make([]*valset.Validator, len(sp.SelectedProducers))
 	for i := range sp.SelectedProducers {
@@ -846,7 +854,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 		defer tx.Rollback()
 	}
 
-	if err = UnwindHeimdall(tx, u, cfg.unwindCfg); err != nil {
+	if err = bordb.UnwindHeimdall(ctx, cfg.heimdallStore, cfg.bridgeStore, tx, u.UnwindPoint, cfg.unwindCfg); err != nil {
 		return err
 	}
 

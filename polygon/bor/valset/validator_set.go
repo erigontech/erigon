@@ -681,6 +681,20 @@ func (vals *ValidatorSet) Difficulty(signer libcommon.Address) (uint64, error) {
 	return uint64(len(vals.Validators) - indexDiff), nil
 }
 
+// SafeDifficulty returns the difficulty for a particular signer at the current snapshot number if available,
+// otherwise it returns 1 for empty signer and 0 if it is not in the validator set.
+func (vals *ValidatorSet) SafeDifficulty(signer libcommon.Address) uint64 {
+	if bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+		return 1
+	}
+
+	if d, err := vals.Difficulty(signer); err == nil {
+		return d
+	} else {
+		return 0
+	}
+}
+
 // GetSignerSuccessionNumber returns the relative position of signer in terms of the in-turn proposer
 func (vals *ValidatorSet) GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error) {
 	proposer := vals.GetProposer()

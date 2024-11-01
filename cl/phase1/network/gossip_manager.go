@@ -116,7 +116,7 @@ func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManage
 		return err
 	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Debug("failed publish gossip", "err", err)
+		log.Debug("failed to publish gossip", "err", err)
 	}
 	return nil
 }
@@ -150,7 +150,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		return err
 	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Warn("failed publish gossip", "err", err)
+		log.Debug("failed to publish gossip", "err", err)
 	}
 	return nil
 }
@@ -313,7 +313,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 	goWorker(syncCommitteesCh, 4)
 	goWorker(operationsCh, 1)
 	goWorker(blocksCh, 1)
-	goWorker(blobsCh, 1)
+	goWorker(blobsCh, 6)
 
 	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
 		// Skip processing the received data if the node is not ready to process operations.

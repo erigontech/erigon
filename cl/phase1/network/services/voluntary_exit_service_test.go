@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/ssz"
 	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -110,7 +111,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		{
 			name: "state is nil",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(nil)
+				t.syncedData.EXPECT().HeadStateReader().Return(nil, synced_data.EmptyCancel)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -121,7 +122,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 			mock: func() {
 				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(nil, errors.New("not found")).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -142,7 +143,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 			},
 			msg:     mockMsg,
@@ -163,7 +164,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 			},
 			msg:     mockMsg,
@@ -184,7 +185,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
 				mockState.EXPECT().Version().Return(clparams.AltairVersion).Times(1)
@@ -212,7 +213,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
 				mockState.EXPECT().Version().Return(clparams.AltairVersion).Times(1)
