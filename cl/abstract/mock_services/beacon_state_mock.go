@@ -1808,6 +1808,82 @@ func (c *MockBeaconStateGetBlockRootAtSlotCall) DoAndReturn(f func(uint64) (comm
 	return c
 }
 
+// GetDepositBalanceToConsume mocks base method.
+func (m *MockBeaconState) GetDepositBalanceToConsume() uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDepositBalanceToConsume")
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// GetDepositBalanceToConsume indicates an expected call of GetDepositBalanceToConsume.
+func (mr *MockBeaconStateMockRecorder) GetDepositBalanceToConsume() *MockBeaconStateGetDepositBalanceToConsumeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDepositBalanceToConsume", reflect.TypeOf((*MockBeaconState)(nil).GetDepositBalanceToConsume))
+	return &MockBeaconStateGetDepositBalanceToConsumeCall{Call: call}
+}
+
+// MockBeaconStateGetDepositBalanceToConsumeCall wrap *gomock.Call
+type MockBeaconStateGetDepositBalanceToConsumeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetDepositBalanceToConsumeCall) Return(arg0 uint64) *MockBeaconStateGetDepositBalanceToConsumeCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetDepositBalanceToConsumeCall) Do(f func() uint64) *MockBeaconStateGetDepositBalanceToConsumeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetDepositBalanceToConsumeCall) DoAndReturn(f func() uint64) *MockBeaconStateGetDepositBalanceToConsumeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetDepositRequestsStartIndex mocks base method.
+func (m *MockBeaconState) GetDepositRequestsStartIndex() uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDepositRequestsStartIndex")
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// GetDepositRequestsStartIndex indicates an expected call of GetDepositRequestsStartIndex.
+func (mr *MockBeaconStateMockRecorder) GetDepositRequestsStartIndex() *MockBeaconStateGetDepositRequestsStartIndexCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDepositRequestsStartIndex", reflect.TypeOf((*MockBeaconState)(nil).GetDepositRequestsStartIndex))
+	return &MockBeaconStateGetDepositRequestsStartIndexCall{Call: call}
+}
+
+// MockBeaconStateGetDepositRequestsStartIndexCall wrap *gomock.Call
+type MockBeaconStateGetDepositRequestsStartIndexCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetDepositRequestsStartIndexCall) Return(arg0 uint64) *MockBeaconStateGetDepositRequestsStartIndexCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetDepositRequestsStartIndexCall) Do(f func() uint64) *MockBeaconStateGetDepositRequestsStartIndexCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetDepositRequestsStartIndexCall) DoAndReturn(f func() uint64) *MockBeaconStateGetDepositRequestsStartIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // GetDomain mocks base method.
 func (m *MockBeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error) {
 	m.ctrl.T.Helper()
@@ -1843,6 +1919,44 @@ func (c *MockBeaconStateGetDomainCall) Do(f func([4]byte, uint64) ([]byte, error
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateGetDomainCall) DoAndReturn(f func([4]byte, uint64) ([]byte, error)) *MockBeaconStateGetDomainCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetPendingDeposits mocks base method.
+func (m *MockBeaconState) GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit] {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPendingDeposits")
+	ret0, _ := ret[0].(*solid.ListSSZ[*solid.PendingDeposit])
+	return ret0
+}
+
+// GetPendingDeposits indicates an expected call of GetPendingDeposits.
+func (mr *MockBeaconStateMockRecorder) GetPendingDeposits() *MockBeaconStateGetPendingDepositsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPendingDeposits", reflect.TypeOf((*MockBeaconState)(nil).GetPendingDeposits))
+	return &MockBeaconStateGetPendingDepositsCall{Call: call}
+}
+
+// MockBeaconStateGetPendingDepositsCall wrap *gomock.Call
+type MockBeaconStateGetPendingDepositsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateGetPendingDepositsCall) Return(arg0 *solid.ListSSZ[*solid.PendingDeposit]) *MockBeaconStateGetPendingDepositsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateGetPendingDepositsCall) Do(f func() *solid.ListSSZ[*solid.PendingDeposit]) *MockBeaconStateGetPendingDepositsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateGetPendingDepositsCall) DoAndReturn(f func() *solid.ListSSZ[*solid.PendingDeposit]) *MockBeaconStateGetPendingDepositsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -3042,6 +3156,42 @@ func (c *MockBeaconStateSetCurrentSyncCommitteeCall) DoAndReturn(f func(*solid.S
 	return c
 }
 
+// SetDepositBalanceToConsume mocks base method.
+func (m *MockBeaconState) SetDepositBalanceToConsume(arg0 uint64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetDepositBalanceToConsume", arg0)
+}
+
+// SetDepositBalanceToConsume indicates an expected call of SetDepositBalanceToConsume.
+func (mr *MockBeaconStateMockRecorder) SetDepositBalanceToConsume(arg0 any) *MockBeaconStateSetDepositBalanceToConsumeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetDepositBalanceToConsume", reflect.TypeOf((*MockBeaconState)(nil).SetDepositBalanceToConsume), arg0)
+	return &MockBeaconStateSetDepositBalanceToConsumeCall{Call: call}
+}
+
+// MockBeaconStateSetDepositBalanceToConsumeCall wrap *gomock.Call
+type MockBeaconStateSetDepositBalanceToConsumeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetDepositBalanceToConsumeCall) Return() *MockBeaconStateSetDepositBalanceToConsumeCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetDepositBalanceToConsumeCall) Do(f func(uint64)) *MockBeaconStateSetDepositBalanceToConsumeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetDepositBalanceToConsumeCall) DoAndReturn(f func(uint64)) *MockBeaconStateSetDepositBalanceToConsumeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetEffectiveBalanceForValidatorAtIndex mocks base method.
 func (m *MockBeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) {
 	m.ctrl.T.Helper()
@@ -3542,6 +3692,42 @@ func (c *MockBeaconStateSetNextWithdrawalValidatorIndexCall) Do(f func(uint64)) 
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBeaconStateSetNextWithdrawalValidatorIndexCall) DoAndReturn(f func(uint64)) *MockBeaconStateSetNextWithdrawalValidatorIndexCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetPendingDeposits mocks base method.
+func (m *MockBeaconState) SetPendingDeposits(arg0 *solid.ListSSZ[*solid.PendingDeposit]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetPendingDeposits", arg0)
+}
+
+// SetPendingDeposits indicates an expected call of SetPendingDeposits.
+func (mr *MockBeaconStateMockRecorder) SetPendingDeposits(arg0 any) *MockBeaconStateSetPendingDepositsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPendingDeposits", reflect.TypeOf((*MockBeaconState)(nil).SetPendingDeposits), arg0)
+	return &MockBeaconStateSetPendingDepositsCall{Call: call}
+}
+
+// MockBeaconStateSetPendingDepositsCall wrap *gomock.Call
+type MockBeaconStateSetPendingDepositsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateSetPendingDepositsCall) Return() *MockBeaconStateSetPendingDepositsCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateSetPendingDepositsCall) Do(f func(*solid.ListSSZ[*solid.PendingDeposit])) *MockBeaconStateSetPendingDepositsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateSetPendingDepositsCall) DoAndReturn(f func(*solid.ListSSZ[*solid.PendingDeposit])) *MockBeaconStateSetPendingDepositsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
