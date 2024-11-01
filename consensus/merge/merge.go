@@ -187,8 +187,8 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 	var rs types.FlatRequests
 	if config.IsPrague(header.Time) {
-		rs = make(types.FlatRequests, 0)
-		allLogs := types.Logs{}
+		rs = make(types.FlatRequests, len(types.KnownRequestTypes))
+		allLogs := make(types.Logs, 0)
 		for _, rec := range receipts {
 			allLogs = append(allLogs, rec.Logs...)
 		}
@@ -196,11 +196,11 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
-		rs = append(rs, *depositReqs)
+		rs[0] = *depositReqs
 		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
-		rs = append(rs, *withdrawalReq)
+		rs[1] = *withdrawalReq
 		consolidations := misc.DequeueConsolidationRequests7251(syscall)
-		rs = append(rs, *consolidations)
+		rs[2] = *consolidations
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {

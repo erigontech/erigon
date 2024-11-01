@@ -66,10 +66,12 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#voluntary-exits
 	// def process_voluntary_exit(state: BeaconState, signed_voluntary_exit: SignedVoluntaryExit) -> None:
-	state := s.syncedDataManager.HeadStateReader()
+	state, cn := s.syncedDataManager.HeadStateReader()
+	defer cn()
 	if state == nil {
 		return ErrIgnore
 	}
+
 	val, err := state.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
 		return ErrIgnore
@@ -119,6 +121,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	if err != nil {
 		return err
 	}
+	cn()
 	if valid, err := blsVerify(msg.Signature[:], signingRoot[:], pk[:]); err != nil {
 		return err
 	} else if !valid {

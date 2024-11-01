@@ -226,10 +226,6 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
-	if dbg.NoSync() {
-		a.DisableFsync()
-	}
-
 	return a, nil
 }
 

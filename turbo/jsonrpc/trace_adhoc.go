@@ -1198,17 +1198,35 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 			return nil, fmt.Errorf("convert callParam to msg: %w", err)
 		}
 	}
-	results, _, err := api.doCallMany(ctx, dbtx, msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, -1 /* all txn indices */, traceConfig)
-	return results, err
-}
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []types.Message, callParams []TraceCallParam,
-	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndexNeeded int,
-	traceConfig *config.TraceConfig,
-) ([]*TraceCallResult, *state.IntraBlockState, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
+	}
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
+	if err != nil {
+		return nil, err
+	}
+	stateCache := shards.NewStateCache(
+		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+	cachedReader := state.NewCachedReader(stateReader, stateCache)
+	noop := state.NewNoopWriter()
+	cachedWriter := state.NewCachedWriter(noop, stateCache)
+	ibs := state.New(cachedReader)
+
+	return api.doCallMany(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs,
+		msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, -1 /* all txn indices */, traceConfig)
+}
+
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
+	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
+	msgs []types.Message, callParams []TraceCallParam,
+	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndexNeeded int,
+	traceConfig *config.TraceConfig,
+) ([]*TraceCallResult, error) {
+	chainConfig, err := api.chainConfig(ctx, dbtx)
+	if err != nil {
+		return nil, err
 	}
 	engine := api.engine()
 
@@ -1218,27 +1236,16 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	}
 	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, chainConfig.ChainName)
-	if err != nil {
-		return nil, nil, err
-	}
-	stateCache := shards.NewStateCache(
-		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-	//cachedReader := stateReader
-	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
-	//cachedWriter := noop
-	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
 
 	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if parentHeader == nil {
-		return nil, nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
+		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
 	}
 
 	// Setup context so it may be cancelled the call has completed
@@ -1274,7 +1281,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 		}
 		if err := libcommon.Stopped(ctx.Done()); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
@@ -1288,7 +1295,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			case TraceTypeVmTrace:
 				traceTypeVmTrace = true
 			default:
-				return nil, nil, fmt.Errorf("unrecognized trace type: %s", traceType)
+				return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
 			}
 		}
 
@@ -1298,7 +1305,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			var ot OeTracer
 			ot.config, err = parseOeTracerConfig(traceConfig)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			ot.compat = api.compatibility
 			ot.r = traceResult
@@ -1347,7 +1354,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			var stateSyncEvents []*types.Message
 			stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 
 			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
@@ -1371,7 +1378,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/)
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
+			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
 
 		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
@@ -1380,21 +1387,21 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			initialIbs := state.New(cloneReader)
 			if !txFinalized {
 				if err = ibs.FinalizeTx(chainRules, sd); err != nil {
-					return nil, nil, err
+					return nil, err
 				}
 			}
 			sd.CompareStates(initialIbs, ibs)
 			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		} else {
 			if !txFinalized {
 				if err = ibs.FinalizeTx(chainRules, noop); err != nil {
-					return nil, nil, err
+					return nil, err
 				}
 			}
 			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
 		if !traceTypeTrace {
@@ -1408,7 +1415,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 	}
 
-	return results, ibs, nil
+	return results, nil
 }
 
 // RawTransaction implements trace_rawTransaction.

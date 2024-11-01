@@ -73,6 +73,9 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 
 				se.outputBlockNum.SetUint64(txTask.BlockNum)
 			}
+			//if !se.execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txTask.TxIndex == 0 && !se.cfg.badBlockHalt {
+			//	return fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
+			//}
 			return nil
 		}(); err != nil {
 			if errors.Is(err, context.Canceled) {

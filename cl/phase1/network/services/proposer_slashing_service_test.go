@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -154,7 +155,7 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 		{
 			name: "empty head state",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(nil).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(nil, synced_data.EmptyCancel).Times(1)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -165,7 +166,7 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 			mock: func() {
 				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockProposerIndex)).Return(nil, errors.New("not found")).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -185,7 +186,7 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 					0,
 				)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockProposerIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(uint64(1)).Times(1)
 			},
 			msg:     mockMsg,
@@ -205,7 +206,7 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 					2,
 					2,
 				)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockProposerIndex)).Return(mockValidator, nil).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(uint64(1)).Times(1)
 
