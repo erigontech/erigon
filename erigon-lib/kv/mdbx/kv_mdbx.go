@@ -233,12 +233,8 @@ func PathDbMap() map[string]kv.RoDB {
 var ErrDBDoesNotExists = errors.New("can't create database - because opening in `Accede` mode. probably another (main) process can create it")
 
 func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
-	opts = opts.WriteMap(dbg.WriteMap())
 	if dbg.DirtySpace() > 0 {
 		opts = opts.DirtySpace(dbg.DirtySpace()) //nolint
-	}
-	if dbg.NoSync() {
-		opts = opts.Flags(func(u uint) uint { return u | mdbx.SafeNoSync }) //nolint
 	}
 	if dbg.MergeTr() > 0 {
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
