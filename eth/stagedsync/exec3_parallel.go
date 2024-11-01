@@ -376,6 +376,9 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}
+			//if !pe.execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txTask.TxIndex == 0 && !pe.cfg.badBlockHalt {
+			//	return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
+			//}
 			// TODO: post-validation of gasUsed and blobGasUsed
 			i++
 		}
