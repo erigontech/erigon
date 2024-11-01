@@ -459,9 +459,8 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		cfg.StateStream = false
 	}
 
-	cfg.ChaosMonkey = false
 	if v := f.Bool(utils.ChaosMonkeyFlag.Name, true, utils.ChaosMonkeyFlag.Usage); v != nil {
-		cfg.StateStream = true
+		cfg.ChaosMonkey = true
 	}
 }
 
