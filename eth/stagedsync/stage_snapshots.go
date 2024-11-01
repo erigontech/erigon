@@ -65,7 +65,7 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/ethdb/prune"
-	borsnaptype "github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -158,7 +158,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 					snapshots.SetSegmentsMin(maxSeedable - blockLimit)
 				}
 
-				if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
+				if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*heimdall.RoSnapshots); ok {
 					snapshots.SetSegmentsMin(maxSeedable - blockLimit)
 				}
 			}
@@ -212,6 +212,15 @@ func SpawnStageSnapshots(
 		}
 	}
 
+	// call this after the tx is commited otherwise observing
+	// components see an inconsistent db view
+	if !cfg.blockReader.Snapshots().DownloadReady() {
+		cfg.blockReader.Snapshots().DownloadComplete()
+	}
+	if cfg.chainConfig.Bor != nil && !cfg.blockReader.BorSnapshots().DownloadReady() {
+		cfg.blockReader.BorSnapshots().DownloadComplete()
+	}
+
 	return nil
 }
 
@@ -228,16 +237,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
 			blockLimit := maxSeedable - u.minBlockNumber()
 
-			if u.cfg.syncConfig.FrozenBlockLimit < blockLimit {
+			if cfg.syncConfig.FrozenBlockLimit < blockLimit {
 				blockLimit = u.cfg.syncConfig.FrozenBlockLimit
 			}
 
-			if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
-				snapshots.SetSegmentsMin(maxSeedable - blockLimit)
-			}
-
-			if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
-				snapshots.SetSegmentsMin(maxSeedable - blockLimit)
+			cfg.blockReader.Snapshots().SetSegmentsMin(maxSeedable - blockLimit)
+			if cfg.chainConfig.Bor != nil {
+				cfg.blockReader.BorSnapshots().SetSegmentsMin(maxSeedable - blockLimit)
 			}
 		}
 
@@ -308,8 +314,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	if casted, ok := tx.(*temporal.Tx); ok {
-		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+	if temporal, ok := tx.(*temporal.Tx); ok {
+		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
@@ -329,8 +335,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
-	if casted, ok := tx.(*temporal.Tx); ok {
-		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+
+	if temporal, ok := tx.(*temporal.Tx); ok {
+		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
 	{
@@ -600,7 +607,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
+		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []snapshotsync.DownloadRequest) error {
 			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
 				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
 					return err
@@ -1252,8 +1259,8 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	for _, f := range list {
 		if f.To > before {
 			switch f.Type.Enum() {
-			case borsnaptype.Enums.BorEvents, borsnaptype.Enums.BorSpans,
-				borsnaptype.Enums.BorCheckpoints, borsnaptype.Enums.BorMilestones:
+			case heimdall.Enums.Events, heimdall.Enums.Spans,
+				heimdall.Enums.Checkpoints, heimdall.Enums.Milestones:
 				borToReopen = append(borToReopen, filepath.Base(f.Path))
 			default:
 				toReopen = append(toReopen, filepath.Base(f.Path))
@@ -1271,7 +1278,7 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 			snapshots.OpenList(toReopen, true)
 		}
 
-		if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots); ok {
+		if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*heimdall.RoSnapshots); ok {
 			snapshots.OpenList(borToReopen, true)
 			snapshots.SetSegmentsMin(before)
 		}

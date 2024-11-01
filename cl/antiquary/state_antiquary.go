@@ -129,7 +129,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer tx.Rollback()
 
 	// maps which validators changes
-	changedValidators := make(map[uint64]struct{})
+	var changedValidators sync.Map
 
 	stateAntiquaryCollector := newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 	defer stateAntiquaryCollector.close()
@@ -144,7 +144,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		// Mark all validators as touched because we just initizialized the whole state.
 		s.currentState.ForEachValidator(func(v solid.Validator, index, total int) bool {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
 				return false
 			}
@@ -175,37 +175,37 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return stateAntiquaryCollector.collectIntraEpochRandaoMix(slot, mix)
 		},
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.AddValidator(uint64(index), v)
 			return s.validatorsTable.AddValidator(v, uint64(index), slot)
 		},
 		OnNewValidatorActivationEpoch: func(index int, epoch uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeActivationEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddActivationEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorExitEpoch: func(index int, epoch uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeExitEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddExitEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorWithdrawableEpoch: func(index int, epoch uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeWithdrawableEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddWithdrawableEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorSlashed: func(index int, newSlashed bool) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeSlashed(uint64(index), newSlashed)
 			return s.validatorsTable.AddSlashed(uint64(index), slot, newSlashed)
 		},
 		OnNewValidatorActivationEligibilityEpoch: func(index int, epoch uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeActivationEligibilityEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddActivationEligibility(uint64(index), slot, epoch)
 		},
 		OnNewValidatorWithdrawalCredentials: func(index int, wc []byte) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeWithdrawalCredentials(uint64(index), libcommon.BytesToHash(wc))
 			return s.validatorsTable.AddWithdrawalCredentials(uint64(index), slot, libcommon.BytesToHash(wc))
 		},
@@ -389,7 +389,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	buf := &bytes.Buffer{}
 	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
-		if _, ok := changedValidators[validatorIndex]; !ok {
+		if _, ok := changedValidators.Load(validatorIndex); !ok {
 			return true
 		}
 		buf.Reset()

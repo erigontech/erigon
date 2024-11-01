@@ -21,11 +21,10 @@ import (
 	"encoding/json"
 	"math/big"
 
-	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
+	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/jsonrpc"

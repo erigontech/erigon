@@ -18,6 +18,7 @@ package statechange
 
 import (
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
@@ -40,5 +41,6 @@ func ProcessRandaoMixesReset(s abstract.BeaconState) {
 }
 
 func ProcessParticipationFlagUpdates(state abstract.BeaconState) {
+	defer monitor.ObserveElaspedTime(monitor.ProcessParticipationFlagUpdatesTime).End()
 	state.ResetEpochParticipation()
 }

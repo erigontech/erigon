@@ -19,6 +19,7 @@ package consensuschain
 import (
 	"context"
 	"math/big"
+	"strings"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -99,10 +101,14 @@ func (cr Reader) HasBlock(hash common.Hash, number uint64) bool {
 	return b != nil
 }
 
-func (cr Reader) BorStartEventID(hash common.Hash, number uint64) uint64 {
-	id, err := cr.blockReader.BorStartEventID(context.Background(), cr.tx, hash, number)
+func (cr Reader) BorStartEventId(hash common.Hash, number uint64) uint64 {
+	id, err := cr.blockReader.BorStartEventId(context.Background(), cr.tx, hash, number)
 	if err != nil {
-		cr.logger.Warn("BorEventsByBlock failed", "err", err)
+		// should be errors.Is, but this causes an import loop - as this code
+		// is due to be retired I've gon for this fix instead
+		if !strings.HasPrefix(err.Error(), "event id range not found") {
+			cr.logger.Warn("BorEventsByBlock failed", "err", err)
+		}
 		return 0
 	}
 	return id
@@ -111,14 +117,18 @@ func (cr Reader) BorStartEventID(hash common.Hash, number uint64) uint64 {
 func (cr Reader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
 	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
 	if err != nil {
-		cr.logger.Warn("BorEventsByBlock failed", "err", err)
+		// should be errors.Is, but this causes an import loop - as this code
+		// is due to be retired I've gon for this fix instead
+		if !strings.HasPrefix(err.Error(), "event id range not found") {
+			cr.logger.Warn("BorEventsByBlock failed", "err", err)
+		}
 		return nil
 	}
 	return events
 }
 
-func (cr Reader) BorSpan(spanId uint64) []byte {
-	span, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
+func (cr Reader) BorSpan(spanId uint64) *heimdall.Span {
+	span, _, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
 	if err != nil {
 		log.Warn("BorSpan failed", "err", err)
 		return nil

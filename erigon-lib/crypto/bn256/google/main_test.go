@@ -1,9 +1,8 @@
 package bn256
 
 import (
-	"testing"
-
 	"crypto/rand"
+	"testing"
 )
 
 func TestRandomG2Marshal(t *testing.T) {
@@ -18,7 +17,6 @@ func TestRandomG2Marshal(t *testing.T) {
 }
 
 func TestPairings(t *testing.T) {
-	_ = hasBMI2
 	a1 := new(G1).ScalarBaseMult(bigFromBase10("1"))
 	a2 := new(G1).ScalarBaseMult(bigFromBase10("2"))
 	a37 := new(G1).ScalarBaseMult(bigFromBase10("37"))
