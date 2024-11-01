@@ -1791,6 +1791,11 @@ func (dt *DomainRoTx) Close() {
 	if dt.files == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
+	if dt.valsC != nil {
+		dt.valsC.Close()
+		dt.vcParentPtr.Store(0)
+		dt.valsC = nil
+	}
 	files := dt.files
 	dt.files = nil
 	for i := range files {
@@ -1864,7 +1869,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
 	if dt.valsC != nil {
 		if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
-			panic(sdTxImmutabilityInvariant) // cursor opened by different tx, invariant broken
+			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
 		}
 		return dt.valsC, nil
 	}
