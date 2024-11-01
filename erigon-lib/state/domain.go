@@ -775,7 +775,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 	}
 
 	g := dt.statelessGetter(i)
-	if !(UseBtree || UseBpsTree) {
+	if !(UseBtree || UseBpsTree || UseBTrie) {
 		reader := dt.statelessIdxReader(i)
 		if reader.Empty() {
 			return nil, false, 0, nil

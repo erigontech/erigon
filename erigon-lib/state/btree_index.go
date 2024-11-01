@@ -887,8 +887,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
 
 	if UseBTrie {
-
-		idx.trie = NewBtrie(idx.KeyCount())
+		idx.trie = NewBtrie(idx.KeyCount() - 1) // di is 0-based
 		added := false
 		if len(idx.data[pos:]) >= 0 {
 			nodes, err := decodeListNodes(idx.data[pos:])
@@ -925,7 +924,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 				}
 				idx.trie.Insert(key, di)
 				count++
-				// b.mx = append(b.mx, Node{off: idx.ef.Get(di), key: common.Copy(key), di: di})
 				cachedBytes += nsz + uint64(len(key))
 			}
 
@@ -941,6 +939,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch UseBpsTree {
+
 	case true:
 		if len(idx.data[pos:]) == 0 {
 			idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
@@ -986,11 +985,19 @@ func (b *BtIndex) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint
 
 func (b *BtIndex) skipMatchLoop(di, maxDi uint64, g *seg.Reader, key, resBuf []byte) bool {
 	resBuf = resBuf[:0]
+	if di > maxDi {
+		panic("di > maxDi")
+	}
+
 	offset := b.ef.Get(di)
+	if largestDi := b.ef.Count(); maxDi >= largestDi {
+		maxDi = largestDi - 1 // ef addresation is from 0
+	}
+
 	maxOffset := b.ef.Get(maxDi)
 	g.Reset(offset)
 
-	for offset < maxOffset || di < maxDi {
+	for offset <= maxOffset || di <= maxDi {
 		if !g.HasNext() {
 			return false
 		}
@@ -1133,7 +1140,10 @@ func (b *BtIndex) Get2(key []byte, g *seg.Reader) (v []byte, offsetInFile uint64
 	if b.trace {
 		fmt.Printf("get   %x\n", key)
 	}
-	if len(key) == 0 && b.ef.Count() > 0 {
+	if b.Empty() {
+		return nil, 0, false, nil
+	}
+	if len(key) == 0 {
 		k0, v0, offt, err := b.dataLookup(0, g)
 		if err != nil || k0 != nil {
 			return nil, 0, false, err
@@ -1156,13 +1166,13 @@ func (b *BtIndex) Get2(key []byte, g *seg.Reader) (v []byte, offsetInFile uint64
 	var m uint64
 	for l < r {
 		m = (l + r) >> 1
-		if r-l <= DefaultBtreeStartSkip {
-			m = l
-			if b.skipMatchLoop(m, r, g, key, v[:0]) {
-				return
-			}
-			return nil, 0, false, err
-		}
+		// if r-l <= DefaultBtreeStartSkip {
+		// 	m = l
+		// 	if b.skipMatchLoop(m, r, g, key, v[:0]) {
+		// 		return
+		// 	}
+		// 	return nil, 0, false, err
+		// }
 
 		cmp, v, err = b.keyCmp(key, m, g, v[:0])
 		if err != nil {
@@ -1187,7 +1197,7 @@ func (b *BtIndex) Get2(key []byte, g *seg.Reader) (v []byte, offsetInFile uint64
 	}
 
 	k0, v0, offt, err := b.dataLookup(l, g)
-	if err != nil || bytes.Equal(k0, key) {
+	if err != nil || !bytes.Equal(k0, key) {
 		return nil, 0, false, err
 	}
 	return v0, offt, true, nil
@@ -1417,6 +1427,16 @@ func (n *trieNode) String() string {
 	// return s
 }
 
+func (bt *Btrie) LRBros(nibble byte) (lnib, rnib byte, ok bool) {
+	if bt.child[nibble] == nil {
+		return 0, 0, false
+	}
+	var Lok, Rok bool
+	lnib, Lok = bt.prevChildTo(nibble)
+	rnib, Rok = bt.nextChildTo(nibble)
+	return lnib, rnib, Lok || Rok
+}
+
 func (bt *Btrie) nextChildTo(nibble byte) (byte, bool) {
 	if len(bt.child) == 0 || nibble == 0xff {
 		return 0, false
@@ -1461,31 +1481,30 @@ func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 	depth, nib := 1, key[0]
 	Ri = bt.maxDi
 
-	nnib, ok := bt.nextChildTo(nib)
-	if bt.trace {
-		fmt.Printf("not found nib=%x next=%x\n", nib, nnib)
+	lnib, ok := bt.prevChildTo(nib)
+	if ok {
+		Li = bt.child[lnib].maxDi
 	}
+
+	nnib, ok := bt.nextChildTo(nib)
 	if ok {
 		Ri = bt.child[nnib].minDi
 	}
 	if bt.child[nib] == nil {
-		if !ok {
-			pn, ok := bt.prevChildTo(nib)
-			if ok {
-				Li = bt.child[pn].maxDi
-			}
-			return
-		}
-		return 0, bt.child[nnib].minDi
+		return
 	}
-	if bytes.HasPrefix(key, []byte{0x5, 0x6, 0x15, 0x2a, 0x25, 0x20, 0xa, 0xa9, 0x11, 0x55, 0x20}) {
-		fmt.Printf("SeekLR %x\n", key)
-		bt.printRoot()
-	}
+	// if bytes.HasPrefix(key, []byte{0x5, 0x6, 0x15, 0x2a, 0x25, 0x20, 0xa, 0xa9, 0x11, 0x55, 0x20}) {
+	// 	fmt.Printf("SeekLR %x\n", key)
+	// 	bt.printRoot()
+	// }
 
 	next := bt.child[nib]
 	nibbler := nibbler{}
 	Li = next.minDi
+	if len(key) == 1 {
+		Ri = next.maxDi
+		return
+	}
 
 	ni := 0
 	for {

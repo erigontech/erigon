@@ -635,20 +635,9 @@ func TestDomain_Delete(t *testing.T) {
 	defer dc.Close()
 	for txNum := uint64(0); txNum < 1000; txNum++ {
 		label := fmt.Sprintf("txNum=%d", txNum)
-		//val, ok, err := dc.GetLatestBeforeTxNum([]byte("key1"), txNum+1, tx)
-		//require.NoError(err)
-		//require.True(ok)
-		//if txNum%2 == 0 {
-		//	require.Equal([]byte("value1"), val, label)
-		//} else {
-		//	require.Nil(val, label)
-		//}
-		//if txNum == 976 {
 		val, _, err := dc.GetAsOf([]byte("key2"), txNum+1, tx)
 		require.NoError(err)
-		//require.False(ok, label)
 		require.Nil(val, label)
-		//}
 	}
 }
 

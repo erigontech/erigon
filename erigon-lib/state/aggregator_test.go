@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/erigontech/erigon-lib/commitment"
 	"math"
 	"math/rand"
 	"os"
@@ -32,6 +31,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon-lib/commitment"
 
 	"github.com/erigontech/erigon-lib/common/background"
 
@@ -424,13 +425,24 @@ func TestNewBtIndex(t *testing.T) {
 	defer kv.Close()
 	require.NotNil(t, kv)
 	require.NotNil(t, bt)
-	require.Len(t, bt.bplus.mx, keyCount/int(DefaultBtreeM))
-
-	for i := 1; i < len(bt.bplus.mx); i++ {
-		require.NotZero(t, bt.bplus.mx[i].di)
-		require.NotZero(t, bt.bplus.mx[i].off)
-		require.NotEmpty(t, bt.bplus.mx[i].key)
+	if !UseBTrie {
+		require.Len(t, bt.bplus.mx, keyCount/int(DefaultBtreeM))
+		for i := 1; i < len(bt.bplus.mx); i++ {
+			require.NotZero(t, bt.bplus.mx[i].di)
+			require.NotZero(t, bt.bplus.mx[i].off)
+			require.NotEmpty(t, bt.bplus.mx[i].key)
+		}
+	} else {
+		require.NotNil(t, bt.trie)
+		topLevelChild := 0
+		for _, c := range bt.trie.child {
+			if c != nil {
+				topLevelChild++
+			}
+		}
+		require.NotZero(t, topLevelChild)
 	}
+
 }
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
@@ -1324,10 +1336,10 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	compression := ac.d[kv.CommitmentDomain].d.compression
 	fnames := []string{}
 	for _, f := range ac.d[kv.CommitmentDomain].files {
-		k, stateVal, _, found, err := f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
+		stateVal, _, found, err := f.src.bindex.Get2(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
 		require.NoError(t, err)
 		require.True(t, found)
-		require.EqualValues(t, keyCommitmentState, k)
+		// require.EqualValues(t, keyCommitmentState, k)
 		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)
 

@@ -139,7 +139,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		if item.bindex == nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement: file doesn't have index", "name", item.decompressor.FileName())
 		}
-		_, _, offsetInFile, ok, err := item.bindex.Get(fullKey, itemGetter)
+		_, offsetInFile, ok, err := item.bindex.Get2(fullKey, itemGetter)
 		if err != nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement seek failed",
 				"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
