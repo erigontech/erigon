@@ -1862,12 +1862,15 @@ var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immut
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
-
 	if dt.valsC != nil {
-		if !dt.vcParentPtr.CompareAndSwap(dt.vcParentPtr.Load(), eface[1]) {
-			return dt.valsC, nil
+		if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
+			panic(sdTxImmutabilityInvariant) // cursor opened by different tx, invariant broken
 		}
-		panic(sdTxImmutabilityInvariant) // cursor opened by different tx, invariant broken
+		return dt.valsC, nil
+	}
+	// initialise parent pointer tracking
+	if !dt.vcParentPtr.CompareAndSwap(0, eface[1]) {
+		panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
 	}
 
 	if dt.d.largeVals {

@@ -630,29 +630,21 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 
 	cursor, err := dc.valsCursor(tx)
 	require.NoError(err)
+	require.NotNil(cursor)
+	tx.Rollback()
 
-	v, _, ok, err := dc.GetLatest([]byte("key1"), nil, tx)
+	otherTx, err := db.BeginRw(ctx)
 	require.NoError(err)
-	require.True(ok)
-	require.Equal(val, v)
+	defer otherTx.Rollback()
 
-	err = tx.Delete(d.valsTable, []byte("key1"))
-	require.NoError(err)
-	tx.Commit()
-	tx = nil
+	defer func() {
+		r := recover()
+		require.NotNil(r)
+		re := r.(error)
+		require.ErrorIs(re, sdTxImmutabilityInvariant)
+	}()
 
-	tx, err = db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-
-	v, _, ok, err = dc.GetLatest([]byte("key1"), nil, tx)
-	require.NoError(err)
-	require.False(ok)
-	require.Empty(v)
-
-	cursor2, err := dc.valsCursor(tx)
-	require.NoError(err)
-	require.NotEqualValues(cursor, cursor2)
+	dc.GetLatest([]byte("key1"), nil, otherTx)
 }
 
 func TestDomain_Delete(t *testing.T) {
