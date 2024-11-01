@@ -552,13 +552,17 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	assert.NoError(t, err)
 	st := state.New(stateReader)
 	assert.NoError(t, err)
-	assert.False(t, st.Exist(contractAddr), "Contract should not exist at block #1")
+	exist, err := st.Exist(contractAddr)
+	assert.NoError(t, err)
+	assert.False(t, exist, "Contract should not exist at block #1")
 
 	stateReader, err = rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 2, 0, "")
 	assert.NoError(t, err)
 	st = state.New(stateReader)
 	assert.NoError(t, err)
-	assert.True(t, st.Exist(contractAddr), "Contract should exist at block #2")
+	exist, err = st.Exist(contractAddr)
+	assert.NoError(t, err)
+	assert.True(t, exist, "Contract should exist at block #2")
 
 	return m, bankAddress, contractAddr
 }

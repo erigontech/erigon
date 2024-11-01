@@ -244,7 +244,10 @@ func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64,
 
 	vmenv := NewEnv(cfg)
 
-	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
+	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
+	if err != nil {
+		return nil, 0, err
+	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil, nil)

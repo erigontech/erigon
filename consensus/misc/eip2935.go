@@ -29,16 +29,21 @@ import (
 	"github.com/erigontech/erigon/params"
 )
 
-func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState, config *chain.Config, headerReader consensus.ChainHeaderReader) {
-	if state.GetCodeSize(params.HistoryStorageAddress) == 0 {
+func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState, config *chain.Config, headerReader consensus.ChainHeaderReader) error {
+	codeSize, err := state.GetCodeSize(params.HistoryStorageAddress)
+	if err != nil {
+		return err
+	}
+	if codeSize == 0 {
 		log.Debug("[EIP-2935] No code deployed to HistoryStorageAddress before call to store EIP-2935 history")
-		return
+		return nil
 	}
 	headerNum := header.Number.Uint64()
 	if headerNum == 0 { // Activation of fork at Genesis
-		return
+		return nil
 	}
 	storeHash(headerNum-1, header.ParentHash, state)
+	return nil
 }
 
 func storeHash(num uint64, hash libcommon.Hash, state *state.IntraBlockState) {

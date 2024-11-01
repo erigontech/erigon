@@ -153,7 +153,10 @@ func TestNewSimulatedBackend(t *testing.T) {
 	}
 
 	statedb := sim.stateByBlockNumber(tx, new(big.Int).SetUint64(num+1))
-	bal := statedb.GetBalance(testAddr)
+	bal, err := statedb.GetBalance(testAddr)
+	if err!=nil {
+		t.Fatal(err)
+	}
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
 	}

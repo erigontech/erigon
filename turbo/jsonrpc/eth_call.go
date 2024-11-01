@@ -207,7 +207,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("can't get the current state")
 		}
 
-		balance := state.GetBalance(*args.From) // from can't be nil
+		balance, err := state.GetBalance(*args.From) // from can't be nil
+		if err != nil {
+			return 0, err
+		}
 		available := balance.ToBig()
 		if args.Value != nil {
 			if args.Value.ToInt().Cmp(available) >= 0 {

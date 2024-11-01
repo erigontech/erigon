@@ -105,10 +105,10 @@ func (result *ExecutionResult) Revert() []byte {
 
 type (
 	// CanTransferFunc is the signature of a transfer guard function
-	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) bool
+	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) (bool, error)
 
 	// TransferFunc is the signature of a transfer function
-	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool)
+	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) error
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
@@ -121,50 +121,50 @@ type (
 
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
-	CreateAccount(common.Address, bool)
+	CreateAccount(common.Address, bool) error
 
-	SubBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason)
-	AddBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason)
-	GetBalance(common.Address) *uint256.Int
+	SubBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
+	AddBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason) error
+	GetBalance(common.Address) (*uint256.Int, error)
 
-	GetNonce(common.Address) uint64
-	SetNonce(common.Address, uint64)
+	GetNonce(common.Address) (uint64, error)
+	SetNonce(common.Address, uint64) error
 
-	GetCodeHash(common.Address) common.Hash
-	GetCode(common.Address) []byte
-	SetCode(common.Address, []byte)
-	GetCodeSize(common.Address) int
+	GetCodeHash(common.Address) (common.Hash, error)
+	GetCode(common.Address) ([]byte, error)
+	SetCode(common.Address, []byte) error
+	GetCodeSize(common.Address) (int, error)
 
 	// eip-7702; delegated designations
-	ResolveCodeHash(common.Address) common.Hash
-	ResolveCode(common.Address) []byte
-	ResolveCodeSize(common.Address) int
-	GetDelegatedDesignation(common.Address) (common.Address, bool)
+	ResolveCodeHash(common.Address) (common.Hash, error)
+	ResolveCode(common.Address) ([]byte, error)
+	ResolveCodeSize(common.Address) (int, error)
+	GetDelegatedDesignation(common.Address) (common.Address, bool, error)
 
 	AddRefund(uint64)
 	SubRefund(uint64)
 	GetRefund() uint64
 
-	GetCommittedState(common.Address, *common.Hash, *uint256.Int)
-	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
-	SetState(common.Address, *common.Hash, uint256.Int)
+	GetCommittedState(common.Address, *common.Hash, *uint256.Int) error
+	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int) error
+	SetState(common.Address, *common.Hash, uint256.Int) error
 
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int
 	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)
 
-	Selfdestruct(common.Address) bool
-	HasSelfdestructed(common.Address) bool
-	Selfdestruct6780(common.Address)
+	Selfdestruct(common.Address) (bool, error)
+	HasSelfdestructed(common.Address) (bool, error)
+	Selfdestruct6780(common.Address) error
 
 	// Exist reports whether the given account exists in state.
 	// Notably this should also return true for suicided accounts.
-	Exist(common.Address) bool
+	Exist(common.Address) (bool, error)
 	// Empty returns whether the given account is empty. Empty
 	// is defined according to EIP161 (balance = nonce = code = 0).
-	Empty(common.Address) bool
+	Empty(common.Address) (bool, error)
 
 	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
-		precompiles []common.Address, txAccesses types2.AccessList, authorities []common.Address)
+		precompiles []common.Address, txAccesses types2.AccessList, authorities []common.Address) error
 
 	AddressInAccessList(addr common.Address) bool
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform

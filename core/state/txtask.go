@@ -140,7 +140,7 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	//}
 	return receipt
 }
-func (t *TxTask) Reset() {
+func (t *TxTask) Reset() *TxTask {
 	t.BalanceIncreaseSet = nil
 	returnReadList(t.ReadLists)
 	t.ReadLists = nil
@@ -149,6 +149,9 @@ func (t *TxTask) Reset() {
 	t.Logs = nil
 	t.TraceFroms = nil
 	t.TraceTos = nil
+	t.Error = nil
+	t.Failed = false
+	return t
 }
 
 // TxTaskQueue non-thread-safe priority-queue

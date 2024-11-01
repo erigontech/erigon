@@ -1017,7 +1017,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		return
 	}
 	defer tx.Rollback()
-	if st := state.New(m.NewStateReader(tx)); !st.Exist(theAddr) {
+	exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exist {
 		t.Error("expected account to exist")
 	}
 	tx.Rollback()
@@ -1027,7 +1031,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
+		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
+		if err != nil {
+			return err
+		}
+		if exist {
 			t.Error("account should not exist")
 		}
 		return nil
@@ -1040,7 +1048,11 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		if st := state.New(m.NewStateReader(tx)); st.Exist(theAddr) {
+		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
+		if err != nil {
+			return err
+		}
+		if exist {
 			t.Error("account should not exist")
 		}
 		return nil
@@ -1106,19 +1118,27 @@ func TestDoubleAccountRemoval(t *testing.T) {
 
 	st := state.New(m.NewStateReader(tx))
 	assert.NoError(t, err)
-	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
+	exist, err := st.Exist(theAddr)
+	assert.NoError(t, err)
+	assert.False(t, exist, "Contract should've been removed")
 
 	st = state.New(m.NewHistoryStateReader(1, tx))
 	assert.NoError(t, err)
-	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
+	exist, err = st.Exist(theAddr)
+	assert.NoError(t, err)
+	assert.False(t, exist, "Contract should not exist at block #0")
 
 	st = state.New(m.NewHistoryStateReader(2, tx))
 	assert.NoError(t, err)
-	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
+	exist, err = st.Exist(theAddr)
+	assert.NoError(t, err)
+	assert.True(t, exist, "Contract should exist at block #1")
 
 	st = state.New(m.NewHistoryStateReader(3, tx))
 	assert.NoError(t, err)
-	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
+	exist, err = st.Exist(theAddr)
+	assert.NoError(t, err)
+	assert.True(t, exist, "Contract should exist at block #2")
 }
 
 // This is a regression test (i.e. as weird as it is, don't delete it ever), which
@@ -1610,7 +1630,10 @@ func TestCVE2020_26265(t *testing.T) {
 		reader := m.NewHistoryStateReader(2, tx)
 		statedb := state.New(reader)
 
-		got := statedb.GetBalance(aa)
+		got, err := statedb.GetBalance(aa)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !got.Eq(new(uint256.Int).SetUint64(5)) {
 			t.Errorf("got %x exp %x", got, 5)
 		}
@@ -1872,7 +1895,11 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			}
 			exp := expectations[i]
 			if exp.exist {
-				if !statedb.Exist(aa) {
+				exist, err := statedb.Exist(aa)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !exist {
 					t.Fatalf("block %d, expected %x to exist, it did not", blockNum, aa)
 				}
 				for slot, val := range exp.values {
@@ -1884,7 +1911,11 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 					}
 				}
 			} else {
-				if statedb.Exist(aa) {
+				exist, err := statedb.Exist(aa)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !exist {
 					t.Fatalf("block %d, expected %x to not exist, it did", blockNum, aa)
 				}
 			}
@@ -1990,7 +2021,11 @@ func TestInitThenFailCreateContract(t *testing.T) {
 
 		// Import the canonical chain
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
-		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
+		got, err := statedb.GetBalance(aa)
+		if err != nil {
+			return err
+		}
+		if exp := uint64(100000); got.Uint64() != exp {
 			t.Fatalf("Genesis err, got %v exp %v", got, exp)
 		}
 		// First block tries to create, but fails
@@ -2000,7 +2035,11 @@ func TestInitThenFailCreateContract(t *testing.T) {
 				t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 			}
 			statedb = state.New(m.NewHistoryStateReader(1, tx))
-			if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
+			got, err := statedb.GetBalance(aa)
+			if err != nil {
+				return err
+			}
+			if exp := uint64(100000); got.Uint64() != exp {
 				t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
 			}
 		}
@@ -2200,7 +2239,10 @@ func TestEIP1559Transition(t *testing.T) {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 
 		// 3: Ensure that miner received only the tx's tip.
-		actual := statedb.GetBalance(block.Coinbase())
+		actual, err := statedb.GetBalance(block.Coinbase())
+		if err != nil {
+			return err
+		}
 		expected := new(uint256.Int).Add(
 			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
 			ethash.ConstantinopleBlockReward,
@@ -2210,7 +2252,11 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 
 		// 4: Ensure the txn sender paid for the gasUsed * (tip + block baseFee).
-		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr1))
+		balance, err := statedb.GetBalance(addr1)
+		if err != nil {
+			return err
+		}
+		actual = new(uint256.Int).Sub(funds, balance)
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
@@ -2242,7 +2288,10 @@ func TestEIP1559Transition(t *testing.T) {
 		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
-		actual := statedb.GetBalance(block.Coinbase())
+		actual, err := statedb.GetBalance(block.Coinbase())
+		if err != nil {
+			return err
+		}
 		expected := new(uint256.Int).Add(
 			new(uint256.Int).SetUint64(block.GasUsed()*effectiveTip),
 			ethash.ConstantinopleBlockReward,
@@ -2252,7 +2301,11 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 
 		// 4: Ensure the txn sender paid for the gasUsed * (effectiveTip + block baseFee).
-		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr2))
+		balance, err := statedb.GetBalance(addr2)
+		if err != nil {
+			return err
+		}
+		actual = new(uint256.Int).Sub(funds, balance)
 		expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
 		if actual.Cmp(expected) != 0 {
 			t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)

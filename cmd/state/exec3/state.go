@@ -18,6 +18,7 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -132,6 +133,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 
 func (rw *Worker) Run() error {
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
+		fmt.Println("RTX", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Final)
 		rw.RunTxTask(txTask, rw.isMining)
 		if err := rw.resultCh.Add(rw.ctx, txTask); err != nil {
 			return err

@@ -1668,22 +1668,42 @@ func (c *Bor) getNextHeimdallSpanForTest(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) error {
 	// get inputs before
-	input1 := db.GetBalance(sender).Clone()
-	input2 := db.GetBalance(recipient).Clone()
-
-	if !bailout {
-		db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+	input1, err := db.GetBalance(sender)
+	if err != nil {
+		return err
 	}
-	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
-
+	input1 = input1.Clone()
+	input2, err := db.GetBalance(recipient)
+	if err != nil {
+		return err
+	}
+	input2 = input2.Clone()
+	if !bailout {
+		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+		if err != nil {
+			return err
+		}
+	}
+	err = db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
+	if err != nil {
+		return err
+	}
 	// get outputs after
-	output1 := db.GetBalance(sender).Clone()
-	output2 := db.GetBalance(recipient).Clone()
-
+	output1, err := db.GetBalance(sender)
+	if err != nil {
+		return err
+	}
+	output1 = output1.Clone()
+	output2, err := db.GetBalance(recipient)
+	if err != nil {
+		return err
+	}
+	output2 = output2.Clone()
 	// add transfer log into state
 	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
+	return nil
 }
 
 func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
