@@ -804,16 +804,29 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	key := make([]byte, 0, 64)
 	var pos uint64
 
-	prev0 := byte(0)
-	var prevSet bool
+	// prev0 := byte(0)
+	// var prevSet bool
+	pref2b := make(map[string]struct{}, 256*256)
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
 		keep := false
-		if !prevSet || prev0 != key[0] {
-			prev0 = key[0]
-			prevSet = true
+		// if !prevSet || prev0 != key[0] {
+		// 	prev0 = key[0]
+		// 	prevSet = true
+		// 	keep = true
+		// }
+
+		var chunk string
+		if len(key) > 1 {
+			chunk = string(key[:2])
+		} else {
+			chunk = string(key)
+		}
+		if _, ok := pref2b[chunk]; !ok {
+			pref2b[chunk] = struct{}{}
 			keep = true
 		}
+
 		err = iw.AddKey(key, pos, keep)
 		if err != nil {
 			return err
