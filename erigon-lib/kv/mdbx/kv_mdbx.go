@@ -1425,13 +1425,8 @@ func (c *MdbxCursor) Delete(k []byte) error {
 // can still be used on it.
 // Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
 // this operation.
-func (c *MdbxCursor) DeleteCurrent() error {
-	return c.c.Del(mdbx.Current)
-}
-
-func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error {
-	return c.c.Put(k, v, mdbx.NoOverwrite)
-}
+func (c *MdbxCursor) DeleteCurrent() error             { return c.c.Del(mdbx.Current) }
+func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error { return c.c.Put(k, v, mdbx.NoOverwrite) }
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {
 	if err := c.c.Put(key, value, 0); err != nil {
