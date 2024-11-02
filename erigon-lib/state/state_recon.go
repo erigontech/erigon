@@ -126,7 +126,7 @@ func (sii *ScanIteratorInc) Next() (uint64, error) {
 	return n, nil
 }
 
-func (hs *HistoryStep) iterateTxs() *ScanIteratorInc {
+func (hs *HistoryStep) iterateTxs() *ScanIteratorInc { //nolint
 	var sii ScanIteratorInc
 	sii.g = hs.indexFile.getter
 	sii.g.Reset(0)
@@ -152,7 +152,7 @@ type HistoryIteratorInc struct {
 	compressVals bool
 }
 
-func (hs *HistoryStep) interateHistoryBeforeTxNum(txNum uint64) *HistoryIteratorInc {
+func (hs *HistoryStep) interateHistoryBeforeTxNum(txNum uint64) *HistoryIteratorInc { //nolint
 	var hii HistoryIteratorInc
 	hii.indexG = hs.indexFile.getter
 	hii.historyG = hs.historyFile.getter
