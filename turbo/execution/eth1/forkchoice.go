@@ -201,7 +201,10 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if err != nil {
 			return err
 		}
-		return rawdb.WriteLastNewBlockSeen(tx, *num)
+		if num != nil {
+			return rawdb.WriteLastNewBlockSeen(tx, *num)
+		}
+		return nil
 	}); err != nil {
 		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		return
@@ -525,7 +528,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		blockTimings := e.forkValidator.GetTimings(blockHash)
-		logArgs := []interface{}{"head", headHash, "hash", blockHash}
+		logArgs := []interface{}{"age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)), "head", headHash, "hash", blockHash}
 		if flushExtendingFork {
 			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
 			if !e.syncCfg.ParallelStateFlushing {
@@ -534,6 +537,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
 			mgasPerSec := gasUsedMgas / totalTime.Seconds()
 			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
+			e.avgMgasSec = (e.avgMgasSec*float64(e.recordedMgasSec) + mgasPerSec) / float64(e.recordedMgasSec+1)
 			e.recordedMgasSec++
 			logArgs = append(logArgs, "number", fcuHeader.Number.Uint64(), "execution", blockTimings[engine_helpers.BlockTimingsValidationIndex], "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
 			if !e.syncCfg.ParallelStateFlushing {

@@ -116,7 +116,7 @@ func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManage
 		return err
 	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Debug("failed publish gossip", "err", err)
+		log.Debug("failed to publish gossip", "err", err)
 	}
 	return nil
 }
@@ -150,7 +150,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		return err
 	}
 	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Warn("failed publish gossip", "err", err)
+		log.Debug("failed to publish gossip", "err", err)
 	}
 	return nil
 }
@@ -218,8 +218,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 	case gossip.TopicNameAttesterSlashing:
 		return operationsContract[*cltypes.AttesterSlashing](ctx, g, data, int(version), "attester slashing", g.forkChoice.OnAttesterSlashing)
 	case gossip.TopicNameBlsToExecutionChange:
-		obj := &cltypes.SignedBLSToExecutionChange{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := &cltypes.SignedBLSToExecutionChangeWithGossipData{
+			GossipData:                 copyOfSentinelData(data),
+			SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{},
+		}
+		if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
@@ -307,7 +310,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 	goWorker(syncCommitteesCh, 4)
 	goWorker(operationsCh, 1)
 	goWorker(blocksCh, 1)
-	goWorker(blobsCh, 1)
+	goWorker(blobsCh, 6)
 
 	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
 		// Skip processing the received data if the node is not ready to process operations.

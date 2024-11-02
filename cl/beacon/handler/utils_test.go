@@ -134,8 +134,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		opPool.VoluntaryExitsPool.Insert(msg.VoluntaryExit.ValidatorIndex, msg)
 		return nil
 	}).AnyTimes()
-	blsToExecutionChangeService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedBLSToExecutionChange) error {
-		opPool.BLSToExecutionChangesPool.Insert(msg.Signature, msg)
+	blsToExecutionChangeService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedBLSToExecutionChangeWithGossipData) error {
+		opPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
 		return nil
 	}).AnyTimes()
 	proposerSlashingService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.ProposerSlashing) error {
@@ -176,6 +176,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		proposerSlashingService,
 		nil,
 		mockValidatorMonitor,
+		false,
 	) // TODO: add tests
 	h.Init()
 	return

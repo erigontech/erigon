@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -90,6 +91,8 @@ type ExecuteBlockCfg struct {
 	blockProduction   bool
 	keepAllChangesets bool
 
+	chaosMonkey bool
+
 	applyWorker, applyWorkerMining *exec3.Worker
 }
 
@@ -104,6 +107,7 @@ func StageExecuteBlocksCfg(
 	stateStream bool,
 	badBlockHalt bool,
 	keepAllChangesets bool,
+	chaosMonkey bool,
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -136,6 +140,7 @@ func StageExecuteBlocksCfg(
 		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
 		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
 		keepAllChangesets: keepAllChangesets,
+		chaosMonkey:       chaosMonkey,
 	}
 }
 
@@ -393,10 +398,12 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
+		pruneTimeout := 250 * time.Millisecond
 		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip *= 10
+			pruneDiffsLimitOnChainTip = math.MaxInt
+			pruneTimeout = time.Hour
 		}
-		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip); err != nil {
+		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip, pruneTimeout); err != nil {
 			return err
 		}
 	}

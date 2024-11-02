@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/tests/contracts"
 )
 
@@ -68,7 +68,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 		t.Fatal("roots are the same")
 	}
 
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
@@ -135,7 +135,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Fatal("roots are the same")
 	}
 
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
@@ -197,7 +197,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	incorrectHeader := types.CopyHeader(chain.Headers[0]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
 
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
@@ -259,7 +259,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	incorrectHeader := types.CopyHeader(chain.Headers[0]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
 
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")
@@ -320,7 +320,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	// BLOCK 1
 	incorrectHeader := types.CopyHeader(chain.Headers[0]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil, nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[0].Transactions(), chain.Blocks[0].Uncles(), chain.Receipts[0], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 
 	if err = m.InsertChain(incorrectChain); err == nil {
@@ -401,7 +401,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	incorrectHeader := types.CopyHeader(chain.Headers[1]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[0].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[1].Transactions(), chain.Blocks[1].Uncles(), chain.Receipts[1], nil, nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[1].Transactions(), chain.Blocks[1].Uncles(), chain.Receipts[1], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 
 	// BLOCK 2 - INCORRECT
@@ -508,7 +508,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	// BLOCK 3 - INCORRECT
 	incorrectHeader := types.CopyHeader(chain.Headers[2]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[2].Transactions(), chain.Blocks[2].Uncles(), chain.Receipts[2], nil, nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[2].Transactions(), chain.Blocks[2].Uncles(), chain.Receipts[2], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 
 	if err = m.InsertChain(incorrectChain); err == nil {
@@ -597,7 +597,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	// BLOCK 4 - INCORRECT
 	incorrectHeader := types.CopyHeader(chain.Headers[3]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil, nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 
 	if err = m.InsertChain(incorrectChain); err == nil {
@@ -685,7 +685,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	// BLOCK 4 - INCORRECT
 	incorrectHeader := types.CopyHeader(chain.Headers[3]) // Copy header, not just pointer
 	incorrectHeader.Root = chain.Headers[1].Root
-	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil, nil)
+	incorrectBlock := types.NewBlock(incorrectHeader, chain.Blocks[3].Transactions(), chain.Blocks[3].Uncles(), chain.Receipts[3], nil)
 	incorrectChain := &core.ChainPack{Blocks: []*types.Block{incorrectBlock}, Headers: []*types.Header{incorrectHeader}, TopBlock: incorrectBlock}
 	if err = m.InsertChain(incorrectChain); err == nil {
 		t.Fatal("should fail")

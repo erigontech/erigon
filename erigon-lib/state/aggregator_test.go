@@ -1280,56 +1280,12 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 }
 
 func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
-	db, agg := testDbAndAggregatorv3(t, 20)
-
-	ctx := context.Background()
-	agg.logger = log.Root().New()
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
+		stepSize:                         20,
+		disableCommitmentBranchTransform: false,
+	})
 
 	ac := agg.BeginFilesRo()
-	defer ac.Close()
-
-	rwTx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	txCount := 640 // will produce files up to step 31, good because covers different ranges (16, 8, 4, 2, 1)
-
-	keys, vals := generateInputData(t, 20, 16, txCount)
-	t.Logf("keys %d vals %d\n", len(keys), len(vals))
-
-	for i := 0; i < len(vals); i++ {
-		domains.SetTxNum(uint64(i))
-
-		for j := 0; j < len(keys); j++ {
-			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
-			prev, step, err := domains.DomainGet(kv.AccountsDomain, keys[j], nil)
-			require.NoError(t, err)
-
-			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)
-			require.NoError(t, err)
-		}
-		if uint64(i+1)%agg.StepSize() == 0 {
-			rh, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
-			require.NoError(t, err)
-			require.NotEmpty(t, rh)
-		}
-	}
-
-	err = domains.Flush(context.Background(), rwTx)
-	require.NoError(t, err)
-	domains.Close() // closes ac
-
-	require.NoError(t, rwTx.Commit())
-
-	// build files out of db
-	err = agg.BuildFiles(uint64(txCount))
-	require.NoError(t, err)
-
-	ac = agg.BeginFilesRo()
 	roots := make([]common.Hash, 0)
 
 	// collect latest root from each available file
@@ -1351,7 +1307,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	agg.d[kv.CommitmentDomain].closeFilesAfterStep(0) // close commitment files to remove
 
 	// now clean all commitment files along with related db buckets
-	rwTx, err = db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
@@ -1378,6 +1334,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	err = agg.OpenFolder()
 	require.NoError(t, err)
 
+	ctx := context.Background()
 	finalRoot, err := agg.RebuildCommitmentFiles(ctx, nil, &rawdbv3.TxNums)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)

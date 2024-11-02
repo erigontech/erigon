@@ -18,6 +18,7 @@ package p2p
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 
 	"golang.org/x/sync/errgroup"
@@ -84,9 +85,34 @@ type service struct {
 
 func (s *service) Run(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return s.MessageListener.Run(ctx) })
-	eg.Go(func() error { return s.PeerTracker.Run(ctx) })
-	eg.Go(func() error { return s.Publisher.Run(ctx) })
+	eg.Go(func() error {
+		err := s.MessageListener.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("message listener failed: %w", err)
+		}
+
+		return err
+	})
+	eg.Go(func() error {
+		err := s.PeerTracker.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("peer tracker failed: %w", err)
+		}
+
+		return err
+	})
+	eg.Go(func() error {
+		err := s.Publisher.Run(ctx)
+
+		if err != nil {
+			err = fmt.Errorf("peer publisher failed: %w", err)
+		}
+
+		return err
+	})
+
 	return eg.Wait()
 }
 

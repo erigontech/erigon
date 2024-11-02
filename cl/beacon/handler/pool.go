@@ -93,13 +93,14 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		return
 	}
 
-	headState := a.syncedData.HeadState()
-	if headState == nil {
-		beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
-		return
-	}
 	failures := []poolingFailure{}
 	for i, attestation := range req {
+		headState, cn := a.syncedData.HeadState()
+		defer cn()
+		if headState == nil {
+			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
+			return
+		}
 		var (
 			slot                  = attestation.Data.Slot
 			epoch                 = a.ethClock.GetEpochAtSlot(slot)
@@ -107,6 +108,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			cIndex                = attestation.Data.CommitteeIndex
 			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
 		)
+
+		cn()
 		if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
 			index, err := attestation.ElectraSingleCommitteeIndex()
 			if err != nil {
@@ -191,9 +194,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 }
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
-	clversion := a.syncedData.HeadState().Version()
+	clVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch())
 
-	req := cltypes.NewAttesterSlashing(clversion)
+	req := cltypes.NewAttesterSlashing(clVersion)
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -269,24 +272,21 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 	}
 	failures := []poolingFailure{}
 	for _, v := range req {
-		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
-			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
-			continue
+		encodedSSZ, err := v.EncodeSSZ(nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		// Broadcast to gossip
-		if a.sentinel != nil {
-			encodedSSZ, err := v.EncodeSSZ(nil)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+
+		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, &cltypes.SignedBLSToExecutionChangeWithGossipData{
+			SignedBLSToExecutionChange: v,
+			GossipData: &sentinel.GossipData{
 				Data: encodedSSZ,
 				Name: gossip.TopicNameBlsToExecutionChange,
-			}); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
+			},
+		}); err != nil && !errors.Is(err, services.ErrIgnore) {
+			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
+			continue
 		}
 	}
 
@@ -341,18 +341,21 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s := a.syncedData.HeadState()
-	if s == nil {
-		http.Error(w, "node is not synced", http.StatusServiceUnavailable)
-		return
-	}
+
 	failures := []poolingFailure{}
 	for idx, v := range msgs {
+		s, cn := a.syncedData.HeadState()
+		defer cn()
+		if s == nil {
+			http.Error(w, "node is not synced", http.StatusServiceUnavailable)
+			return
+		}
 		publishingSubnets, err := subnets.ComputeSubnetsForSyncCommittee(s, v.ValidatorIndex)
 		if err != nil {
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
+		cn()
 		for _, subnet := range publishingSubnets {
 			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, v); err != nil && !errors.Is(err, services.ErrIgnore) {
 				log.Warn("[Beacon REST] failed to process attestation in syncCommittee service", "err", err)
@@ -393,11 +396,6 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 	msgs := []*cltypes.SignedContributionAndProof{}
 	if err := json.NewDecoder(r.Body).Decode(&msgs); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	s := a.syncedData.HeadState()
-	if s == nil {
-		http.Error(w, "node is not synced", http.StatusServiceUnavailable)
 		return
 	}
 	failures := []poolingFailure{}

@@ -230,7 +230,15 @@ func EncodeString(s []byte, to []byte) int {
 	}
 }
 
-// EncodeHash assumes that `to` buffer is already 32bytes long
+// EncodeAddress assumes that `to` buffer is already 21-bytes long
+func EncodeAddress(a, to []byte) int {
+	_ = to[20] // early bounds check to guarantee safety of writes below
+	to[0] = 128 + 20
+	copy(to[1:21], a[:20])
+	return 21
+}
+
+// EncodeHash assumes that `to` buffer is already 33-bytes long
 func EncodeHash(h, to []byte) int {
 	_ = to[32] // early bounds check to guarantee safety of writes below
 	to[0] = 128 + 32

@@ -17,30 +17,38 @@
 package synced_data
 
 import (
+	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
+const EnableDeadlockDetector = true
+
 var _ SyncedData = (*SyncedDataManager)(nil)
 
 type SyncedDataManager struct {
-	enabled   bool
-	cfg       *clparams.BeaconChainConfig
-	headState atomic.Value
+	enabled bool
+	cfg     *clparams.BeaconChainConfig
 
-	copyBuffer      *state.CachingBeaconState
-	copyBufferMutex sync.Mutex
+	headRoot atomic.Value
+	headSlot atomic.Uint64
+
+	headState *state.CachingBeaconState
+
+	mu sync.RWMutex
 }
 
 func NewSyncedDataManager(enabled bool, cfg *clparams.BeaconChainConfig) *SyncedDataManager {
 	return &SyncedDataManager{
-		enabled:    enabled,
-		cfg:        cfg,
-		copyBuffer: state.New(cfg),
+		enabled: enabled,
+		cfg:     cfg,
 	}
 }
 
@@ -48,66 +56,87 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	s.copyBufferMutex.Lock()
-	defer s.copyBufferMutex.Unlock()
-	newPtr := s.copyBuffer
-	if err := newState.CopyInto(newPtr); err != nil {
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var blkRoot common.Hash
+
+	if s.headState == nil {
+		s.headState, err = newState.Copy()
+	} else {
+		err = newState.CopyInto(s.headState)
+	}
+	if err != nil {
 		return err
 	}
-	curPtr, ok := s.headState.Load().(*state.CachingBeaconState)
-	if !ok {
-		// No head state yet
-		s.headState.Store(newPtr)
-		s.copyBuffer = state.New(s.cfg) // acquire new buffer
-		return
+	blkRoot, err = newState.BlockRoot()
+	if err != nil {
+		return err
 	}
-
-	// swap buffers
-	s.headState.Store(newPtr)
-	s.copyBuffer = curPtr
-	return
+	s.headSlot.Store(newState.Slot())
+	s.headRoot.Store(blkRoot)
+	return err
 }
 
-func (s *SyncedDataManager) HeadState() *state.CachingBeaconState {
-	if !s.enabled {
-		return nil
+func EmptyCancel() {}
+
+func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
+	_, synced := s.headRoot.Load().(common.Hash)
+	if !s.enabled || !synced {
+		return nil, EmptyCancel
 	}
-	if ret, ok := s.headState.Load().(*state.CachingBeaconState); ok {
-		return ret
+
+	s.mu.RLock()
+	st := debug.Stack()
+
+	ch := make(chan struct{})
+	if EnableDeadlockDetector {
+		go func() {
+			select {
+			case <-ch:
+				return
+			case <-time.After(100 * time.Second):
+				fmt.Println("Deadlock detected", string(st))
+			}
+		}()
 	}
-	return nil
+
+	var mu sync.Once
+
+	return s.headState, func() {
+		mu.Do(func() {
+			s.mu.RUnlock()
+			if EnableDeadlockDetector {
+				ch <- struct{}{}
+			}
+		})
+	}
 }
 
-func (s *SyncedDataManager) HeadStateReader() abstract.BeaconStateReader {
-	headstate := s.HeadState()
-	if headstate == nil {
-		return nil
-	}
-	return headstate
-}
-
-func (s *SyncedDataManager) HeadStateMutator() abstract.BeaconStateMutator {
-	headstate := s.HeadState()
-	if headstate == nil {
-		return nil
-	}
-	return headstate
+func (s *SyncedDataManager) HeadStateReader() (abstract.BeaconStateReader, CancelFn) {
+	return s.HeadState()
 }
 
 func (s *SyncedDataManager) Syncing() bool {
-	if !s.enabled {
-		return false
-	}
-	return s.headState.Load() == nil
+	_, synced := s.headRoot.Load().(common.Hash)
+	return !synced
 }
 
 func (s *SyncedDataManager) HeadSlot() uint64 {
 	if !s.enabled {
 		return 0
 	}
-	st, ok := s.headState.Load().(*state.CachingBeaconState)
-	if !ok {
-		return 0
+	return s.headSlot.Load()
+}
+
+func (s *SyncedDataManager) HeadRoot() common.Hash {
+	if !s.enabled {
+		return common.Hash{}
 	}
-	return st.Slot()
+	root, ok := s.headRoot.Load().(common.Hash)
+	if !ok {
+		return common.Hash{}
+	}
+	return root
 }

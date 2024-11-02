@@ -32,13 +32,12 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 )
 

@@ -164,29 +164,43 @@ func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvid
 }
 
 func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype.WebSeedsFromProvider) (tags map[string]string, invalidTags, etagFetchFailed []string, err error) {
+	lock := sync.Mutex{}
 	etagFetchFailed = make([]string, 0)
 	tags = make(map[string]string)
 	invalidTagsMap := make(map[string]string)
 
+	eg := errgroup.Group{}
+	eg.SetLimit(100)
 	for name, wurl := range manifestResponse {
+		name, wurl := name, wurl
 		u, err := url.Parse(wurl)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("webseed.fetchFileEtags: %w", err)
 		}
-		md5Tag, err := d.retrieveFileEtag(ctx, u)
-		if err != nil {
-			if errors.Is(err, ErrInvalidEtag) {
-				invalidTagsMap[name] = md5Tag
-				continue
+		eg.Go(func() error {
+			md5Tag, err := d.retrieveFileEtag(ctx, u)
+
+			lock.Lock()
+			defer lock.Unlock()
+			if err != nil {
+				d.logger.Debug("[snapshots.webseed] get file ETag", "err", err, "url", u.String())
+				if errors.Is(err, ErrInvalidEtag) {
+					invalidTagsMap[name] = md5Tag
+					return nil
+				}
+				if errors.Is(err, ErrEtagNotFound) {
+					etagFetchFailed = append(etagFetchFailed, name)
+					return nil
+				}
+				return fmt.Errorf("webseed.fetchFileEtags: %w", err)
 			}
-			if errors.Is(err, ErrEtagNotFound) {
-				etagFetchFailed = append(etagFetchFailed, name)
-				continue
-			}
-			d.logger.Debug("[snapshots.webseed] get file ETag", "err", err, "url", u.String())
-			return nil, nil, nil, fmt.Errorf("webseed.fetchFileEtags: %w", err)
-		}
-		tags[name] = md5Tag
+			tags[name] = md5Tag
+			return nil
+		})
+
+	}
+	if err := eg.Wait(); err != nil {
+		return nil, nil, nil, err
 	}
 
 	invalidTags = make([]string, 0)
@@ -522,7 +536,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 				d.logger.Debug("[snapshots.webseed] empty line in manifest.txt", "webseed", webSeedProviderUrl.String(), "lineNum", fi)
 			}
 			continue
-		case "manifest.txt":
+		case "manifest.txt", "node.txt":
 			continue
 		default:
 			response[trimmed] = webSeedProviderUrl.JoinPath(trimmed).String()

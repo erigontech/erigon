@@ -3,8 +3,8 @@ module github.com/erigontech/erigon-lib
 go 1.22.0
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20240814160410-2ce37904b978
-	github.com/erigontech/interfaces v0.0.0-20241018125732-814767d1b926
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e
+	github.com/erigontech/interfaces v0.0.0-20241024130452-38a90d9c6fd5
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
@@ -20,6 +20,7 @@ require (
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/deckarep/golang-set/v2 v2.3.1
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/elastic/go-freelru v0.13.0
 	github.com/erigontech/speedtest v0.0.2
