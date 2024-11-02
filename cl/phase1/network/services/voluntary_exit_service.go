@@ -20,11 +20,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -64,64 +66,65 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		return ErrIgnore
 	}
 
+	var (
+		signingRoot common.Hash
+		pk          common.Bytes48
+	)
+
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#voluntary-exits
 	// def process_voluntary_exit(state: BeaconState, signed_voluntary_exit: SignedVoluntaryExit) -> None:
-	state, cn := s.syncedDataManager.HeadStateReader()
-	defer cn()
-	if state == nil {
-		return ErrIgnore
-	}
+	if err := s.syncedDataManager.ViewHeadState(func(state *state.CachingBeaconState) error {
+		val, err := state.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+		if err != nil {
+			return ErrIgnore
+		}
+		curEpoch := s.ethClock.GetCurrentEpoch()
 
-	val, err := state.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
-	if err != nil {
-		return ErrIgnore
-	}
-	curEpoch := s.ethClock.GetCurrentEpoch()
+		// Verify the validator is active
+		// assert is_active_validator(validator, get_current_epoch(state))
+		if !val.Active(curEpoch) {
+			return errors.New("validator is not active")
+		}
 
-	// Verify the validator is active
-	// assert is_active_validator(validator, get_current_epoch(state))
-	if !val.Active(curEpoch) {
-		return errors.New("validator is not active")
-	}
+		// Verify exit has not been initiated
+		// assert validator.exit_epoch == FAR_FUTURE_EPOCH
+		if val.ExitEpoch() != s.beaconCfg.FarFutureEpoch {
+			return fmt.Errorf("verify exit has not been initiated. exitEpoch: %d, farFutureEpoch: %d", val.ExitEpoch(), s.beaconCfg.FarFutureEpoch)
+		}
 
-	// Verify exit has not been initiated
-	// assert validator.exit_epoch == FAR_FUTURE_EPOCH
-	if !(val.ExitEpoch() == s.beaconCfg.FarFutureEpoch) {
-		return fmt.Errorf("verify exit has not been initiated. exitEpoch: %d, farFutureEpoch: %d", val.ExitEpoch(), s.beaconCfg.FarFutureEpoch)
-	}
+		// Exits must specify an epoch when they become valid; they are not valid before then
+		// assert get_current_epoch(state) >= voluntary_exit.epoch
+		if curEpoch < voluntaryExit.Epoch {
+			return errors.New("exits must specify an epoch when they become valid; they are not valid before then")
+		}
 
-	// Exits must specify an epoch when they become valid; they are not valid before then
-	// assert get_current_epoch(state) >= voluntary_exit.epoch
-	if !(curEpoch >= voluntaryExit.Epoch) {
-		return errors.New("exits must specify an epoch when they become valid; they are not valid before then")
-	}
+		// Verify the validator has been active long enough
+		// assert get_current_epoch(state) >= validator.activation_epoch + SHARD_COMMITTEE_PERIOD
+		if curEpoch < val.ActivationEpoch()+s.beaconCfg.ShardCommitteePeriod {
+			return errors.New("verify the validator has been active long enough")
+		}
 
-	// Verify the validator has been active long enough
-	// assert get_current_epoch(state) >= validator.activation_epoch + SHARD_COMMITTEE_PERIOD
-	if !(curEpoch >= val.ActivationEpoch()+s.beaconCfg.ShardCommitteePeriod) {
-		return errors.New("verify the validator has been active long enough")
-	}
-
-	// Verify signature
-	// domain = get_domain(state, DOMAIN_VOLUNTARY_EXIT, voluntary_exit.epoch)
-	// signing_root = compute_signing_root(voluntary_exit, domain)
-	// assert bls.Verify(validator.pubkey, signing_root, signed_voluntary_exit.signature)
-	pk := val.PublicKey()
-	domainType := s.beaconCfg.DomainVoluntaryExit
-	var domain []byte
-	if state.Version() < clparams.DenebVersion {
-		domain, err = state.GetDomain(domainType, voluntaryExit.Epoch)
-	} else if state.Version() >= clparams.DenebVersion {
-		domain, err = fork.ComputeDomain(domainType[:], utils.Uint32ToBytes4(uint32(s.beaconCfg.CapellaForkVersion)), state.GenesisValidatorsRoot())
-	}
-	if err != nil {
+		// Verify signature
+		// domain = get_domain(state, DOMAIN_VOLUNTARY_EXIT, voluntary_exit.epoch)
+		// signing_root = compute_signing_root(voluntary_exit, domain)
+		// assert bls.Verify(validator.pubkey, signing_root, signed_voluntary_exit.signature)
+		pk = val.PublicKey()
+		domainType := s.beaconCfg.DomainVoluntaryExit
+		var domain []byte
+		if state.Version() < clparams.DenebVersion {
+			domain, err = state.GetDomain(domainType, voluntaryExit.Epoch)
+		} else if state.Version() >= clparams.DenebVersion {
+			domain, err = fork.ComputeDomain(domainType[:], utils.Uint32ToBytes4(uint32(s.beaconCfg.CapellaForkVersion)), state.GenesisValidatorsRoot())
+		}
+		if err != nil {
+			return err
+		}
+		signingRoot, err = computeSigningRoot(voluntaryExit, domain)
+		return err
+	}); err != nil {
 		return err
 	}
-	signingRoot, err := computeSigningRoot(voluntaryExit, domain)
-	if err != nil {
-		return err
-	}
-	cn()
+
 	if valid, err := blsVerify(msg.Signature[:], signingRoot[:], pk[:]); err != nil {
 		return err
 	} else if !valid {

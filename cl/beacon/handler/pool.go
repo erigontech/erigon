@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 )
@@ -95,9 +96,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 
 	failures := []poolingFailure{}
 	for i, attestation := range req {
-		headState, cn := a.syncedData.HeadState()
-		defer cn()
-		if headState == nil {
+		if a.syncedData.Syncing() {
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state not available")).WriteTo(w)
 			return
 		}
@@ -106,10 +105,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			epoch                 = a.ethClock.GetEpochAtSlot(slot)
 			attClVersion          = a.beaconChainCfg.GetCurrentStateVersion(epoch)
 			cIndex                = attestation.Data.CommitteeIndex
-			committeeCountPerSlot = headState.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
+			committeeCountPerSlot = a.syncedData.CommitteeCount(slot / a.beaconChainCfg.SlotsPerEpoch)
 		)
 
-		cn()
 		if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
 			index, err := attestation.ElectraSingleCommitteeIndex()
 			if err != nil {
@@ -341,21 +339,22 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	var err error
 
 	failures := []poolingFailure{}
 	for idx, v := range msgs {
-		s, cn := a.syncedData.HeadState()
-		defer cn()
-		if s == nil {
-			http.Error(w, "node is not synced", http.StatusServiceUnavailable)
-			return
-		}
-		publishingSubnets, err := subnets.ComputeSubnetsForSyncCommittee(s, v.ValidatorIndex)
-		if err != nil {
+		var publishingSubnets []uint64
+		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			publishingSubnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, v.ValidatorIndex)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
-		cn()
+
 		for _, subnet := range publishingSubnets {
 			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, v); err != nil && !errors.Is(err, services.ErrIgnore) {
 				log.Warn("[Beacon REST] failed to process attestation in syncCommittee service", "err", err)

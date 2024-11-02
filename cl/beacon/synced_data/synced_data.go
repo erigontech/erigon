@@ -17,21 +17,22 @@
 package synced_data
 
 import (
-	"fmt"
-	"runtime/debug"
+	"errors"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 const EnableDeadlockDetector = true
 
+var ErrNotSynced = errors.New("not synced")
+
 var _ SyncedData = (*SyncedDataManager)(nil)
+
+func EmptyCancel() {}
 
 type SyncedDataManager struct {
 	enabled bool
@@ -79,43 +80,14 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	return err
 }
 
-func EmptyCancel() {}
-
-func (s *SyncedDataManager) HeadState() (*state.CachingBeaconState, CancelFn) {
+func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 	_, synced := s.headRoot.Load().(common.Hash)
 	if !s.enabled || !synced {
-		return nil, EmptyCancel
+		return ErrNotSynced
 	}
-
 	s.mu.RLock()
-	st := debug.Stack()
-
-	ch := make(chan struct{})
-	if EnableDeadlockDetector {
-		go func() {
-			select {
-			case <-ch:
-				return
-			case <-time.After(100 * time.Second):
-				fmt.Println("Deadlock detected", string(st))
-			}
-		}()
-	}
-
-	var mu sync.Once
-
-	return s.headState, func() {
-		mu.Do(func() {
-			s.mu.RUnlock()
-			if EnableDeadlockDetector {
-				ch <- struct{}{}
-			}
-		})
-	}
-}
-
-func (s *SyncedDataManager) HeadStateReader() (abstract.BeaconStateReader, CancelFn) {
-	return s.HeadState()
+	defer s.mu.RUnlock()
+	return fn(s.headState)
 }
 
 func (s *SyncedDataManager) Syncing() bool {
@@ -139,4 +111,8 @@ func (s *SyncedDataManager) HeadRoot() common.Hash {
 		return common.Hash{}
 	}
 	return root
+}
+
+func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
+	return s.headState.CommitteeCount(epoch)
 }
