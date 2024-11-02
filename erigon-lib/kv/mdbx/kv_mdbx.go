@@ -841,9 +841,13 @@ type MdbxCursor struct {
 	id         uint64
 }
 
-func (db *MdbxKV) Env() *mdbx.Env {
-	return db.env
+func (db *MdbxKV) Env() *mdbx.Env { return db.env }
+func (db *MdbxKV) AllTables() kv.TableCfg {
+	return db.buckets
 }
+func (tx *MdbxTx) IsRo() bool                     { return tx.readOnly }
+func (tx *MdbxTx) ViewID() uint64                 { return tx.tx.ID() }
+func (tx *MdbxTx) ListBuckets() ([]string, error) { return tx.tx.ListDBI() }
 
 func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 	res := map[string]kv.DBI{}
@@ -860,13 +864,6 @@ func (tx *MdbxTx) Count(bucket string) (uint64, error) {
 	}
 	return st.Entries, nil
 }
-
-func (db *MdbxKV) AllTables() kv.TableCfg {
-	return db.buckets
-}
-
-func (tx *MdbxTx) IsRo() bool     { return tx.readOnly }
-func (tx *MdbxTx) ViewID() uint64 { return tx.tx.ID() }
 
 func (tx *MdbxTx) CollectMetrics() {
 	if tx.db.opts.label != kv.ChainDB {
@@ -913,9 +910,6 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.GcOverflowMetric.SetUint64(gc.OverflowPages)
 	kv.GcPagesMetric.SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8)
 }
-
-// ListBuckets - all buckets stored as keys of un-named bucket
-func (tx *MdbxTx) ListBuckets() ([]string, error) { return tx.tx.ListDBI() }
 
 func (tx *MdbxTx) WarmupDB(force bool) error {
 	if force {
@@ -1141,30 +1135,6 @@ func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
 	}
 
 	return txInfo.SpaceDirty, tx.db.txSize, nil
-}
-
-func (tx *MdbxTx) PrintDebugInfo() {
-	/*
-		txInfo, err := tx.tx.Info(true)
-		if err != nil {
-			panic(err)
-		}
-
-		txSize := uint(txInfo.SpaceDirty / 1024)
-		doPrint := debug.BigRoTxKb() == 0 && debug.BigRwTxKb() == 0 ||
-			tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb() ||
-			(!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
-		if doPrint {
-			tx.db.log.Info("Tx info",
-				"id", txInfo.Id,
-				"read_lag", txInfo.ReadLag,
-				"ro", tx.readOnly,
-				//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
-				"space_dirty_mb", txInfo.SpaceDirty/1024/1024,
-				//"callers", debug.Callers(7),
-			)
-		}
-	*/
 }
 
 func (tx *MdbxTx) closeCursors() {
