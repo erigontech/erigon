@@ -395,14 +395,15 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	wtxRw := WrapTxWithCtx(rwTx, ac)
+	domains, err := NewSharedDomains(wtxRw, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	maxTx := 3*stepSize + 10
 	hashes := make([][]byte, maxTx)
 
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(wtxRw, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -516,7 +517,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.Zero(t, missed)
 		require.Zero(t, notRemoved)
 	}
-	fmt.Printf("deleted\n")
 
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
