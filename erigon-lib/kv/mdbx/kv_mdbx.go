@@ -97,6 +97,9 @@ func NewMDBX(log log.Logger) MdbxOpts {
 func (opts MdbxOpts) GetLabel() kv.Label  { return opts.label }
 func (opts MdbxOpts) GetInMem() bool      { return opts.inMem }
 func (opts MdbxOpts) GetPageSize() uint64 { return opts.pageSize }
+func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
+	return opt
+}
 
 func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
 	opts.label = label
@@ -126,10 +129,6 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts {
 func (opts MdbxOpts) Path(path string) MdbxOpts {
 	opts.path = path
 	return opts
-}
-
-func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
-	return opt
 }
 
 func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
