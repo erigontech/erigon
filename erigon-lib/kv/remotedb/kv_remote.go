@@ -276,7 +276,7 @@ func (tx *tx) Count(bucket string) (uint64, error) {
 func (tx *tx) BucketSize(name string) (uint64, error) { panic("not implemented") }
 
 func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
-	it, err := tx.Range(bucket, fromPrefix, nil)
+	it, err := tx.Range(bucket, fromPrefix, nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return err
 	}
@@ -681,9 +681,9 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 func (tx *tx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return tx.Range(table, prefix, nil)
+		return tx.Range(table, prefix, nil, order.Asc, kv.Unlim)
 	}
-	return tx.Range(table, prefix, nextPrefix)
+	return tx.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
 }
 
 func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
@@ -696,14 +696,8 @@ func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc ord
 		return reply.Keys, reply.Values, reply.NextPageToken, nil
 	}), nil
 }
-func (tx *tx) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, -1)
-}
-func (tx *tx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, limit)
-}
-func (tx *tx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Desc, limit)
+func (tx *tx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, asc, limit)
 }
 func (tx *tx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	panic("not implemented yet")

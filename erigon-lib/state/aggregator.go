@@ -283,6 +283,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadi
 	return nil
 }
 
+func (a *Aggregator) StepSize() uint64        { return a.aggregationStep }
 func (a *Aggregator) OnFreeze(f OnFreezeFunc) { a.onFreeze = f }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {

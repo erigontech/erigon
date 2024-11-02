@@ -97,39 +97,32 @@ func NewMDBX(log log.Logger) MdbxOpts {
 func (opts MdbxOpts) GetLabel() kv.Label  { return opts.label }
 func (opts MdbxOpts) GetInMem() bool      { return opts.inMem }
 func (opts MdbxOpts) GetPageSize() uint64 { return opts.pageSize }
-
-func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
-	opts.label = label
-	return opts
-}
-
-func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts {
-	opts.dirtySpace = s
-	return opts
-}
-
-func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts {
-	opts.roTxsLimiter = l
-	return opts
-}
-
-func (opts MdbxOpts) PageSize(v uint64) MdbxOpts {
-	opts.pageSize = v
-	return opts
-}
-
-func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts {
-	opts.growthStep = v
-	return opts
-}
-
-func (opts MdbxOpts) Path(path string) MdbxOpts {
-	opts.path = path
-	return opts
-}
-
 func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
 	return opt
+}
+func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
+
+func (opts MdbxOpts) Label(label kv.Label) MdbxOpts               { opts.label = label; return opts }
+func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts                { opts.dirtySpace = s; return opts }
+func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLimiter = l; return opts }
+func (opts MdbxOpts) PageSize(v uint64) MdbxOpts                  { opts.pageSize = v; return opts }
+func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
+func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
+func (opts MdbxOpts) Exclusive() MdbxOpts                         { opts.flags = opts.flags | mdbx.Exclusive; return opts }
+func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts            { opts.flags = f(opts.flags); return opts }
+func (opts MdbxOpts) Readonly() MdbxOpts                          { opts.flags = opts.flags | mdbx.Readonly; return opts }
+func (opts MdbxOpts) Accede() MdbxOpts                            { opts.flags = opts.flags | mdbx.Accede; return opts }
+func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
+func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts    { opts.verbosity = v; return opts }
+func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts       { opts.mapSize = sz; return opts }
+func (opts MdbxOpts) LifoReclaim() MdbxOpts                       { opts.flags |= mdbx.LifoReclaim; return opts }
+func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeThreshold = v; return opts }
+func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
+func (opts MdbxOpts) WriteMap(flag bool) MdbxOpts {
+	if flag {
+		opts.flags |= mdbx.WriteMap
+	}
+	return opts
 }
 
 func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
@@ -150,62 +143,6 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.dirtySpace = uint64(128 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.label = kv.InMem
-	return opts
-}
-
-func (opts MdbxOpts) Exclusive() MdbxOpts {
-	opts.flags = opts.flags | mdbx.Exclusive
-	return opts
-}
-
-func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
-	opts.flags = f(opts.flags)
-	return opts
-}
-
-func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
-func (opts MdbxOpts) Readonly() MdbxOpts {
-	opts.flags = opts.flags | mdbx.Readonly
-	return opts
-}
-func (opts MdbxOpts) Accede() MdbxOpts {
-	opts.flags = opts.flags | mdbx.Accede
-	return opts
-}
-
-func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts {
-	opts.syncPeriod = period
-	return opts
-}
-
-func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts {
-	opts.verbosity = v
-	return opts
-}
-
-func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
-	opts.mapSize = sz
-	return opts
-}
-
-func (opts MdbxOpts) WriteMap(flag bool) MdbxOpts {
-	if flag {
-		opts.flags |= mdbx.WriteMap
-	}
-	return opts
-}
-func (opts MdbxOpts) LifoReclaim() MdbxOpts {
-	opts.flags |= mdbx.LifoReclaim
-	return opts
-}
-
-func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts {
-	opts.mergeThreshold = v
-	return opts
-}
-
-func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts {
-	opts.bucketsCfg = f
 	return opts
 }
 
@@ -514,139 +451,6 @@ type MdbxKV struct {
 	batch   *batch
 }
 
-// Default values if not set in a DB instance.
-const (
-	DefaultMaxBatchSize  int = 1000
-	DefaultMaxBatchDelay     = 10 * time.Millisecond
-)
-
-type batch struct {
-	db    *MdbxKV
-	timer *time.Timer
-	start sync.Once
-	calls []call
-}
-
-type call struct {
-	fn  func(kv.RwTx) error
-	err chan<- error
-}
-
-// trigger runs the batch if it hasn't already been run.
-func (b *batch) trigger() {
-	b.start.Do(b.run)
-}
-
-// run performs the transactions in the batch and communicates results
-// back to DB.Batch.
-func (b *batch) run() {
-	b.db.batchMu.Lock()
-	b.timer.Stop()
-	// Make sure no new work is added to this batch, but don't break
-	// other batches.
-	if b.db.batch == b {
-		b.db.batch = nil
-	}
-	b.db.batchMu.Unlock()
-
-retry:
-	for len(b.calls) > 0 {
-		var failIdx = -1
-		err := b.db.Update(context.Background(), func(tx kv.RwTx) error {
-			for i, c := range b.calls {
-				if err := safelyCall(c.fn, tx); err != nil {
-					failIdx = i
-					return err
-				}
-			}
-			return nil
-		})
-
-		if failIdx >= 0 {
-			// take the failing transaction out of the batch. it's
-			// safe to shorten b.calls here because db.batch no longer
-			// points to us, and we hold the mutex anyway.
-			c := b.calls[failIdx]
-			b.calls[failIdx], b.calls = b.calls[len(b.calls)-1], b.calls[:len(b.calls)-1]
-			// tell the submitter re-run it solo, continue with the rest of the batch
-			c.err <- trySolo
-			continue retry
-		}
-
-		// pass success, or bolt internal errors, to all callers
-		for _, c := range b.calls {
-			c.err <- err
-		}
-		break retry
-	}
-}
-
-// trySolo is a special sentinel error value used for signaling that a
-// transaction function should be re-run. It should never be seen by
-// callers.
-var trySolo = errors.New("batch function returned an error and should be re-run solo")
-
-type panicked struct {
-	reason interface{}
-}
-
-func (p panicked) Error() string {
-	if err, ok := p.reason.(error); ok {
-		return err.Error()
-	}
-	return fmt.Sprintf("panic: %v", p.reason)
-}
-
-func safelyCall(fn func(tx kv.RwTx) error, tx kv.RwTx) (err error) {
-	defer func() {
-		if p := recover(); p != nil {
-			err = panicked{p}
-		}
-	}()
-	return fn(tx)
-}
-
-// Batch is only useful when there are multiple goroutines calling it.
-// It behaves similar to Update, except:
-//
-// 1. concurrent Batch calls can be combined into a single RwTx.
-//
-// 2. the function passed to Batch may be called multiple times,
-// regardless of whether it returns error or not.
-//
-// This means that Batch function side effects must be idempotent and
-// take permanent effect only after a successful return is seen in
-// caller.
-//
-// Example of bad side-effects: print messages, mutate external counters `i++`
-//
-// The maximum batch size and delay can be adjusted with DB.MaxBatchSize
-// and DB.MaxBatchDelay, respectively.
-func (db *MdbxKV) Batch(fn func(tx kv.RwTx) error) error {
-	errCh := make(chan error, 1)
-
-	db.batchMu.Lock()
-	if (db.batch == nil) || (db.batch != nil && len(db.batch.calls) >= db.MaxBatchSize) {
-		// There is no existing batch, or the existing batch is full; start a new one.
-		db.batch = &batch{
-			db: db,
-		}
-		db.batch.timer = time.AfterFunc(db.MaxBatchDelay, db.batch.trigger)
-	}
-	db.batch.calls = append(db.batch.calls, call{fn: fn, err: errCh})
-	if len(db.batch.calls) >= db.MaxBatchSize {
-		// wake up batch, it's ready to run
-		go db.batch.trigger()
-	}
-	db.batchMu.Unlock()
-
-	err := <-errCh
-	if errors.Is(err, trySolo) {
-		err = db.Update(context.Background(), fn)
-	}
-	return err
-}
-
 func (db *MdbxKV) Path() string     { return db.opts.path }
 func (db *MdbxKV) PageSize() uint64 { return db.opts.pageSize }
 func (db *MdbxKV) ReadOnly() bool   { return db.opts.HasFlag(mdbx.Readonly) }
@@ -841,9 +645,13 @@ type MdbxCursor struct {
 	id         uint64
 }
 
-func (db *MdbxKV) Env() *mdbx.Env {
-	return db.env
+func (db *MdbxKV) Env() *mdbx.Env { return db.env }
+func (db *MdbxKV) AllTables() kv.TableCfg {
+	return db.buckets
 }
+func (tx *MdbxTx) IsRo() bool                     { return tx.readOnly }
+func (tx *MdbxTx) ViewID() uint64                 { return tx.tx.ID() }
+func (tx *MdbxTx) ListBuckets() ([]string, error) { return tx.tx.ListDBI() }
 
 func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 	res := map[string]kv.DBI{}
@@ -860,13 +668,6 @@ func (tx *MdbxTx) Count(bucket string) (uint64, error) {
 	}
 	return st.Entries, nil
 }
-
-func (db *MdbxKV) AllTables() kv.TableCfg {
-	return db.buckets
-}
-
-func (tx *MdbxTx) IsRo() bool     { return tx.readOnly }
-func (tx *MdbxTx) ViewID() uint64 { return tx.tx.ID() }
 
 func (tx *MdbxTx) CollectMetrics() {
 	if tx.db.opts.label != kv.ChainDB {
@@ -913,9 +714,6 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.GcOverflowMetric.SetUint64(gc.OverflowPages)
 	kv.GcPagesMetric.SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8)
 }
-
-// ListBuckets - all buckets stored as keys of un-named bucket
-func (tx *MdbxTx) ListBuckets() ([]string, error) { return tx.tx.ListDBI() }
 
 func (tx *MdbxTx) WarmupDB(force bool) error {
 	if force {
@@ -1143,30 +941,6 @@ func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
 	return txInfo.SpaceDirty, tx.db.txSize, nil
 }
 
-func (tx *MdbxTx) PrintDebugInfo() {
-	/*
-		txInfo, err := tx.tx.Info(true)
-		if err != nil {
-			panic(err)
-		}
-
-		txSize := uint(txInfo.SpaceDirty / 1024)
-		doPrint := debug.BigRoTxKb() == 0 && debug.BigRwTxKb() == 0 ||
-			tx.readOnly && debug.BigRoTxKb() > 0 && txSize > debug.BigRoTxKb() ||
-			(!tx.readOnly && debug.BigRwTxKb() > 0 && txSize > debug.BigRwTxKb())
-		if doPrint {
-			tx.db.log.Info("Tx info",
-				"id", txInfo.Id,
-				"read_lag", txInfo.ReadLag,
-				"ro", tx.readOnly,
-				//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
-				"space_dirty_mb", txInfo.SpaceDirty/1024/1024,
-				//"callers", debug.Callers(7),
-			)
-		}
-	*/
-}
-
 func (tx *MdbxTx) closeCursors() {
 	for _, c := range tx.toCloseMap {
 		if c != nil {
@@ -1199,7 +973,6 @@ func (tx *MdbxTx) Put(table string, k, v []byte) error {
 
 func (tx *MdbxTx) Delete(table string, k []byte) error {
 	err := tx.tx.Del(mdbx.DBI(tx.db.buckets[table].DBI), k, nil)
-	//TODO: revise the logic, why we should drop not found err? maybe we need another function for get with key error
 	if mdbx.IsNotFound(err) {
 		return nil
 	}
@@ -1208,7 +981,6 @@ func (tx *MdbxTx) Delete(table string, k []byte) error {
 
 func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
 	v, err := tx.tx.Get(mdbx.DBI(tx.db.buckets[bucket].DBI), k)
-	//TODO: revise the logic, why we should drop not found err? maybe we need another function for get with key error
 	if mdbx.IsNotFound(err) {
 		return nil, nil
 	}
@@ -1362,35 +1134,12 @@ func (tx *MdbxTx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 	return tx.RwCursorDupSort(bucket)
 }
 
-// methods here help to see better pprof picture
-func (c *MdbxCursor) set(k []byte) ([]byte, []byte, error) { return c.c.Get(k, nil, mdbx.Set) }
-func (c *MdbxCursor) getCurrent() ([]byte, []byte, error)  { return c.c.Get(nil, nil, mdbx.GetCurrent) }
-func (c *MdbxCursor) next() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Next) }
-func (c *MdbxCursor) nextDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.NextDup) }
-func (c *MdbxCursor) nextNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.NextNoDup) }
-func (c *MdbxCursor) prev() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Prev) }
-func (c *MdbxCursor) prevDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.PrevDup) }
-func (c *MdbxCursor) prevNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.PrevNoDup) }
-func (c *MdbxCursor) last() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Last) }
-func (c *MdbxCursor) delCurrent() error                    { return c.c.Del(mdbx.Current) }
-func (c *MdbxCursor) delAllDupData() error                 { return c.c.Del(mdbx.AllDups) }
-func (c *MdbxCursor) put(k, v []byte) error                { return c.c.Put(k, v, 0) }
-func (c *MdbxCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v, mdbx.NoOverwrite) }
-func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
-	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
-	return v, err
-}
-func (c *MdbxCursor) getBothRange(k, v []byte) ([]byte, error) {
-	_, v, err := c.c.Get(k, v, mdbx.GetBothRange)
-	return v, err
-}
-
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
 	return c.Seek(nil)
 }
 
 func (c *MdbxCursor) Last() ([]byte, []byte, error) {
-	k, v, err := c.last()
+	k, v, err := c.c.Get(nil, nil, mdbx.Last)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1421,49 +1170,45 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 		}
 		return []byte{}, nil, fmt.Errorf("cursor.SetRange: %w, bucket: %s, key: %x", err, c.bucketName, seek)
 	}
-
 	return k, v, nil
 }
 
 func (c *MdbxCursor) Next() (k, v []byte, err error) {
-	k, v, err = c.next()
+	k, v, err = c.c.Get(nil, nil, mdbx.Next)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, fmt.Errorf("failed MdbxKV cursor.Next(): %w", err)
 	}
-
 	return k, v, nil
 }
 
 func (c *MdbxCursor) Prev() (k, v []byte, err error) {
-	k, v, err = c.prev()
+	k, v, err = c.c.Get(nil, nil, mdbx.Prev)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, fmt.Errorf("failed MdbxKV cursor.Prev(): %w", err)
 	}
-
 	return k, v, nil
 }
 
 // Current - return key/data at current cursor position
 func (c *MdbxCursor) Current() ([]byte, []byte, error) {
-	k, v, err := c.getCurrent()
+	k, v, err := c.c.Get(nil, nil, mdbx.GetCurrent)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
 		return []byte{}, nil, err
 	}
-
 	return k, v, nil
 }
 
 func (c *MdbxCursor) Delete(k []byte) error {
-	_, _, err := c.set(k)
+	_, _, err := c.c.Get(k, nil, mdbx.Set)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil
@@ -1472,10 +1217,10 @@ func (c *MdbxCursor) Delete(k []byte) error {
 	}
 
 	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
-		return c.delAllDupData()
+		return c.c.Del(mdbx.AllDups)
 	}
 
-	return c.delCurrent()
+	return c.c.Del(mdbx.Current)
 }
 
 // DeleteCurrent This function deletes the key/data pair to which the cursor refers.
@@ -1483,23 +1228,18 @@ func (c *MdbxCursor) Delete(k []byte) error {
 // can still be used on it.
 // Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
 // this operation.
-func (c *MdbxCursor) DeleteCurrent() error {
-	return c.delCurrent()
-}
-
-func (c *MdbxCursor) PutNoOverwrite(key []byte, value []byte) error {
-	return c.putNoOverwrite(key, value)
-}
+func (c *MdbxCursor) DeleteCurrent() error             { return c.c.Del(mdbx.Current) }
+func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error { return c.c.Put(k, v, mdbx.NoOverwrite) }
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {
-	if err := c.put(key, value); err != nil {
+	if err := c.c.Put(key, value, 0); err != nil {
 		return fmt.Errorf("label: %s, table: %s, err: %w", c.tx.db.opts.label, c.bucketName, err)
 	}
 	return nil
 }
 
 func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
-	k, v, err := c.set(key)
+	k, v, err := c.c.Get(key, nil, mdbx.Set)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1531,24 +1271,20 @@ type MdbxDupSortCursor struct {
 	*MdbxCursor
 }
 
-func (c *MdbxDupSortCursor) Internal() *mdbx.Cursor {
-	return c.c
-}
-
 // DeleteExact - does delete
 func (c *MdbxDupSortCursor) DeleteExact(k1, k2 []byte) error {
-	_, err := c.getBoth(k1, k2)
+	_, _, err := c.c.Get(k1, k2, mdbx.GetBoth)
 	if err != nil { // if key not found, or found another one - then nothing to delete
 		if mdbx.IsNotFound(err) {
 			return nil
 		}
 		return err
 	}
-	return c.delCurrent()
+	return c.c.Del(mdbx.Current)
 }
 
 func (c *MdbxDupSortCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
-	v, err := c.getBoth(key, value)
+	_, v, err := c.c.Get(key, value, mdbx.GetBoth)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1559,7 +1295,7 @@ func (c *MdbxDupSortCursor) SeekBothExact(key, value []byte) ([]byte, []byte, er
 }
 
 func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
-	v, err := c.getBothRange(key, value)
+	_, v, err := c.c.Get(key, value, mdbx.GetBothRange)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
@@ -1582,7 +1318,7 @@ func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
 
 // NextDup - iterate only over duplicates of current key
 func (c *MdbxDupSortCursor) NextDup() ([]byte, []byte, error) {
-	k, v, err := c.nextDup()
+	k, v, err := c.c.Get(nil, nil, mdbx.NextDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1594,7 +1330,7 @@ func (c *MdbxDupSortCursor) NextDup() ([]byte, []byte, error) {
 
 // NextNoDup - iterate with skipping all duplicates
 func (c *MdbxDupSortCursor) NextNoDup() ([]byte, []byte, error) {
-	k, v, err := c.nextNoDup()
+	k, v, err := c.c.Get(nil, nil, mdbx.NextNoDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1605,7 +1341,7 @@ func (c *MdbxDupSortCursor) NextNoDup() ([]byte, []byte, error) {
 }
 
 func (c *MdbxDupSortCursor) PrevDup() ([]byte, []byte, error) {
-	k, v, err := c.prevDup()
+	k, v, err := c.c.Get(nil, nil, mdbx.PrevDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1616,7 +1352,7 @@ func (c *MdbxDupSortCursor) PrevDup() ([]byte, []byte, error) {
 }
 
 func (c *MdbxDupSortCursor) PrevNoDup() ([]byte, []byte, error) {
-	k, v, err := c.prevNoDup()
+	k, v, err := c.c.Get(nil, nil, mdbx.PrevNoDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1661,7 +1397,7 @@ func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
 
 // DeleteCurrentDuplicates - delete all of the data items for the current key.
 func (c *MdbxDupSortCursor) DeleteCurrentDuplicates() error {
-	if err := c.delAllDupData(); err != nil {
+	if err := c.c.Del(mdbx.AllDups); err != nil {
 		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.tx.db.opts.label, err)
 	}
 	return nil
@@ -1708,19 +1444,23 @@ func (tx *MdbxTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []b
 func (tx *MdbxTx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return tx.Range(table, prefix, nil)
+		return tx.Range(table, prefix, nil, order.Asc, -1)
 	}
-	return tx.Range(table, prefix, nextPrefix)
+	return tx.Range(table, prefix, nextPrefix, order.Asc, -1)
 }
 
-func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	return tx.RangeAscend(table, fromPrefix, toPrefix, -1)
-}
-func (tx *MdbxTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, limit)
-}
-func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Desc, limit)
+func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: asc, limit: int64(limit), id: tx.ID}
+	tx.ID++
+	if tx.toCloseMap == nil {
+		tx.toCloseMap = make(map[uint64]kv.Closer)
+	}
+	tx.toCloseMap[s.id] = s
+	if err := s.init(table, tx); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
 }
 
 type cursor2iter struct {
@@ -1734,19 +1474,6 @@ type cursor2iter struct {
 	ctx                                context.Context
 }
 
-func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, orderAscend order.By, limit int) (*cursor2iter, error) {
-	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: orderAscend, limit: int64(limit), id: tx.ID}
-	tx.ID++
-	if tx.toCloseMap == nil {
-		tx.toCloseMap = make(map[uint64]kv.Closer)
-	}
-	tx.toCloseMap[s.id] = s
-	if err := s.init(table, tx); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
-		return nil, err
-	}
-	return s, nil
-}
 func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	if s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) >= 0 {
 		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.fromPrefix, s.toPrefix)

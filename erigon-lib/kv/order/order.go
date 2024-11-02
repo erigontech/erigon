@@ -22,3 +22,10 @@ const (
 	Asc  By = true
 	Desc By = false
 )
+
+func FromBool(v bool) By {
+	if v {
+		return Asc
+	}
+	return Desc
+}
