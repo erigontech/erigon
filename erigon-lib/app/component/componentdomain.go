@@ -516,9 +516,8 @@ func (cd *componentDomain) Deactivate(deactivationContext context.Context) (chan
 
 			if cd.serviceBus != nil {
 				if log.DebugEnabled() {
-					log.Debug().
-						Str("component", cd.Id().String()).
-						Msg("Deactivating Service Bus")
+					log.Debug("Deactivating Service Bus",
+						"component", cd.Id().String())
 				}
 				cd.ServiceBus().Deactivate()
 			}

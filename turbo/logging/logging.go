@@ -103,6 +103,8 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
 	}
 
 	initSeparatedLogging(logger, filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
+	
+	log.SetDefaultLogger(logger)
 	return logger
 }
 

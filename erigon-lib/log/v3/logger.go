@@ -27,6 +27,7 @@ const (
 )
 
 var defaultLevel Lvl = LvlInfo
+var defaultLogger Logger
 
 func SetDefaultLevel(level Lvl) Lvl {
 	prev := defaultLevel
@@ -36,6 +37,19 @@ func SetDefaultLevel(level Lvl) Lvl {
 
 func GetDefaultLevel() Lvl {
 	return defaultLevel
+}
+
+func SetDefaultLogger(logger Logger) Logger {
+	prev := defaultLogger
+	defaultLogger = logger
+	return prev
+}
+
+func GetDefaultLogger() Logger {
+	if defaultLogger == nil {
+		return root
+	}
+	return defaultLogger
 }
 
 // Returns the name of a Lvl

@@ -84,6 +84,9 @@ type Logger interface {
 
 	GetLevel() log.Lvl
 	SetLevel(level log.Lvl) log.Lvl
+
+	GetLabels() []string
+	SetLabels(parts ...string) []string
 }
 
 type LevelSetter func(level log.Lvl) log.Lvl
@@ -187,11 +190,13 @@ func LogLevels(levelValues []string) []log.Lvl {
 type logger struct {
 	log.Logger
 	sync.RWMutex
-	level log.Lvl
+	level      log.Lvl
+	label      string
+	labelParts []string
 }
 
-func NewLogger(root log.Logger, level log.Lvl) Logger {
-	return nil
+func NewLogger(root log.Logger, level log.Lvl, labels []string, ctx []interface{}) Logger {
+	return &logger{Logger: log.GetDefaultLogger().New(ctx), level: level, labelParts: labels}
 }
 
 func (l *logger) SetLevel(level log.Lvl) log.Lvl {
@@ -200,4 +205,98 @@ func (l *logger) SetLevel(level log.Lvl) log.Lvl {
 	prev := l.level
 	l.level = level
 	return prev
+}
+
+func (l *logger) GetLevel() log.Lvl {
+	l.RLock()
+	defer l.RUnlock()
+	return l.level
+}
+
+func (l *logger) SetLabels(parts ...string) []string {
+	l.Lock()
+	defer l.Unlock()
+	prev := l.labelParts
+	l.label = ""
+	l.labelParts = parts
+	return prev
+}
+
+func (l *logger) GetLabels() []string {
+	l.RLock()
+	defer l.RUnlock()
+	return l.labelParts
+}
+
+func (l *logger) Trace(msg string, ctx ...interface{}) {
+	l.Log(log.LvlTrace, msg, ctx...)
+}
+
+func (l *logger) Debug(msg string, ctx ...interface{}) {
+	l.Log(log.LvlDebug, msg, ctx...)
+}
+
+func (l *logger) Info(msg string, ctx ...interface{}) {
+	l.Log(log.LvlInfo, msg, ctx...)
+}
+
+func (l *logger) Warn(msg string, ctx ...interface{}) {
+	l.Log(log.LvlWarn, msg, ctx...)
+}
+
+func (l *logger) Error(msg string, ctx ...interface{}) {
+	l.Log(log.LvlError, msg, ctx...)
+}
+
+func (l *logger) Crit(msg string, ctx ...interface{}) {
+	l.Log(log.LvlCrit, msg, ctx...)
+}
+
+func (l *logger) Log(level log.Lvl, msg string, ctx ...interface{}) {
+	l.RLock()
+	enabled := l.level >= level
+	l.RUnlock()
+	if enabled {
+		l.RLock()
+		label := l.label
+		labelParts := l.labelParts
+		l.RUnlock()
+
+		if label == "" && len(labelParts) > 0 {
+			label = "[" + strings.Join(l.labelParts, ":") + "]"
+			l.Lock()
+			l.label = label
+			l.Unlock()
+		}
+
+		if label != "" {
+			msg = strings.Join([]string{label, msg}, " ")
+		}
+
+		l.Log(level, msg, ctx...)
+	}
+}
+
+func (l *logger) TraceEnabled() bool {
+	return l.Enabled(log.LvlTrace)
+}
+func (l *logger) DebugEnabled() bool {
+	return l.Enabled(log.LvlDebug)
+}
+func (l *logger) InfoEnabled() bool {
+	return l.Enabled(log.LvlInfo)
+}
+func (l *logger) WarnEnabled() bool {
+	return l.Enabled(log.LvlWarn)
+}
+func (l *logger) ErrorEnabled() bool {
+	return l.Enabled(log.LvlError)
+}
+func (l *logger) CritEnabled() bool {
+	return l.Enabled(log.LvlCrit)
+}
+func (l *logger) Enabled(level log.Lvl) bool {
+	l.RLock()
+	defer l.RUnlock()
+	return l.level >= level
 }
