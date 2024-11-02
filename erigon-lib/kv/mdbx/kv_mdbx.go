@@ -973,7 +973,6 @@ func (tx *MdbxTx) Put(table string, k, v []byte) error {
 
 func (tx *MdbxTx) Delete(table string, k []byte) error {
 	err := tx.tx.Del(mdbx.DBI(tx.db.buckets[table].DBI), k, nil)
-	//TODO: revise the logic, why we should drop not found err? maybe we need another function for get with key error
 	if mdbx.IsNotFound(err) {
 		return nil
 	}
@@ -982,7 +981,6 @@ func (tx *MdbxTx) Delete(table string, k []byte) error {
 
 func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
 	v, err := tx.tx.Get(mdbx.DBI(tx.db.buckets[bucket].DBI), k)
-	//TODO: revise the logic, why we should drop not found err? maybe we need another function for get with key error
 	if mdbx.IsNotFound(err) {
 		return nil, nil
 	}
