@@ -696,14 +696,8 @@ func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc ord
 		return reply.Keys, reply.Values, reply.NextPageToken, nil
 	}), nil
 }
-func (tx *tx) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, -1)
-}
-func (tx *tx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, limit)
-}
-func (tx *tx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Desc, limit)
+func (tx *tx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, asc, limit)
 }
 func (tx *tx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	panic("not implemented yet")

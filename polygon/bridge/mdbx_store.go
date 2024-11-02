@@ -28,6 +28,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
@@ -207,7 +208,7 @@ func lastEventIdWithinWindow(tx kv.Tx, fromId uint64, toTime time.Time) (uint64,
 	k := make([]byte, 8)
 	binary.BigEndian.PutUint64(k, fromId)
 
-	it, err := tx.RangeAscend(kv.BorEvents, k, nil, -1)
+	it, err := tx.Range(kv.BorEvents, k, nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return 0, err
 	}

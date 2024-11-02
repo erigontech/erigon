@@ -373,16 +373,11 @@ type Tx interface {
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
-	Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
-	// Stream is like Range, but for requesting huge data (Example: full table scan). Client can't stop it.
-	// Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
-	// RangeAscend - like Range [from, to) but also allow pass Limit parameters
+	// if `order.Desc` expecing `from`<`to`
 	// Limit -1 means Unlimited
-	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
-	// StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
-	// RangeDescend - is like Range [from, to), but expecing `from`<`to`
-	// example: RangeDescend("Table", "B", "A", -1)
-	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
+	// Designed for requesting huge data (Example: full table scan). Client can't stop it.
+	// Example: RangeDescend("Table", "B", "A", order.Asc, -1)
+	Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error)
 	//StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
 	// Prefix - is exactly Range(Table, prefix, kv.NextSubtree(prefix))
 	Prefix(table string, prefix []byte) (stream.KV, error)
