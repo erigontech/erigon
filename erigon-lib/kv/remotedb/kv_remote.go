@@ -276,7 +276,7 @@ func (tx *tx) Count(bucket string) (uint64, error) {
 func (tx *tx) BucketSize(name string) (uint64, error) { panic("not implemented") }
 
 func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
-	it, err := tx.Range(bucket, fromPrefix, nil)
+	it, err := tx.Range(bucket, fromPrefix, nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return err
 	}
