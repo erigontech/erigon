@@ -77,24 +77,6 @@ func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash)
 }
 
 // AddrHash + incarnation + KeyHash
-// For contract storage
-func GenerateCompositeStorageKey(addressHash libcommon.Hash, incarnation uint64, seckey libcommon.Hash) []byte {
-	compositeKey := make([]byte, length.Hash+length.Incarnation+length.Hash)
-	copy(compositeKey, addressHash[:])
-	binary.BigEndian.PutUint64(compositeKey[length.Hash:], incarnation)
-	copy(compositeKey[length.Hash+length.Incarnation:], seckey[:])
-	return compositeKey
-}
-
-func ParseCompositeStorageKey(compositeKey []byte) (libcommon.Hash, uint64, libcommon.Hash) {
-	prefixLen := length.Hash + length.Incarnation
-	addrHash, inc := ParseStoragePrefix(compositeKey[:prefixLen])
-	var key libcommon.Hash
-	copy(key[:], compositeKey[prefixLen:prefixLen+length.Hash])
-	return addrHash, inc, key
-}
-
-// AddrHash + incarnation + KeyHash
 // For contract storage (for plain state)
 func PlainGenerateCompositeStorageKey(address []byte, incarnation uint64, key []byte) []byte {
 	compositeKey := make([]byte, length.Addr+length.Incarnation+length.Hash)
