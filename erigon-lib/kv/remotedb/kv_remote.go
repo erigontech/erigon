@@ -681,9 +681,9 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 func (tx *tx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return tx.Range(table, prefix, nil)
+		return tx.Range(table, prefix, nil, order.Asc, kv.Unlim)
 	}
-	return tx.Range(table, prefix, nextPrefix)
+	return tx.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
 }
 
 func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
