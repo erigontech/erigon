@@ -67,16 +67,6 @@ func LogKey(blockNumber uint64, txId uint32) []byte {
 	return newK
 }
 
-// bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
-func BloomBitsKey(bit uint, section uint64, hash libcommon.Hash) []byte {
-	key := append(make([]byte, 10), hash.Bytes()...)
-
-	binary.BigEndian.PutUint16(key[0:], uint16(bit))
-	binary.BigEndian.PutUint64(key[2:], section)
-
-	return key
-}
-
 // AddrHash + KeyHash
 // Only for trie
 func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash) []byte {
@@ -122,15 +112,6 @@ func PlainParseCompositeStorageKey(compositeKey []byte) (libcommon.Address, uint
 	return addr, inc, key
 }
 
-// AddrHash + incarnation + StorageHashPrefix
-func GenerateCompositeStoragePrefix(addressHash []byte, incarnation uint64, storageHashPrefix []byte) []byte {
-	key := make([]byte, length.Hash+length.Incarnation+len(storageHashPrefix))
-	copy(key, addressHash)
-	binary.BigEndian.PutUint64(key[length.Hash:], incarnation)
-	copy(key[length.Hash+length.Incarnation:], storageHashPrefix)
-	return key
-}
-
 // address hash + incarnation prefix
 func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
 	prefix := make([]byte, length.Hash+NumberLength)
@@ -159,34 +140,4 @@ func ParseStoragePrefix(prefix []byte) (libcommon.Hash, uint64) {
 	copy(addrHash[:], prefix[:length.Hash])
 	inc := binary.BigEndian.Uint64(prefix[length.Hash : length.Hash+length.Incarnation])
 	return addrHash, inc
-}
-
-// Key + blockNum
-func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []byte) {
-	encodedTS = encodeTimestamp(timestamp)
-	composite = make([]byte, len(key)+len(encodedTS))
-	copy(composite, key)
-	copy(composite[len(key):], encodedTS)
-	return composite, encodedTS
-}
-
-// encodeTimestamp has the property: if a < b, then Encoding(a) < Encoding(b) lexicographically
-func encodeTimestamp(timestamp uint64) []byte {
-	var suffix []byte
-	var limit uint64 = 32
-
-	for bytecount := 1; bytecount <= 8; bytecount++ {
-		if timestamp < limit {
-			suffix = make([]byte, bytecount)
-			b := timestamp
-			for i := bytecount - 1; i > 0; i-- {
-				suffix[i] = byte(b & 0xff)
-				b >>= 8
-			}
-			suffix[0] = byte(b) | (byte(bytecount) << 5) // 3 most significant bits of the first byte are bytecount
-			break
-		}
-		limit <<= 8
-	}
-	return suffix
 }
