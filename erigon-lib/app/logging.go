@@ -2,7 +2,13 @@ package app
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"reflect"
+	"strings"
+	"sync"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // Returns false for values where is nil is
@@ -55,47 +61,33 @@ func LogInstance(instance interface{}) string {
 	return fmt.Sprintf("%T:%p", instance, instance)
 }
 
-/*
-type Logger interface {
-	// Log a message at the given level with context key/value pairs
-	Trace(msg string, ctx ...interface{})
-	Debug(msg string, ctx ...interface{})
-	Info(msg string, ctx ...interface{})
-	Warn(msg string, ctx ...interface{})
-	Error(msg string, ctx ...interface{})
-	Crit(msg string, ctx ...interface{})
-	Log(level Lvl, msg string, ctx ...interface{})
+func LogId(instance interface{}) string {
+	switch instance := instance.(type) {
+	case Id:
+		return LogString(instance)
+	case Identifiable:
+		return LogString(instance.Id())
+	}
 
+	return "<na>"
+}
+
+type Logger interface {
+	log.Logger
 	TraceEnabled() bool
 	DebugEnabled() bool
 	InfoEnabled() bool
 	WarnEnabled() bool
 	ErrorEnabled() bool
 	CritEnabled() bool
-	Enabled(level Lvl) bool
-}*/
+	Enabled(level log.Lvl) bool
 
-/*
-func init() {
-	zerolog.ErrorStackMarshaler = MarshalStack
-
-	if logFormat, ok := os.LookupEnv("LOG_FORMAT"); ok { //json,console
-		if strings.EqualFold(logFormat, "console") {
-			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-		}
-	}
-
-	RegisterEnvGetter("util/logging", func() map[string]interface{} {
-		if logFormat, ok := os.LookupEnv("LOG_FORMAT"); ok {
-			return map[string]interface{}{"LOG_FORMAT": logFormat}
-		}
-
-		return map[string]interface{}{"LOG_FORMAT": "json"}
-	})
+	GetLevel() log.Lvl
+	SetLevel(level log.Lvl) log.Lvl
 }
 
-type LevelSetter func(level zerolog.Level) *zerolog.Logger
-type LevelGetter func() zerolog.Level
+type LevelSetter func(level log.Lvl) log.Lvl
+type LevelGetter func() log.Lvl
 
 var levelUpdaters = map[string]*updater{}
 
@@ -111,7 +103,7 @@ func RegisterLevelUpdater(logger string, setter LevelSetter, getter LevelGetter)
 func LogLevelHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
-			b, err := ioutil.ReadAll(r.Body)
+			b, err := io.ReadAll(r.Body)
 			if err != nil {
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 				return
@@ -123,7 +115,7 @@ func LogLevelHandler() http.Handler {
 		}
 
 		if r.Method == "GET" {
-			var logLevels = []string{fmt.Sprintf("default:%s", zerolog.GlobalLevel())}
+			var logLevels = []string{fmt.Sprintf("default:%s", log.GetDefaultLevel())}
 
 			for logger, updater := range levelUpdaters {
 				level := updater.getter()
@@ -143,18 +135,18 @@ func LogLevelHandler() http.Handler {
 // convention loggers are registered at a package level and specify
 // a public Logger variable set to that string so that programmatic log
 // setting can be done as follows:
-//   LogLevel(package.Logger, zerolog.DebugLevel)
-func LogLevel(logger string, level zerolog.Level) *zerolog.Logger {
+//
+//	LogLevel(package.Logger, zerolog.DebugLevel)
+func LogLevel(logger string, level log.Lvl) log.Lvl {
 	if strings.EqualFold(logger, "default") {
-		zerolog.SetGlobalLevel(level)
-		return nil
+		return log.SetDefaultLevel(level)
 	}
 
 	if updater, ok := levelUpdaters[logger]; ok {
 		return updater.setter(level)
 	}
 
-	return nil
+	return 0
 }
 
 // Parses a string formatted like this: `package:debug` and uses the
@@ -163,48 +155,49 @@ func LogLevel(logger string, level zerolog.Level) *zerolog.Logger {
 // A logger named 'default' will set the default global level for the
 // process.  A log level of 'default' will set the log level for the
 // logger to the current global default level
-func ParseLoggerLevel(loggerLevel string) *zerolog.Logger {
+func ParseLoggerLevel(loggerLevel string) log.Lvl {
 	parts := strings.Split(loggerLevel, ":")
 
 	if len(parts) > 1 {
 		if strings.EqualFold(parts[1], "default") {
-			return LogLevel(parts[0], zerolog.GlobalLevel())
+			return LogLevel(parts[0], log.GetDefaultLevel())
 		}
 
-		if level, err := zerolog.ParseLevel(strings.ToLower(parts[1])); err == nil {
+		if level, err := log.LvlFromString(strings.ToLower(parts[1])); err == nil {
 			return LogLevel(parts[0], level)
 		}
 	}
 
-	return nil
+	return 0
 }
 
 // Parses each of the passed in level values and sets the logger to the
 // specified log level.  Assumes the strings are of format `package:level`
 // as used by `ParseLoggerLevel`
-func LogLevels(levels []string) []*zerolog.Logger {
-	var loggers []*zerolog.Logger
+func LogLevels(levelValues []string) []log.Lvl {
+	var levels []log.Lvl
 
-	for _, level := range levels {
-		loggers = append(loggers, ParseLoggerLevel(level))
+	for _, level := range levelValues {
+		levels = append(levels, ParseLoggerLevel(level))
 	}
 
-	return loggers
+	return levels
 }
 
-type Logger struct {
-	*zerolog.Logger
+type logger struct {
+	log.Logger
 	sync.RWMutex
+	level log.Lvl
 }
-*/
 
-func LogId(instance interface{}) string {
-	switch instance := instance.(type) {
-	case Id:
-		return LogString(instance)
-	case Identifiable:
-		return LogString(instance.Id())
-	}
+func NewLogger(root log.Logger, level log.Lvl) Logger {
+	return nil
+}
 
-	return "<na>"
+func (l *logger) SetLevel(level log.Lvl) log.Lvl {
+	l.Lock()
+	defer l.Unlock()
+	prev := l.level
+	l.level = level
+	return prev
 }

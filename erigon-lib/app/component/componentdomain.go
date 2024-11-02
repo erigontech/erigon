@@ -281,10 +281,8 @@ func (cd *componentDomain) Activate(activationContext context.Context) (chan *co
 
 func (cd *componentDomain) activateDependents(activationContext context.Context, activationList []*component, cResOut chan *component, cErrOut chan error) {
 	if len(activationList) == 0 {
-		if log.Trace().Enabled() {
-			log.Trace().
-				Str("manager", util.LogInstance(cd)).
-				Msg("Activated")
+		if log.TraceEnabled() {
+			log.Trace("Activated", "domain", app.LogInstance(cd))
 		}
 
 		err := cd.onDependenciesActive(activationContext)
@@ -304,10 +302,10 @@ func (cd *componentDomain) activateDependents(activationContext context.Context,
 
 		activate := func(dependency *component) {
 			defer wg.Done()
-			if log.Trace().Enabled() {
+			if log.TraceEnabled() {
 				log.Trace().
-					Str("manager", util.LogInstance(cd)).
-					Str("dependency", util.LogInstance(dependency)).
+					Str("manager", app.LogInstance(cd)).
+					Str("dependency", app.LogInstance(dependency)).
 					Msg("Activating")
 			}
 
@@ -321,10 +319,10 @@ func (cd *componentDomain) activateDependents(activationContext context.Context,
 				select {
 				case _, ok := <-cres:
 					if ok {
-						if log.Trace().Enabled() {
+						if log.TraceEnabled() {
 							log.Trace().
-								Str("manager", util.LogInstance(cd)).
-								Str("dependency", util.LogInstance(dependency)).
+								Str("manager", app.LogInstance(cd)).
+								Str("dependency", app.LogInstance(dependency)).
 								Msg("Dependency activated")
 						}
 						return
@@ -348,9 +346,9 @@ func (cd *componentDomain) activateDependents(activationContext context.Context,
 
 		go func() {
 			wg.Wait()
-			if log.Trace().Enabled() {
+			if log.TraceEnabled() {
 				log.Trace().
-					Str("manager", util.LogInstance(cd)).
+					Str("manager", app.LogInstance(cd)).
 					Msg("Activated")
 			}
 			if len(errors) > 0 {
@@ -501,14 +499,14 @@ func (cd *componentDomain) Deactivate(deactivationContext context.Context) (chan
 			close(cResOut)
 			close(cErrOut)
 
-			if log.Debug().Enabled() {
+			if log.DebugEnabled() {
 				log.Debug().
 					Str("component", cd.Id().String()).
 					Msg("Unregistering from Service Bus")
 			}
 
 			if err := cd.ServiceBus().UnregisterAll(cd); err != nil {
-				if log.Debug().Enabled() {
+				if log.DebugEnabled() {
 					log.Debug().
 						Str("component", cd.Id().String()).
 						Err(err).
@@ -517,7 +515,7 @@ func (cd *componentDomain) Deactivate(deactivationContext context.Context) (chan
 			}
 
 			if cd.serviceBus != nil {
-				if log.Debug().Enabled() {
+				if log.DebugEnabled() {
 					log.Debug().
 						Str("component", cd.Id().String()).
 						Msg("Deactivating Service Bus")
@@ -526,7 +524,7 @@ func (cd *componentDomain) Deactivate(deactivationContext context.Context) (chan
 			}
 
 			if cd.execPool != nil {
-				if log.Debug().Enabled() {
+				if log.DebugEnabled() {
 					log.Debug().
 						Str("component", cd.Id().String()).
 						Msg("Stopping Exec Pool")

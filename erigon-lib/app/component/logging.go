@@ -2,29 +2,25 @@ package component
 
 import (
 	"path"
-	"sync"
 
-	"github.com/rs/zerolog"
-	root "github.com/rs/zerolog/log"
+	"github.com/erigontech/erigon-lib/app"
+	"github.com/erigontech/erigon-lib/app/util"
+	liblog "github.com/erigontech/erigon-lib/log/v3"
 )
 
 var logger = path.Base(util.CallerPackageName(0))
 
 func init() {
-	app.RegisterLevelUpdater(logger, LogLevel, func() zerolog.Level { return log.GetLevel() })
+	app.RegisterLevelUpdater(logger, LogLevel, func() liblog.Lvl { return log.GetLevel() })
 }
 
-var log = &app.Logger{Logger: logLevel(zerolog.WarnLevel), RWMutex: sync.RWMutex{}}
+var log = app.NewLogger(logLevel(liblog.LvlWarn))
 
-func logLevel(level zerolog.Level) *zerolog.Logger {
-	log := root.With().Str("logger", logger).Logger().Level(level)
-	return &log
+func logLevel(level liblog.Lvl) (liblog.Logger, liblog.Lvl) {
+	return liblog.New(liblog.Root()), level 
+	//TODO .With().Str("logger", logger).Logger().Level(level)
 }
 
-func LogLevel(level zerolog.Level) *zerolog.Logger {
-	prev := log.Logger
-	log.Lock()
-	log.Logger = logLevel(level)
-	log.Unlock()
-	return prev
+func LogLevel(level liblog.Lvl) liblog.Lvl {
+	return log.SetLevel(level)
 }

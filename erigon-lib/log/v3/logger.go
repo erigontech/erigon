@@ -26,6 +26,18 @@ const (
 	LvlTrace
 )
 
+var defaultLevel Lvl = LvlInfo
+
+func SetDefaultLevel(level Lvl) Lvl {
+	prev := defaultLevel
+	defaultLevel = level
+	return prev
+}
+
+func GetDefaultLevel() Lvl {
+	return defaultLevel
+}
+
 // Returns the name of a Lvl
 func (l Lvl) String() string {
 	switch l {

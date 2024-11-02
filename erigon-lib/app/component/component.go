@@ -520,9 +520,9 @@ func (component *component) setState(state State) {
 		component.state = state
 		component.Unlock()
 
-		if log.Debug().Enabled() {
+		if log.DebugEnabled() {
 			log.Debug().
-				Str("provider", util.LogInstance(component.provider)).
+				Str("provider", app.LogInstance(component.provider)).
 				Str("state", state.String()).
 				Send()
 		}
@@ -615,7 +615,7 @@ func (component *component) Name() string {
 }
 
 func (component *component) InstanceId() string {
-	return util.LogInstance(component)
+	return app.LogInstance(component)
 }
 
 func (c *component) activate(activationContext context.Context) (chan *component, chan error) {
@@ -905,7 +905,7 @@ func (component *component) onComponentStateChanged(event *ComponentStateChanged
 					if err := component.onDependenciesActive(component.Context()); err != nil {
 						log.Debug().
 							Caller().
-							Str("component", util.LogInstance(component.provider)).
+							Str("component", app.LogInstance(component.provider)).
 							Err(err).
 							Msg("Event handler for : onDependencyComponentsActive failed")
 					}
@@ -932,11 +932,10 @@ func (component *component) onComponentStateChanged(event *ComponentStateChanged
 
 					//fmt.Printf("2. ")
 					if err := component.onDependenciesActive(component.Context()); err != nil {
-						log.Debug().
+						log.Debug("Event handler for : onDependencyComponentsActive failed").
 							Caller().
-							Str("component", util.LogInstance(component.provider)).
-							Err(err).
-							Msg("Event handler for : onDependencyComponentsActive failed")
+							Str("component", app.LogInstance(component.provider)).
+							Err(err)
 					}
 				}
 			}

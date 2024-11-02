@@ -75,6 +75,12 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
 		dirLevel = dirDefaultLevel
 	}
 
+	if dirLevel >= consoleLevel {
+		log.SetDefaultLevel(dirLevel)
+	} else {
+		log.SetDefaultLevel(consoleLevel)
+	}
+
 	dirPath := ""
 	if !ctx.Bool(LogDirDisableFlag.Name) && dirPath != "/dev/null" {
 		dirPath = ctx.String(LogDirPathFlag.Name)

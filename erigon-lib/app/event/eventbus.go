@@ -84,7 +84,7 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 
 			var logger *zerolog.Event
 
-			if log.Trace().Enabled() {
+			if log.TraceEnabled() {
 				logger = log.Trace()
 			}
 
@@ -94,7 +94,7 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 				asyncHandler := handler
 				bus.wg.Add(1)
 
-				if log.Trace().Enabled() {
+				if log.TraceEnabled() {
 					log.Trace().
 						Str("handler", fmt.Sprint(asyncHandler)).
 						Str("bus", app.LogInstance(asyncHandler.bus)).
