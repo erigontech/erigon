@@ -430,7 +430,7 @@ FAQ
 
 ```
 # please use git branch name (or commit hash). don't use git tags
-go mod edit -replace github.com/erigontech/erigon-lib=github.com/erigontech/erigon/erigon-lib@5498f854e44df5c8f0804ff4f0747c0dec3caad5
+go mod edit -replace github.com/erigontech/erigon-lib=github.com/erigontech/erigon-lib@5498f854e44df5c8f0804ff4f0747c0dec3caad5
 go get github.com/erigontech/erigon@main
 go mod tidy
 ```

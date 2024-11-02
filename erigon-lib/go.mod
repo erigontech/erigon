@@ -8,6 +8,7 @@ require (
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
+	go.uber.org/goleak  v1.3.0
 )
 
 require (
