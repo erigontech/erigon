@@ -1437,11 +1437,11 @@ func (bt *Btrie) prevChildTo(nibble byte) (byte, bool) {
 // SeekLR finds full match of key or defines min/max DI values for partial match.
 //
 // Main need of this btrie - we need to figure L and R values for given prefix.
-type nibbler struct {
-	stack  [5]*trieNode
-	nibbls [5]byte
-	// path   []byte
-}
+// type nibbler struct {
+// 	// stack  [5]*trieNode
+// 	nibbls [32]byte
+// 	// path   []byte
+// }
 
 func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 	if bt.trace {
@@ -1472,18 +1472,18 @@ func (bt *Btrie) SeekLR(key []byte) (Li, Ri uint64) {
 	// }
 
 	next := bt.child[nib]
-	nibbler := nibbler{}
+	// nibbler := nibbler{}
 	Li = next.minDi
 	if len(key) == 1 {
 		Ri = next.maxDi
 		return
 	}
 
-	ni := 0
+	// ni := 0
 	for {
-		nibbler.stack[ni] = next
-		nibbler.nibbls[ni] = nib
-		ni++
+		// nibbler.stack[ni] = next
+		// nibbler.nibbls[ni] = nib
+		// ni++
 		// nibbler.path = append(nibbler.path, nib)
 
 		if bt.trace {
