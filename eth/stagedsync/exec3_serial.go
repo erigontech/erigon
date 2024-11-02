@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"sync/atomic"
 	"time"
 
@@ -90,9 +91,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 					}
 				}
 			}
-			//if !se.execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txTask.TxIndex == 0 && !se.cfg.badBlockHalt {
-			//	return fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
-			//}
+			if se.cfg.chaosMonkey {
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, txTask.Error)
+				if chaosErr != nil {
+					log.Warn("Monkey in a consensus")
+					return chaosErr
+				}
+			}
 			return nil
 		}(); err != nil {
 			if errors.Is(err, context.Canceled) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -376,9 +377,13 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}
-			//if !pe.execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txTask.TxIndex == 0 && !pe.cfg.badBlockHalt {
-			//	return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
-			//}
+			if pe.cfg.chaosMonkey {
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, txTask.Error)
+				if chaosErr != nil {
+					log.Warn("Monkey in a consensus")
+					return outputTxNum, conflicts, triggers, processedBlockNum, false, chaosErr
+				}
+			}
 			// TODO: post-validation of gasUsed and blobGasUsed
 			i++
 		}

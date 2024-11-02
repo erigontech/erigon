@@ -497,6 +497,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					cfg.StateStream,
 					/*stateStream=*/ false,
 					/*alwaysGenerateChangesets=*/ true,
+					cfg.ChaosMonkey, //Set to true to enable in tests
 					dirs,
 					mock.BlockReader,
 					mock.sentriesClient.Hd,
@@ -535,6 +536,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			cfg.StateStream,
 			/*stateStream=*/ false,
 			/*alwaysGenerateChangesets=*/ true,
+			cfg.ChaosMonkey, //Set to true to enable in tests
 			dirs,
 			mock.BlockReader,
 			mock.sentriesClient.Hd,
@@ -572,6 +574,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				cfg.StateStream,
 				/*stateStream=*/ false,
 				/*alwaysGenerateChangesets=*/ true,
+				cfg.ChaosMonkey, //Set to true to enable in tests
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
