@@ -46,7 +46,7 @@ import (
 )
 
 var UseBpsTree = true
-var UseBTrie = true
+var UseBTrie = false
 
 const BtreeLogPrefix = "btree"
 
@@ -1202,10 +1202,10 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 
 			switch cmp {
 			case 0:
-				if g.HasNext() {
-					cmpKey, _ = g.Next(cmpKey[:0])
-					return b.newCursor(context.Background(), x, cmpKey, m, g), nil
-				}
+				// if g.HasNext() {
+				// 	cmpKey, _ = g.Next(cmpKey[:0])
+				// 	return b.newCursor(context.Background(), x, cmpKey, m, g), nil
+				// }
 				l, r = m, m
 			case 1:
 				r = m
