@@ -77,9 +77,6 @@ import (
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
-// const Unbounded []byte = nil
-const Unlim int = -1
-
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
 
@@ -344,6 +341,9 @@ type StatelessRwTx interface {
 	Getter
 	Putter
 }
+
+// const Unbounded/EOF/EndOfTable []byte = nil
+const Unlim int = -1
 
 // Tx
 // WARNING:
