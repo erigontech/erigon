@@ -1368,7 +1368,6 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 		}
 		return []byte{}, nil, fmt.Errorf("cursor.SetRange: %w, bucket: %s, key: %x", err, c.bucketName, seek)
 	}
-
 	return k, v, nil
 }
 
@@ -1380,7 +1379,6 @@ func (c *MdbxCursor) Next() (k, v []byte, err error) {
 		}
 		return []byte{}, nil, fmt.Errorf("failed MdbxKV cursor.Next(): %w", err)
 	}
-
 	return k, v, nil
 }
 
@@ -1392,7 +1390,6 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 		}
 		return []byte{}, nil, fmt.Errorf("failed MdbxKV cursor.Prev(): %w", err)
 	}
-
 	return k, v, nil
 }
 
@@ -1405,7 +1402,6 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 		}
 		return []byte{}, nil, err
 	}
-
 	return k, v, nil
 }
 
@@ -1476,10 +1472,6 @@ func (c *MdbxCursor) Close() {
 
 type MdbxDupSortCursor struct {
 	*MdbxCursor
-}
-
-func (c *MdbxDupSortCursor) Internal() *mdbx.Cursor {
-	return c.c
 }
 
 // DeleteExact - does delete
