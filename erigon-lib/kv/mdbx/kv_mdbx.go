@@ -100,34 +100,28 @@ func (opts MdbxOpts) GetPageSize() uint64 { return opts.pageSize }
 func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
 	return opt
 }
+func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
 
-func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
-	opts.label = label
-	return opts
-}
-
-func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts {
-	opts.dirtySpace = s
-	return opts
-}
-
-func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts {
-	opts.roTxsLimiter = l
-	return opts
-}
-
-func (opts MdbxOpts) PageSize(v uint64) MdbxOpts {
-	opts.pageSize = v
-	return opts
-}
-
-func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts {
-	opts.growthStep = v
-	return opts
-}
-
-func (opts MdbxOpts) Path(path string) MdbxOpts {
-	opts.path = path
+func (opts MdbxOpts) Label(label kv.Label) MdbxOpts               { opts.label = label; return opts }
+func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts                { opts.dirtySpace = s; return opts }
+func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLimiter = l; return opts }
+func (opts MdbxOpts) PageSize(v uint64) MdbxOpts                  { opts.pageSize = v; return opts }
+func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
+func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
+func (opts MdbxOpts) Exclusive() MdbxOpts                         { opts.flags = opts.flags | mdbx.Exclusive; return opts }
+func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts            { opts.flags = f(opts.flags); return opts }
+func (opts MdbxOpts) Readonly() MdbxOpts                          { opts.flags = opts.flags | mdbx.Readonly; return opts }
+func (opts MdbxOpts) Accede() MdbxOpts                            { opts.flags = opts.flags | mdbx.Accede; return opts }
+func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
+func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts    { opts.verbosity = v; return opts }
+func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts       { opts.mapSize = sz; return opts }
+func (opts MdbxOpts) LifoReclaim() MdbxOpts                       { opts.flags |= mdbx.LifoReclaim; return opts }
+func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeThreshold = v; return opts }
+func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
+func (opts MdbxOpts) WriteMap(flag bool) MdbxOpts {
+	if flag {
+		opts.flags |= mdbx.WriteMap
+	}
 	return opts
 }
 
@@ -149,62 +143,6 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.dirtySpace = uint64(128 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.label = kv.InMem
-	return opts
-}
-
-func (opts MdbxOpts) Exclusive() MdbxOpts {
-	opts.flags = opts.flags | mdbx.Exclusive
-	return opts
-}
-
-func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
-	opts.flags = f(opts.flags)
-	return opts
-}
-
-func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
-func (opts MdbxOpts) Readonly() MdbxOpts {
-	opts.flags = opts.flags | mdbx.Readonly
-	return opts
-}
-func (opts MdbxOpts) Accede() MdbxOpts {
-	opts.flags = opts.flags | mdbx.Accede
-	return opts
-}
-
-func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts {
-	opts.syncPeriod = period
-	return opts
-}
-
-func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts {
-	opts.verbosity = v
-	return opts
-}
-
-func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
-	opts.mapSize = sz
-	return opts
-}
-
-func (opts MdbxOpts) WriteMap(flag bool) MdbxOpts {
-	if flag {
-		opts.flags |= mdbx.WriteMap
-	}
-	return opts
-}
-func (opts MdbxOpts) LifoReclaim() MdbxOpts {
-	opts.flags |= mdbx.LifoReclaim
-	return opts
-}
-
-func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts {
-	opts.mergeThreshold = v
-	return opts
-}
-
-func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts {
-	opts.bucketsCfg = f
 	return opts
 }
 
