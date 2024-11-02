@@ -206,7 +206,7 @@ func ExecV3(ctx context.Context,
 	isMining bool,
 ) error {
 	// TODO: e35 doesn't support parallel-exec yet
-	parallel = true //nolint
+	parallel = false //nolint
 
 	batchSize := cfg.batchSize
 	chainDb := cfg.db
