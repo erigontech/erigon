@@ -15,10 +15,12 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/turbo/shards"
 	"golang.org/x/sync/errgroup"
 )
@@ -156,8 +158,8 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, bloc
 		}
 		pe.logger.Warn("[dbg] apply loop exit")
 	}()
-	fmt.Println("applyLoop started")
-	defer fmt.Println("applyLoop done")
+	//fmt.Println("applyLoop started")
+	//defer fmt.Println("applyLoop done")
 
 	applyLoopInner := func(ctx context.Context) error {
 		tx, err := pe.cfg.db.BeginRo(ctx)
@@ -178,7 +180,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, bloc
 			if err != nil {
 				return err
 			}
-			fmt.Println("QR", processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err)
+			//fmt.Println("QR", processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err)
 			mxExecRepeats.AddInt(conflicts)
 			mxExecTriggers.AddInt(triggers)
 
@@ -204,8 +206,8 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, bloc
 // Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
 
 func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger log.Logger) error {
-	fmt.Println("rwLoop started", maxTxNum)
-	defer fmt.Println("rwLoop done")
+	//fmt.Println("rwLoop started", maxTxNum)
+	//defer fmt.Println("rwLoop done")
 
 	tx := pe.applyTx
 	if tx == nil {
@@ -226,7 +228,6 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 	blockComplete := atomic.Bool{}
 	blockComplete.Store(true)
 
-	fmt.Println("rwLoop", 0)
 	go pe.applyLoop(applyCtx, maxTxNum, &blockComplete, pe.rwLoopErrCh)
 
 	for pe.outputTxNum.Load() <= maxTxNum {
@@ -374,16 +375,20 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum uint64, backPressure chan<- struct{}, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := pe.rws.Iter()
 	defer rwsIt.Close()
-	defer fmt.Println("PRQ", "Done")
+	//defer fmt.Println("PRQ", "Done")
 
 	var i int
 	outputTxNum = inputTxNum
 	for rwsIt.HasNext(outputTxNum) {
 		txTask := rwsIt.PopNext()
-		fmt.Println("PRQ", txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
+		//fmt.Println("PRQ", txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
 		if txTask.Error != nil || !pe.rs.ReadsValid(txTask.ReadLists) {
 			conflicts++
-			fmt.Println(txTask.TxNum, txTask.Error)
+			//fmt.Println(txTask.TxNum, txTask.Error)
+			if errors.Is(txTask.Error, vm.ErrIntraBlockStateFailed) ||
+				errors.Is(txTask.Error, core.ErrStateTransitionFailed) {
+				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
+			}
 			if i > 0 && canRetry {
 				//send to re-exex
 				pe.rs.ReTry(txTask, pe.in)
@@ -393,7 +398,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			// resolve first conflict right here: it's faster and conflict-free
 			pe.applyWorker.RunTxTaskNoLock(txTask.Reset(), pe.isMining)
 			if txTask.Error != nil {
-				fmt.Println("RETRY", txTask.TxNum, txTask.Error)
+				//fmt.Println("RETRY", txTask.TxNum, txTask.Error)
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}
 			//if !pe.execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txTask.TxIndex == 0 && !pe.cfg.badBlockHalt {
@@ -474,7 +479,6 @@ func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log
 }
 
 func (pe *parallelExecutor) status(ctx context.Context, commitThreshold uint64) error {
-	fmt.Println(len(pe.rwLoopErrCh))
 	select {
 	case err := <-pe.rwLoopErrCh:
 		if err != nil {

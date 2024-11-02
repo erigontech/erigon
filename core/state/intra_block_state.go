@@ -121,12 +121,14 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
+// Deprecated: The IBS api now returns errors directly
 func (sdb *IntraBlockState) setErrorUnsafe(err error) {
 	if sdb.savedErr == nil {
 		sdb.savedErr = err
 	}
 }
 
+// Deprecated: The IBS api now returns errors directly
 func (sdb *IntraBlockState) Error() error {
 	return sdb.savedErr
 }
@@ -323,12 +325,12 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) (libcommon.Hash,
 func (sdb *IntraBlockState) ResolveCodeHash(addr libcommon.Address) (libcommon.Hash, error) {
 	// eip-7702
 	dd, ok, err := sdb.GetDelegatedDesignation(addr)
-	
+
 	if ok {
 		return sdb.GetCodeHash(dd)
 	}
 
-	if err!=nil {
+	if err != nil {
 		return libcommon.Hash{}, err
 	}
 
@@ -341,7 +343,7 @@ func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) ([]byte, error) 
 	if ok {
 		return sdb.GetCode(dd)
 	}
-	if err!=nil {
+	if err != nil {
 		return nil, err
 	}
 	return sdb.GetCode(addr)
@@ -455,7 +457,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	}
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	stateObject.AddBalance(amount, reason)
@@ -470,7 +472,7 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 	}
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	if stateObject != nil {
@@ -482,7 +484,7 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	if stateObject != nil {
@@ -494,7 +496,7 @@ func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.I
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	if stateObject != nil {
@@ -507,7 +509,7 @@ func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) error
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	if stateObject != nil {
@@ -519,7 +521,7 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr libcommon.Address, key *libcommon.Hash, value uint256.Int) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	if stateObject != nil {
@@ -532,7 +534,7 @@ func (sdb *IntraBlockState) SetState(addr libcommon.Address, key *libcommon.Hash
 // storage. This function should only be used for debugging.
 func (sdb *IntraBlockState) SetStorage(addr libcommon.Address, storage Storage) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	if stateObject != nil {
@@ -544,7 +546,7 @@ func (sdb *IntraBlockState) SetStorage(addr libcommon.Address, storage Storage) 
 // SetIncarnation sets incarnation for account if account exists
 func (sdb *IntraBlockState) SetIncarnation(addr libcommon.Address, incarnation uint64) error {
 	stateObject, err := sdb.GetOrNewStateObject(addr)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	if stateObject != nil {
@@ -553,9 +555,9 @@ func (sdb *IntraBlockState) SetIncarnation(addr libcommon.Address, incarnation u
 	return nil
 }
 
-func (sdb *IntraBlockState) GetIncarnation(addr libcommon.Address) (uint64,error) {
+func (sdb *IntraBlockState) GetIncarnation(addr libcommon.Address) (uint64, error) {
 	stateObject, err := sdb.getStateObject(addr)
-	if err!=nil {
+	if err != nil {
 		return 0, err
 	}
 	if stateObject != nil {
@@ -737,6 +739,7 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 			prevInc = inc
 		} else {
 			sdb.savedErr = err
+			return err
 		}
 	}
 	if previous != nil && prevInc < previous.data.PrevIncarnation {
@@ -1013,7 +1016,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 
 		if dst != nil {
 			dd, ok, err := sdb.GetDelegatedDesignation(*dst)
-			if err!=nil {
+			if err != nil {
 				return err
 			}
 			if ok {
