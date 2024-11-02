@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
@@ -37,7 +39,16 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		}
 		return nil
 	}); err != nil {
-		return
+		if errors.Is(err, synced_data.ErrNotSynced) {
+			// Get the current head of the fork choice
+			headRoot, headSlot, err = cfg.forkChoice.GetHead(nil)
+			if err != nil {
+				return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
+			}
+		} else {
+			return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
+		}
+
 	}
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
