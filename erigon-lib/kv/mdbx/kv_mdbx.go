@@ -1363,19 +1363,8 @@ func (tx *MdbxTx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 }
 
 // methods here help to see better pprof picture
-func (c *MdbxCursor) set(k []byte) ([]byte, []byte, error) { return c.c.Get(k, nil, mdbx.Set) }
-func (c *MdbxCursor) getCurrent() ([]byte, []byte, error)  { return c.c.Get(nil, nil, mdbx.GetCurrent) }
-func (c *MdbxCursor) next() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Next) }
-func (c *MdbxCursor) nextDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.NextDup) }
-func (c *MdbxCursor) nextNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.NextNoDup) }
-func (c *MdbxCursor) prev() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Prev) }
-func (c *MdbxCursor) prevDup() ([]byte, []byte, error)     { return c.c.Get(nil, nil, mdbx.PrevDup) }
-func (c *MdbxCursor) prevNoDup() ([]byte, []byte, error)   { return c.c.Get(nil, nil, mdbx.PrevNoDup) }
-func (c *MdbxCursor) last() ([]byte, []byte, error)        { return c.c.Get(nil, nil, mdbx.Last) }
-func (c *MdbxCursor) delCurrent() error                    { return c.c.Del(mdbx.Current) }
-func (c *MdbxCursor) delAllDupData() error                 { return c.c.Del(mdbx.AllDups) }
-func (c *MdbxCursor) put(k, v []byte) error                { return c.c.Put(k, v, 0) }
-func (c *MdbxCursor) putNoOverwrite(k, v []byte) error     { return c.c.Put(k, v, mdbx.NoOverwrite) }
+func (c *MdbxCursor) delAllDupData() error  { return c.c.Del(mdbx.AllDups) }
+func (c *MdbxCursor) put(k, v []byte) error { return c.c.Put(k, v, 0) }
 func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
 	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
 	return v, err
@@ -1390,7 +1379,7 @@ func (c *MdbxCursor) First() ([]byte, []byte, error) {
 }
 
 func (c *MdbxCursor) Last() ([]byte, []byte, error) {
-	k, v, err := c.last()
+	k, v, err := c.c.Get(nil, nil, mdbx.Last)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1426,7 +1415,7 @@ func (c *MdbxCursor) Seek(seek []byte) (k, v []byte, err error) {
 }
 
 func (c *MdbxCursor) Next() (k, v []byte, err error) {
-	k, v, err = c.next()
+	k, v, err = c.c.Get(nil, nil, mdbx.Next)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1438,7 +1427,7 @@ func (c *MdbxCursor) Next() (k, v []byte, err error) {
 }
 
 func (c *MdbxCursor) Prev() (k, v []byte, err error) {
-	k, v, err = c.prev()
+	k, v, err = c.c.Get(nil, nil, mdbx.Prev)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1451,7 +1440,7 @@ func (c *MdbxCursor) Prev() (k, v []byte, err error) {
 
 // Current - return key/data at current cursor position
 func (c *MdbxCursor) Current() ([]byte, []byte, error) {
-	k, v, err := c.getCurrent()
+	k, v, err := c.c.Get(nil, nil, mdbx.GetCurrent)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1463,7 +1452,7 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 }
 
 func (c *MdbxCursor) Delete(k []byte) error {
-	_, _, err := c.set(k)
+	_, _, err := c.c.Get(k, nil, mdbx.Set)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil
@@ -1475,7 +1464,7 @@ func (c *MdbxCursor) Delete(k []byte) error {
 		return c.delAllDupData()
 	}
 
-	return c.delCurrent()
+	return c.c.Del(mdbx.Current)
 }
 
 // DeleteCurrent This function deletes the key/data pair to which the cursor refers.
@@ -1484,11 +1473,11 @@ func (c *MdbxCursor) Delete(k []byte) error {
 // Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
 // this operation.
 func (c *MdbxCursor) DeleteCurrent() error {
-	return c.delCurrent()
+	return c.c.Del(mdbx.Current)
 }
 
-func (c *MdbxCursor) PutNoOverwrite(key []byte, value []byte) error {
-	return c.putNoOverwrite(key, value)
+func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error {
+	return c.c.Put(k, v, mdbx.NoOverwrite)
 }
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {
@@ -1499,7 +1488,7 @@ func (c *MdbxCursor) Put(key []byte, value []byte) error {
 }
 
 func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
-	k, v, err := c.set(key)
+	k, v, err := c.c.Get(key, nil, mdbx.Set)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1544,7 +1533,7 @@ func (c *MdbxDupSortCursor) DeleteExact(k1, k2 []byte) error {
 		}
 		return err
 	}
-	return c.delCurrent()
+	return c.c.Del(mdbx.Current)
 }
 
 func (c *MdbxDupSortCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
@@ -1582,7 +1571,7 @@ func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
 
 // NextDup - iterate only over duplicates of current key
 func (c *MdbxDupSortCursor) NextDup() ([]byte, []byte, error) {
-	k, v, err := c.nextDup()
+	k, v, err := c.c.Get(nil, nil, mdbx.NextDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1594,7 +1583,7 @@ func (c *MdbxDupSortCursor) NextDup() ([]byte, []byte, error) {
 
 // NextNoDup - iterate with skipping all duplicates
 func (c *MdbxDupSortCursor) NextNoDup() ([]byte, []byte, error) {
-	k, v, err := c.nextNoDup()
+	k, v, err := c.c.Get(nil, nil, mdbx.NextNoDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1605,7 +1594,7 @@ func (c *MdbxDupSortCursor) NextNoDup() ([]byte, []byte, error) {
 }
 
 func (c *MdbxDupSortCursor) PrevDup() ([]byte, []byte, error) {
-	k, v, err := c.prevDup()
+	k, v, err := c.c.Get(nil, nil, mdbx.PrevDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1616,7 +1605,7 @@ func (c *MdbxDupSortCursor) PrevDup() ([]byte, []byte, error) {
 }
 
 func (c *MdbxDupSortCursor) PrevNoDup() ([]byte, []byte, error) {
-	k, v, err := c.prevNoDup()
+	k, v, err := c.c.Get(nil, nil, mdbx.PrevNoDup)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
