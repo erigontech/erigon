@@ -804,17 +804,10 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	key := make([]byte, 0, 64)
 	var pos uint64
 
-	// prev0 := byte(0)
-	// var prevSet bool
 	pref2b := make(map[string]struct{}, 256*256)
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
 		keep := false
-		// if !prevSet || prev0 != key[0] {
-		// 	prev0 = key[0]
-		// 	prevSet = true
-		// 	keep = true
-		// }
 
 		var chunk string
 		if len(key) > 1 {
@@ -1164,10 +1157,10 @@ func (b *BtIndex) Get2(key []byte, g *seg.Reader) (v []byte, offsetInFile uint64
 
 		switch cmp {
 		case 0:
-			if g.HasNext() {
-				v, _ = g.Next(v[:0])
-				return v, b.ef.Get(m), true, nil
-			}
+			// if g.HasNext() {
+			// 	v, _ = g.Next(v[:0])
+			// 	return v, b.ef.Get(m), true, nil
+			// }
 			l, r = m, m
 		case 1:
 			r = m
