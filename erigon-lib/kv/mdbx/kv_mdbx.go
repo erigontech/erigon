@@ -1362,18 +1362,6 @@ func (tx *MdbxTx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 	return tx.RwCursorDupSort(bucket)
 }
 
-// methods here help to see better pprof picture
-func (c *MdbxCursor) delAllDupData() error  { return c.c.Del(mdbx.AllDups) }
-func (c *MdbxCursor) put(k, v []byte) error { return c.c.Put(k, v, 0) }
-func (c *MdbxCursor) getBoth(k, v []byte) ([]byte, error) {
-	_, v, err := c.c.Get(k, v, mdbx.GetBoth)
-	return v, err
-}
-func (c *MdbxCursor) getBothRange(k, v []byte) ([]byte, error) {
-	_, v, err := c.c.Get(k, v, mdbx.GetBothRange)
-	return v, err
-}
-
 func (c *MdbxCursor) First() ([]byte, []byte, error) {
 	return c.Seek(nil)
 }
@@ -1461,7 +1449,7 @@ func (c *MdbxCursor) Delete(k []byte) error {
 	}
 
 	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
-		return c.delAllDupData()
+		return c.c.Del(mdbx.AllDups)
 	}
 
 	return c.c.Del(mdbx.Current)
@@ -1481,7 +1469,7 @@ func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error {
 }
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {
-	if err := c.put(key, value); err != nil {
+	if err := c.c.Put(key, value, 0); err != nil {
 		return fmt.Errorf("label: %s, table: %s, err: %w", c.tx.db.opts.label, c.bucketName, err)
 	}
 	return nil
@@ -1526,7 +1514,7 @@ func (c *MdbxDupSortCursor) Internal() *mdbx.Cursor {
 
 // DeleteExact - does delete
 func (c *MdbxDupSortCursor) DeleteExact(k1, k2 []byte) error {
-	_, err := c.getBoth(k1, k2)
+	_, _, err := c.c.Get(k1, k2, mdbx.GetBoth)
 	if err != nil { // if key not found, or found another one - then nothing to delete
 		if mdbx.IsNotFound(err) {
 			return nil
@@ -1537,7 +1525,7 @@ func (c *MdbxDupSortCursor) DeleteExact(k1, k2 []byte) error {
 }
 
 func (c *MdbxDupSortCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
-	v, err := c.getBoth(key, value)
+	_, v, err := c.c.Get(key, value, mdbx.GetBoth)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
@@ -1548,7 +1536,7 @@ func (c *MdbxDupSortCursor) SeekBothExact(key, value []byte) ([]byte, []byte, er
 }
 
 func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
-	v, err := c.getBothRange(key, value)
+	_, v, err := c.c.Get(key, value, mdbx.GetBothRange)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
 			return nil, nil
@@ -1650,7 +1638,7 @@ func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
 
 // DeleteCurrentDuplicates - delete all of the data items for the current key.
 func (c *MdbxDupSortCursor) DeleteCurrentDuplicates() error {
-	if err := c.delAllDupData(); err != nil {
+	if err := c.c.Del(mdbx.AllDups); err != nil {
 		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.tx.db.opts.label, err)
 	}
 	return nil
