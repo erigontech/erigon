@@ -513,9 +513,11 @@ func (g *GossipManager) Start(ctx context.Context) {
 				logArgs := []interface{}{}
 				g.subscriptions.Range(func(key, value any) bool {
 					sub := value.(*GossipSubscription)
+					sub.lock.Lock()
 					if sub.topic != nil {
 						logArgs = append(logArgs, sub.topic.String(), sub.subscribed.Load())
 					}
+					sub.lock.Unlock()
 					return true
 				})
 				log.Trace("[Gossip] Subscriptions", "subscriptions", logArgs)

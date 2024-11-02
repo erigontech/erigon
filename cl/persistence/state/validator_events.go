@@ -134,6 +134,8 @@ func ReplayEvents(onAddValidator func(validatorIndex uint64, validator solid.Val
 	onChangeActivationEligibilityEpoch func(validatorIndex uint64, activationEligibilityEpoch uint64) error,
 	onChangeSlashed func(validatorIndex uint64, slashed bool) error,
 	e *StateEvents) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	buf := e.buf
 	for len(buf) > 0 {
 		event := stateEvent(buf[0])

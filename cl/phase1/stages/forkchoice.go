@@ -29,12 +29,15 @@ import (
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
 func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
+	prevHeadState, cn := cfg.syncedData.HeadState()
+	defer cn()
 	// Get the current head of the fork choice
-	headRoot, headSlot, err = cfg.forkChoice.GetHead(cfg.syncedData.HeadState())
+	headRoot, headSlot, err = cfg.forkChoice.GetHead(prevHeadState)
 	if err != nil {
 		err = fmt.Errorf("failed to get head: %w", err)
 		return
 	}
+	cn()
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
 	monitor.ObserveCurrentEpoch(headSlot / cfg.beaconCfg.SlotsPerEpoch)
@@ -308,8 +311,8 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	if err := cfg.syncedData.OnHeadState(headState); err != nil {
 		return fmt.Errorf("failed to set head state: %w", err)
 	}
-	headState = cfg.syncedData.HeadState() // headState is a copy of the head state here.
-
+	headState, cn := cfg.syncedData.HeadState() // headState is a copy of the head state here.
+	defer cn()
 	// Produce and cache attestation data for validator node (this is not an expensive operation so we can do it for all nodes)
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)

@@ -318,7 +318,8 @@ func (a *ApiHandler) writeValidatorsResponse(
 	}
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
-		s := a.syncedData.HeadState()
+		s, cn := a.syncedData.HeadState()
+		defer cn()
 		if s == nil {
 			http.Error(w, errors.New("node is not synced").Error(), http.StatusServiceUnavailable)
 			return
@@ -465,7 +466,8 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 	getter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
-		s := a.syncedData.HeadState()
+		s, cn := a.syncedData.HeadState()
+		defer cn()
 		if s == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("node is not synced"))
 		}
@@ -586,7 +588,8 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
-		s := a.syncedData.HeadState()
+		s, cn := a.syncedData.HeadState()
+		defer cn()
 		if s == nil {
 			http.Error(w, errors.New("node is not synced").Error(), http.StatusServiceUnavailable)
 			return

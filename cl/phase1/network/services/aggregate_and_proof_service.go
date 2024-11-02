@@ -98,7 +98,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *cltypes.SignedAggregateAndProofData,
 ) error {
-	headState := a.syncedDataManager.HeadState()
+	headState, cn := a.syncedDataManager.HeadState()
+	defer cn()
 	if headState == nil {
 		return ErrIgnore
 	}
@@ -126,6 +127,16 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
 		return ErrIgnore
 	}
+
+	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
+	committeeCountPerSlot := headState.CommitteeCount(target.Epoch)
+	if committeeIndex >= committeeCountPerSlot {
+		return errors.New("invalid committee index in aggregate and proof")
+	}
+	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
+	if aggregateData.Target.Epoch != epoch {
+		return errors.New("invalid target epoch in aggregate and proof")
+	}
 	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 	finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
@@ -150,15 +161,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return ErrIgnore
 	}
 
-	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
-	committeeCountPerSlot := headState.CommitteeCount(target.Epoch)
-	if committeeIndex >= committeeCountPerSlot {
-		return errors.New("invalid committee index in aggregate and proof")
-	}
-	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
-	if aggregateData.Target.Epoch != epoch {
-		return errors.New("invalid target epoch in aggregate and proof")
-	}
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
@@ -370,11 +372,13 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		headState := a.syncedDataManager.HeadState()
-		if headState == nil {
-			continue
-		}
+
 		a.aggregatesScheduledForLaterExecution.Range(func(key, value any) bool {
+			if a.syncedDataManager.Syncing() {
+				// Discard the job if we can't get the head state
+				a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
+				return false
+			}
 			job := value.(*aggregateJob)
 			// check if it has expired
 			if time.Since(job.creationTime) > attestationJobExpiry {
@@ -382,14 +386,14 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 				return true
 			}
 			aggregateData := job.aggregate.SignedAggregateAndProof.Message.Aggregate.Data
-			if aggregateData.Slot > headState.Slot() {
+			if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
 				return true
 			}
-
 			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
 				log.Trace("blob sidecar verification failed", "err", err)
 				return true
 			}
+
 			a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
 		})

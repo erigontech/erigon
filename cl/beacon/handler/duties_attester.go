@@ -62,7 +62,8 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
-	s := a.syncedData.HeadState()
+	s, cn := a.syncedData.HeadState()
+	defer cn()
 	if s == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
 	}

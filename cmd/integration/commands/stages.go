@@ -501,12 +501,14 @@ func init() {
 	withDataDir(cmdStageSenders)
 	withChain(cmdStageSenders)
 	withHeimdall(cmdStageSenders)
+	withChaosMonkey(cmdStageSenders)
 	rootCmd.AddCommand(cmdStageSenders)
 
 	withConfig(cmdStageSnapshots)
 	withDataDir(cmdStageSnapshots)
 	withChain(cmdStageSnapshots)
 	withReset(cmdStageSnapshots)
+	withChaosMonkey(cmdStageSnapshots)
 	rootCmd.AddCommand(cmdStageSnapshots)
 
 	withConfig(cmdStageHeaders)
@@ -516,6 +518,7 @@ func init() {
 	withReset(cmdStageHeaders)
 	withChain(cmdStageHeaders)
 	withHeimdall(cmdStageHeaders)
+	withChaosMonkey(cmdStageHeaders)
 	rootCmd.AddCommand(cmdStageHeaders)
 
 	withConfig(cmdStageBorHeimdall)
@@ -525,6 +528,7 @@ func init() {
 	withUnwindTypes(cmdStageBorHeimdall)
 	withChain(cmdStageBorHeimdall)
 	withHeimdall(cmdStageBorHeimdall)
+	withChaosMonkey(cmdStageBorHeimdall)
 	rootCmd.AddCommand(cmdStageBorHeimdall)
 
 	withConfig(cmdStageBodies)
@@ -532,6 +536,7 @@ func init() {
 	withUnwind(cmdStageBodies)
 	withChain(cmdStageBodies)
 	withHeimdall(cmdStageBodies)
+	withChaosMonkey(cmdStageBodies)
 	rootCmd.AddCommand(cmdStageBodies)
 
 	withConfig(cmdStagePolygon)
@@ -541,6 +546,7 @@ func init() {
 	withUnwindTypes(cmdStagePolygon)
 	withChain(cmdStagePolygon)
 	withHeimdall(cmdStagePolygon)
+	withChaosMonkey(cmdStagePolygon)
 	rootCmd.AddCommand(cmdStagePolygon)
 
 	withConfig(cmdStageExec)
@@ -555,6 +561,7 @@ func init() {
 	withChain(cmdStageExec)
 	withHeimdall(cmdStageExec)
 	withWorkers(cmdStageExec)
+	withChaosMonkey(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withConfig(cmdStageCustomTrace)
@@ -569,6 +576,7 @@ func init() {
 	withChain(cmdStageCustomTrace)
 	withHeimdall(cmdStageCustomTrace)
 	withWorkers(cmdStageCustomTrace)
+	withChaosMonkey(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withConfig(cmdStagePatriciaTrie)
@@ -580,6 +588,7 @@ func init() {
 	withIntegrityChecks(cmdStagePatriciaTrie)
 	withChain(cmdStagePatriciaTrie)
 	withHeimdall(cmdStagePatriciaTrie)
+	withChaosMonkey(cmdStagePatriciaTrie)
 	rootCmd.AddCommand(cmdStagePatriciaTrie)
 
 	withConfig(cmdStageTxLookup)
@@ -590,6 +599,7 @@ func init() {
 	withPruneTo(cmdStageTxLookup)
 	withChain(cmdStageTxLookup)
 	withHeimdall(cmdStageTxLookup)
+	withChaosMonkey(cmdStageTxLookup)
 	rootCmd.AddCommand(cmdStageTxLookup)
 
 	withConfig(cmdPrintMigrations)
@@ -710,12 +720,6 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if casted, ok := tx.(kv.CanWarmupDB); ok {
-				if err := casted.WarmupDB(false); err != nil {
-					return err
-				}
-			}
-
 			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
 				return err
 			}
@@ -1063,7 +1067,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true /*alwaysGenerateChangesets=*/, false,
+		/*badBlockHalt=*/ true /*alwaysGenerateChangesets=*/, false, chaosMonkey,
 		dirs, br, nil, genesis, syncCfg, nil)
 
 	if unwind > 0 {
@@ -1280,10 +1284,10 @@ var _allSnapshotsSingleton *freezeblocks.RoSnapshots
 var _allBorSnapshotsSingleton *heimdall.RoSnapshots
 var _allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
 var _aggSingleton *libstate.Aggregator
+var _bridgeStoreSingleton bridge.Store
+var _heimdallStoreSingleton heimdall.Store
 
 func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *heimdall.RoSnapshots, *libstate.Aggregator, *freezeblocks.CaplinSnapshots, bridge.Store, heimdall.Store) {
-	var bridgeStore bridge.Store
-	var heimdallStore heimdall.Store
 
 	openSnapshotOnce.Do(func() {
 		dirs := datadir.New(datadirCli)
@@ -1293,10 +1297,10 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		_allSnapshotsSingleton = freezeblocks.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_allBorSnapshotsSingleton = heimdall.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
-		bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
-		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
+		_bridgeStoreSingleton = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
+		_heimdallStoreSingleton = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
 		var err error
-		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, heimdallStore, bridgeStore)
+		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, _heimdallStoreSingleton, _bridgeStoreSingleton)
 
 		txNums := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 		_aggSingleton, err = libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, db, logger)
@@ -1356,7 +1360,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			return nil
 		})
 	})
-	return _allSnapshotsSingleton, _allBorSnapshotsSingleton, _aggSingleton, _allCaplinSnapshotsSingleton, bridgeStore, heimdallStore
+	return _allSnapshotsSingleton, _allBorSnapshotsSingleton, _aggSingleton, _allCaplinSnapshotsSingleton, _bridgeStoreSingleton, _heimdallStoreSingleton
 }
 
 var openBlockReaderOnce sync.Once
@@ -1481,6 +1485,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				cfg.StateStream,
 				/*stateStream=*/ false,
 				/*alwaysGenerateChangesets=*/ false,
+				chaosMonkey,
 				dirs,
 				blockReader,
 				sentryControlServer.Hd,
