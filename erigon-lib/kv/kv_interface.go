@@ -564,10 +564,6 @@ type TemporalPutDel interface {
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
 
-type CanWarmupDB interface {
-	WarmupDB(force bool) error
-	LockDBInRam() error
-}
 type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
 }
