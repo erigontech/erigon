@@ -1653,7 +1653,17 @@ func (tx *MdbxTx) Prefix(table string, prefix []byte) (stream.KV, error) {
 }
 
 func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, asc, limit)
+	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: asc, limit: int64(limit), id: tx.ID}
+	tx.ID++
+	if tx.toCloseMap == nil {
+		tx.toCloseMap = make(map[uint64]kv.Closer)
+	}
+	tx.toCloseMap[s.id] = s
+	if err := s.init(table, tx); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
 }
 
 type cursor2iter struct {
@@ -1667,19 +1677,6 @@ type cursor2iter struct {
 	ctx                                context.Context
 }
 
-func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, orderAscend order.By, limit int) (*cursor2iter, error) {
-	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: orderAscend, limit: int64(limit), id: tx.ID}
-	tx.ID++
-	if tx.toCloseMap == nil {
-		tx.toCloseMap = make(map[uint64]kv.Closer)
-	}
-	tx.toCloseMap[s.id] = s
-	if err := s.init(table, tx); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
-		return nil, err
-	}
-	return s, nil
-}
 func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	if s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) >= 0 {
 		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.fromPrefix, s.toPrefix)
