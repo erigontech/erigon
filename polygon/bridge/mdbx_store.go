@@ -514,7 +514,7 @@ func (s txStore) Events(ctx context.Context, start, end uint64) ([][]byte, error
 	kEnd := make([]byte, 8)
 	binary.BigEndian.PutUint64(kEnd, end)
 
-	it, err := s.tx.Range(kv.BorEvents, kStart, kEnd)
+	it, err := s.tx.Range(kv.BorEvents, kStart, kEnd, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}

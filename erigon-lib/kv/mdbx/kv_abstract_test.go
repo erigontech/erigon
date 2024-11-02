@@ -272,7 +272,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Range(kv.AccountChangeSet, from, to)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Asc, kv.Unlim)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err = it.Next()
