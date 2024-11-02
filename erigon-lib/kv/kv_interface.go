@@ -366,8 +366,6 @@ type Tx interface {
 	Cursor(table string) (Cursor, error)
 	CursorDupSort(table string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 
-	DBSize() (uint64, error)
-
 	// --- High-Level methods: 1request -> stream of server-side pushes ---
 
 	// Range [from, to)
