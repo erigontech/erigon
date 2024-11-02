@@ -67,12 +67,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
-	// s, cn := a.syncedData.HeadState()
-	// defer cn()
-	// if s == nil {
-	// 	return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
-	// }
-	// dependentRoot := a.getDependentRoot(s, epoch)
+
 	dependentRoot, err := a.getDependentRoot(epoch)
 	if err != nil {
 		return nil, err
@@ -104,7 +99,6 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	// get the duties
 	if a.forkchoiceStore.LowestAvailableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
 		// non-finality case
-
 		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
 			if epoch > state.Epoch(s)+3 {
 				return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is too far in the future", epoch))
