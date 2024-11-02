@@ -26,6 +26,47 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
+// Batch is only useful when there are multiple goroutines calling it.
+// It behaves similar to Update, except:
+//
+// 1. concurrent Batch calls can be combined into a single RwTx.
+//
+// 2. the function passed to Batch may be called multiple times,
+// regardless of whether it returns error or not.
+//
+// This means that Batch function side effects must be idempotent and
+// take permanent effect only after a successful return is seen in
+// caller.
+//
+// Example of bad side-effects: print messages, mutate external counters `i++`
+//
+// The maximum batch size and delay can be adjusted with DB.MaxBatchSize
+// and DB.MaxBatchDelay, respectively.
+func (db *MdbxKV) Batch(fn func(tx kv.RwTx) error) error {
+	errCh := make(chan error, 1)
+
+	db.batchMu.Lock()
+	if (db.batch == nil) || (db.batch != nil && len(db.batch.calls) >= db.MaxBatchSize) {
+		// There is no existing batch, or the existing batch is full; start a new one.
+		db.batch = &batch{
+			db: db,
+		}
+		db.batch.timer = time.AfterFunc(db.MaxBatchDelay, db.batch.trigger)
+	}
+	db.batch.calls = append(db.batch.calls, call{fn: fn, err: errCh})
+	if len(db.batch.calls) >= db.MaxBatchSize {
+		// wake up batch, it's ready to run
+		go db.batch.trigger()
+	}
+	db.batchMu.Unlock()
+
+	err := <-errCh
+	if errors.Is(err, trySolo) {
+		err = db.Update(context.Background(), fn)
+	}
+	return err
+}
+
 // Default values if not set in a DB instance.
 const (
 	DefaultMaxBatchSize  int = 1000
@@ -116,45 +157,4 @@ func safelyCall(fn func(tx kv.RwTx) error, tx kv.RwTx) (err error) {
 		}
 	}()
 	return fn(tx)
-}
-
-// Batch is only useful when there are multiple goroutines calling it.
-// It behaves similar to Update, except:
-//
-// 1. concurrent Batch calls can be combined into a single RwTx.
-//
-// 2. the function passed to Batch may be called multiple times,
-// regardless of whether it returns error or not.
-//
-// This means that Batch function side effects must be idempotent and
-// take permanent effect only after a successful return is seen in
-// caller.
-//
-// Example of bad side-effects: print messages, mutate external counters `i++`
-//
-// The maximum batch size and delay can be adjusted with DB.MaxBatchSize
-// and DB.MaxBatchDelay, respectively.
-func (db *MdbxKV) Batch(fn func(tx kv.RwTx) error) error {
-	errCh := make(chan error, 1)
-
-	db.batchMu.Lock()
-	if (db.batch == nil) || (db.batch != nil && len(db.batch.calls) >= db.MaxBatchSize) {
-		// There is no existing batch, or the existing batch is full; start a new one.
-		db.batch = &batch{
-			db: db,
-		}
-		db.batch.timer = time.AfterFunc(db.MaxBatchDelay, db.batch.trigger)
-	}
-	db.batch.calls = append(db.batch.calls, call{fn: fn, err: errCh})
-	if len(db.batch.calls) >= db.MaxBatchSize {
-		// wake up batch, it's ready to run
-		go db.batch.trigger()
-	}
-	db.batchMu.Unlock()
-
-	err := <-errCh
-	if errors.Is(err, trySolo) {
-		err = db.Update(context.Background(), fn)
-	}
-	return err
 }
