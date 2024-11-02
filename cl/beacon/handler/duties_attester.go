@@ -62,11 +62,14 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
+
+	// non-finality case
 	s, cn := a.syncedData.HeadState()
 	defer cn()
 	if s == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
 	}
+
 	dependentRoot := a.getDependentRoot(s, epoch)
 
 	var idxsStr []string
@@ -90,17 +93,10 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		idxSet[int(idx)] = struct{}{}
 	}
 
-	tx, err := a.indiciesDB.BeginRo(r.Context())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	resp := []attesterDutyResponse{}
 
 	// get the duties
 	if a.forkchoiceStore.LowestAvailableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
-		// non-finality case
 
 		if s == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
@@ -140,8 +136,16 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 				}
 			}
 		}
+		cn()
 		return newBeaconResponse(resp).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 	}
+
+	cn()
+	tx, err := a.indiciesDB.BeginRo(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
 	stageStateProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
