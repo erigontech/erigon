@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"sync/atomic"
 	"time"
 
@@ -88,6 +89,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
+				}
+			}
+			if se.cfg.chaosMonkey {
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, txTask.Error)
+				if chaosErr != nil {
+					log.Warn("Monkey in a consensus")
+					return chaosErr
 				}
 			}
 			return nil

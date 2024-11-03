@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -291,7 +292,7 @@ func (h *Harness) SetMiningBlockEmptyHeader(ctx context.Context, t *testing.T, p
 
 func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		spanIter, err := tx.Range(kv.BorSpans, nil, nil)
+		spanIter, err := tx.Range(kv.BorSpans, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -326,7 +327,7 @@ func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, 
 
 func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uint64, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		eventsIter, err := tx.Range(kv.BorEvents, nil, nil)
+		eventsIter, err := tx.Range(kv.BorEvents, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -352,7 +353,7 @@ func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uin
 func (h *Harness) ReadLastStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
 	nums = map[uint64]uint64{}
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil)
+		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}

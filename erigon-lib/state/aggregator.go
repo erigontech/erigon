@@ -226,10 +226,6 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
-	if dbg.NoSync() {
-		a.DisableFsync()
-	}
-
 	return a, nil
 }
 
@@ -287,6 +283,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadi
 	return nil
 }
 
+func (a *Aggregator) StepSize() uint64        { return a.aggregationStep }
 func (a *Aggregator) OnFreeze(f OnFreezeFunc) { a.onFreeze = f }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
