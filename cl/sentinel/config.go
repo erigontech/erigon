@@ -112,8 +112,11 @@ func buildOptions(cfg *SentinelConfig, s *Sentinel) ([]libp2p.Option, error) {
 		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 		libp2p.DefaultMuxers,
-		//libp2p.NATPortMap(),
 		libp2p.Ping(false),
+	}
+
+	if cfg.EnableUPnP {
+		options = append(options, libp2p.NATPortMap())
 	}
 
 	options = append(options, libp2p.Security(noise.ID, noise.New), libp2p.DisableRelay())
