@@ -14,7 +14,7 @@ replace github.com/erigontech/erigon-lib => ./erigon-lib
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.48
-	github.com/Giulio2002/bls v0.0.0-20241013174947-019133587795
+	github.com/Giulio2002/bls v0.0.0-20241103004224-ebd1ec68db0d
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/alecthomas/atomic v0.1.0-alpha2
