@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"math/rand"
 	"os"
 	"path"
@@ -42,8 +44,9 @@ import (
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {
 	b.Helper()
+	customfs.CFS = customfs.CustomFileSystem{Fs: afero.NewMemMapFs()}
 	logger := log.New()
-	dirs := datadir.New(b.TempDir())
+	dirs := datadir.New("tmp")
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()

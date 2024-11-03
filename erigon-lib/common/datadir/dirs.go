@@ -19,11 +19,10 @@ package datadir
 import (
 	"errors"
 	"fmt"
-	"os"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/gofrs/flock"
 	"path/filepath"
 	"syscall"
-
-	"github.com/gofrs/flock"
 
 	"github.com/erigontech/erigon-lib/common/dir"
 )
@@ -163,7 +162,7 @@ func downloaderV2Migration(dirs Dirs) error {
 		return nil
 	}
 	from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
-	if err := os.Rename(from, to); err != nil {
+	if err := customfs.CFS.Rename(from, to); err != nil {
 		//fall back to copy-file if folders are on different disks
 		if err := CopyFile(from, to); err != nil {
 			return err
@@ -173,24 +172,24 @@ func downloaderV2Migration(dirs Dirs) error {
 }
 
 func CopyFile(from, to string) error {
-	r, err := os.Open(from)
+	r, err := customfs.CFS.Open(from)
 	if err != nil {
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	defer r.Close()
-	w, err := os.Create(to)
+	w, err := customfs.CFS.Create(to)
 	if err != nil {
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	defer w.Close()
 	if _, err = w.ReadFrom(r); err != nil {
 		w.Close()
-		os.Remove(to)
+		customfs.CFS.Remove(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	if err = w.Sync(); err != nil {
 		w.Close()
-		os.Remove(to)
+		customfs.CFS.Remove(to)
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)
 	}
 	return nil

@@ -17,6 +17,7 @@
 package dir
 
 import (
+	"github.com/erigontech/erigon-lib/common/customfs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,18 +35,18 @@ func MustExist(path ...string) {
 		if exist {
 			continue
 		}
-		if err := os.MkdirAll(p, perm); err != nil {
+		if err := customfs.CFS.MkdirAll(p, perm); err != nil {
 			panic(err)
 		}
 	}
 }
 
 func Exist(path string) (exists bool, err error) {
-	_, err = os.Stat(path)
+	_, err = customfs.CFS.Stat(path)
 	switch {
 	case err == nil:
 		return true, nil
-	case os.IsNotExist(err):
+	case customfs.CFS.IsNotExist(err):
 		return false, nil
 	default:
 		return false, err
@@ -53,9 +54,9 @@ func Exist(path string) (exists bool, err error) {
 }
 
 func FileExist(path string) (exists bool, err error) {
-	fi, err := os.Stat(path)
+	fi, err := customfs.CFS.Stat(path)
 	switch {
-	case os.IsNotExist(err):
+	case customfs.CFS.IsNotExist(err):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -71,8 +72,8 @@ func FileExist(path string) (exists bool, err error) {
 }
 
 func FileNonZero(path string) bool {
-	fi, err := os.Stat(path)
-	if err != nil && os.IsNotExist(err) {
+	fi, err := customfs.CFS.Stat(path)
+	if err != nil && customfs.CFS.IsNotExist(err) {
 		return false
 	}
 	if fi == nil {
@@ -86,7 +87,7 @@ func FileNonZero(path string) bool {
 
 // nolint
 func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
-	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	f, err := customfs.CFS.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
@@ -108,7 +109,7 @@ func Recreate(dir string) {
 		panic(err)
 	}
 	if exist {
-		_ = os.RemoveAll(dir)
+		_ = customfs.CFS.RemoveAll(dir)
 	}
 	MustExist(dir)
 }
@@ -139,7 +140,7 @@ func DeleteFiles(dirs ...string) error {
 		}
 		for _, fPath := range files {
 			fPath := fPath
-			g.Go(func() error { return os.Remove(fPath) })
+			g.Go(func() error { return customfs.CFS.Remove(fPath) })
 		}
 	}
 	return g.Wait()
