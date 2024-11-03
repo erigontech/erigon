@@ -395,7 +395,13 @@ func (f *ForkChoiceStore) GetSyncCommittees(period uint64) (*solid.SyncCommittee
 }
 
 func (f *ForkChoiceStore) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	return f.syncedDataManager.HeadState().GetBeaconCommitee(slot, committeeIndex)
+	headState, cn := f.syncedDataManager.HeadState()
+	defer cn()
+	if headState == nil {
+		return nil, nil
+	}
+
+	return headState.GetBeaconCommitee(slot, committeeIndex)
 }
 
 func (f *ForkChoiceStore) BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {
@@ -538,13 +544,7 @@ func (f *ForkChoiceStore) IsHeadOptimistic() bool {
 		return false
 	}
 
-	headState := f.syncedDataManager.HeadState()
-	if headState == nil {
-		return true
-	}
-	// get latest root
-	latestRoot := headState.LatestBlockHeader().Root
-	return f.optimisticStore.IsOptimistic(latestRoot)
+	return f.optimisticStore.IsOptimistic(f.syncedDataManager.HeadRoot())
 }
 
 func (f *ForkChoiceStore) DumpBeaconStateOnDisk(bs *state.CachingBeaconState) error {
