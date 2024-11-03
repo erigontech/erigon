@@ -17,6 +17,7 @@
 package eth2
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -39,6 +40,10 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/utils"
+)
+
+const (
+	FullExitRequestAmount = 0
 )
 
 func (I *impl) FullValidate() bool {
@@ -957,5 +962,94 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 			}
 		}
 	}
+	return nil
+}
+
+func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error {
+	if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
+		s.SetDepositRequestsStartIndex(depositRequest.Index)
+	}
+
+	// Create pending deposit
+	s.AppendPendingDeposit(&solid.PendingDeposit{
+		PubKey:                depositRequest.PubKey,
+		WithdrawalCredentials: depositRequest.WithdrawalCredentials,
+		Amount:                depositRequest.Amount,
+		Signature:             depositRequest.Signature,
+		Slot:                  s.Slot(),
+	})
+	return nil
+}
+
+func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.WithdrawalRequest) error {
+	var (
+		amount            = req.Amount
+		isFullExitRequest = req.Amount == FullExitRequestAmount
+		reqPubkey         = req.ValidatorPubKey
+	)
+	// If partial withdrawal queue is full, only full exits are processed
+	if uint64(s.GetPendingPartialWithdrawals().Len()) >= s.BeaconConfig().PendingPartialWithdrawalsLimit && !isFullExitRequest {
+		return nil
+	}
+	// Verify pubkey exists
+	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
+	if !exist {
+		return nil
+	}
+	validator, err := s.ValidatorForValidatorIndex(int(vindex))
+	if err != nil {
+		return err
+	}
+	// Verify withdrawal credentials
+	hasCorrectCredential := state.HasExecutionWithdrawalCredential(validator, s.BeaconConfig())
+	wc := validator.WithdrawalCredentials()
+	isCorrectSourceAddress := bytes.Equal(req.SourceAddress[:], wc[12:])
+	if !(isCorrectSourceAddress && hasCorrectCredential) {
+		return nil
+	}
+	// check validator is active
+	if !validator.Active(state.Epoch(s)) {
+		return nil
+	}
+	// Verify exit has not been initiated
+	if validator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
+		return nil
+	}
+	// Verify the validator has been active long enough
+	if state.Epoch(s) < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+		return nil
+	}
+	pendingBalanceToWithdraw := getPendingBalanceToWithdraw(s, vindex)
+	if isFullExitRequest {
+		// Only exit validator if it has no pending withdrawals in the queue
+		if pendingBalanceToWithdraw == 0 {
+			return s.InitiateValidatorExit(vindex)
+		}
+	}
+
+	vbalance, err := s.ValidatorBalance(int(vindex))
+	if err != nil {
+		return err
+	}
+	hasSufficientEffectiveBalance := validator.EffectiveBalance() >= s.BeaconConfig().MinActivationBalance
+	hasExcessBalance := vbalance > s.BeaconConfig().MinActivationBalance+pendingBalanceToWithdraw
+	// Only allow partial withdrawals with compounding withdrawal credentials
+	if state.HasCompoundingWithdrawalCredential(validator, s.BeaconConfig()) && hasSufficientEffectiveBalance && hasExcessBalance {
+		toWithdraw := min(
+			vbalance-s.BeaconConfig().MinActivationBalance-pendingBalanceToWithdraw,
+			amount,
+		)
+		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(validator.EffectiveBalance())
+		withdrawableEpoch := exitQueueEpoch + s.BeaconConfig().MinValidatorWithdrawabilityDelay
+		s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{
+			Index:             vindex,
+			Amount:            toWithdraw,
+			WithdrawableEpoch: withdrawableEpoch,
+		})
+	}
+	return nil
+}
+
+func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error {
 	return nil
 }

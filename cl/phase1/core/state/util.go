@@ -73,37 +73,37 @@ func GetValidatorFromDeposit(s abstract.BeaconState, pubkey [48]byte, withdrawal
 	return validator
 }
 
-func hasEth1WithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
+func HasEth1WithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
 	return withdrawalCredentials[0] == byte(conf.ETH1AddressWithdrawalPrefixByte)
 }
 
-func hasCompoundingWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
+func HasCompoundingWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
 	return withdrawalCredentials[0] == CompoundingWithdrawalPrefix
 }
 
-func hasExecutionWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
-	return hasCompoundingWithdrawalCredential(validator, conf) || hasEth1WithdrawalCredential(validator, conf)
+func HasExecutionWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
+	return HasCompoundingWithdrawalCredential(validator, conf) || HasEth1WithdrawalCredential(validator, conf)
 }
 
 // Check whether a validator is fully withdrawable at the given epoch.
 func isFullyWithdrawableValidator(b abstract.BeaconState, validator solid.Validator, balance uint64, epoch uint64) bool {
 	conf := b.BeaconConfig()
 	if b.Version().BeforeOrEqual(clparams.DenebVersion) {
-		return hasEth1WithdrawalCredential(validator, conf) &&
+		return HasEth1WithdrawalCredential(validator, conf) &&
 			validator.WithdrawableEpoch() <= epoch &&
 			balance > 0
 	}
 	// electra and after
-	return hasExecutionWithdrawalCredential(validator, conf) &&
+	return HasExecutionWithdrawalCredential(validator, conf) &&
 		validator.WithdrawableEpoch() <= epoch &&
 		balance > 0
 }
 
 // getMaxEffectiveBalanceElectra is new in electra
 func getMaxEffectiveBalanceElectra(v solid.Validator, conf *clparams.BeaconChainConfig) uint64 {
-	if hasCompoundingWithdrawalCredential(v, conf) {
+	if HasCompoundingWithdrawalCredential(v, conf) {
 		return conf.MaxEffectiveBalanceElectra
 	}
 	return conf.MinActivationBalance
@@ -129,7 +129,7 @@ func isPartiallyWithdrawableValidator(b abstract.BeaconState, validator solid.Va
 	}
 	// electra and after
 	maxEffectiveBalance := getMaxEffectiveBalanceElectra(validator, conf)
-	return hasExecutionWithdrawalCredential(validator, conf) &&
+	return HasExecutionWithdrawalCredential(validator, conf) &&
 		validator.EffectiveBalance() == maxEffectiveBalance &&
 		balance > maxEffectiveBalance
 }

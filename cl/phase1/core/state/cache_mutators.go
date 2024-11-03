@@ -100,13 +100,13 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 
 	var exitQueueEpoch uint64
 	switch {
-	case b.Version().AfterOrEqual(clparams.ElectraVersion):
+	case b.Version() >= clparams.ElectraVersion:
 		// electra and after
 		effectiveBalance, err := b.ValidatorEffectiveBalance(int(index))
 		if err != nil {
 			return err
 		}
-		exitQueueEpoch = b.computeExitEpochAndUpdateChurn(effectiveBalance)
+		exitQueueEpoch = b.ComputeExitEpochAndUpdateChurn(effectiveBalance)
 	default:
 		currentEpoch := Epoch(b)
 		exitQueueEpoch = ComputeActivationExitEpoch(b.BeaconConfig(), currentEpoch)
@@ -140,7 +140,7 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 }
 
 // def compute_exit_epoch_and_update_churn(state: BeaconState, exit_balance: Gwei) -> Epoch
-func (b *CachingBeaconState) computeExitEpochAndUpdateChurn(exitBalance uint64) uint64 {
+func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) uint64 {
 	earliestExitEpoch := max(
 		b.EarliestExitEpoch(),
 		ComputeActivationExitEpoch(b.BeaconConfig(), Epoch(b)),

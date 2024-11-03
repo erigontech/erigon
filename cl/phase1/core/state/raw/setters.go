@@ -536,6 +536,11 @@ func (b *BeaconState) AppendPendingDeposit(deposit *solid.PendingDeposit) {
 	b.markLeaf(PendingDepositsLeafIndex)
 }
 
+func (b *BeaconState) AppendPendingPartialWithdrawal(withdrawal *solid.PendingPartialWithdrawal) {
+	b.pendingPartialWithdrawals.Append(withdrawal)
+	b.markLeaf(PendingPartialWithdrawalsLeafIndex)
+}
+
 func (b *BeaconState) SetPendingDeposits(deposits *solid.ListSSZ[*solid.PendingDeposit]) {
 	b.pendingDeposits = deposits
 	b.markLeaf(PendingDepositsLeafIndex)
@@ -549,4 +554,9 @@ func (b *BeaconState) SetPendingConsolidations(consolidations *solid.ListSSZ[*so
 func (b *BeaconState) SetDepositBalanceToConsume(balance uint64) {
 	b.depositBalanceToConsume = balance
 	b.markLeaf(DepositBalanceToConsumeLeafIndex)
+}
+
+func (b *BeaconState) SetDepositRequestsStartIndex(index uint64) {
+	b.depositRequestsStartIndex = index
+	b.markLeaf(DepositRequestsStartIndexLeafIndex)
 }
