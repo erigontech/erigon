@@ -87,7 +87,8 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	selectionProof := contributionAndProof.SelectionProof
 	aggregationBits := contributionAndProof.Contribution.AggregationBits
 
-	headState := s.syncedDataManager.HeadState()
+	headState, cn := s.syncedDataManager.HeadState()
+	defer cn()
 	if headState == nil {
 		return ErrIgnore
 	}

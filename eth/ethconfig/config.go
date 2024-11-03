@@ -105,6 +105,8 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
+
+	ChaosMonkey: false,
 }
 
 func init() {
@@ -258,6 +260,8 @@ type Config struct {
 	SilkwormRpcJsonCompatibility bool
 
 	DisableTxPoolGossip bool
+
+	ChaosMonkey bool
 }
 
 type Sync struct {

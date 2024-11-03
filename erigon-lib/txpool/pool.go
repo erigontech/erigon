@@ -35,6 +35,7 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
@@ -2108,7 +2109,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	it, err := tx.Range(kv.RecentLocalTransaction, nil, nil)
+	it, err := tx.Range(kv.RecentLocalTransaction, nil, nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return err
 	}
@@ -2125,7 +2126,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	parseCtx.WithSender(false)
 
 	i := 0
-	it, err = tx.Range(kv.PoolTransaction, nil, nil)
+	it, err = tx.Range(kv.PoolTransaction, nil, nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return err
 	}

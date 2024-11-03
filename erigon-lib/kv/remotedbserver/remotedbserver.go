@@ -726,16 +726,9 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 	var err error
 	if err = s.with(req.TxId, func(tx kv.Tx) error {
 		var it stream.KV
-		if req.OrderAscend {
-			it, err = tx.RangeAscend(req.Table, from, req.ToPrefix, limit)
-			if err != nil {
-				return err
-			}
-		} else {
-			it, err = tx.RangeDescend(req.Table, from, req.ToPrefix, limit)
-			if err != nil {
-				return err
-			}
+		it, err = tx.Range(req.Table, from, req.ToPrefix, order.FromBool(req.OrderAscend), limit)
+		if err != nil {
+			return err
 		}
 		for it.HasNext() {
 			k, v, err := it.Next()

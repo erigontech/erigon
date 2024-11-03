@@ -1733,13 +1733,7 @@ func (ht *HistoryRoTx) idxRangeRecent(key []byte, startTxNum, endTxNum int, asc 
 			toTxNum = uint64(endTxNum)
 		}
 		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
-		var it stream.KV
-		var err error
-		if asc {
-			it, err = roTx.RangeAscend(ht.h.historyValsTable, from, to, limit)
-		} else {
-			it, err = roTx.RangeDescend(ht.h.historyValsTable, from, to, limit)
-		}
+		it, err := roTx.Range(ht.h.historyValsTable, from, to, asc, limit)
 		if err != nil {
 			return nil, err
 		}

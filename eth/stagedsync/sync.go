@@ -365,8 +365,8 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 	s.timings = s.timings[:0]
 
 	hasMore := false
-	var badBlockUnwind bool
 	for !s.IsDone() {
+		var badBlockUnwind bool
 		if s.unwindPoint != nil {
 			for j := 0; j < len(s.unwindOrder); j++ {
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
@@ -447,11 +447,6 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 	}
 
 	s.currentStage = 0
-
-	if badBlockUnwind {
-		return false, errors.New("bad block unwinding")
-	}
-
 	return hasMore, nil
 }
 

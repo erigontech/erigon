@@ -130,13 +130,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return nil, err
 	}
 	defer tx.Rollback()
-	headState := a.syncedData.HeadState()
-	if headState == nil {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusServiceUnavailable,
-			errors.New("beacon node is still syncing"),
-		)
-	}
 
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
@@ -158,6 +151,16 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		// electra case
 		zero := uint64(0)
 		committeeIndex = &zero
+	}
+
+	headState, cn := a.syncedData.HeadState()
+	defer cn()
+
+	if headState == nil {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+			errors.New("beacon node is still syncing"),
+		)
 	}
 
 	attestationData, err := a.attestationProducer.ProduceAndCacheAttestationData(
@@ -229,15 +232,13 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		}
 	}
 
-	s := a.syncedData.HeadState()
-	if s == nil {
+	baseBlockRoot := a.syncedData.HeadRoot()
+	if baseBlockRoot == (libcommon.Hash{}) {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
 			errors.New("node is syncing"),
 		)
 	}
-
-	baseBlockRoot := a.syncedData.HeadRoot()
 	sourceBlock, err := a.blockReader.ReadBlockByRoot(ctx, tx, baseBlockRoot)
 	if err != nil {
 		log.Warn("Failed to get source block", "err", err, "root", baseBlockRoot)
