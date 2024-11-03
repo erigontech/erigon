@@ -707,7 +707,7 @@ Loop:
 
 	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", mxExecRepeats.GetValueUint64())
 
-	fmt.Println("WAIT")
+	//fmt.Println("WAIT")
 	executor.wait()
 
 	if u != nil && !u.HasUnwindPoint() {
