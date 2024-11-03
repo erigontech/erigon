@@ -87,6 +87,8 @@ type Logger interface {
 
 	GetLabels() []string
 	SetLabels(parts ...string) []string
+
+	Caller() log.CtxPair
 }
 
 type LevelSetter func(level log.Lvl) log.Lvl
@@ -188,15 +190,38 @@ func LogLevels(levelValues []string) []log.Lvl {
 }
 
 type logger struct {
-	log.Logger
 	sync.RWMutex
 	level      log.Lvl
 	label      string
 	labelParts []string
+	ctx        []interface{}
+	logger     log.Logger
 }
 
-func NewLogger(root log.Logger, level log.Lvl, labels []string, ctx []interface{}) Logger {
-	return &logger{Logger: log.GetDefaultLogger().New(ctx), level: level, labelParts: labels}
+func NewLogger(level log.Lvl, labels []string, ctx []interface{}) Logger {
+	return &logger{ctx: ctx, level: level, labelParts: labels}
+}
+
+func (l *logger) New(ctx ...any) log.Logger {
+	parent := l.logger
+	if parent == nil {
+		parent = log.GetDefaultLogger()
+	}
+	return &logger{ctx: ctx, level: l.level, labelParts: l.labelParts, logger: parent.New()}
+}
+
+func (l *logger) GetHandler() log.Handler {
+	if l.logger != nil {
+		return l.logger.GetHandler()
+	}
+	return log.GetDefaultLogger().GetHandler()
+}
+
+func (l *logger) SetHandler(h log.Handler) {
+	if l.logger == nil {
+		l.logger = log.GetDefaultLogger().New()
+	}
+	l.logger.SetHandler(h)
 }
 
 func (l *logger) SetLevel(level log.Lvl) log.Lvl {
@@ -260,6 +285,7 @@ func (l *logger) Log(level log.Lvl, msg string, ctx ...interface{}) {
 		l.RLock()
 		label := l.label
 		labelParts := l.labelParts
+		ctx = append(l.ctx, ctx)
 		l.RUnlock()
 
 		if label == "" && len(labelParts) > 0 {
@@ -273,7 +299,7 @@ func (l *logger) Log(level log.Lvl, msg string, ctx ...interface{}) {
 			msg = strings.Join([]string{label, msg}, " ")
 		}
 
-		l.Log(level, msg, ctx...)
+		log.GetDefaultLogger().Log(level, msg, ctx...)
 	}
 }
 
@@ -299,4 +325,8 @@ func (l *logger) Enabled(level log.Lvl) bool {
 	l.RLock()
 	defer l.RUnlock()
 	return l.level >= level
+}
+
+func (l *logger) Caller() log.CtxPair {
+	return log.Caller()
 }

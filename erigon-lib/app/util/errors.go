@@ -2,12 +2,11 @@ package util
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
 	"strings"
-
-	"github.com/go-errors/errors"
 )
 
 var (

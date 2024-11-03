@@ -8,7 +8,6 @@ import (
 	"github.com/erigontech/erigon-lib/app"
 	"github.com/erigontech/erigon-lib/app/util"
 	"github.com/pkg/errors"
-	"github.com/rs/zerolog"
 )
 
 // BusSubscriber defines subscription-related bus behavior
@@ -82,26 +81,21 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 				hmap.removeHandler(i)
 			}
 
-			var logger *zerolog.Event
-
-			if log.TraceEnabled() {
-				logger = log.Trace()
-			}
+			logEnabled := log.TraceEnabled()
 
 			if !handler.async {
-				handler.doPublish(handler.bus, logger, args...)
+				handler.doPublish(handler.bus, logEnabled, args...)
 			} else {
 				asyncHandler := handler
 				bus.wg.Add(1)
 
 				if log.TraceEnabled() {
-					log.Trace().
-						Str("handler", fmt.Sprint(asyncHandler)).
-						Str("bus", app.LogInstance(asyncHandler.bus)).
-						Int("poolSize", bus.execPool.PoolSize()).
-						Int("queueSize", bus.execPool.QueueSize()).
-						Str("args", fmt.Sprint(args...)).
-						Msg("Exec handler func")
+					log.Trace("Exec handler func",
+						"handler", fmt.Sprint(asyncHandler),
+						"bus", app.LogInstance(asyncHandler.bus),
+						"poolSize", bus.execPool.PoolSize(),
+						"queueSize", bus.execPool.QueueSize(),
+						"args", fmt.Sprint(args...))
 				}
 
 				bus.execPool.Exec(func() {
@@ -109,14 +103,13 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 					handlerBus := asyncHandler.bus
 					bus.lock.RUnlock()
 					if handlerBus != nil {
-						asyncHandler.doPublish(handlerBus, logger, args...)
+						asyncHandler.doPublish(handlerBus, logEnabled, args...)
 					} else {
-						if logger != nil {
-							logger.
-								Str("handler", fmt.Sprint(asyncHandler)).
-								Str("bus", app.LogInstance(handlerBus)).
-								Str("args", fmt.Sprint(args...)).
-								Msg("Ignoring callback")
+						if logEnabled {
+							log.Trace("Ignoring callback",
+								"handler", fmt.Sprint(asyncHandler),
+								"bus", app.LogInstance(handlerBus),
+								"args", fmt.Sprint(args...))
 						}
 					}
 					bus.wg.Done()
@@ -127,19 +120,17 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 				if queueSize > 0 {
 					if queueSize > bus.prevQueueSize {
 						if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
-							log.Debug().
-								Str("bus", app.LogInstance(bus)).
-								Int("poolSize", bus.execPool.PoolSize()).
-								Int("queueSize", bus.execPool.QueueSize()).
-								Msg("Execpool overflowing")
+							log.Debug("Execpool overflowing",
+								"bus", app.LogInstance(bus),
+								"poolSize", bus.execPool.PoolSize(),
+								"queueSize", bus.execPool.QueueSize())
 						}
 					} else if queueSize < bus.prevQueueSize {
 						if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
-							log.Debug().
-								Str("bus", app.LogInstance(bus)).
-								Int("poolSize", bus.execPool.PoolSize()).
-								Int("queueSize", bus.execPool.QueueSize()).
-								Msg("Execpool overflow recovering")
+							log.Debug("Execpool overflow recovering",
+								"bus", app.LogInstance(bus),
+								"poolSize", bus.execPool.PoolSize(),
+								"queueSize", bus.execPool.QueueSize())
 						}
 					}
 
@@ -180,19 +171,18 @@ type eventHandler struct {
 	async    bool
 }
 
-func (handler *eventHandler) doPublish(bus *eventBus, logger *zerolog.Event, args ...interface{}) {
+func (handler *eventHandler) doPublish(bus *eventBus, logEnabled bool, args ...interface{}) {
 	passedArguments := make([]reflect.Value, len(args))
 	for i, arg := range args {
 		passedArguments[i] = reflect.ValueOf(arg)
 	}
 
-	if logger != nil {
-		logger.
-			Str("bus", app.LogInstance(bus)).
-			Bool("async", handler.async).
-			Str("callback", fmt.Sprint(handler.callBack)).
-			Str("args", fmt.Sprint(args...)).
-			Msg("Calling callback")
+	if logEnabled {
+		log.Trace("Calling callback",
+			"bus", app.LogInstance(bus),
+			"async", handler.async,
+			"callback", fmt.Sprint(handler.callBack),
+			"args", fmt.Sprint(args...))
 	}
 
 	defer func() {
@@ -204,14 +194,13 @@ func (handler *eventHandler) doPublish(bus *eventBus, logger *zerolog.Event, arg
 				err = errors.WithStack(fmt.Errorf("Panic: %v\n", r))
 			}
 
-			log.Error().
-				Str("bus", app.LogInstance(bus)).
-				Bool("async", handler.async).
-				Str("callback", fmt.Sprint(handler.callBack)).
-				Str("args", fmt.Sprint(args...)).
-				Stack().
-				Err(err).
-				Msg("Handler panicked")
+			log.Error("Handler panicked",
+				"bus", app.LogInstance(bus),
+				"async", handler.async,
+				"callback", fmt.Sprint(handler.callBack),
+				"args", fmt.Sprint(args...),
+				//TODO Stack().
+				"err", err)
 		}
 	}()
 

@@ -303,10 +303,9 @@ func (cd *componentDomain) activateDependents(activationContext context.Context,
 		activate := func(dependency *component) {
 			defer wg.Done()
 			if log.TraceEnabled() {
-				log.Trace().
-					Str("manager", app.LogInstance(cd)).
-					Str("dependency", app.LogInstance(dependency)).
-					Msg("Activating")
+				log.Trace("Activating",
+					"domain", app.LogInstance(cd),
+					"dependency", app.LogInstance(dependency))
 			}
 
 			cres, cerr := dependency.activate(dependentActivationContext)
@@ -320,10 +319,9 @@ func (cd *componentDomain) activateDependents(activationContext context.Context,
 				case _, ok := <-cres:
 					if ok {
 						if log.TraceEnabled() {
-							log.Trace().
-								Str("manager", app.LogInstance(cd)).
-								Str("dependency", app.LogInstance(dependency)).
-								Msg("Dependency activated")
+							log.Trace("Dependency activated",
+								"domain", app.LogInstance(cd),
+								"dependency", app.LogInstance(dependency))
 						}
 						return
 					}
@@ -347,9 +345,8 @@ func (cd *componentDomain) activateDependents(activationContext context.Context,
 		go func() {
 			wg.Wait()
 			if log.TraceEnabled() {
-				log.Trace().
-					Str("manager", app.LogInstance(cd)).
-					Msg("Activated")
+				log.Trace("Activated",
+					"domain", app.LogInstance(cd))
 			}
 			if len(errors) > 0 {
 				cErrOut <- fmt.Errorf("Activate failed with the following errors %v", errors)
@@ -500,17 +497,15 @@ func (cd *componentDomain) Deactivate(deactivationContext context.Context) (chan
 			close(cErrOut)
 
 			if log.DebugEnabled() {
-				log.Debug().
-					Str("component", cd.Id().String()).
-					Msg("Unregistering from Service Bus")
+				log.Debug("Unregistering from Service Bus",
+					"component", cd.Id().String())
 			}
 
 			if err := cd.ServiceBus().UnregisterAll(cd); err != nil {
 				if log.DebugEnabled() {
-					log.Debug().
-						Str("component", cd.Id().String()).
-						Err(err).
-						Msg("Unregister from Service Bus failed")
+					log.Debug("Unregister from Service Bus failed",
+						"component", cd.Id().String(),
+						"err", err)
 				}
 			}
 
@@ -524,9 +519,8 @@ func (cd *componentDomain) Deactivate(deactivationContext context.Context) (chan
 
 			if cd.execPool != nil {
 				if log.DebugEnabled() {
-					log.Debug().
-						Str("component", cd.Id().String()).
-						Msg("Stopping Exec Pool")
+					log.Debug("Stopping Exec Pool",
+						"component", cd.Id().String())
 				}
 				cd.execPool.StopWait()
 				cd.execPool = nil

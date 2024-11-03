@@ -14,12 +14,7 @@ func init() {
 	app.RegisterLevelUpdater(logger, LogLevel, func() liblog.Lvl { return log.GetLevel() })
 }
 
-var log = app.NewLogger(logLevel(liblog.LvlWarn))
-
-func logLevel(level liblog.Lvl) (liblog.Logger, liblog.Lvl) {
-	return liblog.New(liblog.Root()), level 
-	//TODO .With().Str("logger", logger).Logger().Level(level)
-}
+var log = app.NewLogger(liblog.LvlWarn, []string{logger}, nil)
 
 func LogLevel(level liblog.Lvl) liblog.Lvl {
 	return log.SetLevel(level)
