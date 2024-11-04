@@ -1353,6 +1353,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 
 		ctx: ctx,
 	}
+	fmt.Printf("[dbg] ht.iit.files: %d\n", len(ht.iit.files))
 	for _, item := range ht.iit.files {
 		if item.endTxNum <= startTxNum {
 			continue
@@ -1418,6 +1419,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		var idxVal []byte
 		//if hi.compressVals {
 		idxVal, _ = top.g.Next(nil)
+		fmt.Printf("[dbg] StateAsOfIterF advanceInFiles: %s, %x\n", top.g.FileName(), key)
 		//} else {
 		//	idxVal, _ = top.g.NextUncompressed()
 		//}
