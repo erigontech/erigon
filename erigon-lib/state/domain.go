@@ -1973,6 +1973,7 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("[dbg] DomainRange 3: %s\n", dt.d.name)
 	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
