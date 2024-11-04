@@ -136,7 +136,6 @@ jobs:
           trace_filter/test_16.json,\
           trace_rawTransaction/test_01.json,\
           trace_rawTransaction/test_03.json,\
-          trace_replayBlockTransactions/test_29.tar,\
           admin_nodeInfo/test_01.json,\
           admin_peers/test_01.json,\
           erigon_nodeInfo/test_1.json,\
@@ -174,28 +173,11 @@ jobs:
           eth_submitWork/test_1.json,\
           net_peerCount/test_1.json,\
           net_version/test_1.json,\
-          trace_call/test_05.json,\
-          trace_call/test_07.json,\
-          trace_call/test_12.json,\
-          trace_call/test_14.json,\
-          trace_call/test_15.json,\
-          trace_call/test_16.json,\
-          trace_call/test_18.json,\
           txpool_content/test_01.json,\
           txpool_status/test_1.json,\
           web3_clientVersion/test_1.json,\
           eth_estimateGas/test_14.json,\
-          trace_replayBlockTransactions/test_26.tar,\
-          trace_replayBlockTransactions/test_28.tar,\
-          trace_replayBlockTransactions/test_29.tar,\
-          trace_replayBlockTransactions/test_31.tar,\
-          trace_replayBlockTransactions/test_32.tar,\
-          trace_replayBlockTransactions/test_33.tar,\
-          trace_replayBlockTransactions/test_34.tar,\
-          trace_replayBlockTransactions/test_35.tar,\
-          trace_replayTransaction/test_31.json,\
-          trace_replayTransaction/test_32.json,\
-          trace_replayTransaction/test_34.json
+          trace_replayBlockTransactions/test_29.tar
           
           # Capture test runner script exit status
           test_exit_status=$?
