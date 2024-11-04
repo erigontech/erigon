@@ -33,7 +33,7 @@ var _ SyncedData = (*SyncedDataManager)(nil)
 
 func EmptyCancel() {}
 
-const MinHeadStateDelay = 300 * time.Millisecond
+const MinHeadStateDelay = 600 * time.Millisecond
 
 type SyncedDataManager struct {
 	enabled bool
