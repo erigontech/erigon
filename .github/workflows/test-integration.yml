@@ -22,8 +22,7 @@ jobs:
       matrix:
         # list of os: https://github.com/actions/virtual-environments
         os:
-          - ubuntu-22.04
-          - macos-14
+        - ubuntu-latest-erigontests-xlarge
           - ubuntu-latest-erigontests-large
     runs-on: ${{ matrix.os }}
 
