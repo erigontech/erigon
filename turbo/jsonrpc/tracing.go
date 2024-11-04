@@ -116,6 +116,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	txns := block.Transactions()
 
 	var borStateSyncTxn types.Transaction
+
 	if *config.BorTraceEnabled {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 
