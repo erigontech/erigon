@@ -1073,7 +1073,7 @@ func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (of
 		g.Reset(offset)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
-			fmt.Printf("bs: %x, %x\n", fromPrefix, key)
+			fmt.Printf("bs: %x, %x, %t\n", fromPrefix, key, bytes.Compare(fromPrefix, key) >= 0)
 			return bytes.Compare(fromPrefix, key) >= 0
 		}
 		return false
