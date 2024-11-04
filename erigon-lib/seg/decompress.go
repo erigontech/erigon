@@ -1070,10 +1070,11 @@ func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (of
 	//n := item.src.decompressor.Count() / 2
 	foundItem := sort.Search(count, func(i int) bool {
 		offset := f(uint64(i))
+		fmt.Printf("bs_0: %d, %d; %d, %d\n", count, i, len(g.data), offset)
 		g.Reset(offset)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
-			fmt.Printf("bs: %x, %x, %t\n", fromPrefix, key, bytes.Compare(fromPrefix, key) >= 0)
+			fmt.Printf("bs_1: %x, %x, %t\n", fromPrefix, key, bytes.Compare(fromPrefix, key) >= 0)
 			return bytes.Compare(fromPrefix, key) >= 0
 		}
 		return false
