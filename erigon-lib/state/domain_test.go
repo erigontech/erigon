@@ -22,10 +22,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
 	"io/fs"
 	"math"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -116,9 +116,9 @@ func TestDomain_OpenFolder(t *testing.T) {
 	fn := ff.src.decompressor.FilePath()
 	d.Close()
 
-	err := os.Remove(fn)
+	err := customfs.CFS.Remove(fn)
 	require.NoError(t, err)
-	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	err = customfs.CFS.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
 	err = d.openFolder()
@@ -916,6 +916,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 		dom.History._visibleFiles[i].src.closeFilesAndRemove()
 	}
+	println("removedHist", len(removedHist))
 	dom.Close()
 
 	err = dom.openFolder()
@@ -925,6 +926,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	// domain files for same range should not be available so lengths should match
 	require.Len(t, dom._visible.files, len(run1Doms)-len(removedHist))
+
 	require.Len(t, dom.History._visibleFiles, len(dom._visible.files))
 	require.Len(t, dom.History._visibleFiles, len(run1Hist)-len(removedHist))
 
@@ -954,7 +956,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	// check files persist on the disk
 	persistingDomains := make(map[string]bool, 0)
-	err = fs.WalkDir(os.DirFS(dom.dirs.SnapDomain), ".", func(path string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(customfs.CFS.DirFS(dom.dirs.SnapDomain), ".", func(path string, d fs.DirEntry, err error) error {
 		persistingDomains[filepath.Base(path)] = false
 		return nil
 	})

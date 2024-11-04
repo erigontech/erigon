@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/afero"
 	"math"
 	"math/rand"
+	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -1093,11 +1094,18 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {
 	t.Helper()
 	require := require.New(t)
-	customfs.CFS = customfs.CustomFileSystem{Fs: afero.NewMemMapFs()}
-	tmpName := "tmp" + strconv.Itoa(rand.Int())
+	if _, ok := customfs.CFS.Fs.(*afero.OsFs); ok {
+		customfs.CFS = customfs.CustomFileSystem{Fs: afero.NewMemMapFs(), TmpCounter: atomic.Int32{}}
+	}
+	tmpCounter := customfs.CFS.TmpCounter.Add(1) - 1
+	tmpName := "tmp" + strconv.Itoa(int(tmpCounter))
+	println("tmpName", tmpName)
 	dirs := datadir.New(tmpName)
 	t.Cleanup(func() {
-		customfs.CFS.RemoveAll(tmpName)
+		println("removing")
+		err := customfs.CFS.RemoveAll(tmpName)
+		require.NoError(err)
+		err = os.RemoveAll(tmpName)
 	})
 	logger := log.New()
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {

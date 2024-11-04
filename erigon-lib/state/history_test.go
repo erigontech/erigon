@@ -22,12 +22,13 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"math"
-	"math/rand"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,8 +54,16 @@ import (
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
-	tmpName := "tmp" + strconv.Itoa(rand.Int())
+	if _, ok := customfs.CFS.Fs.(*afero.OsFs); ok {
+		customfs.CFS = customfs.CustomFileSystem{Fs: afero.NewMemMapFs(), TmpCounter: atomic.Int32{}}
+	}
+	tmpCounter := customfs.CFS.TmpCounter.Add(1) - 1
+	tmpName := "tmp" + strconv.Itoa(int(tmpCounter))
 	dirs := datadir.New(tmpName)
+	tb.Cleanup(func() {
+		customfs.CFS.RemoveAll(tmpName)
+		os.RemoveAll(tmpName)
+	})
 	keysTable := "AccountKeys"
 	indexTable := "AccountIndex"
 	valsTable := "AccountVals"
@@ -1549,9 +1558,9 @@ func TestHistory_OpenFolder(t *testing.T) {
 	fn := ff.src.decompressor.FilePath()
 	h.Close()
 
-	err := os.Remove(fn)
+	err := customfs.CFS.Remove(fn)
 	require.NoError(t, err)
-	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	err = customfs.CFS.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
 	err = h.openFolder()

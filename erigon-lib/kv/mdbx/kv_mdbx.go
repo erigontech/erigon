@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/customfs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -128,11 +127,11 @@ func (opts MdbxOpts) WriteMap(flag bool) MdbxOpts {
 
 func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	if tmpDir != "" {
-		if err := customfs.CFS.MkdirAll(tmpDir, 0755); err != nil {
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			panic(err)
 		}
 	}
-	path, err := customfs.CFS.MkdirTemp(tmpDir, "erigon-memdb-")
+	path, err := os.MkdirTemp(tmpDir, "erigon-memdb-")
 	if err != nil {
 		panic(err)
 	}

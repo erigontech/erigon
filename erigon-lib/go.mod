@@ -40,6 +40,7 @@ require (
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/shirou/gopsutil/v4 v4.24.8
 	github.com/spaolacci/murmur3 v1.1.0
+	github.com/spf13/afero v1.11.0
 	github.com/stretchr/testify v1.9.0
 	github.com/tidwall/btree v1.6.0
 	go.uber.org/mock v0.5.0
@@ -61,7 +62,6 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/pion/udp v0.1.4 // indirect
-	github.com/spf13/afero v1.11.0 // indirect
 	golang.org/x/mod v0.21.0 // indirect
 	golang.org/x/tools v0.26.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240604185151-ef581f913117 // indirect

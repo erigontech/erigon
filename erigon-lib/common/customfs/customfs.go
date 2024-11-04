@@ -4,18 +4,28 @@ import (
 	"errors"
 	"github.com/spf13/afero"
 	"io"
-	"math/rand"
+	"io/fs"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 )
 
-var CFS = CustomFileSystem{afero.NewOsFs()}
+var CFS = CustomFileSystem{afero.NewOsFs(), atomic.Int32{}}
 
 type CustomFileSystem struct {
 	afero.Fs
+	TmpCounter atomic.Int32
+}
+
+type IoWrapper struct {
+	CustomFileSystem
+}
+
+func (fs *IoWrapper) Open(name string) (fs.File, error) {
+	return fs.Fs.Open(name)
 }
 
 type CustomFile struct {
@@ -119,7 +129,8 @@ func (fs *CustomFileSystem) MkdirTemp(dir, pattern string) (string, error) {
 
 	try := 0
 	for {
-		name := prefix + strconv.Itoa(rand.Int()) + suffix
+		tmpCounter := fs.TmpCounter.Add(1) - 1
+		name := prefix + strconv.Itoa(int(tmpCounter)) + suffix
 		err := fs.Mkdir(name, 0700)
 		if err == nil {
 			return name, nil
@@ -156,7 +167,8 @@ func (fs *CustomFileSystem) CreateTemp(dir, pattern string) (*CustomFile, error)
 
 	try := 0
 	for {
-		name := prefix + strconv.Itoa(rand.Int()) + suffix
+		tmpCounter := fs.TmpCounter.Add(1) - 1
+		name := prefix + strconv.Itoa(int(tmpCounter)) + suffix
 		f, err := fs.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 		if fs.IsExist(err) {
 			if try++; try < 10000 {
@@ -253,4 +265,23 @@ func (fs *CustomFileSystem) ReadFile(name string) ([]byte, error) {
 			data = d[:len(data)]
 		}
 	}
+}
+
+func (fs *CustomFileSystem) WriteFile(name string, data []byte, perm os.FileMode) error {
+	f, err := fs.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err1 := f.Close(); err1 != nil && err == nil {
+		err = err1
+	}
+	return err
+}
+
+func (fs *CustomFileSystem) DirFS(dir string) fs.FS {
+	if _, ok := fs.Fs.(*afero.OsFs); ok {
+		return os.DirFS(dir)
+	}
+	return &IoWrapper{CustomFileSystem{afero.NewBasePathFs(fs.Fs, dir), atomic.Int32{}}}
 }

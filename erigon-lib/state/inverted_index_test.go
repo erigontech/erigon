@@ -21,8 +21,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
 	"math"
-	"os"
 	"testing"
 	"time"
 
@@ -737,9 +737,9 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 	fn := ff.src.decompressor.FilePath()
 	ii.Close()
 
-	err := os.Remove(fn)
+	err := customfs.CFS.Remove(fn)
 	require.NoError(t, err)
-	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	err = customfs.CFS.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
 
 	err = ii.openFolder()
