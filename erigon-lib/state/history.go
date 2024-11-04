@@ -1372,7 +1372,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 				if g.HasNext() {
 					key, _ := g.Next(nil)
 					fmt.Printf("bs: %x, %x\n", from, key)
-					return bytes.Compare(from, key) < 0
+					return bytes.Compare(from, key) >= 0
 				}
 				return false
 			})
