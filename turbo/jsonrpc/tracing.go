@@ -134,7 +134,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 	}
 
-	usedGas, usedBlobGas := new(uint64), new(uint64)
+	var usedGas uint64
 	for idx, txn := range txns {
 		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
@@ -195,7 +195,9 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				stateSyncEvents,
 			)
 		} else {
-			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, usedGas, usedBlobGas, api.evmCallTimeout)
+			var _usedGas uint64
+			_usedGas, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+			usedGas += _usedGas
 		}
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
@@ -224,7 +226,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			used += txn.GetGas()
 			used2 += txn.GetGas() + txn.GetBlobGas()
 		}
-		fmt.Printf("[dbg] header: %d, txs: %d, %d, exec: %d %d\n", block.GasUsed(), used, used2, *usedGas, *usedBlobGas)
+		fmt.Printf("[dbg] header: %d, txs: %d, %d, exec: %d\n", block.GasUsed(), used, used2, usedGas)
 	}
 
 	stream.WriteArrayEnd()
@@ -354,9 +356,9 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 
-	usedGas, usedBlobGas := new(uint64), new(uint64)
 	// Trace the transaction and return
-	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, usedGas, usedBlobGas, api.evmCallTimeout)
+	_, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	return err
 }
 
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
@@ -424,8 +426,8 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 	// Trace the transaction and return
-	usedGas, usedBlobGas := new(uint64), new(uint64)
-	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, usedGas, usedBlobGas, api.evmCallTimeout)
+	_, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	return err
 }
 
 func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
@@ -570,7 +572,6 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		}
 	}
 
-	usedGas, usedBlobGas := new(uint64), new(uint64)
 	stream.WriteArrayStart()
 	for bundleIndex, bundle := range bundles {
 		stream.WriteArrayStart()
@@ -589,7 +590,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
 			ibs.SetTxContext(txnIndex)
-			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, usedGas, usedBlobGas, api.evmCallTimeout)
+			_, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
 				stream.WriteArrayEnd()
 				stream.WriteArrayEnd()
