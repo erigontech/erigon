@@ -215,6 +215,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	}
 	it.Close()
 
+	fmt.Printf("[dbg] first loop done: %d\n", len(addrList))
+
 	j := 0
 	for i, addr := range addrList {
 		account := accountList[i]
