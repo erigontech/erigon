@@ -651,9 +651,9 @@ func (sd *StateDiff) DeleteAccount(address libcommon.Address, original *accounts
 func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
 		if original == nil {
-			fmt.Printf("[dbg] WriteAccountStorage: nil -> %x\n", libcommon.BytesToHash(value.Bytes()))
+			fmt.Printf("[dbg] WriteAccountStorage(%x): nil -> %x\n", *key, libcommon.BytesToHash(value.Bytes()))
 		} else {
-			fmt.Printf("[dbg] WriteAccountStorage: %x -> %x\n", libcommon.BytesToHash(original.Bytes()), libcommon.BytesToHash(value.Bytes()))
+			fmt.Printf("[dbg] WriteAccountStorage(%x): %x -> %x\n", *key, libcommon.BytesToHash(original.Bytes()), libcommon.BytesToHash(value.Bytes()))
 		}
 	}
 	if *original == *value {
