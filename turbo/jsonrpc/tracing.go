@@ -20,9 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	dbg "runtime/debug"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
