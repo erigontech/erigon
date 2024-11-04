@@ -62,28 +62,28 @@ func doCheckForBadBatch(batchContext *BatchContext, batchState *BatchState, this
 		return false, err
 	}
 
-	if !badBatch {
-		return false, nil
-	}
+	return badBatch, nil
+}
 
+func writeBadBatchDetails(batchContext *BatchContext, batchState *BatchState, blockNumber uint64) error {
 	log.Info(fmt.Sprintf("[%s] Skipping bad batch %d...", batchContext.s.LogPrefix(), batchState.batchNumber))
 	// store the fact that this batch was invalid during recovery - will be used for the stream later
-	if err = batchContext.sdb.hermezDb.WriteInvalidBatch(batchState.batchNumber); err != nil {
-		return false, err
+	if err := batchContext.sdb.hermezDb.WriteInvalidBatch(batchState.batchNumber); err != nil {
+		return err
 	}
-	if err = batchContext.sdb.hermezDb.WriteBatchCounters(currentBlock.NumberU64(), []int{}); err != nil {
-		return false, err
+	if err := batchContext.sdb.hermezDb.WriteBatchCounters(blockNumber, []int{}); err != nil {
+		return err
 	}
-	if err = stages.SaveStageProgress(batchContext.sdb.tx, stages.HighestSeenBatchNumber, batchState.batchNumber); err != nil {
-		return false, err
+	if err := stages.SaveStageProgress(batchContext.sdb.tx, stages.HighestSeenBatchNumber, batchState.batchNumber); err != nil {
+		return err
 	}
-	if err = batchContext.sdb.hermezDb.WriteForkId(batchState.batchNumber, batchState.forkId); err != nil {
-		return false, err
+	if err := batchContext.sdb.hermezDb.WriteForkId(batchState.batchNumber, batchState.forkId); err != nil {
+		return err
 	}
-	if err = batchContext.sdb.tx.Commit(); err != nil {
-		return false, err
+	if err := batchContext.sdb.tx.Commit(); err != nil {
+		return err
 	}
-	return true, nil
+	return nil
 }
 
 func updateStreamAndCheckRollback(

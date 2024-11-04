@@ -90,6 +90,7 @@ type Zk struct {
 	InitialBatchCfgFile    string
 	ACLPrintHistory        int
 	InfoTreeUpdateInterval time.Duration
+	BadBatches []uint64
 }
 
 var DefaultZkConfig = &Zk{}

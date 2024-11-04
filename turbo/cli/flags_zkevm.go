@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	utils2 "github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/urfave/cli/v2"
+	"strconv"
 )
 
 var DeprecatedFlags = map[string]string{
@@ -112,6 +113,21 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 
 	witnessMemSize := utils.DatasizeFlagValue(ctx, utils.WitnessMemdbSize.Name)
 
+	badBatchStrings := strings.Split(ctx.String(utils.BadBatches.Name), ",")
+	badBatches := make([]uint64, 0)
+	for _, s := range badBatchStrings {
+		if s == "" {
+			// if there are no entries then we can just ignore it and move on
+			continue
+		}
+		// parse the string as uint64
+		val, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			panic(fmt.Sprintf("could not parse bad batch number %s", s))
+		}
+		badBatches = append(badBatches, val)
+	}
+
 	cfg.Zk = &ethconfig.Zk{
 		L2ChainId:                              ctx.Uint64(utils.L2ChainIdFlag.Name),
 		L2RpcUrl:                               ctx.String(utils.L2RpcUrlFlag.Name),
@@ -184,6 +200,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		DataStreamWriteTimeout:                 ctx.Duration(utils.DataStreamWriteTimeout.Name),
 		DataStreamInactivityTimeout:            ctx.Duration(utils.DataStreamInactivityTimeout.Name),
 		VirtualCountersSmtReduction:            ctx.Float64(utils.VirtualCountersSmtReduction.Name),
+		BadBatches:                             badBatches,
 		InitialBatchCfgFile:                    ctx.String(utils.InitialBatchCfgFile.Name),
 		ACLPrintHistory:                        ctx.Int(utils.ACLPrintHistory.Name),
 		InfoTreeUpdateInterval:                 ctx.Duration(utils.InfoTreeUpdateInterval.Name),
