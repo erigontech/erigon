@@ -628,9 +628,6 @@ func (sd *StateDiff) UpdateAccountData(address libcommon.Address, original, acco
 }
 
 func (sd *StateDiff) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
-	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
-		fmt.Printf("[dbg] UpdateAccountCode\n")
-	}
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
@@ -638,10 +635,6 @@ func (sd *StateDiff) UpdateAccountCode(address libcommon.Address, incarnation ui
 }
 
 func (sd *StateDiff) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
-	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
-		fmt.Printf("[dbg] DeleteAccount\n")
-	}
-
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
@@ -660,17 +653,10 @@ func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation 
 	m := make(map[string]interface{})
 	m["*"] = &StateDiffStorage{From: libcommon.BytesToHash(original.Bytes()), To: libcommon.BytesToHash(value.Bytes())}
 	accountDiff.Storage[*key] = m
-	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
-		fmt.Printf("[dbg] WriteAccountStorage(%x): %x -> %x\n", *key, libcommon.BytesToHash(original.Bytes()), libcommon.BytesToHash(value.Bytes()))
-		fmt.Printf("[dbg] map: %d\n", len(accountDiff.Storage[*key]))
-	}
 	return nil
 }
 
 func (sd *StateDiff) CreateContract(address libcommon.Address) error {
-	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
-		fmt.Printf("[dbg] CreateContract\n")
-	}
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
