@@ -18,8 +18,10 @@ package synced_data
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -58,6 +60,8 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	start := time.Now()
+	time.Sleep(1 * time.Second)
 
 	var blkRoot common.Hash
 
@@ -75,6 +79,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	}
 	s.headSlot.Store(newState.Slot())
 	s.headRoot.Store(blkRoot)
+	fmt.Println("SyncedDataManager.OnHeadState took", time.Since(start))
 	return err
 }
 
