@@ -20,6 +20,7 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -32,6 +33,8 @@ var _ SyncedData = (*SyncedDataManager)(nil)
 
 func EmptyCancel() {}
 
+const MinHeadStateDelay = 300 * time.Millisecond
+
 type SyncedDataManager struct {
 	enabled bool
 	cfg     *clparams.BeaconChainConfig
@@ -39,15 +42,17 @@ type SyncedDataManager struct {
 	headRoot atomic.Value
 	headSlot atomic.Uint64
 
-	headState *state.CachingBeaconState
+	headState         *state.CachingBeaconState
+	minHeadStateDelay time.Duration
 
 	mu sync.RWMutex
 }
 
-func NewSyncedDataManager(enabled bool, cfg *clparams.BeaconChainConfig) *SyncedDataManager {
+func NewSyncedDataManager(cfg *clparams.BeaconChainConfig, enabled bool, minHeadStateDelay time.Duration) *SyncedDataManager {
 	return &SyncedDataManager{
-		enabled: enabled,
-		cfg:     cfg,
+		enabled:           enabled,
+		cfg:               cfg,
+		minHeadStateDelay: minHeadStateDelay,
 	}
 }
 
@@ -60,7 +65,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	defer s.mu.Unlock()
 
 	var blkRoot common.Hash
-
+	start := time.Now()
 	if s.headState == nil {
 		s.headState, err = newState.Copy()
 	} else {
@@ -75,6 +80,11 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	}
 	s.headSlot.Store(newState.Slot())
 	s.headRoot.Store(blkRoot)
+	took := time.Since(start)
+	// Delay head update to avoid being out of sync with slower nodes.
+	if took < s.minHeadStateDelay {
+		time.Sleep(s.minHeadStateDelay - took)
+	}
 	return err
 }
 
