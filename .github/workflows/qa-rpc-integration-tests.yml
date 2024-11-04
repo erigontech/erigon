@@ -156,27 +156,6 @@ jobs:
           trace_filter/test_16.json,\
           trace_rawTransaction/test_01.json,\
           trace_rawTransaction/test_03.json,\
-          trace_replayBlockTransactions/test_01.tar,\
-          trace_replayBlockTransactions/test_02.tar,\
-          trace_replayBlockTransactions/test_03.tar,\
-          trace_replayBlockTransactions/test_04.tar,\
-          trace_replayBlockTransactions/test_05.tar,\
-          trace_replayBlockTransactions/test_08.tar,\
-          trace_replayBlockTransactions/test_10.json,\
-          trace_replayBlockTransactions/test_11.json,\
-          trace_replayBlockTransactions/test_13.tar,\
-          trace_replayBlockTransactions/test_14.tar,\
-          trace_replayBlockTransactions/test_15.tar,\
-          trace_replayBlockTransactions/test_16.tar,\
-          trace_replayBlockTransactions/test_17.tar,\
-          trace_replayBlockTransactions/test_18.tar,\
-          trace_replayBlockTransactions/test_19.tar,\
-          trace_replayBlockTransactions/test_20.tar,\
-          trace_replayBlockTransactions/test_21.tar,\
-          trace_replayBlockTransactions/test_22.tar,\
-          trace_replayBlockTransactions/test_23.tar,\
-          trace_replayBlockTransactions/test_24.tar,\
-          trace_replayBlockTransactions/test_25.tar,\
           trace_replayTransaction/test_02.tar,\
           trace_replayTransaction/test_03.tar,\
           trace_replayTransaction/test_04.tar,\
