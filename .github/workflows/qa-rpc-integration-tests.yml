@@ -102,17 +102,6 @@ jobs:
           erigon_getHeaderByNumber/test_06.json,\
           erigon_getHeaderByNumber/test_07.json,\
           erigon_getHeaderByNumber/test_08.json,\
-          erigon_getLatestLogs/test_01.json,\
-          erigon_getLatestLogs/test_02.json,\
-          erigon_getLatestLogs/test_03.json,\
-          erigon_getLatestLogs/test_04.json,\
-          erigon_getLatestLogs/test_05.json,\
-          erigon_getLatestLogs/test_06.json,\
-          erigon_getLatestLogs/test_08.json,\
-          erigon_getLatestLogs/test_09.json,\
-          erigon_getLatestLogs/test_10.json,\
-          erigon_getLatestLogs/test_11.json,\
-          erigon_getLatestLogs/test_12.json,\
           erigon_getBalanceChangesInBlock,\
           eth_callBundle/test_09.json,\
           eth_callBundle/test_12.json,\
