@@ -1419,7 +1419,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		var idxVal []byte
 		//if hi.compressVals {
 		idxVal, _ = top.g.Next(nil)
-		fmt.Printf("[dbg] StateAsOfIterF advanceInFiles: %s, %x\n", top.g.FileName(), key)
+		fmt.Printf("[dbg] StateAsOfIterF advanceInFiles: %s, %x, to: %x\n", top.g.FileName(), key, hi.to)
 		//} else {
 		//	idxVal, _ = top.g.NextUncompressed()
 		//}
