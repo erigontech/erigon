@@ -50,7 +50,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eest' --client erigon 2>&1 | tee output.log || {
+            ./hive --sim 'ethereum/eest/consume-engine' --client erigon 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -78,4 +78,4 @@ jobs:
               exit 1
             fi
           }
-          run_suite eest-engine
+          run_suite eest/consume-engine
