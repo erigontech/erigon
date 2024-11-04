@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
 	"math"
 	"os"
 	"path/filepath"
@@ -243,7 +244,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	}
 
 	if saltExists && !saltStateExists {
-		_ = os.Rename(filepath.Join(baseDir, "salt.txt"), filepath.Join(baseDir, "salt-state.txt"))
+		_ = customfs.CFS.Rename(filepath.Join(baseDir, "salt.txt"), filepath.Join(baseDir, "salt-state.txt"))
 	}
 
 	fpath := filepath.Join(baseDir, "salt-state.txt")
@@ -264,7 +265,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 		return salt, nil // Return the newly created salt directly
 	}
 
-	saltBytes, err := os.ReadFile(fpath)
+	saltBytes, err := customfs.CFS.ReadFile(fpath)
 	if err != nil {
 		return nil, err
 	}
@@ -591,8 +592,8 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
-	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
-
+	a.logger.Info("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
+	var err error
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
 		txFrom        = a.FirstTxNumOfStep(step)
@@ -631,7 +632,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 			defer a.wg.Done()
 
 			var collation Collation
-			if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+			if err = a.db.View(ctx, func(tx kv.Tx) (err error) {
 				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
 				return err
 			}); err != nil {
@@ -757,7 +758,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
 					panic(err)
 				}
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err, "stack", dbg.Stack())
 				panic(err)
 			}
 		}
@@ -1637,7 +1638,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		if a.snapshotBuildSema != nil {
 			//we are inside own goroutine - it's fine to block here
 			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err, "stack", dbg.Stack())
 				return //nolint
 			}
 			defer a.snapshotBuildSema.Release(1)
@@ -1668,7 +1669,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 					close(fin)
 					return
 				}
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err, "stack", dbg.Stack())
 				break
 			}
 		}

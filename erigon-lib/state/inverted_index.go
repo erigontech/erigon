@@ -23,8 +23,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
 	"math"
-	"os"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -137,13 +137,13 @@ func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
 }
 
 func filesFromDir(dir string) ([]string, error) {
-	allFiles, err := os.ReadDir(dir)
+	allFiles, err := customfs.CFS.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("filesFromDir: %w, %s", err, dir)
 	}
 	filtered := make([]string, 0, len(allFiles))
 	for _, f := range allFiles {
-		if f.IsDir() || !f.Type().IsRegular() {
+		if f.IsDir() || !f.Mode().IsRegular() {
 			continue
 		}
 		if strings.HasPrefix(f.Name(), ".") { // hidden files

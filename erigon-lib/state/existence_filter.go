@@ -18,8 +18,9 @@ package state
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"hash"
-	"os"
 	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -32,7 +33,7 @@ type ExistenceFilter struct {
 	filter             *bloomfilter.Filter
 	empty              bool
 	FileName, FilePath string
-	f                  *os.File
+	f                  afero.File
 	noFsync            bool // fsync is enabled by default, but tests can manually disable
 }
 
@@ -74,7 +75,7 @@ func (b *ExistenceFilter) Contains(v hash.Hash64) bool {
 }
 func (b *ExistenceFilter) Build() error {
 	if b.empty {
-		cf, err := os.Create(b.FilePath)
+		cf, err := customfs.CFS.Create(b.FilePath)
 		if err != nil {
 			return err
 		}
@@ -84,7 +85,7 @@ func (b *ExistenceFilter) Build() error {
 
 	log.Trace("[agg] write file", "file", b.FileName)
 	tmpFilePath := b.FilePath + ".tmp"
-	cf, err := os.Create(tmpFilePath)
+	cf, err := customfs.CFS.Create(tmpFilePath)
 	if err != nil {
 		return err
 	}
@@ -99,7 +100,7 @@ func (b *ExistenceFilter) Build() error {
 	if err = cf.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpFilePath, b.FilePath); err != nil {
+	if err := customfs.CFS.Rename(tmpFilePath, b.FilePath); err != nil {
 		return err
 	}
 	return nil
@@ -110,7 +111,7 @@ func (b *ExistenceFilter) DisableFsync() { b.noFsync = true }
 // fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
 // Machine may power-off right after `rename` - it means `fsync` must be before `rename`
-func (b *ExistenceFilter) fsync(f *os.File) error {
+func (b *ExistenceFilter) fsync(f afero.File) error {
 	if b.noFsync {
 		return nil
 	}
@@ -145,7 +146,7 @@ func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error)
 		return nil, fmt.Errorf("file doesn't exists: %s", fileName)
 	}
 	{
-		ff, err := os.Open(filePath)
+		ff, err := customfs.CFS.Open(filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +160,11 @@ func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error)
 
 	if !idx.empty {
 		var err error
-		idx.filter, _, err = bloomfilter.ReadFile(filePath)
+		file, err := customfs.CFS.Open(filePath)
+		if err != nil {
+			return nil, err
+		}
+		idx.filter, _, err = bloomfilter.ReadFrom(file)
 		if err != nil {
 			return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
 		}

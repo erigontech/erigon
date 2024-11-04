@@ -17,7 +17,7 @@
 package state
 
 import (
-	"os"
+	"github.com/erigontech/erigon-lib/common/customfs"
 	"sync/atomic"
 
 	btree2 "github.com/tidwall/btree"
@@ -107,10 +107,10 @@ func (i *filesItem) closeFilesAndRemove() {
 		i.decompressor.Close()
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
-			if err := os.Remove(i.decompressor.FilePath()); err != nil {
+			if err := customfs.CFS.Remove(i.decompressor.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
 			}
-			if err := os.Remove(i.decompressor.FilePath() + ".torrent"); err != nil {
+			if err := customfs.CFS.Remove(i.decompressor.FilePath() + ".torrent"); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
 			}
 		}
@@ -120,10 +120,10 @@ func (i *filesItem) closeFilesAndRemove() {
 		i.index.Close()
 		// paranoic-mode on: don't delete frozen files
 		if !i.frozen {
-			if err := os.Remove(i.index.FilePath()); err != nil {
+			if err := customfs.CFS.Remove(i.index.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.index.FileName())
 			}
-			if err := os.Remove(i.index.FilePath() + ".torrent"); err != nil {
+			if err := customfs.CFS.Remove(i.index.FilePath() + ".torrent"); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.index.FileName())
 			}
 		}
@@ -131,30 +131,30 @@ func (i *filesItem) closeFilesAndRemove() {
 	}
 	if i.bindex != nil {
 		i.bindex.Close()
-		if err := os.Remove(i.bindex.FilePath()); err != nil {
+		if err := customfs.CFS.Remove(i.bindex.FilePath()); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
-		if err := os.Remove(i.bindex.FilePath() + ".torrent"); err != nil {
+		if err := customfs.CFS.Remove(i.bindex.FilePath() + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
 		i.bindex = nil
 	}
 	if i.bm != nil {
 		i.bm.Close()
-		if err := os.Remove(i.bm.FilePath()); err != nil {
+		if err := customfs.CFS.Remove(i.bm.FilePath()); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
 		}
-		if err := os.Remove(i.bm.FilePath() + ".torrent"); err != nil {
+		if err := customfs.CFS.Remove(i.bm.FilePath() + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
 		}
 		i.bm = nil
 	}
 	if i.existence != nil {
 		i.existence.Close()
-		if err := os.Remove(i.existence.FilePath); err != nil {
+		if err := customfs.CFS.Remove(i.existence.FilePath); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
 		}
-		if err := os.Remove(i.existence.FilePath + ".torrent"); err != nil {
+		if err := customfs.CFS.Remove(i.existence.FilePath + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.existence.FilePath)
 		}
 		i.existence = nil

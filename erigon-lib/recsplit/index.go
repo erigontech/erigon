@@ -21,6 +21,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"math"
 	"math/bits"
 	"os"
@@ -71,7 +73,7 @@ var IncompatibleErr = errors.New("incompatible. can re-build such files by comma
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
 	offsetEf           *eliasfano32.EliasFano
-	f                  *os.File
+	f                  afero.File
 	mmapHandle2        *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	filePath, fileName string
 
@@ -130,7 +132,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 		}
 	}()
 
-	idx.f, err = os.Open(indexFilePath)
+	idx.f, err = customfs.CFS.Open(indexFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -140,8 +142,20 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	}
 	idx.size = stat.Size()
 	idx.modTime = stat.ModTime()
-	if idx.mmapHandle1, idx.mmapHandle2, err = mmap.Mmap(idx.f, int(idx.size)); err != nil {
-		return nil, err
+	if _, ok := customfs.CFS.Fs.(*afero.OsFs); ok {
+		if idx.mmapHandle1, idx.mmapHandle2, err = mmap.Mmap(idx.f.(*os.File), int(idx.size)); err != nil {
+			return nil, err
+		}
+	} else {
+		mmapHandle1 := make([]byte, idx.size)
+		_, err := idx.f.Read(mmapHandle1)
+		if err != nil {
+			println("read mem err", err.Error())
+			return nil, err
+		}
+		mmapHandle2 := (*[mmap.MaxMapSize]byte)(unsafe.Pointer(&mmapHandle1[0]))
+		idx.mmapHandle1 = mmapHandle1
+		idx.mmapHandle2 = mmapHandle2
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
 	defer idx.EnableReadAhead().DisableReadAhead()

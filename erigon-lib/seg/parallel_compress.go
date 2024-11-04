@@ -23,8 +23,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"io"
-	"os"
 	"slices"
 	"strconv"
 	"sync"
@@ -235,7 +236,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 	return x
 }
 
-func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf afero.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -294,9 +295,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 
 	var err error
 	intermediatePath := segmentFilePath + ".tmp"
-	defer os.Remove(intermediatePath)
-	var intermediateFile *os.File
-	if intermediateFile, err = os.Create(intermediatePath); err != nil {
+	defer customfs.CFS.Remove(intermediatePath)
+	var intermediateFile *customfs.CustomFile
+	if intermediateFile, err = customfs.CFS.Create(intermediatePath); err != nil {
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
 	defer intermediateFile.Close()
@@ -947,7 +948,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tm
 }
 
 func PersistDictionary(fileName string, db *DictionaryBuilder) error {
-	df, err := os.Create(fileName)
+	df, err := customfs.CFS.Create(fileName)
 	if err != nil {
 		return err
 	}
@@ -965,7 +966,7 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 	// We only consider values with length > 2, because smaller values are not compressible without going into bits
-	f, err := os.Open(fileName)
+	f, err := customfs.CFS.Open(fileName)
 	if err != nil {
 		return err
 	}
