@@ -21,9 +21,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
 	"math"
+	"math/rand"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +53,8 @@ import (
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
-	dirs := datadir.New(tb.TempDir())
+	tmpName := "tmp" + strconv.Itoa(rand.Int())
+	dirs := datadir.New(tmpName)
 	keysTable := "AccountKeys"
 	indexTable := "AccountIndex"
 	valsTable := "AccountVals"
@@ -84,6 +88,9 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	h.DisableFsync()
 	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)
+	tb.Cleanup(func() {
+		customfs.CFS.RemoveAll(tmpName)
+	})
 	return db, h
 }
 

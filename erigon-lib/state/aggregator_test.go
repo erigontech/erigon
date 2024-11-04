@@ -1094,7 +1094,11 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 	t.Helper()
 	require := require.New(t)
 	customfs.CFS = customfs.CustomFileSystem{Fs: afero.NewMemMapFs()}
-	dirs := datadir.New("tmp" + strconv.Itoa(rand.Int()))
+	tmpName := "tmp" + strconv.Itoa(rand.Int())
+	dirs := datadir.New(tmpName)
+	t.Cleanup(func() {
+		customfs.CFS.RemoveAll(tmpName)
+	})
 	logger := log.New()
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
