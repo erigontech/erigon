@@ -156,6 +156,7 @@ jobs:
           trace_filter/test_16.json,\
           trace_rawTransaction/test_01.json,\
           trace_rawTransaction/test_03.json,\
+          trace_replayBlockTransactions/test_29.tar,\
           trace_replayTransaction/test_02.tar,\
           trace_replayTransaction/test_03.tar,\
           trace_replayTransaction/test_04.tar,\
