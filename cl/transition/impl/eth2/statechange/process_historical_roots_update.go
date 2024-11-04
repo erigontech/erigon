@@ -20,12 +20,14 @@ import (
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 )
 
 // ProcessHistoricalRootsUpdate updates the historical root data structure by computing a new historical root batch when it is time to do so.
 func ProcessHistoricalRootsUpdate(s abstract.BeaconState) error {
+	defer monitor.ObserveElaspedTime(monitor.ProcessHistoricalRootsUpdateTime).End()
 	nextEpoch := state.Epoch(s) + 1
 	beaconConfig := s.BeaconConfig()
 	blockRoots := s.BlockRoots()

@@ -27,6 +27,7 @@ type BatchSignatureVerifier struct {
 	aggregateProofVerify       chan *AggregateVerificationData
 	blsToExecutionChangeVerify chan *AggregateVerificationData
 	syncContributionVerify     chan *AggregateVerificationData
+	voluntaryExitVerify        chan *AggregateVerificationData
 	ctx                        context.Context
 }
 
@@ -51,6 +52,7 @@ func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinel.SentinelCl
 		aggregateProofVerify:       make(chan *AggregateVerificationData, 1024),
 		blsToExecutionChangeVerify: make(chan *AggregateVerificationData, 1024),
 		syncContributionVerify:     make(chan *AggregateVerificationData, 1024),
+		voluntaryExitVerify:        make(chan *AggregateVerificationData, 1024),
 	}
 }
 
@@ -71,6 +73,10 @@ func (b *BatchSignatureVerifier) AsyncVerifySyncContribution(data *AggregateVeri
 	b.syncContributionVerify <- data
 }
 
+func (b *BatchSignatureVerifier) AsyncVerifyVoluntaryExit(data *AggregateVerificationData) {
+	b.voluntaryExitVerify <- data
+}
+
 func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificationData) error {
 	return b.processSignatureVerification([]*AggregateVerificationData{data})
 }
@@ -81,6 +87,7 @@ func (b *BatchSignatureVerifier) Start() {
 	go b.start(b.aggregateProofVerify)
 	go b.start(b.blsToExecutionChangeVerify)
 	go b.start(b.syncContributionVerify)
+	go b.start(b.voluntaryExitVerify)
 }
 
 // When receiving AggregateVerificationData, we simply collect all the signature verification data

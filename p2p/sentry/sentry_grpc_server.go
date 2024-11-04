@@ -625,7 +625,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 	var disc enode.Iterator
 	if dialCandidates != nil {
 		disc = dialCandidates()
+	} else {
+		disc, _ = setupDiscovery(ss.p2p.DiscoveryDNS)
 	}
+
 	protocols := []uint{protocol}
 	if protocol == direct.ETH67 {
 		protocols = append(protocols, direct.ETH66)
@@ -711,8 +714,8 @@ func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discovery
 		}
 		return d
 	}
+	cfg.DiscoveryDNS = discoveryDNS
 	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion, logger)
-	sentryServer.discoveryDNS = discoveryDNS
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer, healthCheck)
 	if err != nil {
@@ -729,7 +732,6 @@ type GrpcServer struct {
 	proto_sentry.UnimplementedSentryServer
 	ctx                  context.Context
 	Protocols            []p2p.Protocol
-	discoveryDNS         []string
 	GoodPeers            sync.Map
 	TxSubscribed         uint32 // Set to non-zero if downloader is subscribed to transaction messages
 	p2pServer            *p2p.Server
@@ -1020,17 +1022,18 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 
 func (ss *GrpcServer) startP2PServer(genesisHash libcommon.Hash) (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
-		if len(ss.discoveryDNS) == 0 {
+		if len(ss.p2p.DiscoveryDNS) == 0 {
 			if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
-				ss.discoveryDNS = []string{url}
+				ss.p2p.DiscoveryDNS = []string{url}
 			}
-		}
-		for _, p := range ss.Protocols {
-			dialCandidates, err := setupDiscovery(ss.discoveryDNS)
-			if err != nil {
-				return nil, err
+
+			for _, p := range ss.Protocols {
+				dialCandidates, err := setupDiscovery(ss.p2p.DiscoveryDNS)
+				if err != nil {
+					return nil, err
+				}
+				p.DialCandidates = dialCandidates
 			}
-			p.DialCandidates = dialCandidates
 		}
 	}
 

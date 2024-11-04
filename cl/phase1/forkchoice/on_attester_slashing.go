@@ -42,7 +42,8 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return errors.New("attestation data is not slashable")
 	}
 	var err error
-	s := f.syncedDataManager.HeadState()
+	s, cn := f.syncedDataManager.HeadState()
+	defer cn()
 	if s == nil {
 		// Retrieve justified state
 		s, err = f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root, false)

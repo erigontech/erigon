@@ -835,6 +835,7 @@ func (s *Sync) handleWaypointExecutionErr(ctx context.Context, lastCorrectTip *t
 		return execErr
 	}
 
+	execErr = fmt.Errorf("unexpected bad block at finalized waypoint: %w", execErr)
 	// if it is a bad block try to unwind the bridge to the last known tip so we leave it in a good state
 	if bridgeUnwindErr := s.bridgeSync.Unwind(ctx, lastCorrectTip.Number.Uint64()); bridgeUnwindErr != nil {
 		return fmt.Errorf("%w: %w", bridgeUnwindErr, execErr)
