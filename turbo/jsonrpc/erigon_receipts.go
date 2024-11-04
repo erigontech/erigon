@@ -84,7 +84,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			return nil, err
 		}
 		begin = header.Number.Uint64()
-		end = header.Number.Uint64() + 1
+		end = header.Number.Uint64()
 
 	} else {
 		// Convert the RPC block numbers into internal representations
@@ -101,7 +101,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
 			}
 		}
-		end = latest + 1
+		end = latest
 		if crit.ToBlock != nil {
 			if crit.ToBlock.Sign() >= 0 {
 				end = crit.ToBlock.Uint64()
@@ -132,6 +132,8 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 // {} or nil          matches any topics list
 // {{A}}              matches topic A in any positions. Logs with {{B}, {A}} will be matched
 func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.ErigonLogs, error) {
+	var begin, end uint64 // Filter range: begin-end[from;to]. Two limits are included in the filter
+
 	if logOptions.LogCount != 0 && logOptions.BlockCount != 0 {
 		return nil, errors.New("logs count & block count are ambigious")
 	}
@@ -148,8 +150,6 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	tx := dbTx.(kv.TemporalTx)
 
 	var err error
-	var begin, end uint64 // Filter range: begin-end[from;to]. Two limits are included in the filter
-
 	if crit.BlockHash != nil {
 		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
 		if err != nil {
@@ -159,7 +159,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, fmt.Errorf("block header not found %x", *crit.BlockHash)
 		}
 		begin = header.Number.Uint64()
-		end = header.Number.Uint64() + 1
+		end = header.Number.Uint64()
 	} else {
 		// Convert the RPC block numbers into internal representations
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
@@ -175,7 +175,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
 			}
 		}
-		end = latest + 1
+		end = latest
 		if crit.ToBlock != nil {
 			if crit.ToBlock.Sign() >= 0 {
 				end = crit.ToBlock.Uint64()

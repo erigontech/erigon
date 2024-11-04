@@ -213,8 +213,8 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 	return roaring.FastOr(rx...), nil
 }
 
+// [begin, end] - both inclusive
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
-	//[from,to)
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
 		fromTxNum, err = txNumsReader.Min(tx, begin)
