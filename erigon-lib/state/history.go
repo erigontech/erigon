@@ -1368,7 +1368,9 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 			offset, ok = idx.Lookup(from)
 			if !ok {
 				// TODO: seek(from) - to support prefix - by binary-search
-				fmt.Printf("[dbg] ht.iit.files1 !ok, %x\n", from)
+				fmt.Printf("[dbg] ht.iit.files1 !ok, %x, %d\n", from, offset)
+			} else {
+				fmt.Printf("[dbg] ht.iit.files2 ok, %x, %d\n", from, offset)
 			}
 		}
 		g.Reset(offset)
