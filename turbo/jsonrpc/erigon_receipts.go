@@ -247,9 +247,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			exec.ChangeBlock(header)
 			timestamp = header.Time
 		}
-		var logIndex uint
-		var blockLogs types.Logs
 
+		if txIndex == -1 {
+			continue
+		}
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
@@ -263,7 +264,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if err != nil {
 			return nil, err
 		}
-		blockLogs = exec.GetRawLogs(txIndex)
+		blockLogs := exec.GetRawLogs(txIndex)
+		var logIndex uint
 		for _, log := range blockLogs {
 			log.Index = logIndex
 			logIndex++
