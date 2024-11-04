@@ -229,6 +229,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("[dbg] iter: %d, %d\n", blockNum, txIndex)
 		if isFinalTxn {
 			continue
 		}
@@ -254,6 +255,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, err
 		}
 		if txn == nil {
+			fmt.Printf("[dbg] txn not found: %d, %d\n", blockNum, txIndex)
 			continue
 		}
 

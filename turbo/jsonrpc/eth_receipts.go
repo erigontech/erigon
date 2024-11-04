@@ -229,7 +229,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("[dbg] iter: %d, %d\n", blockNum, txIndex)
 		if isFinalTxn {
 			continue
 		}
@@ -258,7 +257,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		if txn == nil {
-			fmt.Printf("[dbg] txn not found: %d, %d\n", blockNum, txIndex)
 			continue
 		}
 
