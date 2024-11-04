@@ -825,9 +825,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 			cell := &hph.grid[row][col]
 			if cell.hashedExtLen > 0 || cell.accountAddrLen > 0 {
 				var cellHash []byte
-				hph.trace = false
 				cellHash, _, _, err := hph.computeCellHash(cell, hph.depths[row], nil)
-				hph.trace = true
 				if err != nil {
 					panic("failed to compute cell hash")
 				}
@@ -885,6 +883,17 @@ func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []by
 	return accountNode, nil
 }
 
+func (hph *HexPatriciaHashed) nCellsInRow(row int) int {
+	count := 0
+	for col := 0; col < 16; col++ {
+		c := &hph.grid[row][col]
+		if !c.IsEmpty() {
+			count++
+		}
+	}
+	return count
+}
+
 func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
@@ -897,12 +906,18 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 		cellToExpand := &hph.grid[row][currentNibble]
 		// determine the next node
 		if cellToExpand.hashedExtLen > 0 { // extension cell
+			keyPos += cellToExpand.hashedExtLen // jump ahead
 			hashedExtKey := cellToExpand.hashedExtension[:cellToExpand.hashedExtLen]
-			extensionKey := make([]byte, len(hashedExtKey)+1) // +1 for the terminator 0x10 ([16]) byte
+			extKeyLength := len(hashedExtKey)
+			if keyPos+1 == len(hashedKey) || keyPos+1 == 64 {
+				extKeyLength++ //  +1 for the terminator 0x10 ([16])  byte when on a terminal extension node
+			}
+			extensionKey := make([]byte, extKeyLength)
 			copy(extensionKey, hashedExtKey)
-			extensionKey[len(extensionKey)-1] = 16        // append terminator byte
+			if keyPos+1 == len(hashedKey) || keyPos+1 == 64 {
+				extensionKey[len(extensionKey)-1] = 16 // append terminator byte
+			}
 			nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
-			keyPos += cellToExpand.hashedExtLen           // jump ahead
 			if keyPos+1 == len(hashedKey) {
 				if cellToExpand.storageAddrLen > 0 {
 					storageUpdate, err := hph.Ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
@@ -917,14 +932,12 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 						return nil, err
 					}
 					nextNode = &trie.ShortNode{Key: extensionKey, Val: accNode}
-					// extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
-					// subTrieRoot := extNodeSubTrie.Root()
-					// cellHash, _, _, _ := hph.computeCellHash(cellToExpand, hph.depths[row], nil)
-					// if !bytes.Equal(subTrieRoot, cellHash[1:]) {
-					// 	return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
-					// }
-					// terminalHashedKey := ecrypto.Keccak256(cellToExpand.accountAddr[:])
-					// fmt.Printf("terminalHashedKey = %x\n", terminalHashedKey)
+					extNodeSubTrie := trie.NewInMemoryTrie(nextNode)
+					subTrieRoot := extNodeSubTrie.Root()
+					cellHash, _, _, _ := hph.computeCellHash(cellToExpand, hph.depths[row], nil)
+					if !bytes.Equal(subTrieRoot, cellHash[1:]) {
+						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
+					}
 				}
 			}
 			// // for debugging only
@@ -1485,7 +1498,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	var (
 		m  runtime.MemStats
 		ki uint64
-		// update *Update
 
 		updatesCount = updates.Size()
 		logEvery     = time.NewTicker(20 * time.Second)
@@ -1523,6 +1535,8 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			}
 			fmt.Printf("storage FOUND = %v\n", storage.Storage)
 		}
+
+		hph.SetTrace(true)
 
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
@@ -1574,10 +1588,10 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
-	err = hph.branchEncoder.Load(hph.Ctx, etl.TransformArgs{Quit: ctx.Done()})
-	if err != nil {
-		return nil, nil, fmt.Errorf("branch update failed: %w", err)
-	}
+	// err = hph.branchEncoder.Load(hph.Ctx, etl.TransformArgs{Quit: ctx.Done()})
+	// if err != nil {
+	// 	return nil, nil, fmt.Errorf("branch update failed: %w", err)
+	// }
 
 	witnessTrie, err = trie.MergeTries(tries)
 	if err != nil {
@@ -1605,7 +1619,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 	defer logEvery.Stop()
-	hph.trace = true
 	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
