@@ -628,6 +628,9 @@ func (sd *StateDiff) UpdateAccountData(address libcommon.Address, original, acco
 }
 
 func (sd *StateDiff) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
+	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
+		fmt.Printf("[dbg] UpdateAccountCode\n")
+	}
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
@@ -635,6 +638,10 @@ func (sd *StateDiff) UpdateAccountCode(address libcommon.Address, incarnation ui
 }
 
 func (sd *StateDiff) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
+	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
+		fmt.Printf("[dbg] DeleteAccount\n")
+	}
+
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
@@ -642,6 +649,13 @@ func (sd *StateDiff) DeleteAccount(address libcommon.Address, original *accounts
 }
 
 func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
+	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
+		if original == nil {
+			fmt.Printf("[dbg] WriteAccountStorage: nil -> %x\n", libcommon.BytesToHash(value.Bytes()))
+		} else {
+			fmt.Printf("[dbg] WriteAccountStorage: %x -> %x\n", libcommon.BytesToHash(original.Bytes()), libcommon.BytesToHash(value.Bytes()))
+		}
+	}
 	if *original == *value {
 		return nil
 	}
@@ -657,6 +671,9 @@ func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation 
 }
 
 func (sd *StateDiff) CreateContract(address libcommon.Address) error {
+	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
+		fmt.Printf("[dbg] CreateContract\n")
+	}
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
