@@ -1085,7 +1085,7 @@ func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (of
 	}
 
 	if foundItem > 2 {
-		g.Reset(f(uint64(foundItem - 2)))
+		g.Reset(f(uint64(foundItem - 2))) // prev key
 		key, _ := g.Next(nil)
 		if bytes.Compare(fromPrefix, key) > 0 {
 			panic(fmt.Errorf("see smaller key: %x, %x", fromPrefix, key))
