@@ -106,15 +106,10 @@ jobs:
           sed -i '/zkevm.sequencer-non-empty-batch-seal-time:/d' templates/cdk-erigon/config.yml
           sed -i '/sentry.drop-useless-peers:/d' templates/cdk-erigon/config.yml
 
-      - name: Configure Kurtosis CDK
-        working-directory: ./kurtosis-cdk
-        run: |
-          /usr/local/bin/yq -i '.args.data_availability_mode = "${{ matrix.da-mode }}"' params.yml
-          /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' params.yml
-
       - name: Deploy Kurtosis CDK package
         working-directory: ./kurtosis-cdk
-        run: kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always .
+        run: | 
+          kurtosis run --enclave cdk-v1 --image-download always . '{"args": {"data_availability_mode": "${{ matrix.da-mode }}", "cdk_erigon_node_image": "cdk-erigon:local"}}'
 
       - name: Monitor verified batches
         working-directory: ./kurtosis-cdk
@@ -233,8 +228,6 @@ jobs:
       - name: Configure Kurtosis CDK
         working-directory: ./kurtosis-cdk
         run: |
-          /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' params.yml
-          /usr/local/bin/yq -i '.args.erigon_strict_mode = false' params.yml
           sed -i 's/"londonBlock": [0-9]\+/"londonBlock": 0/' ./templates/cdk-erigon/chainspec.json
           sed -i 's/"normalcyBlock": [0-9]\+/"normalcyBlock": 0/' ./templates/cdk-erigon/chainspec.json
           sed -i 's/"shanghaiTime": [0-9]\+/"shanghaiTime": 0/' ./templates/cdk-erigon/chainspec.json
@@ -243,7 +236,8 @@ jobs:
           
       - name: Deploy Kurtosis CDK package
         working-directory: ./kurtosis-cdk
-        run: kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always .
+        run: |
+           kurtosis run --enclave cdk-v1 --image-download always . '{"args": {"erigon_strict_mode": false, "cdk_erigon_node_image": "cdk-erigon:local"}}'
   
       - name: Dynamic gas fee tx load test
         working-directory: ./kurtosis-cdk
