@@ -292,6 +292,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		blockCount++
 
 		if len(blockLogs) == 0 {
+			fmt.Printf("[dbg] continue1: %d, %d\n", blockNum, txIndex)
 			continue
 		}
 
