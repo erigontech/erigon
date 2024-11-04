@@ -1354,18 +1354,20 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		ctx: ctx,
 	}
 	fmt.Printf("[dbg] ht.iit.files: %d, %x, %x\n", len(ht.iit.files), from, to)
-	for _, item := range ht.iit.files {
+	for i, item := range ht.iit.files {
 		if item.endTxNum <= startTxNum {
 			continue
 		}
 		// TODO: seek(from)
 		g := seg.NewReader(item.src.decompressor.MakeGetter(), ht.h.compression)
 
+		idx := ht.iit.statelessIdxReader(i)
 		var offset uint64
 		if len(from) > 0 {
 			var ok bool
-			offset, ok = item.reader.Lookup(from)
+			offset, ok = idx.Lookup(from)
 			if !ok {
+				// TODO: seek(from) - to support prefix - by binary-search
 				fmt.Printf("[dbg] ht.iit.files1 !ok, %x\n", from)
 			}
 		}
