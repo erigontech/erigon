@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
@@ -61,7 +62,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	start := time.Now()
-	time.Sleep(1 * time.Second)
+	//time.Sleep(1 * time.Second)
 
 	var blkRoot common.Hash
 
@@ -88,7 +89,9 @@ func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 	if !s.enabled || !synced {
 		return ErrNotSynced
 	}
+	start := time.Now()
 	s.mu.RLock()
+	fmt.Println("SyncedDataManager.ViewHeadState took", time.Since(start), dbg.Stack())
 	defer s.mu.RUnlock()
 	return fn(s.headState)
 }
