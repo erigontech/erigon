@@ -284,4 +284,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.InitialBatchCfgFile,
 
 	&utils.ACLPrintHistory,
+	&utils.InfoTreeUpdateInterval,
 }

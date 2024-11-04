@@ -738,9 +738,14 @@ var (
 		Usage: "The file that contains the initial (injected) batch data.",
 		Value: "",
 	}
+	InfoTreeUpdateInterval = cli.DurationFlag{
+		Name:  "zkevm.info-tree-update-interval",
+		Usage: "The interval at which the sequencer checks the L1 for new GER information",
+		Value: 1 * time.Minute,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
-		Usage: "Number of entries to print from the ACL history on node startup",
+		Usage: "Number of entries to print from the ACL history on node start up",
 		Value: 10,
 	}
 	DebugTimers = cli.BoolFlag{

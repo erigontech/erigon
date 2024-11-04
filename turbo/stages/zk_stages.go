@@ -20,6 +20,7 @@ import (
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/erigon/zk/txpool"
+	"github.com/ledgerwatch/erigon/zk/l1infotree"
 )
 
 // NewDefaultZkStages creates stages for zk syncer (RPC mode)
@@ -34,9 +35,9 @@ func NewDefaultZkStages(ctx context.Context,
 	forkValidator *engine_helpers.ForkValidator,
 	engine consensus.Engine,
 	l1Syncer *syncer.L1Syncer,
-	l1InfoTreeSyncer *syncer.L1Syncer,
 	datastreamClient zkStages.DatastreamClient,
 	datastreamServer *datastreamer.StreamServer,
+	infoTreeUpdater *l1infotree.Updater,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockWriter := blockio.NewBlockWriter(cfg.HistoryV3)
@@ -51,7 +52,7 @@ func NewDefaultZkStages(ctx context.Context,
 
 	return zkStages.DefaultZkStages(ctx,
 		zkStages.StageL1SyncerCfg(db, l1Syncer, cfg.Zk),
-		zkStages.StageL1InfoTreeCfg(db, cfg.Zk, l1InfoTreeSyncer),
+		zkStages.StageL1InfoTreeCfg(db, cfg.Zk, infoTreeUpdater),
 		zkStages.StageBatchesCfg(db, datastreamClient, cfg.Zk, controlServer.ChainConfig, &cfg.Miner),
 		zkStages.StageDataStreamCatchupCfg(datastreamServer, db, cfg.Genesis.Config.ChainID.Uint64(), cfg.DatastreamVersion, cfg.HasExecutors()),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
@@ -101,11 +102,11 @@ func NewSequencerZkStages(ctx context.Context,
 	datastreamServer *datastreamer.StreamServer,
 	sequencerStageSyncer *syncer.L1Syncer,
 	l1Syncer *syncer.L1Syncer,
-	l1InfoTreeSyncer *syncer.L1Syncer,
 	l1BlockSyncer *syncer.L1Syncer,
 	txPool *txpool.TxPool,
 	txPoolDb kv.RwDB,
 	verifier *legacy_executor_verifier.LegacyExecutorVerifier,
+	infoTreeUpdater *l1infotree.Updater,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockReader := freezeblocks.NewBlockReader(snapshots, nil)
@@ -117,7 +118,7 @@ func NewSequencerZkStages(ctx context.Context,
 	return zkStages.SequencerZkStages(ctx,
 		zkStages.StageL1SyncerCfg(db, l1Syncer, cfg.Zk),
 		zkStages.StageL1SequencerSyncCfg(db, cfg.Zk, sequencerStageSyncer),
-		zkStages.StageL1InfoTreeCfg(db, cfg.Zk, l1InfoTreeSyncer),
+		zkStages.StageL1InfoTreeCfg(db, cfg.Zk, infoTreeUpdater),
 		zkStages.StageSequencerL1BlockSyncCfg(db, cfg.Zk, l1BlockSyncer),
 		zkStages.StageDataStreamCatchupCfg(datastreamServer, db, cfg.Genesis.Config.ChainID.Uint64(), cfg.DatastreamVersion, cfg.HasExecutors()),
 		zkStages.StageSequenceBlocksCfg(
@@ -144,6 +145,7 @@ func NewSequencerZkStages(ctx context.Context,
 			txPoolDb,
 			verifier,
 			uint16(cfg.YieldSize),
+			infoTreeUpdater,
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg),
 		zkStages.StageZkInterHashesCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg, cfg.Zk),

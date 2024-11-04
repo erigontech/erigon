@@ -139,6 +139,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/etherman"
+	"github.com/ledgerwatch/erigon/zk/l1infotree"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -1097,6 +1098,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.L1HighestBlockType,
 		)
 
+		l1InfoTreeUpdater := l1infotree.NewUpdater(cfg.Zk, l1InfoTreeSyncer)
+
 		if isSequencer {
 			// if we are sequencing transactions, we do the sequencing loop...
 			witnessGenerator := witness.NewGenerator(
@@ -1167,11 +1170,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.dataStream,
 				backend.l1Syncer,
 				seqVerSyncer,
-				l1InfoTreeSyncer,
 				l1BlockSyncer,
 				backend.txPool2,
 				backend.txPool2DB,
 				verifier,
+				l1InfoTreeUpdater,
 			)
 
 			backend.syncUnwindOrder = zkStages.ZkSequencerUnwindOrder
@@ -1205,9 +1208,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.forkValidator,
 				backend.engine,
 				backend.l1Syncer,
-				l1InfoTreeSyncer,
 				streamClient,
 				backend.dataStream,
+				l1InfoTreeUpdater,
 			)
 
 			backend.syncUnwindOrder = zkStages.ZkUnwindOrder

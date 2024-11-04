@@ -186,6 +186,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		VirtualCountersSmtReduction:            ctx.Float64(utils.VirtualCountersSmtReduction.Name),
 		InitialBatchCfgFile:                    ctx.String(utils.InitialBatchCfgFile.Name),
 		ACLPrintHistory:                        ctx.Int(utils.ACLPrintHistory.Name),
+		InfoTreeUpdateInterval:                 ctx.Duration(utils.InfoTreeUpdateInterval.Name),
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)
