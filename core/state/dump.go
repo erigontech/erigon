@@ -165,6 +165,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		return nil, err
 	}
 	defer it.Close()
+	i := 0
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -177,6 +178,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if len(v) == 0 {
 			continue
 		}
+		i++
+		fmt.Printf("[dbg] iter: %d\n", i)
 
 		if e := accounts.DeserialiseV3(&acc, v); e != nil {
 			return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
