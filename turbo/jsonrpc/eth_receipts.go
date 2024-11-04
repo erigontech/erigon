@@ -154,6 +154,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 // [begin, end] - both inclusive
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out stream.U64, err error) {
+	fmt.Printf("[dbg] applyFiltersV3: %d, %d\n", begin, end)
+
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
 		fromTxNum, err = txNumsReader.Min(tx, begin)
