@@ -127,9 +127,6 @@ func TraceTx(
 	}
 
 	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
-	if err != nil {
-		return usedGas, err
-	}
 	return usedGas, err
 }
 

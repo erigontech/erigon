@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	dbg "runtime/debug"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -181,7 +182,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				return err
 			}
 
-			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
+			var _usedGas uint64
+			_usedGas, err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 				ctx,
 				chainConfig,
 				config,
@@ -194,6 +196,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				api.evmCallTimeout,
 				stateSyncEvents,
 			)
+			usedGas += _usedGas
 		} else {
 			var _usedGas uint64
 			_usedGas, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
@@ -219,14 +222,10 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 	}
 
-	{ //assert
-		var used uint64
-		var used2 uint64
-		for _, txn := range txns {
-			used += txn.GetGas()
-			used2 += txn.GetGas() + txn.GetBlobGas()
+	if dbg.AssertEnabled {
+		if block.GasUsed() != usedGas {
+			panic(fmt.Errorf("assert: block.GasUsed() %d != usedGas %d. blockNum=%d", block.GasUsed(), usedGas, blockNumber))
 		}
-		fmt.Printf("[dbg] header: %d, txs: %d, %d, exec: %d\n", block.GasUsed(), used, used2, usedGas)
 	}
 
 	stream.WriteArrayEnd()
@@ -335,7 +334,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			return err
 		}
 
-		return polygontracer.TraceBorStateSyncTxnDebugAPI(
+		_, err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 			ctx,
 			chainConfig,
 			config,
@@ -348,6 +347,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			api.evmCallTimeout,
 			stateSyncEvents,
 		)
+		return err
 	}
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, txnIndex)
