@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -1063,4 +1064,24 @@ func (g *Getter) FastNext(buf []byte) ([]byte, uint64) {
 	g.dataP = postLoopPos
 	g.dataBit = 0
 	return buf[:wordLen], postLoopPos
+}
+
+func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (offset uint64)) (foundOffset uint64) {
+	//n := item.src.decompressor.Count() / 2
+	foundItem := sort.Search(count, func(i int) bool {
+		offset := f(uint64(i))
+		g.Reset(offset)
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			fmt.Printf("bs: %x, %x\n", fromPrefix, key)
+			return bytes.Compare(fromPrefix, key) >= 0
+		}
+		return false
+	})
+	if foundItem < count {
+		fmt.Printf("[dbg] bs1 !ok, %x, %d\n", fromPrefix, f(uint64(foundItem)))
+		return f(uint64(foundItem))
+	}
+	fmt.Printf("[dbg] bs2 !ok, %x, %d\n", fromPrefix, 0)
+	return 0
 }
