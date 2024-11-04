@@ -148,7 +148,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	tx := dbTx.(kv.TemporalTx)
 
 	var err error
-	var begin, end uint64 // Filter range: begin-end(from-to). Two limits are included in the filter
+	var begin, end uint64 // Filter range: begin-end[from;to]. Two limits are included in the filter
 
 	if crit.BlockHash != nil {
 		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
@@ -159,7 +159,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, fmt.Errorf("block header not found %x", *crit.BlockHash)
 		}
 		begin = header.Number.Uint64()
-		end = header.Number.Uint64()
+		end = header.Number.Uint64() + 1
 	} else {
 		// Convert the RPC block numbers into internal representations
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
@@ -175,7 +175,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
 			}
 		}
-		end = latest
+		end = latest + 1
 		if crit.ToBlock != nil {
 			if crit.ToBlock.Sign() >= 0 {
 				end = crit.ToBlock.Uint64()
