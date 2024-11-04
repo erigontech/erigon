@@ -113,6 +113,16 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	stream.WriteArrayStart()
 
 	txns := block.Transactions()
+	{ //assert
+		var used uint64
+		var used2 uint64
+		for _, txn := range txns {
+			used += txn.GetGas()
+			used2 += txn.GetGas() + txn.GetBlobGas()
+		}
+		fmt.Printf("[dbg] header: %d, txs: %d, %d\n", block.GasUsed(), used, used2)
+	}
+
 	var borStateSyncTxn types.Transaction
 	if *config.BorTraceEnabled {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
