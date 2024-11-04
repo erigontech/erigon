@@ -1106,6 +1106,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 		err := customfs.CFS.RemoveAll(tmpName)
 		require.NoError(err)
 		err = os.RemoveAll(tmpName)
+		require.NoError(err)
 	})
 	logger := log.New()
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {

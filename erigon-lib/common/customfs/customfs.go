@@ -41,17 +41,17 @@ func underlyingErrorIs(err, target error) bool {
 	// underlyingError only unwraps the specific error-wrapping types
 	// that it historically did, not all errors implementing Unwrap().
 	err = underlyingError(err)
-	if err == target {
+	if err == target { //nolint
 		return true
 	}
 	// To preserve prior behavior, only examine syscall errors.
-	e, ok := err.(syscallErrorType)
+	e, ok := err.(syscallErrorType) //nolint
 	return ok && e.Is(target)
 }
 
 // underlyingError returns the underlying error for known os error types.
 func underlyingError(err error) error {
-	switch err := err.(type) {
+	switch err := err.(type) { //nolint
 	case *os.PathError:
 		return err.Err
 	case *os.LinkError:
@@ -82,11 +82,11 @@ func genericReadFrom(f *CustomFile, r io.Reader) (int64, error) {
 
 // noReadFrom can be embedded alongside another type to
 // hide the ReadFrom method of that other type.
-type noReadFrom struct{}
+type noReadFrom struct{} //nolint
 
 // ReadFrom hides another ReadFrom method.
 // It should never be called.
-func (noReadFrom) ReadFrom(io.Reader) (int64, error) {
+func (noReadFrom) ReadFrom(io.Reader) (int64, error) { //nolint
 	panic("can't happen")
 }
 
@@ -94,7 +94,7 @@ func (noReadFrom) ReadFrom(io.Reader) (int64, error) {
 // than ReadFrom. This is used to permit ReadFrom to call io.Copy
 // without leading to a recursive call to ReadFrom.
 type fileWithoutReadFrom struct {
-	noReadFrom
+	noReadFrom //nolint
 	*CustomFile
 }
 
@@ -254,7 +254,7 @@ func (fs *CustomFileSystem) ReadFile(name string) ([]byte, error) {
 		n, err := f.Read(data[len(data):cap(data)])
 		data = data[:len(data)+n]
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF { //nolint
 				err = nil
 			}
 			return data, err
