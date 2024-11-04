@@ -661,12 +661,8 @@ func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation 
 	m["*"] = &StateDiffStorage{From: libcommon.BytesToHash(original.Bytes()), To: libcommon.BytesToHash(value.Bytes())}
 	accountDiff.Storage[*key] = m
 	if address == libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413") {
-		if original == nil {
-			fmt.Printf("[dbg] WriteAccountStorage(%x): nil -> %x\n", *key, libcommon.BytesToHash(value.Bytes()))
-		} else {
-			fmt.Printf("[dbg] WriteAccountStorage(%x): %x -> %x\n", *key, libcommon.BytesToHash(original.Bytes()), libcommon.BytesToHash(value.Bytes()))
-		}
-		fmt.Printf("[dbg] map: %s\n", accountDiff.Storage[*key])
+		fmt.Printf("[dbg] WriteAccountStorage(%x): %x -> %x\n", *key, libcommon.BytesToHash(original.Bytes()), libcommon.BytesToHash(value.Bytes()))
+		fmt.Printf("[dbg] map: %d\n", len(accountDiff.Storage[*key]))
 	}
 	return nil
 }
@@ -1307,6 +1303,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, stateReader
 			sd = &StateDiff{sdMap: sdMap}
 		}
 
+		ibs.Reset()
 		var finalizeTxStateWriter state.StateWriter
 		if sd != nil {
 			finalizeTxStateWriter = sd
