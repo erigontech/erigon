@@ -666,7 +666,7 @@ func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation 
 		} else {
 			fmt.Printf("[dbg] WriteAccountStorage(%x): %x -> %x\n", *key, libcommon.BytesToHash(original.Bytes()), libcommon.BytesToHash(value.Bytes()))
 		}
-		fmt.Printf("[dbg] map: %x\n", accountDiff.Storage[*key])
+		fmt.Printf("[dbg] map: %s\n", accountDiff.Storage[*key])
 	}
 	return nil
 }
