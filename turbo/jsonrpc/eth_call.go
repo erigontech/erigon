@@ -614,70 +614,24 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
 	}
 
-	// // example storage key where sharedDomains doesn't find this key, whereas StateReader finds it
-	// plainStorageKeyStr := "000f3df6d732807ef1319fb7b8bb8522d0beac0200000000000000000000000000000000000000000000000000000000000009f7"
-	// addressStr := "000f3df6d732807ef1319fb7b8bb8522d0beac02"
-	// address, err := hex.DecodeString(addressStr)
-	// storageKey := [32]byte{}
-	// storageKey[30] = 0x9
-	// storageKey[31] = 0xf7 // storageKey = 0x0000....09f7
-	// keyHash := libcommon.Hash(storageKey)
-
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// plainStorageKey, err := hex.DecodeString(plainStorageKeyStr)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// storageInCommitment, err := hph.Ctx.Storage(plainStorageKey)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// _ = storageInCommitment
-	// _ = address
-	// storageVal, err := store.Tds.StateReader.ReadAccountStorage(libcommon.Address(address), 1, &keyHash)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// _ = storageVal
-
-	// // Debugging
-	// accountOfInterest := "e0a65106f4bfd859a2ccc7f254ed0c1cc127c760"
-	// accountOfInterestBytes := libcommon.FromHex(accountOfInterest)
-	// // accountOfInterestAddress := libcommon.Address(accountOfInterestBytes)
-	// accountUpdate, err := hph.Ctx.Account(accountOfInterestBytes)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// fmt.Printf("accountUpdate for plainKey=%x in commitment = %v\n", accountOfInterestBytes, accountUpdate)
-
 	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	// accountUpdate2, err := hph.Ctx.Account(accountOfInterestBytes)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// fmt.Printf("accountUpdate2 for plainKey=%x in commitment = %v\n", accountOfInterestBytes, accountUpdate2)
-
 	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
 	codeReads := store.Tds.BuildCodeTouches()
 
 	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
-	for _, key := range touchedPlainKeys {
-		updates.TouchPlainKey(key, nil, updates.TouchAccount)
-	}
-
-	// accountUpdate3, err := hph.Ctx.Account(accountOfInterestBytes)
-	// if err != nil {
-	// 	return nil, err
+	// for _, key := range touchedPlainKeys {
+	// 	updates.TouchPlainKey(key, nil, updates.TouchAccount)
 	// }
-	// fmt.Printf("accountUpdate2 for plainKey=%x in commitment = %v\n", accountOfInterestBytes, accountUpdate3)
-	// fmt.Printf("BLOCK ROOT = %x\n", prevHeader.Root[:])
-	hph.SetTrace(true) // enable tracing
+
+	_ = touchedPlainKeys
+	extraPlainKey := libcommon.FromHex("00a3ca265ebcb825b45f985a16cefb49958ce017")
+	updates.TouchPlainKey(extraPlainKey, nil, updates.TouchAccount)
+
+	hph.SetTrace(false) // disable tracing
 	witnessTrie, rootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
 	if err != nil {
 		return nil, err
