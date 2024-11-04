@@ -499,7 +499,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		return err
 	}
 
-	st := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	header := block.Header()
 
@@ -521,7 +521,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
 	// Get a new instance of the EVM
-	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
+	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: false})
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	rules := chainConfig.Rules(blockNum, blockCtx.Time)
 
@@ -529,7 +529,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		st.SetTxContext(idx)
+		ibs.SetTxContext(idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			stream.WriteNil()
@@ -543,13 +543,13 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			stream.WriteNil()
 			return err
 		}
-		_ = st.FinalizeTx(rules, state.NewNoopWriter())
+		_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
 
 	}
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		err = config.StateOverrides.Override(evm.IntraBlockState().(*state.IntraBlockState))
+		err = config.StateOverrides.Override(ibs)
 		if err != nil {
 			stream.WriteNil()
 			return err
@@ -561,6 +561,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		stream.WriteArrayStart()
 		// first change blockContext
 		blockHeaderOverride(&blockCtx, bundle.BlockOverride, overrideBlockHash)
+		ibs.Reset()
 		for txnIndex, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
@@ -572,7 +573,6 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 				return err
 			}
 			txCtx = core.NewEVMTxContext(msg)
-			ibs := evm.IntraBlockState().(*state.IntraBlockState)
 			ibs.SetTxContext(txnIndex)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
