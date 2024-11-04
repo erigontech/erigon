@@ -26,6 +26,7 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -1364,13 +1365,22 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		idx := ht.iit.statelessIdxReader(i)
 		var offset uint64
 		if len(from) > 0 {
-			var ok bool
-			offset, ok = idx.Lookup(from)
-			if !ok {
-				// TODO: seek(from) - to support prefix - by binary-search
-				fmt.Printf("[dbg] ht.iit.files1 !ok, %x, %d\n", from, offset)
+			n := item.src.decompressor.Count() / 2
+			found := sort.Search(n, func(i int) bool {
+				offset = idx.OrdinalLookup(uint64(i))
+				g.Reset(offset)
+				if g.HasNext() {
+					key, _ := g.Next(nil)
+					fmt.Printf("bs: %x, %x\n", from, key)
+					return bytes.Compare(from, key) < 0
+				}
+				return false
+			})
+			if found < n {
+				fmt.Printf("[dbg] bs1 !ok, %x, %d\n", from, offset)
 			} else {
-				fmt.Printf("[dbg] ht.iit.files2 ok, %x, %d\n", from, offset)
+				fmt.Printf("[dbg] bs2 !ok, %x, %d\n", from, offset)
+				offset = 0
 			}
 		}
 		g.Reset(offset)
