@@ -20,8 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/RoaringBitmap/roaring"
+	"math"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -113,7 +112,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	if end < begin {
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
-	if end > roaring.MaxUint32 {
+	if end > math.MaxUint32 {
 		return nil, fmt.Errorf("end (%d) > MaxUint32", end)
 	}
 
