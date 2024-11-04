@@ -1360,7 +1360,16 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		}
 		// TODO: seek(from)
 		g := seg.NewReader(item.src.decompressor.MakeGetter(), ht.h.compression)
-		g.Reset(0)
+
+		var offset uint64
+		if len(from) > 0 {
+			var ok bool
+			offset, ok = item.reader.Lookup(from)
+			if !ok {
+				fmt.Printf("[dbg] ht.iit.files1 !ok, %x\n", from)
+			}
+		}
+		g.Reset(offset)
 		if g.HasNext() {
 			key, offset := g.Next(nil)
 			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
