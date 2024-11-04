@@ -1963,7 +1963,7 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	//if err != nil {
 	//	return nil, err
 	//}
-	fmt.Printf("[dbg] DomainRange 1: %s\n", dt.d.name)
+	fmt.Printf("[dbg] DomainRange 1: %s, %x, %x\n", dt.d.name, fromKey, toKey)
 	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, tx, limit)
 	if err != nil {
 		return nil, err
