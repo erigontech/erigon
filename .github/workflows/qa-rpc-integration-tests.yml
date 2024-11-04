@@ -86,7 +86,7 @@ jobs:
           
           # Run RPC integration test runner via http
           python3 ./run_tests.py -p 8545 --continue -f --json-diff -x \
-          debug_accountAt,debug_accountRange,debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,debug_storageRangeAt,debug_traceBlockByHash,\
+          debug_accountRange,debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,debug_storageRangeAt,debug_traceBlockByHash,\
           debug_traceCallMany/test_02.tar,debug_traceCallMany/test_04.tar,debug_traceCallMany/test_05.tar,debug_traceCallMany/test_06.tar,debug_traceCallMany/test_07.tar,debug_traceCallMany/test_09.json,debug_traceCallMany/test_10.tar,\
           debug_traceBlockByNumber/test_05.tar,debug_traceBlockByNumber/test_08.tar,debug_traceBlockByNumber/test_09.tar,debug_traceBlockByNumber/test_10.tar,debug_traceBlockByNumber/test_11.tar,debug_traceBlockByNumber/test_12.tar,\
           debug_traceTransaction,\
@@ -118,15 +118,7 @@ jobs:
           erigon_getLatestLogs/test_11.json,\
           erigon_getLatestLogs/test_12.json,\
           erigon_getBalanceChangesInBlock,\
-          eth_callBundle/test_09.json,\
-          eth_callBundle/test_12.json,\
-          eth_createAccessList/test_06.json,\
-          eth_createAccessList/test_07.json,\
-          eth_createAccessList/test_15.json,\
           eth_createAccessList/test_16.json,\
-          eth_getBlockTransactionCountByHash/test_02.json,\
-          eth_getBlockTransactionCountByNumber/test_08.json,\
-          eth_getUncleCountByBlockHash/test_03.json,\
           parity_getBlockReceipts/test_01.json,\
           parity_getBlockReceipts/test_02.json,\
           parity_getBlockReceipts/test_03.json,\
