@@ -69,7 +69,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
 func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
-	var begin, end uint64
+	var begin, end uint64 // Filter range: begin-end[from;to]. Two limits are included in the filter
 	erigonLogs := types.ErigonLogs{}
 
 	tx, beginErr := api.db.BeginRo(ctx)
@@ -84,7 +84,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			return nil, err
 		}
 		begin = header.Number.Uint64()
-		end = header.Number.Uint64()
+		end = header.Number.Uint64() + 1
 
 	} else {
 		// Convert the RPC block numbers into internal representations
@@ -101,7 +101,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
 			}
 		}
-		end = latest
+		end = latest + 1
 		if crit.ToBlock != nil {
 			if crit.ToBlock.Sign() >= 0 {
 				end = crit.ToBlock.Uint64()
