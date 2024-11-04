@@ -312,7 +312,7 @@ func Provider[T any](c *component) T {
 type component struct {
 	sync.RWMutex
 	componentDomain *componentDomain
-	options         []Option
+	options         []app.Option
 	context         context.Context
 	id              app.Id
 	name            string
@@ -322,36 +322,8 @@ type component struct {
 	provider        interface{}
 }
 
-type Option struct {
-	target     reflect.Type
-	applicator func(t interface{})
-}
-
-func (o Option) Apply(t interface{}) {
-	o.applicator(t)
-}
-
-func (o Option) Target() reflect.Type {
-	return o.target
-}
-
-func WithOption[T any](applicator func(t *T)) Option {
-	var t T
-	return Option{
-		target:     reflect.TypeOf(t),
-		applicator: func(t interface{}) { applicator(t.(*T)) },
-	}
-}
-
-func WithId(id app.Id) Option {
-	return WithOption[component](
-		func(c *component) {
-			c.id = id
-		})
-}
-
-func WithName(name string) Option {
-	return WithOption[component](
+func WithName(name string) app.Option {
+	return app.WithOption[component](
 		func(c *component) {
 			c.name = name
 		})
@@ -367,8 +339,8 @@ func (f ProviderFactoryFunc[P]) New() *P {
 	return f()
 }
 
-func WithProvider[P any](p *P) Option {
-	return WithOption[component](
+func WithProvider[P any](p *P) app.Option {
+	return app.WithOption[component](
 		func(c *component) {
 			c.provider = p
 		})
@@ -377,50 +349,45 @@ func WithProvider[P any](p *P) Option {
 type componentOptions struct {
 	dependencies relations
 	dependents   relations
+	id           string
 }
 
-func WithDependencies(dependencies ...relation) Option {
-	return WithOption[componentOptions](
+func WithId(id string) app.Option {
+	return app.WithOption[componentOptions](
+		func(c *componentOptions) {
+			c.id = id
+		})
+}
+
+func WithDependencies(dependencies ...relation) app.Option {
+	return app.WithOption[componentOptions](
 		func(c *componentOptions) {
 			c.dependencies = append(c.dependencies, dependencies...)
 		})
 }
 
-func WithDependent(dependent relation) Option {
-	return WithOption[componentOptions](
+func WithDependent(dependent relation) app.Option {
+	return app.WithOption[componentOptions](
 		func(c *componentOptions) {
 			c.dependents = append(c.dependents, dependent)
 		})
 }
 
-func WithDomain(dependent ComponentDomain) Option {
-	return WithOption[componentOptions](
+func WithDomain(dependent ComponentDomain) app.Option {
+	return app.WithOption[componentOptions](
 		func(c *componentOptions) {
 			c.dependents = append(c.dependents, dependent.(*componentDomain).component)
 		})
 }
 
-func WithProviderFactory[P any](p ProviderFactory[P]) Option {
-	return WithOption[component](
+func WithProviderFactory[P any](p ProviderFactory[P]) app.Option {
+	return app.WithOption[component](
 		func(c *component) {
 			c.provider = p.New()
 		})
 }
 
-func ApplyOptions[T any](t *T, options []Option) (remaining []Option) {
-	for _, opt := range options {
-		if opt.Target() == reflect.TypeOf(t).Elem() {
-			opt.Apply(t)
-			continue
-		}
-
-		remaining = append(remaining, opt)
-	}
-
-	return remaining
-}
-
-func NewComponent[P any](context context.Context, options ...Option) (Component[P], error) {
+func NewComponent[P any](context context.Context, options ...app.Option) (Component[P], error) {
 	c := &component{
 		RWMutex: sync.RWMutex{},
 		context: context,
@@ -428,8 +395,8 @@ func NewComponent[P any](context context.Context, options ...Option) (Component[
 	}
 
 	var opts componentOptions
-	options = ApplyOptions(&opts, options)
-	c.options = ApplyOptions(c, options)
+	options = app.ApplyOptions(&opts, options)
+	c.options = app.ApplyOptions(c, options)
 
 	if c.provider == nil {
 		var p P
@@ -453,7 +420,12 @@ func NewComponent[P any](context context.Context, options ...Option) (Component[
 	}
 
 	if c.componentDomain == nil {
-		if c.provider != rootComponentDomain {
+		if c.provider == rootComponentDomain {
+			if len(opts.id) == 0 {
+				opts.id = "root"
+			}
+			c.id, _ = rootComponentDomain.NewId(context, opts.id)
+		} else {
 			if err := c.setDomain(rootComponentDomain, false); err != nil {
 				return nil, err
 			}
@@ -461,15 +433,22 @@ func NewComponent[P any](context context.Context, options ...Option) (Component[
 	}
 
 	if c.id == nil {
-		c.id, _ = c.componentDomain.NewId(context, strings.ToLower(filepath.Ext(reflect.TypeOf(c.provider).String())[1:]))
+		if len(opts.id) == 0 {
+			opts.id = strings.ToLower(filepath.Ext(reflect.TypeOf(c.provider).String())[1:])
+		}
+		c.id, _ = c.componentDomain.NewId(context, opts.id)
 	}
 
 	if err := c.registerSubscriptions(); err != nil {
 		return nil, err
 	}
 
-	for _, dependency := range opts.dependencies {
-		c.AddDependency(dependency)
+	// don't do this for component domains - they will not
+	// be fully initialized yet - they handle this themselves
+	if _, ok := c.provider.(*componentDomain); !ok {
+		for _, dependency := range opts.dependencies {
+			c.AddDependency(dependency)
+		}
 	}
 
 	return typedComponent[P]{c}, nil
@@ -480,7 +459,7 @@ func (component *component) String() string {
 		return provider.String()
 	}
 
-	return fmt.Sprintf("%T [id=%s, name=%s, parents=%s, state=%s]",
+	return fmt.Sprintf("%T [id=%s, name=%s, dependents=%s, state=%s]",
 		component.provider,
 		component.Id(),
 		component.Name(),
@@ -582,7 +561,7 @@ func asComponent(r relation) *component {
 }
 
 func (c *component) AddDependency(dependency relation) relation {
-	c.addDependency(asComponent(dependency), false)
+	asComponent(dependency).addDependent(c, false)
 	return c
 }
 
@@ -956,20 +935,29 @@ func (component *component) onDependenciesActive(activationContext context.Conte
 	return nil
 }
 
-func (component *component) onDependenciesDeactivated(deactivationContext context.Context) error {
+func (component *component) onDependenciesDeactivated(_ context.Context) error {
 	component.setState(Deactivated)
 	return nil
 }
 
-func (c *component) addDependency(dependent *component, locked bool) *component {
+func (c *component) addDependency(dependency *component, locked bool) (*component, error) {
 
 	if !locked {
 		c.Lock()
 		defer c.Unlock()
 	}
 
-	if dependent != nil && dependent.provider != nil {
-		c.dependencies = c.dependencies.Add(dependent)
+	if dependency != nil && dependency.provider != nil {
+		c.dependencies = c.dependencies.Add(dependency)
+
+		if domain, ok := c.provider.(*componentDomain); ok {
+			if dependency.Domain() != domain {
+				if err := dependency.setDomain(domain, true); err != nil {
+					return nil, err
+				}
+			}
+		}
+
 		/*if component.dependents.Contains(dependent.component()) {
 			fmt.Printf("%v ADD DEP dep: %p\n", component.Name(), dependent.component())
 			for _, dep := range component.dependents {
@@ -984,7 +972,7 @@ func (c *component) addDependency(dependent *component, locked bool) *component 
 		}*/
 	}
 
-	return c
+	return c, nil
 }
 
 func (component *component) removeDependency(dependent *component, locked bool) {

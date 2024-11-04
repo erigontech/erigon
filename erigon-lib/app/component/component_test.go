@@ -19,6 +19,25 @@ func TestCreateComponent(t *testing.T) {
 
 	var p *provider = c.Provider()
 	require.NotNil(t, p)
+
+	c1, err := component.NewComponent[provider](context.Background(),
+		component.WithId("my-id"))
+	require.Nil(t, err)
+	require.NotNil(t, c1)
+	require.Equal(t, "root:my-id", c1.Id().String())
+
+	c2, err := component.NewComponent[provider](context.Background(),
+		component.WithId("my-id-2"),
+		component.WithDependencies(c, c1))
+	require.Nil(t, err)
+	require.NotNil(t, c2)
+	require.Equal(t, "root:my-id-2", c2.Id().String())
+	require.Equal(t, "root:my-id", c1.Id().String())
+	require.Equal(t, "root:provider", c.Id().String())
+	require.True(t, c.HasDependent(c2))
+	require.True(t, c1.HasDependent(c2))
+	require.False(t, c.HasDependent(c1))
+	require.False(t, c1.HasDependent(c))
 }
 
 func TestCreateDomain(t *testing.T) {
@@ -64,4 +83,12 @@ func TestCreateComponentInDomain(t *testing.T) {
 	require.NotNil(t, d1)
 	require.Equal(t, "root:domain-1", d1.Id().String())
 	require.Equal(t, "domain-1:provider", c1.Id().String())
+
+	d2, err := component.NewComponentDomain(context.Background(), "domain-2",
+		component.WithDependencies(c, c1))
+	require.Nil(t, err)
+	require.NotNil(t, d2)
+	require.Equal(t, "root:domain-2", d2.Id().String())
+	require.Equal(t, "domain-2:provider", c.Id().String())
+	require.Equal(t, "domain-2:provider", c1.Id().String())
 }

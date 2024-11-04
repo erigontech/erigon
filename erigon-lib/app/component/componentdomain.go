@@ -36,10 +36,8 @@ func init() {
 	rootComponentDomain.serviceBus = event.NewServiceBus(rootComponentDomain)
 	rootComponentDomain.Domain, _ = app.NewNamedDomain[string]("root",
 		app.WithIdGenerator(app.PassThroughGenerator[string]()))
-	rootId, _ := rootComponentDomain.NewId(context.Background(), "root")
 	component, _ := NewComponent[ComponentDomain](context.Background(),
-		WithProvider(rootComponentDomain),
-		WithId(rootId))
+		WithProvider(rootComponentDomain))
 
 	rootComponentDomain.component = asComponent(component)
 }
@@ -68,15 +66,15 @@ type domainOptions struct {
 	execPoolSize *int
 }
 
-func WithDependentDomain(dependent ComponentDomain) Option {
-	return WithOption[domainOptions](
+func WithDependentDomain(dependent ComponentDomain) app.Option {
+	return app.WithOption[domainOptions](
 		func(o *domainOptions) {
 			o.dependent = dependent.(*componentDomain)
 		})
 }
 
-func WithExecPoolSize(execPoolSize int) Option {
-	return WithOption[domainOptions](
+func WithExecPoolSize(execPoolSize int) app.Option {
+	return app.WithOption[domainOptions](
 		func(o *domainOptions) {
 			o.execPoolSize = &execPoolSize
 		})
@@ -92,11 +90,11 @@ func WithExecPoolSize(execPoolSize int) Option {
 // it will use its parents workerpool, or if none is passed a process wide root pool.  In general it should only be
 // necessary to create additional workerpools for situations where a lot of non-executable tasks are likely to be
 // created - so that pool exhaustion does not lead to less than optimal cross process parrallelisation
-func NewComponentDomain(context context.Context, id string, options ...Option) (ComponentDomain, error) {
+func NewComponentDomain(context context.Context, id string, options ...app.Option) (ComponentDomain, error) {
 	var cd *componentDomain
 	var opts domainOptions
 
-	options = ApplyOptions(&opts, options)
+	options = app.ApplyOptions(&opts, options)
 
 	if opts.dependent != nil {
 		var execPool *workerpool.WorkerPool
@@ -149,18 +147,26 @@ func NewComponentDomain(context context.Context, id string, options ...Option) (
 		app.WithIdGenerator(app.PassThroughGenerator[string]()))
 	cd.serviceBus = event.NewServiceBus(cd)
 
-	componentId, _ := cd.NewId(context, id)
 	component, err := NewComponent[ComponentDomain](context,
 		append(options,
 			WithDependent(opts.dependent.component),
 			WithProvider(cd),
-			WithId(componentId))...)
+			WithId(id))...)
 
 	if err != nil {
 		return nil, err
 	}
 
 	cd.component = asComponent(component)
+
+	// this needs to happen after cd.component has been set
+	var copts componentOptions
+	app.ApplyOptions(&copts, options)
+
+	for _, dependency := range copts.dependencies {
+		cd.AddDependency(dependency)
+	}
+
 	return cd, nil
 }
 

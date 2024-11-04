@@ -74,13 +74,10 @@ func NewVersion(major interface{}, minor ...uint64) Version {
 func NewPreReleaseVersion(major, minor, patch uint64, preReleaseInfo, buildInfo []string) Version {
 
 	preReleaseValues := []PreReleaseValue{}
-
-	if preReleaseInfo != nil {
-		for _, prvalstr := range preReleaseInfo {
-			prval, err := newPreReleaseValue(prvalstr)
-			if err != nil {
-				preReleaseValues = append(preReleaseValues, prval)
-			}
+	for _, prvalstr := range preReleaseInfo {
+		prval, err := newPreReleaseValue(prvalstr)
+		if err != nil {
+			preReleaseValues = append(preReleaseValues, prval)
 		}
 	}
 
@@ -217,20 +214,20 @@ func (v *SemanticVersion) Validate() error {
 	for _, pre := range v.PreReleaseInfo {
 		if !pre.isNumeric { //Numeric prerelease versioning already uint64
 			if len(pre.strValue) == 0 {
-				return fmt.Errorf("Prerelease can not be empty %q", pre.strValue)
+				return fmt.Errorf("prerelease can not be empty %q", pre.strValue)
 			}
 			if !containsOnly(pre.strValue, alphanum) {
-				return fmt.Errorf("Invalid character(s) found in prerelease %q", pre.strValue)
+				return fmt.Errorf("invalid character(s) found in prerelease %q", pre.strValue)
 			}
 		}
 	}
 
 	for _, build := range v.BuildInfo {
 		if len(build) == 0 {
-			return fmt.Errorf("Build meta data can not be empty %q", build)
+			return fmt.Errorf("build meta data can not be empty %q", build)
 		}
 		if !containsOnly(build, alphanum) {
-			return fmt.Errorf("Invalid character(s) found in build meta data %q", build)
+			return fmt.Errorf("invalid character(s) found in build meta data %q", build)
 		}
 	}
 
@@ -249,7 +246,7 @@ func ParseVersionTolerant(s string) (Version, error) {
 	parts := strings.SplitN(s, ".", 3)
 	if len(parts) < 3 {
 		if strings.ContainsAny(parts[len(parts)-1], "+-") {
-			return nil, errors.New("Short version cannot contain PreRelease/Build meta data")
+			return nil, errors.New("short version cannot contain PreRelease/Build meta data")
 		}
 		for len(parts) < 3 {
 			parts = append(parts, "0")
@@ -263,7 +260,7 @@ func ParseVersionTolerant(s string) (Version, error) {
 // Parse parses version string and returns a validated Version or error
 func ParseVersion(s string) (Version, error) {
 	if len(s) == 0 {
-		return nil, errors.New("Version string empty")
+		return nil, errors.New("version string empty")
 	}
 
 	if containsOnly(s, numbers) {
@@ -283,10 +280,10 @@ func ParseVersion(s string) (Version, error) {
 
 	// Major
 	if !containsOnly(parts[0], numbers) {
-		return nil, fmt.Errorf("Invalid character(s) found in major number %q", parts[0])
+		return nil, fmt.Errorf("invalid character(s) found in major number %q", parts[0])
 	}
 	if hasLeadingZeroes(parts[0]) {
-		return nil, fmt.Errorf("Major number must not contain leading zeroes %q", parts[0])
+		return nil, fmt.Errorf("major number must not contain leading zeroes %q", parts[0])
 	}
 	major, err := strconv.ParseUint(parts[0], 10, 64)
 	if err != nil {
@@ -295,10 +292,10 @@ func ParseVersion(s string) (Version, error) {
 
 	// Minor
 	if !containsOnly(parts[1], numbers) {
-		return nil, fmt.Errorf("Invalid character(s) found in minor number %q", parts[1])
+		return nil, fmt.Errorf("invalid character(s) found in minor number %q", parts[1])
 	}
 	if hasLeadingZeroes(parts[1]) {
-		return nil, fmt.Errorf("Minor number must not contain leading zeroes %q", parts[1])
+		return nil, fmt.Errorf("minor number must not contain leading zeroes %q", parts[1])
 	}
 	minor, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
@@ -323,10 +320,10 @@ func ParseVersion(s string) (Version, error) {
 	}
 
 	if !containsOnly(patchStr, numbers) {
-		return nil, fmt.Errorf("Invalid character(s) found in patch number %q", patchStr)
+		return nil, fmt.Errorf("invalid character(s) found in patch number %q", patchStr)
 	}
 	if hasLeadingZeroes(patchStr) {
-		return nil, fmt.Errorf("Patch number must not contain leading zeroes %q", patchStr)
+		return nil, fmt.Errorf("patch number must not contain leading zeroes %q", patchStr)
 	}
 	patch, err := strconv.ParseUint(patchStr, 10, 64)
 	if err != nil {
@@ -347,10 +344,10 @@ func ParseVersion(s string) (Version, error) {
 	// Build meta data
 	for _, str := range build {
 		if len(str) == 0 {
-			return nil, errors.New("Build meta data is empty")
+			return nil, errors.New("build meta data is empty")
 		}
 		if !containsOnly(str, alphanum) {
-			return nil, fmt.Errorf("Invalid character(s) found in build meta data %q", str)
+			return nil, fmt.Errorf("invalid character(s) found in build meta data %q", str)
 		}
 		v.BuildInfo = append(v.BuildInfo, str)
 	}
@@ -376,12 +373,12 @@ type PreReleaseValue struct {
 
 func newPreReleaseValue(s string) (PreReleaseValue, error) {
 	if len(s) == 0 {
-		return PreReleaseValue{}, errors.New("Prerelease is empty")
+		return PreReleaseValue{}, errors.New("prerelease is empty")
 	}
 	v := PreReleaseValue{}
 	if containsOnly(s, numbers) {
 		if hasLeadingZeroes(s) {
-			return PreReleaseValue{}, fmt.Errorf("Numeric PreRelease version must not contain leading zeroes %q", s)
+			return PreReleaseValue{}, fmt.Errorf("numeric PreRelease version must not contain leading zeroes %q", s)
 		}
 		num, err := strconv.ParseUint(s, 10, 64)
 
@@ -395,7 +392,7 @@ func newPreReleaseValue(s string) (PreReleaseValue, error) {
 		v.strValue = s
 		v.isNumeric = false
 	} else {
-		return PreReleaseValue{}, fmt.Errorf("Invalid character(s) found in prerelease %q", s)
+		return PreReleaseValue{}, fmt.Errorf("invalid character(s) found in prerelease %q", s)
 	}
 	return v, nil
 }
@@ -445,10 +442,10 @@ func (v PreReleaseValue) String() string {
 func newBuildValue(s string) (string, error) {
 
 	if len(s) == 0 {
-		return "", errors.New("Buildversion is empty")
+		return "", errors.New("build version is empty")
 	}
 	if !containsOnly(s, alphanum) {
-		return "", fmt.Errorf("Invalid character(s) found in build meta data %q", s)
+		return "", fmt.Errorf("invalid character(s) found in build meta data %q", s)
 	}
 	return s, nil
 }

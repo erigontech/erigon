@@ -150,7 +150,7 @@ func (id DomainId) asBytes() []byte {
 	return Handle[ident](id).Value().asBytes()
 }
 
-func toId(rootId Handle[ident], incarnation Incarnation, features ...domainFeature) (DomainId, error) {
+func toId(rootId Handle[ident], incarnation Incarnation, _ ...domainFeature) (DomainId, error) {
 	// TODO this needs rlp encoding
 	if incarnation != nil {
 		return DomainId(Make(ident(strings.Join([]string{string(rootId.Value()), string(incarnation.asIdent())}, "-")))), nil
@@ -378,7 +378,7 @@ func NewTypedDomain[I comparable, T any](features ...domainFeature) (TypedDomain
 	return newTypedDomain[I, T](features...)
 }
 
-func newTypedDomain[I comparable, T any](features ...domainFeature) (TypedDomain, error) {
+func newTypedDomain[I comparable, T any](_ ...domainFeature) (TypedDomain, error) {
 
 	localDomain, _ := NewDomain[I]()
 

@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	"github.com/erigontech/erigon-lib/app"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -78,7 +79,7 @@ func (c *MockComponentProviderActivateCall) DoAndReturn(f func(context.Context) 
 }
 
 // Configure mocks base method.
-func (m *MockComponentProvider) Configure(ctx context.Context, options ...Option) error {
+func (m *MockComponentProvider) Configure(ctx context.Context, options ...app.Option) error {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx}
 	for _, a := range options {
@@ -109,13 +110,13 @@ func (c *MockComponentProviderConfigureCall) Return(arg0 error) *MockComponentPr
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockComponentProviderConfigureCall) Do(f func(context.Context, ...Option) error) *MockComponentProviderConfigureCall {
+func (c *MockComponentProviderConfigureCall) Do(f func(context.Context, ...app.Option) error) *MockComponentProviderConfigureCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockComponentProviderConfigureCall) DoAndReturn(f func(context.Context, ...Option) error) *MockComponentProviderConfigureCall {
+func (c *MockComponentProviderConfigureCall) DoAndReturn(f func(context.Context, ...app.Option) error) *MockComponentProviderConfigureCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -159,7 +160,7 @@ func (c *MockComponentProviderDeactivateCall) DoAndReturn(f func(context.Context
 }
 
 // Initialize mocks base method.
-func (m *MockComponentProvider) Initialize(ctx context.Context, options ...Option) error {
+func (m *MockComponentProvider) Initialize(ctx context.Context, options ...app.Option) error {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx}
 	for _, a := range options {
@@ -190,13 +191,13 @@ func (c *MockComponentProviderInitializeCall) Return(arg0 error) *MockComponentP
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockComponentProviderInitializeCall) Do(f func(context.Context, ...Option) error) *MockComponentProviderInitializeCall {
+func (c *MockComponentProviderInitializeCall) Do(f func(context.Context, ...app.Option) error) *MockComponentProviderInitializeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockComponentProviderInitializeCall) DoAndReturn(f func(context.Context, ...Option) error) *MockComponentProviderInitializeCall {
+func (c *MockComponentProviderInitializeCall) DoAndReturn(f func(context.Context, ...app.Option) error) *MockComponentProviderInitializeCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -263,7 +264,7 @@ func (m *MockConfigurable) EXPECT() *MockConfigurableMockRecorder {
 }
 
 // Configure mocks base method.
-func (m *MockConfigurable) Configure(ctx context.Context, options ...Option) error {
+func (m *MockConfigurable) Configure(ctx context.Context, options ...app.Option) error {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx}
 	for _, a := range options {
@@ -294,13 +295,13 @@ func (c *MockConfigurableConfigureCall) Return(arg0 error) *MockConfigurableConf
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockConfigurableConfigureCall) Do(f func(context.Context, ...Option) error) *MockConfigurableConfigureCall {
+func (c *MockConfigurableConfigureCall) Do(f func(context.Context, ...app.Option) error) *MockConfigurableConfigureCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockConfigurableConfigureCall) DoAndReturn(f func(context.Context, ...Option) error) *MockConfigurableConfigureCall {
+func (c *MockConfigurableConfigureCall) DoAndReturn(f func(context.Context, ...app.Option) error) *MockConfigurableConfigureCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -329,7 +330,7 @@ func (m *MockInitializable) EXPECT() *MockInitializableMockRecorder {
 }
 
 // Initialize mocks base method.
-func (m *MockInitializable) Initialize(ctx context.Context, options ...Option) error {
+func (m *MockInitializable) Initialize(ctx context.Context, options ...app.Option) error {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx}
 	for _, a := range options {
@@ -360,13 +361,13 @@ func (c *MockInitializableInitializeCall) Return(arg0 error) *MockInitializableI
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockInitializableInitializeCall) Do(f func(context.Context, ...Option) error) *MockInitializableInitializeCall {
+func (c *MockInitializableInitializeCall) Do(f func(context.Context, ...app.Option) error) *MockInitializableInitializeCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockInitializableInitializeCall) DoAndReturn(f func(context.Context, ...Option) error) *MockInitializableInitializeCall {
+func (c *MockInitializableInitializeCall) DoAndReturn(f func(context.Context, ...app.Option) error) *MockInitializableInitializeCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

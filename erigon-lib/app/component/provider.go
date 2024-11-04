@@ -1,6 +1,10 @@
 package component
 
-import "context"
+import (
+	"context"
+
+	"github.com/erigontech/erigon-lib/app"
+)
 
 // ComponentProvider is a type which provides functionality for a composable
 // component.  In practice a type that provides functionality for a component
@@ -14,17 +18,18 @@ import "context"
 //
 // For a fully implemented provider its methods will get called in the
 // following order:
-//  * Configure
-//  * Initialize
-//  * Recover
-//  * Activate
-//  * Deactivate
+//   - Configure
+//   - Initialize
+//   - Recover
+//   - Activate
+//   - Deactivate
 //
 // If any of these methods return a non-nil error then the component will
 // enter a failed state.
 //
 // Configure may be called multiple times - if a provider does not support
 // reconfiguration this should be ignored after its first call.
+//
 //go:generate mockgen -typed=true -source=./provider.go -destination=./provider_mock.go -package=component . ComponentProvider
 type ComponentProvider interface {
 	Configurable
@@ -43,7 +48,7 @@ type ComponentProvider interface {
 // component is initialized - it is passed any options which
 // have been set on the component whose target is the provider
 type Configurable interface {
-	Configure(ctx context.Context, options ...Option) error
+	Configure(ctx context.Context, options ...app.Option) error
 }
 
 // Initializable is a provider which needs to be initialized
@@ -62,7 +67,7 @@ type Configurable interface {
 // If a provider can only be configured at start-up it is enough
 // to implement Initialize.
 type Initializable interface {
-	Initialize(ctx context.Context, options ...Option) error
+	Initialize(ctx context.Context, options ...app.Option) error
 }
 
 // Recoverable is a provider which needs perform recovery
