@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,15 @@ func policyTransactionSliceEqual(a, b []PolicyTransaction) bool {
 	}
 
 	return true
+}
+
+func containsSubstring(slice []string, substring string) bool {
+	for _, str := range slice {
+		if strings.Contains(str, substring) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCheckDBsCreation(t *testing.T) {
@@ -239,20 +249,33 @@ func TestPolicyMapping(t *testing.T) {
 	var policiesNone []byte
 	var pListNone []Policy
 
+	// Expected outcomes - these are stored in []string, because reading policies doesn't guarantee order, and the returned values may be in arbitrary order.
+	// Therefore a []string is used to check if the returned values are within the expected combinations stored within the string slice.
+	var expectedAll []string
+	var expectedSendTx []string
+	var expectedDeploy []string
+	var expectedNone []string
+
+	expectedAll = append(expectedAll, "\tsendTx: true\n\tdeploy: true")
+	expectedAll = append(expectedAll, "\tdeploy: true\n\tsendTx: true")
+	expectedSendTx = append(expectedSendTx, "\tsendTx: true")
+	expectedDeploy = append(expectedDeploy, "\tdeploy: true")
+	expectedNone = append(expectedNone, "")
+
 	var tests = []struct {
 		policies []byte
 		pList    []Policy
-		want     string
+		want     []string
 	}{
-		{policiesAll, pListAll, "\tsendTx: true\n\tdeploy: true"},
-		{policiesSendTx, pListSendTx, "\tsendTx: true"},
-		{policiesDeploy, pListDeploy, "\tdeploy: true"},
-		{policiesNone, pListNone, ""},
+		{policiesAll, pListAll, expectedAll},
+		{policiesSendTx, pListSendTx, expectedSendTx},
+		{policiesDeploy, pListDeploy, expectedDeploy},
+		{policiesNone, pListNone, expectedNone},
 	}
 	for _, tt := range tests {
 		t.Run("PolicyMapping", func(t *testing.T) {
 			ans := policyMapping(tt.policies, tt.pList)
-			if ans != tt.want {
+			if !containsSubstring(tt.want, ans) {
 				t.Errorf("got %v, want %v", ans, tt.want)
 			}
 		})
