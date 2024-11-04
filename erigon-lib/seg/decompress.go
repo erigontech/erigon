@@ -1068,7 +1068,6 @@ func (g *Getter) FastNext(buf []byte) ([]byte, uint64) {
 
 func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (offset uint64)) (foundOffset uint64) {
 	//TODO: unit tests with asserts
-	//n := item.src.decompressor.Count() / 2
 	foundItem := sort.Search(count, func(i int) bool {
 		offset := f(uint64(i))
 		g.Reset(offset)
