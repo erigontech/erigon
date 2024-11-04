@@ -111,6 +111,8 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	}
 	defer tx.Rollback()
 
+	fmt.Printf("[dbg] AccountRange limits: %t, %t, %d\n", excludeCode, excludeStorage, maxResults)
+
 	var blockNumber uint64
 
 	if number, ok := blockNrOrHash.Number(); ok {

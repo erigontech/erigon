@@ -148,6 +148,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 	c.OnRoot(emptyHash) // We do not calculate the root
 
+	fmt.Printf("[dbg] DumpToCollector limits: %t, %t, %d\n", excludeCode, excludeStorage, maxResults)
 	ttx := d.db.(kv.TemporalTx)
 	txNum, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
 	if err != nil {
