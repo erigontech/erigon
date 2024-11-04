@@ -118,8 +118,6 @@ jobs:
           erigon_getLatestLogs/test_11.json,\
           erigon_getLatestLogs/test_12.json,\
           erigon_getBalanceChangesInBlock,\
-          eth_callBundle/test_09.json,\
-          eth_callBundle/test_12.json,\
           eth_createAccessList/test_16.json,\
           parity_getBlockReceipts/test_01.json,\
           parity_getBlockReceipts/test_02.json,\
