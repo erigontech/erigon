@@ -1365,13 +1365,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		var offset uint64
 		if len(from) > 0 {
 			n := item.src.decompressor.Count() / 2
-			found := g.BinarySearch(from, n, idx.OrdinalLookup)
-			if int(found) < n {
-				fmt.Printf("[dbg] bs1 !ok, %x, %d\n", from, offset)
-			} else {
-				fmt.Printf("[dbg] bs2 !ok, %x, %d\n", from, offset)
-				offset = 0
-			}
+			offset = g.BinarySearch(from, n, idx.OrdinalLookup)
 		}
 		g.Reset(offset)
 		if g.HasNext() {
