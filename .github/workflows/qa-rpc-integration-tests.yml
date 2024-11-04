@@ -16,7 +16,7 @@ on:
 
 jobs:
   integration-test-suite:
-    runs-on: [self-hosted, Erigon3]
+    runs-on: [ self-hosted, Erigon3 ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
@@ -236,7 +236,7 @@ jobs:
           
           # Save the subsection reached status
           echo "::set-output name=test_executed::true"
-        
+          
           # Check test runner exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "tests completed successfully"
@@ -245,7 +245,7 @@ jobs:
           else
             echo "error detected during tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-            
+          
             # Save failed results to a directory with timestamp and commit hash
             cp -r ${{ runner.workspace }}/rpc-tests/integration/mainnet/results/ $RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_$commit_http/
           fi
