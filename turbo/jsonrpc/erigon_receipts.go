@@ -321,11 +321,12 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			erigonLog.Removed = log.Removed
 			erigonLogs = append(erigonLogs, erigonLog)
 		}
-		fmt.Printf("[dbg] cnt: %d, %d, %d, %d\n", logOptions.LogCount, logCount, logOptions.BlockCount, blockCount)
 		if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
+			fmt.Printf("[dbg] cnt: %d, %d, %d, %d\n", logOptions.LogCount, logCount, logOptions.BlockCount, blockCount)
 			return erigonLogs, nil
 		}
 		if logOptions.BlockCount != 0 && logOptions.BlockCount <= blockCount {
+			fmt.Printf("[dbg] cnt2: %d, %d, %d, %d\n", logOptions.LogCount, logCount, logOptions.BlockCount, blockCount)
 			return erigonLogs, nil
 		}
 	}
