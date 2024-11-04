@@ -2,12 +2,16 @@ package smt
 
 import (
 	"context"
+	"fmt"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/status-im/keycard-go/hexutils"
 )
 
+// BuildWitness creates a witness from the SMT
 func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Witness, error) {
 	operands := make([]trie.WitnessOperator, 0)
 
@@ -33,7 +37,7 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 				This algorithm adds a little bit more nodes to the witness but it ensures that all requiring nodes are included.
 			*/
 
-			retain := true
+			var retain bool
 
 			prefixLen := len(prefix)
 			if prefixLen > 0 {
@@ -111,4 +115,167 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 	err = s.Traverse(ctx, root, action)
 
 	return trie.NewWitness(operands), err
+}
+
+// BuildSMTfromWitness builds SMT from witness
+func BuildSMTfromWitness(w *trie.Witness) (*SMT, error) {
+	// using memdb
+	s := NewSMT(nil, false)
+
+	balanceMap := make(map[string]*big.Int)
+	nonceMap := make(map[string]*big.Int)
+	contractMap := make(map[string]string)
+	storageMap := make(map[string]map[string]string)
+
+	path := make([]int, 0)
+
+	firstNode := true
+	NodeChildCountMap := make(map[string]uint32)
+	NodesBranchValueMap := make(map[string]uint32)
+
+	type nodeHash struct {
+		path []int
+		hash libcommon.Hash
+	}
+
+	nodeHashes := make([]nodeHash, 0)
+
+	for i, operator := range w.Operators {
+		switch op := operator.(type) {
+		case *trie.OperatorSMTLeafValue:
+			valScaler := big.NewInt(0).SetBytes(op.Value)
+			addr := libcommon.BytesToAddress(op.Address)
+
+			switch op.NodeType {
+			case utils.KEY_BALANCE:
+				balanceMap[addr.String()] = valScaler
+
+			case utils.KEY_NONCE:
+				nonceMap[addr.String()] = valScaler
+
+			case utils.SC_STORAGE:
+				if _, ok := storageMap[addr.String()]; !ok {
+					storageMap[addr.String()] = make(map[string]string)
+				}
+
+				stKey := hexutils.BytesToHex(op.StorageKey)
+				if len(stKey) > 0 {
+					stKey = fmt.Sprintf("0x%s", stKey)
+				}
+
+				storageMap[addr.String()][stKey] = valScaler.String()
+			}
+
+			path = path[:len(path)-1]
+			NodeChildCountMap[intArrayToString(path)] += 1
+
+			for len(path) != 0 && NodeChildCountMap[intArrayToString(path)] == NodesBranchValueMap[intArrayToString(path)] {
+				path = path[:len(path)-1]
+			}
+			if NodeChildCountMap[intArrayToString(path)] < NodesBranchValueMap[intArrayToString(path)] {
+				path = append(path, 1)
+			}
+
+		case *trie.OperatorCode:
+			addr := libcommon.BytesToAddress(w.Operators[i+1].(*trie.OperatorSMTLeafValue).Address)
+
+			code := hexutils.BytesToHex(op.Code)
+			if len(code) > 0 {
+				if err := s.Db.AddCode(hexutils.HexToBytes(code)); err != nil {
+					return nil, err
+				}
+				code = fmt.Sprintf("0x%s", code)
+			}
+
+			contractMap[addr.String()] = code
+
+		case *trie.OperatorBranch:
+			if firstNode {
+				firstNode = false
+			} else {
+				NodeChildCountMap[intArrayToString(path[:len(path)-1])] += 1
+			}
+
+			switch op.Mask {
+			case 1:
+				NodesBranchValueMap[intArrayToString(path)] = 1
+				path = append(path, 0)
+			case 2:
+				NodesBranchValueMap[intArrayToString(path)] = 1
+				path = append(path, 1)
+			case 3:
+				NodesBranchValueMap[intArrayToString(path)] = 2
+				path = append(path, 0)
+			}
+
+		case *trie.OperatorHash:
+			pathCopy := make([]int, len(path))
+			copy(pathCopy, path)
+			nodeHashes = append(nodeHashes, nodeHash{path: pathCopy, hash: op.Hash})
+
+			path = path[:len(path)-1]
+			NodeChildCountMap[intArrayToString(path)] += 1
+
+			for len(path) != 0 && NodeChildCountMap[intArrayToString(path)] == NodesBranchValueMap[intArrayToString(path)] {
+				path = path[:len(path)-1]
+			}
+			if NodeChildCountMap[intArrayToString(path)] < NodesBranchValueMap[intArrayToString(path)] {
+				path = append(path, 1)
+			}
+
+		default:
+			// Unsupported operator type
+			return nil, fmt.Errorf("unsupported operator type: %T", op)
+		}
+	}
+
+	for _, nodeHash := range nodeHashes {
+		_, err := s.InsertHashNode(nodeHash.path, nodeHash.hash.Big())
+		if err != nil {
+			return nil, err
+		}
+
+		_, err = s.Db.GetLastRoot()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for addr, balance := range balanceMap {
+		_, err := s.SetAccountBalance(addr, balance)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for addr, nonce := range nonceMap {
+		_, err := s.SetAccountNonce(addr, nonce)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for addr, code := range contractMap {
+		err := s.SetContractBytecode(addr, code)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for addr, storage := range storageMap {
+		_, err := s.SetContractStorage(addr, storage, nil)
+		if err != nil {
+			fmt.Println("error : unable to set contract storage", err)
+		}
+	}
+
+	return s, nil
+}
+
+func intArrayToString(a []int) string {
+	s := ""
+	for _, v := range a {
+		s += fmt.Sprintf("%d", v)
+	}
+	return s
 }

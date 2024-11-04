@@ -14,30 +14,55 @@ import (
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 )
 
+// SetAccountState sets the balance and nonce of an account
 func (s *SMT) SetAccountState(ethAddr string, balance, nonce *big.Int) (*big.Int, error) {
-	keyBalance := utils.KeyEthAddrBalance(ethAddr)
-	keyNonce := utils.KeyEthAddrNonce(ethAddr)
-
-	if _, err := s.InsertKA(keyBalance, balance); err != nil {
-		return nil, err
-	}
-
-	ks := utils.EncodeKeySource(utils.KEY_BALANCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
-	if err := s.Db.InsertKeySource(keyBalance, ks); err != nil {
-		return nil, err
-	}
-
-	auxRes, err := s.InsertKA(keyNonce, nonce)
+	_, err := s.SetAccountBalance(ethAddr, balance)
 	if err != nil {
 		return nil, err
 	}
 
-	ks = utils.EncodeKeySource(utils.KEY_NONCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
-	if err := s.Db.InsertKeySource(keyNonce, ks); err != nil {
+	auxOut, err := s.SetAccountNonce(ethAddr, nonce)
+	if err != nil {
 		return nil, err
 	}
 
-	return auxRes.NewRootScalar.ToBigInt(), nil
+	return auxOut, nil
+}
+
+// SetAccountBalance sets the balance of an account
+func (s *SMT) SetAccountBalance(ethAddr string, balance *big.Int) (*big.Int, error) {
+	keyBalance := utils.KeyEthAddrBalance(ethAddr)
+
+	response, err := s.InsertKA(keyBalance, balance)
+	if err != nil {
+		return nil, err
+	}
+
+	ks := utils.EncodeKeySource(utils.KEY_BALANCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+	err = s.Db.InsertKeySource(keyBalance, ks)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.NewRootScalar.ToBigInt(), err
+}
+
+// SetAccountNonce sets the nonce of an account
+func (s *SMT) SetAccountNonce(ethAddr string, nonce *big.Int) (*big.Int, error) {
+	keyNonce := utils.KeyEthAddrNonce(ethAddr)
+
+	response, err := s.InsertKA(keyNonce, nonce)
+	if err != nil {
+		return nil, err
+	}
+
+	ks := utils.EncodeKeySource(utils.KEY_NONCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+	err = s.Db.InsertKeySource(keyNonce, ks)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.NewRootScalar.ToBigInt(), nil
 }
 
 func (s *SMT) SetAccountStorage(addr libcommon.Address, acc *accounts.Account) error {
@@ -80,13 +105,7 @@ func (s *SMT) SetContractBytecode(ethAddr string, bytecode string) error {
 
 	ks = utils.EncodeKeySource(utils.SC_LENGTH, utils.ConvertHexToAddress(ethAddr), common.Hash{})
 
-	err = s.Db.InsertKeySource(keyContractLength, ks)
-
-	if err != nil {
-		return err
-	}
-
-	return err
+	return s.Db.InsertKeySource(keyContractLength, ks)
 }
 
 func (s *SMT) SetContractStorage(ethAddr string, storage map[string]string, progressChan chan uint64) (*big.Int, error) {
@@ -203,7 +222,7 @@ func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[l
 	for addr, acc := range accChanges {
 		select {
 		case <-ctx.Done():
-			return nil, nil, fmt.Errorf(fmt.Sprintf("[%s] Context done", logPrefix))
+			return nil, nil, fmt.Errorf("[%s] Context done", logPrefix)
 		default:
 		}
 		ethAddr := addr.String()
@@ -250,7 +269,7 @@ func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[l
 	for addr, code := range codeChanges {
 		select {
 		case <-ctx.Done():
-			return nil, nil, fmt.Errorf(fmt.Sprintf("[%s] Context done", logPrefix))
+			return nil, nil, fmt.Errorf("[%s] Context done", logPrefix)
 		default:
 		}
 
@@ -295,7 +314,7 @@ func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[l
 	for addr, storage := range storageChanges {
 		select {
 		case <-ctx.Done():
-			return nil, nil, fmt.Errorf(fmt.Sprintf("[%s] Context done", logPrefix))
+			return nil, nil, fmt.Errorf("[%s] Context done", logPrefix)
 		default:
 		}
 		ethAddr := addr.String()
@@ -304,7 +323,7 @@ func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[l
 
 		for k, v := range storage {
 			keyStoragePosition := utils.KeyContractStorage(ethAddrBigIngArray, k)
-			valueBigInt := convertStrintToBigInt(v)
+			valueBigInt := convertStringToBigInt(v)
 			keysBatchStorage = append(keysBatchStorage, &keyStoragePosition)
 			if valuesBatchStorage, isDelete, err = appendToValuesBatchStorageBigInt(valuesBatchStorage, valueBigInt); err != nil {
 				return nil, nil, err
@@ -341,7 +360,7 @@ func (s *SMT) DeleteKeySource(nodeKey *utils.NodeKey) error {
 }
 
 func calcHashVal(v string) (*utils.NodeValue8, [4]uint64, error) {
-	val := convertStrintToBigInt(v)
+	val := convertStringToBigInt(v)
 
 	x := utils.ScalarToArrayBig(val)
 	value, err := utils.NodeValue8FromBigIntArray(x)
@@ -354,10 +373,10 @@ func calcHashVal(v string) (*utils.NodeValue8, [4]uint64, error) {
 	return value, h, nil
 }
 
-func convertStrintToBigInt(v string) *big.Int {
+func convertStringToBigInt(v string) *big.Int {
 	base := 10
 	if strings.HasPrefix(v, "0x") {
-		v = v[2:]
+		v = strings.TrimPrefix(v, "0x")
 		base = 16
 	}
 
@@ -374,14 +393,8 @@ func appendToValuesBatchStorageBigInt(valuesBatchStorage []*utils.NodeValue8, va
 }
 
 func convertBytecodeToBigInt(bytecode string) (*big.Int, int, error) {
-	var parsedBytecode string
 	bi := utils.HashContractBytecodeBigInt(bytecode)
-
-	if strings.HasPrefix(bytecode, "0x") {
-		parsedBytecode = bytecode[2:]
-	} else {
-		parsedBytecode = bytecode
-	}
+	parsedBytecode := strings.TrimPrefix(bytecode, "0x")
 
 	if len(parsedBytecode)%2 != 0 {
 		parsedBytecode = "0" + parsedBytecode

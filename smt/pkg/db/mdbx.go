@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/hex"
 	"math/big"
 
 	"fmt"
@@ -302,6 +303,19 @@ func (m *EriRoDb) GetCode(codeHash []byte) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func (m *EriDb) AddCode(code []byte) error {
+	codeHash := utils.HashContractBytecode(hex.EncodeToString(code))
+
+	codeHashBytes, err := hex.DecodeString(strings.TrimPrefix(codeHash, "0x"))
+	if err != nil {
+		return err
+	}
+
+	codeHashBytes = utils.ResizeHashTo32BytesByPrefixingWithZeroes(codeHashBytes)
+
+	return m.tx.Put(kv.Code, codeHashBytes, code)
 }
 
 func (m *EriRoDb) PrintDb() {
