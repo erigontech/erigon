@@ -23,11 +23,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/erigontech/erigon-lib/commitment"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"math"
 	"math/rand"
-	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -819,7 +821,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	db.Close()
 
 	// remove database files
-	require.NoError(t, os.RemoveAll(dirs.Chaindata))
+	require.NoError(t, customfs.CFS.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
 	newDb := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
@@ -1091,7 +1093,8 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {
 	t.Helper()
 	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
+	customfs.CFS = customfs.CustomFileSystem{Fs: afero.NewMemMapFs()}
+	dirs := datadir.New("tmp" + strconv.Itoa(rand.Int()))
 	logger := log.New()
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
@@ -1315,7 +1318,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 
 	for _, fn := range fnames {
 		if strings.Contains(fn, "v1-commitment") {
-			require.NoError(t, os.Remove(fn))
+			require.NoError(t, customfs.CFS.Remove(fn))
 			t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}

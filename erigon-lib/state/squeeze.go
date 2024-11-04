@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
 	"math"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -68,7 +68,7 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 	}
 
 	for _, f := range filesToRemove {
-		if err := os.Remove(f); err != nil {
+		if err := customfs.CFS.Remove(f); err != nil {
 			return err
 		}
 	}
@@ -143,11 +143,11 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		return err
 	}
 	getSizeDelta := func(a, b string) (datasize.ByteSize, float32, error) {
-		ai, err := os.Stat(a)
+		ai, err := customfs.CFS.Stat(a)
 		if err != nil {
 			return 0, 0, err
 		}
-		bi, err := os.Stat(b)
+		bi, err := customfs.CFS.Stat(b)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -287,7 +287,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			cf.closeFilesAndRemove()
 
 			squeezedPath := originalPath + sqExt
-			if err = os.Rename(squeezedTmpPath, squeezedPath); err != nil {
+			if err = customfs.CFS.Rename(squeezedTmpPath, squeezedPath); err != nil {
 				return err
 			}
 			temporalFiles = append(temporalFiles, squeezedPath)
@@ -306,7 +306,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 	}
 
 	for _, path := range temporalFiles {
-		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
+		if err := customfs.CFS.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
 			return err
 		}
 		ac.a.logger.Debug("[squeeze_migration] temporal file renaming", "path", path)

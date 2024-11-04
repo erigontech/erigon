@@ -23,6 +23,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"math"
 	"os"
 	"path"
@@ -558,7 +560,7 @@ type BtIndexWriter struct {
 	prevOffset uint64
 	minDelta   uint64
 	indexW     *bufio.Writer
-	indexF     *os.File
+	indexF     *customfs.CustomFile
 	ef         *eliasfano32.EliasFano
 	collector  *etl.Collector
 
@@ -648,8 +650,8 @@ func (btw *BtIndexWriter) Build() error {
 		return errors.New("already built")
 	}
 	var err error
-	if btw.indexF, err = os.Create(btw.tmpFilePath); err != nil {
-		return fmt.Errorf("create index file %s: %w", btw.args.IndexFile, err)
+	if btw.indexF, err = customfs.CFS.Create(btw.tmpFilePath); err != nil {
+		return fmt.Errorf("create index file %s %s: %w", btw.args.IndexFile, btw.tmpFilePath, err)
 	}
 	defer btw.indexF.Close()
 	btw.indexW = bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
@@ -695,7 +697,7 @@ func (btw *BtIndexWriter) Build() error {
 	if err = btw.indexF.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(btw.tmpFilePath, btw.args.IndexFile); err != nil {
+	if err = customfs.CFS.Rename(btw.tmpFilePath, btw.args.IndexFile); err != nil {
 		return err
 	}
 	return nil
@@ -733,7 +735,7 @@ type BtIndex struct {
 	m        mmap.MMap
 	data     []byte
 	ef       *eliasfano32.EliasFano
-	file     *os.File
+	file     afero.File
 	alloc    *btAlloc // pointless?
 	bplus    *BpsTree
 	size     int64
@@ -842,22 +844,32 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		}
 	}()
 
-	s, err := os.Stat(indexPath)
+	s, err := customfs.CFS.Stat(indexPath)
 	if err != nil {
 		return nil, err
 	}
 	idx.size = s.Size()
 	idx.modTime = s.ModTime()
 
-	idx.file, err = os.Open(indexPath)
+	idx.file, err = customfs.CFS.Open(indexPath)
 	if err != nil {
 		return nil, err
 	}
 	if idx.size == 0 {
 		return idx, nil
 	}
+	if _, ok := customfs.CFS.Fs.(*afero.OsFs); ok {
+		idx.m, err = mmap.MapRegion(idx.file.(*os.File), int(idx.size), mmap.RDONLY, 0, 0)
+	} else {
+		mm := make([]byte, idx.size)
+		_, err := idx.file.Read(mm)
+		if err != nil {
+			println("read mem err", err.Error())
+			return nil, err
+		}
+		idx.m = mm
+	}
 
-	idx.m, err = mmap.MapRegion(idx.file, int(idx.size), mmap.RDONLY, 0, 0)
 	if err != nil {
 		return nil, err
 	}

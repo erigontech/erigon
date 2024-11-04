@@ -25,9 +25,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"io"
 	"math/bits"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -258,9 +259,9 @@ func (c *Compressor) Compress() error {
 			return err
 		}
 	}
-	defer os.Remove(c.tmpOutFilePath)
+	defer customfs.CFS.Remove(c.tmpOutFilePath)
 
-	cf, err := os.Create(c.tmpOutFilePath)
+	cf, err := customfs.CFS.Create(c.tmpOutFilePath)
 	if err != nil {
 		return err
 	}
@@ -275,7 +276,7 @@ func (c *Compressor) Compress() error {
 	if err = cf.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(c.tmpOutFilePath, c.outputFile); err != nil {
+	if err := customfs.CFS.Rename(c.tmpOutFilePath, c.outputFile); err != nil {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
@@ -296,7 +297,7 @@ func (c *Compressor) DisableFsync() { c.noFsync = true }
 // fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
 // Machine may power-off right after `rename` - it means `fsync` must be before `rename`
-func (c *Compressor) fsync(f *os.File) error {
+func (c *Compressor) fsync(f afero.File) error {
 	if c.noFsync {
 		return nil
 	}
@@ -810,11 +811,11 @@ type CompressionRatio float64
 func (r CompressionRatio) String() string { return fmt.Sprintf("%.2f", r) }
 
 func Ratio(f1, f2 string) (CompressionRatio, error) {
-	s1, err := os.Stat(f1)
+	s1, err := customfs.CFS.Stat(f1)
 	if err != nil {
 		return 0, err
 	}
-	s2, err := os.Stat(f2)
+	s2, err := customfs.CFS.Stat(f2)
 	if err != nil {
 		return 0, err
 	}
@@ -823,7 +824,7 @@ func Ratio(f1, f2 string) (CompressionRatio, error) {
 
 // RawWordsFile - .idt file format - simple format for temporary data store
 type RawWordsFile struct {
-	f        *os.File
+	f        afero.File
 	w        *bufio.Writer
 	filePath string
 	buf      []byte
@@ -831,7 +832,7 @@ type RawWordsFile struct {
 }
 
 func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
-	f, err := os.Create(filePath)
+	f, err := customfs.CFS.Create(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -839,7 +840,7 @@ func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
 }
 func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
-	f, err := os.Open(filePath)
+	f, err := customfs.CFS.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -855,7 +856,7 @@ func (f *RawWordsFile) Close() {
 }
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
-	os.Remove(f.filePath)
+	customfs.CFS.Remove(f.filePath)
 }
 func (f *RawWordsFile) Append(v []byte) error {
 	f.count++

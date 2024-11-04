@@ -4,7 +4,9 @@ import (
 	"errors"
 	"github.com/spf13/afero"
 	"io"
+	"math/rand"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -116,8 +118,8 @@ func (fs *CustomFileSystem) MkdirTemp(dir, pattern string) (string, error) {
 	prefix = joinPath(dir, prefix)
 
 	try := 0
-	for i := 0; ; i++ {
-		name := prefix + strconv.Itoa(i) + suffix
+	for {
+		name := prefix + strconv.Itoa(rand.Int()) + suffix
 		err := fs.Mkdir(name, 0700)
 		if err == nil {
 			return name, nil
@@ -134,6 +136,35 @@ func (fs *CustomFileSystem) MkdirTemp(dir, pattern string) (string, error) {
 			}
 		}
 		return "", err
+	}
+}
+
+func (fs *CustomFileSystem) CreateTemp(dir, pattern string) (*CustomFile, error) {
+	if _, ok := fs.Fs.(*afero.OsFs); ok {
+		file, err := os.CreateTemp(dir, pattern)
+		return &CustomFile{file}, err
+	}
+	if dir == "" {
+		dir = "tmp"
+	}
+
+	prefix, suffix, err := prefixAndSuffix(pattern)
+	if err != nil {
+		return nil, &os.PathError{Op: "createtemp", Path: pattern, Err: err}
+	}
+	prefix = joinPath(dir, prefix)
+
+	try := 0
+	for {
+		name := prefix + strconv.Itoa(rand.Int()) + suffix
+		f, err := fs.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+		if fs.IsExist(err) {
+			if try++; try < 10000 {
+				continue
+			}
+			return nil, &os.PathError{Op: "createtemp", Path: prefix + "*" + suffix, Err: os.ErrExist}
+		}
+		return &CustomFile{f}, err
 	}
 }
 
@@ -162,4 +193,64 @@ func joinPath(dir, name string) string {
 		return dir + name
 	}
 	return dir + string(os.PathSeparator) + name
+}
+
+func (fs *CustomFileSystem) ReadDir(name string) ([]os.FileInfo, error) {
+	f, err := fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	dirs, err := f.Readdir(-1)
+	slices.SortFunc(dirs, func(a, b os.FileInfo) int {
+		return strings.Compare(a.Name(), b.Name())
+	})
+	return dirs, err
+}
+
+// ReadFile reads the named file and returns the contents.
+// A successful call returns err == nil, not err == EOF.
+// Because ReadFile reads the whole file, it does not treat an EOF from Read
+// as an error to be reported.
+func (fs *CustomFileSystem) ReadFile(name string) ([]byte, error) {
+	f, err := fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var size int
+	if info, err := f.Stat(); err == nil {
+		size64 := info.Size()
+		if int64(int(size64)) == size64 {
+			size = int(size64)
+		}
+	}
+	size++ // one byte for final read at EOF
+
+	// If a file claims a small size, read at least 512 bytes.
+	// In particular, files in Linux's /proc claim size 0 but
+	// then do not work right if read in small pieces,
+	// so an initial read of 1 byte would not work correctly.
+	if size < 512 {
+		size = 512
+	}
+
+	data := make([]byte, 0, size)
+	for {
+		n, err := f.Read(data[len(data):cap(data)])
+		data = data[:len(data)+n]
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			return data, err
+		}
+
+		if len(data) >= cap(data) {
+			d := append(data[:cap(data)], 0)
+			data = d[:len(data)]
+		}
+	}
 }

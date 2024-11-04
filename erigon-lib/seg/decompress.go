@@ -21,6 +21,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -120,7 +122,7 @@ func (e ErrCompressedFileCorrupted) Is(err error) bool {
 
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
-	f               *os.File
+	f               afero.File
 	mmapHandle2     *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	dict            *patternTable
 	posDict         *posTable
@@ -196,7 +198,7 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 		}
 	}()
 
-	d.f, err = os.Open(compressedFilePath)
+	d.f, err = customfs.CFS.Open(compressedFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -214,8 +216,21 @@ func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	}
 
 	d.modTime = stat.ModTime()
-	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
-		return nil, err
+	if _, ok := customfs.CFS.Fs.(*afero.OsFs); ok {
+		if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f.(*os.File), int(d.size)); err != nil {
+			return nil, err
+		}
+	} else {
+		mmapHandle1 := make([]byte, d.size)
+		_, err := d.f.Read(mmapHandle1)
+		if err != nil {
+			println("read mem err", err.Error())
+			return nil, err
+		}
+		mmapHandle2 := (*[mmap.MaxMapSize]byte)(unsafe.Pointer(&mmapHandle1[0]))
+		d.mmapHandle1 = mmapHandle1
+		d.mmapHandle2 = mmapHandle2
+
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]

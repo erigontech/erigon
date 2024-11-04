@@ -23,10 +23,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/customfs"
+	"github.com/spf13/afero"
 	"io"
 	"math"
 	"math/bits"
-	"os"
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
@@ -68,11 +69,11 @@ type RecSplit struct {
 	offsetCollector *etl.Collector // Collector that sorts by offsets
 
 	indexW          *bufio.Writer
-	indexF          *os.File
+	indexF          afero.File
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
 
-	existenceF *os.File
+	existenceF afero.File
 	existenceW *bufio.Writer
 
 	indexFileName          string
@@ -184,7 +185,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 	rs.lessFalsePositives = args.LessFalsePositives
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
-		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
+		bufferFile, err := customfs.CFS.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
 		if err != nil {
 			return nil, err
 		}
@@ -584,7 +585,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.indexFileName, rs.keyExpectedCount, rs.keysAdded)
 	}
 	var err error
-	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {
+	if rs.indexF, err = customfs.CFS.Create(rs.tmpFilePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
 
@@ -719,7 +720,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	if err = os.Rename(rs.tmpFilePath, rs.indexFile); err != nil {
+	if err = customfs.CFS.Rename(rs.tmpFilePath, rs.indexFile); err != nil {
 		rs.logger.Warn("[index] rename", "file", rs.tmpFilePath, "err", err)
 		return err
 	}

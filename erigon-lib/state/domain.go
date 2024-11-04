@@ -1298,6 +1298,12 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
+	var err error
+	defer func() {
+		if err != nil {
+			println("buildFiles", dbg.Stack(), err.Error())
+		}
+	}()
 	if traceFileLife != "" && d.filenameBase == traceFileLife {
 		d.logger.Warn("[agg.dbg] buildFiles", "step", step, "domain", d.filenameBase)
 	}
