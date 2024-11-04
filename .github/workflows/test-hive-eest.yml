@@ -4,7 +4,7 @@ on:
   push:
     branches:
         - release/*
-        - pectra_e2
+        - main
   workflow_dispatch:
 
 jobs:
