@@ -193,16 +193,6 @@ jobs:
           admin_peers/test_01.json,\
           erigon_nodeInfo/test_1.json,\
           eth_coinbase/test_01.json,\
-          eth_feeHistory/test_01.json,\
-          eth_feeHistory/test_02.json,\
-          eth_feeHistory/test_03.json,\
-          eth_feeHistory/test_04.json,\
-          eth_feeHistory/test_05.json,\
-          eth_feeHistory/test_06.json,\
-          eth_feeHistory/test_08.json,\
-          eth_feeHistory/test_09.json,\
-          eth_feeHistory/test_10.json,\
-          eth_feeHistory/test_11.json,\
           eth_getBlockByHash/test_01.json,\
           eth_getBlockByHash/test_02.json,\
           eth_getBlockByHash/test_05.json,\
