@@ -164,7 +164,7 @@ func TestV2Resolution(t *testing.T) {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	tr1 := New(libcommon.Hash{})
-	tr1.root = hb.root()
+	tr1.RootNode = hb.root()
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
@@ -247,7 +247,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		fmt.Printf("Trie built: %s\n", hb.root().fstring(""))
-		fmt.Printf("Trie expected: %s\n", tr.root.fstring(""))
+		fmt.Printf("Trie expected: %s\n", tr.RootNode.fstring(""))
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
 	}
 	fmt.Printf("groups: %d\n", len(groups))

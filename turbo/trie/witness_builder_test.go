@@ -17,7 +17,7 @@ func TestBlockWitness(t *testing.T) {
 	rl := NewRetainList(2)
 	rl.AddKey([]byte("ABCD0001"))
 
-	bwb := NewWitnessBuilder(tr.root, false)
+	bwb := NewWitnessBuilder(tr.RootNode, false)
 
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
@@ -54,7 +54,7 @@ func TestBlockWitnessAccount(t *testing.T) {
 	rl := NewRetainList(2)
 	rl.AddKey([]byte("ABCD0001"))
 
-	bwb := NewWitnessBuilder(tr.root, false)
+	bwb := NewWitnessBuilder(tr.RootNode, false)
 
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)

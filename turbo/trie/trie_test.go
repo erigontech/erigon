@@ -400,7 +400,7 @@ func TestCodeNodeGetHashedAccount(t *testing.T) {
 
 	hex := keybytesToHex(crypto.Keccak256(address[:]))
 
-	_, trie.root = trie.insert(trie.root, hex, &HashNode{hash: fakeAccountHash[:]})
+	_, trie.RootNode = trie.insert(trie.RootNode, hex, &HashNode{hash: fakeAccountHash[:]})
 
 	value, gotValue := trie.GetAccountCode(crypto.Keccak256(address[:]))
 	assert.False(t, gotValue, "should indicate that account exists but hashed")

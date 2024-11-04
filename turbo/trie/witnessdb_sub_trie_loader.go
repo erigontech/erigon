@@ -40,7 +40,7 @@ func (wstl *WitnessDbSubTrieLoader) LoadSubTries(db WitnessStorage, blockNr uint
 		if err != nil {
 			return SubTries{}, 0, err
 		}
-		rootNode := trie.root
+		rootNode := trie.RootNode
 		rootHash := trie.Hash()
 		subTries.roots = append(subTries.roots, rootNode)
 		subTries.Hashes = append(subTries.Hashes, rootHash)

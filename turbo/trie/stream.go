@@ -113,7 +113,7 @@ func NewIterator(t *Trie, rl *RetainList, trace bool) *Iterator {
 	return &Iterator{
 		rl:           rl,
 		hex:          []byte{},
-		nodeStack:    []Node{t.root},
+		nodeStack:    []Node{t.RootNode},
 		iStack:       []int{0},
 		goDeepStack:  []bool{true},
 		lenStack:     []int{0},
@@ -130,7 +130,7 @@ func (it *Iterator) Reset(t *Trie, rl *RetainList, trace bool) {
 	if len(it.nodeStack) > 0 {
 		it.nodeStack = it.nodeStack[:0]
 	}
-	it.nodeStack = append(it.nodeStack, t.root)
+	it.nodeStack = append(it.nodeStack, t.RootNode)
 	if len(it.iStack) > 0 {
 		it.iStack = it.iStack[:0]
 	}
@@ -773,7 +773,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	}
 	if trace {
 		tt := New(libcommon.Hash{})
-		tt.root = hb.root()
+		tt.RootNode = hb.root()
 		filename := "root.txt"
 		f, err1 := os.Create(filename)
 		if err1 == nil {

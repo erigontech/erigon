@@ -43,7 +43,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 	// Collect all nodes on the path to key.
 	key = keybytesToHex(key)
 	key = key[:len(key)-1] // Remove terminator
-	tn := t.root
+	tn := t.RootNode
 	for len(key) > 0 && tn != nil {
 		switch n := tn.(type) {
 		case *ShortNode:

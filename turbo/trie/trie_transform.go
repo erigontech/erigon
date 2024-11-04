@@ -30,7 +30,7 @@ func transformSubTrie(nd Node, hex []byte, newTrie *Trie, transformFunc keyTrans
 	case ValueNode:
 		nCopy := make(ValueNode, len(n))
 		copy(nCopy, n)
-		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), nCopy)
+		_, newTrie.RootNode = newTrie.insert(newTrie.RootNode, transformFunc(hex), nCopy)
 		return
 	case *AccountNode:
 		accountCopy := accounts.NewAccount()
@@ -40,14 +40,14 @@ func transformSubTrie(nd Node, hex []byte, newTrie *Trie, transformFunc keyTrans
 			code = make([]byte, len(n.Code))
 			copy(code, n.Code)
 		}
-		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), &AccountNode{accountCopy, nil, true, code, n.CodeSize})
+		_, newTrie.RootNode = newTrie.insert(newTrie.RootNode, transformFunc(hex), &AccountNode{accountCopy, nil, true, code, n.CodeSize})
 		aHex := hex
 		if aHex[len(aHex)-1] == 16 {
 			aHex = aHex[:len(aHex)-1]
 		}
 		transformSubTrie(n.Storage, aHex, newTrie, transformFunc)
 	case HashNode:
-		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), HashNode{hash: common.CopyBytes(n.hash)})
+		_, newTrie.RootNode = newTrie.insert(newTrie.RootNode, transformFunc(hex), HashNode{hash: common.CopyBytes(n.hash)})
 		return
 	case *ShortNode:
 		var hexVal []byte

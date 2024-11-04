@@ -55,7 +55,7 @@ func (t *Trie) PrintTrie() {
 }
 
 func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {
-	printDiff(t.root, t2.root, w, "", "0x")
+	printDiff(t.RootNode, t2.RootNode, w, "", "0x")
 }
 
 func (n *FullNode) fstring(ind string) string {
@@ -290,7 +290,7 @@ func printDiff(n1, n2 Node, w io.Writer, ind string, key string) {
 }
 
 func (t *Trie) HashOfHexKey(hexKey []byte) (libcommon.Hash, error) {
-	nd := t.root
+	nd := t.RootNode
 	pos := 0
 	var account bool
 	for pos < len(hexKey) || account {

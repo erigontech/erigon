@@ -90,6 +90,6 @@ func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 	}
 	r := hb.root()
 	tr := New(hb.rootHash())
-	tr.root = r
+	tr.RootNode = r
 	return tr, nil
 }

@@ -7,7 +7,7 @@ func (t *Trie) ExtractWitness(trace bool, rl RetainDecider) (*Witness, error) {
 	if rl != nil {
 		rd = rl
 	}
-	return extractWitnessFromRootNode(t.root, trace, rd)
+	return extractWitnessFromRootNode(t.RootNode, trace, rd)
 }
 
 func (t *Trie) ExtractWitnessForPrefix(prefix []byte, trace bool, rl RetainDecider) (*Witness, error) {

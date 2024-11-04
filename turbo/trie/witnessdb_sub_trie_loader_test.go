@@ -33,17 +33,17 @@ func TestRebuildTrie(t *testing.T) {
 	trie2 := buildTestTrie(10)
 	trie3 := buildTestTrie(100)
 
-	w1, err := extractWitnessFromRootNode(trie1.root, false, nil)
+	w1, err := extractWitnessFromRootNode(trie1.RootNode, false, nil)
 	if err != nil {
 		t.Error(err)
 	}
 
-	w2, err := extractWitnessFromRootNode(trie2.root, false, nil)
+	w2, err := extractWitnessFromRootNode(trie2.RootNode, false, nil)
 	if err != nil {
 		t.Error(err)
 	}
 
-	w3, err := extractWitnessFromRootNode(trie3.root, false, nil)
+	w3, err := extractWitnessFromRootNode(trie3.RootNode, false, nil)
 	if err != nil {
 		t.Error(err)
 	}
@@ -88,7 +88,7 @@ func TestRebuildTrie(t *testing.T) {
 	currentTrie := 0
 	for i, root := range subTries.roots {
 		tr := New(subTries.Hashes[i])
-		tr.root = root
+		tr.RootNode = root
 		loadedTries[currentTrie] = tr
 		currentTrie++
 	}
@@ -104,7 +104,7 @@ func TestRebuildTrie(t *testing.T) {
 	}
 	for i, root := range subTries.roots {
 		tr := New(subTries.Hashes[i])
-		tr.root = root
+		tr.RootNode = root
 		loadedTries[currentTrie] = tr
 		currentTrie++
 	}
