@@ -120,13 +120,7 @@ jobs:
           erigon_getBalanceChangesInBlock,\
           eth_callBundle/test_09.json,\
           eth_callBundle/test_12.json,\
-          eth_createAccessList/test_06.json,\
-          eth_createAccessList/test_07.json,\
-          eth_createAccessList/test_15.json,\
           eth_createAccessList/test_16.json,\
-          eth_getBlockTransactionCountByHash/test_02.json,\
-          eth_getBlockTransactionCountByNumber/test_08.json,\
-          eth_getUncleCountByBlockHash/test_03.json,\
           parity_getBlockReceipts/test_01.json,\
           parity_getBlockReceipts/test_02.json,\
           parity_getBlockReceipts/test_03.json,\
