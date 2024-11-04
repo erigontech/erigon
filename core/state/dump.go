@@ -210,6 +210,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		numberOfResults++
 	}
 
+	j := 0
 	for i, addr := range addrList {
 		account := accountList[i]
 
@@ -222,6 +223,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			}
 			defer r.Close()
 			for r.HasNext() {
+				j++
+				fmt.Printf("[dbg] iter j: %d\n", j)
 				k, vs, err := r.Next()
 				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
@@ -234,6 +237,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 				h, _ := libcommon.HashData(loc)
 				t.Update(h.Bytes(), libcommon.Copy(vs))
 			}
+			r.Close()
 
 			account.Root = t.Hash().Bytes()
 		}
