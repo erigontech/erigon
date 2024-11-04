@@ -133,6 +133,7 @@ jobs:
           parity_getBlockReceipts/test_08.json,\
           parity_getBlockReceipts/test_09.json,\
           parity_getBlockReceipts/test_10.json,\
+          trace_filter/test_16.json,\
           trace_rawTransaction/test_01.json,\
           trace_rawTransaction/test_03.json,\
           admin_nodeInfo/test_01.json,\
