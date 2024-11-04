@@ -1968,6 +1968,7 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("[dbg] DomainRange 2: %s\n", dt.d.name)
 	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
 	if err != nil {
 		return nil, err
