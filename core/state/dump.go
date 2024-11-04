@@ -22,6 +22,7 @@ package state
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -159,11 +160,14 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		return nil, err
 	}
 
+	fmt.Printf("[dbg] before DomainRange\n")
+	t := time.Now()
 	var nextKey []byte
 	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("[dbg] after DomainRange: %s\n", time.Since(t))
 	defer it.Close()
 	i := 0
 	for it.HasNext() {
@@ -209,6 +213,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 		numberOfResults++
 	}
+	it.Close()
 
 	j := 0
 	for i, addr := range addrList {
