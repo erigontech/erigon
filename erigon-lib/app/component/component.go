@@ -50,7 +50,7 @@ func MakeResultChannels() (chan *component, chan error) {
 func ReturnResultChannels(c *component, err error) (chan *component, chan error) {
 	cproc, cerr := make(chan *component, 1), make(chan error, 1)
 
-	if cproc != nil {
+	if c != nil {
 		cproc <- c
 	}
 
@@ -374,17 +374,29 @@ func WithProvider[P any](p *P) Option {
 		})
 }
 
+type componentOptions struct {
+	dependencies relations
+	dependents   relations
+}
+
 func WithDependencies(dependencies ...relation) Option {
-	return WithOption[component](
-		func(c *component) {
+	return WithOption[componentOptions](
+		func(c *componentOptions) {
 			c.dependencies = append(c.dependencies, dependencies...)
 		})
 }
 
 func WithDependent(dependent relation) Option {
-	return WithOption[component](
-		func(c *component) {
+	return WithOption[componentOptions](
+		func(c *componentOptions) {
 			c.dependents = append(c.dependents, dependent)
+		})
+}
+
+func WithDomain(dependent ComponentDomain) Option {
+	return WithOption[componentOptions](
+		func(c *componentOptions) {
+			c.dependents = append(c.dependents, dependent.(*componentDomain).component)
 		})
 }
 
@@ -415,23 +427,9 @@ func NewComponent[P any](context context.Context, options ...Option) (Component[
 		state:   Instantiated,
 	}
 
+	var opts componentOptions
+	options = ApplyOptions(&opts, options)
 	c.options = ApplyOptions(c, options)
-
-	// options may have added a list of dependencies or
-	// dependents but we want to add them at the end of
-	// this function so the relationship is initialized
-	// properly
-	var dependencies relations
-	if len(c.dependencies) > 0 {
-		dependencies = c.dependencies
-		c.dependencies = nil
-	}
-
-	var dependents relations
-	if len(c.dependents) > 0 {
-		dependents = c.dependents
-		c.dependencies = nil
-	}
 
 	if c.provider == nil {
 		var p P
@@ -446,15 +444,15 @@ func NewComponent[P any](context context.Context, options ...Option) (Component[
 		c.name = t.String()
 	}
 
-	if len(dependents) > 0 {
-		for _, dependent := range dependents {
+	if len(opts.dependents) > 0 {
+		for _, dependent := range opts.dependents {
 			if err := c.addDependent(asComponent(dependent), false); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	if len(dependents) == 0 {
+	if c.componentDomain == nil {
 		if c.provider != rootComponentDomain {
 			if err := c.setDomain(rootComponentDomain, false); err != nil {
 				return nil, err
@@ -470,7 +468,7 @@ func NewComponent[P any](context context.Context, options ...Option) (Component[
 		return nil, err
 	}
 
-	for _, dependency := range dependencies {
+	for _, dependency := range opts.dependencies {
 		c.AddDependency(dependency)
 	}
 
@@ -859,7 +857,7 @@ func (component *component) registerSubscriptions() error {
 		return serviceBus.Register(component, component.onComponentStateChanged)
 	}
 
-	return fmt.Errorf("Expected domain (%T) to have non nil service bus", component.Domain())
+	return fmt.Errorf("expected domain (%T) to have non nil service bus", component.Domain())
 }
 
 func (component *component) onComponentStateChanged(event *ComponentStateChanged) {
@@ -963,15 +961,15 @@ func (component *component) onDependenciesDeactivated(deactivationContext contex
 	return nil
 }
 
-func (component *component) addDependency(dependent *component, locked bool) *component {
+func (c *component) addDependency(dependent *component, locked bool) *component {
 
 	if !locked {
-		component.Lock()
-		defer component.Unlock()
+		c.Lock()
+		defer c.Unlock()
 	}
 
 	if dependent != nil && dependent.provider != nil {
-		component.dependencies = component.dependencies.Add(dependent)
+		c.dependencies = c.dependencies.Add(dependent)
 		/*if component.dependents.Contains(dependent.component()) {
 			fmt.Printf("%v ADD DEP dep: %p\n", component.Name(), dependent.component())
 			for _, dep := range component.dependents {
@@ -986,7 +984,7 @@ func (component *component) addDependency(dependent *component, locked bool) *co
 		}*/
 	}
 
-	return component
+	return c
 }
 
 func (component *component) removeDependency(dependent *component, locked bool) {
