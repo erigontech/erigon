@@ -160,10 +160,10 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		return nil, err
 	}
 
-	fmt.Printf("[dbg] before DomainRange\n")
 	t := time.Now()
 	var nextKey []byte
 	nextAcc, _ := kv.NextSubtree(startAddress[:])
+	fmt.Printf("[dbg] before DomainRange: %x, %x\n", startAddress[:], nextAcc)
 	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nextAcc, txNum, order.Asc, maxResults)
 	if err != nil {
 		return nil, err
