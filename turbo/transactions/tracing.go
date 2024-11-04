@@ -106,6 +106,7 @@ func TraceTx(
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
+	usedGas, usedBlobGas *uint64,
 	callTimeout time.Duration,
 ) error {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, stream, callTimeout)
@@ -118,7 +119,13 @@ func TraceTx(
 
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		gp := new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
-		return core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
+		res, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
+		if err != nil {
+			return res, err
+		}
+		*usedGas += res.UsedGas
+		*usedBlobGas += message.BlobGas()
+		return res, nil
 	}
 
 	return ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)

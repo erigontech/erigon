@@ -122,7 +122,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, txn, usedGas, usedBlobGas, *vmConfig)
+		applyTransaction, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, txn, usedGas, usedBlobGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(txn)
