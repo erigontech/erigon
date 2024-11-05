@@ -158,7 +158,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	getter := seg.NewReader(kv.MakeGetter(), comp)
 
 	for i := 0; i < b.N; i++ {
-		p := rnd.Intn(len(keys))
+		p := rnd.IntN(len(keys))
 		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
 		require.EqualValues(b, keys[p], cur.Key())
@@ -208,7 +208,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 
 	b.Run("seek_then_next", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			p := rnd.Intn(len(keys))
+			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
@@ -268,7 +268,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	require.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
-		p := rnd.Intn(len(keys))
+		p := rnd.IntN(len(keys))
 
 		offset, _ := idxr.Lookup(keys[p])
 		getter.Reset(offset)

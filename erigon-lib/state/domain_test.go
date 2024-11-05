@@ -51,18 +51,18 @@ import (
 	"github.com/erigontech/erigon-lib/types"
 )
 
-type rnd struct {
+type rndGen struct {
 	*rand.Rand
 	src *rand.ChaCha8
 }
 
-func newRnd(seed uint64) *rnd {
+func newRnd(seed uint64) *rndGen {
 	_ = seed
 	src := rand.NewChaCha8([32]byte{})
-	return &rnd{Rand: rand.New(src), src: src}
+	return &rndGen{Rand: rand.New(src), src: src}
 }
-func (r *rnd) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
-func (r *rnd) Read(p []byte) (n int, err error) { return r.src.Read(p) }
+func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
+func (r *rndGen) Read(p []byte) (n int, err error) { return r.src.Read(p) }
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
@@ -1319,18 +1319,18 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 	return data
 }
 
-func generateRandomKey(r *rnd, size uint64) string {
+func generateRandomKey(r *rndGen, size uint64) string {
 	return string(generateRandomKeyBytes(r, size))
 }
 
-func generateRandomKeyBytes(r *rnd, size uint64) []byte {
+func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
 
 	return key
 }
 
-func generateAccountUpdates(r *rnd, totalTx, keyTxsLimit uint64) []upd {
+func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
@@ -1347,7 +1347,7 @@ func generateAccountUpdates(r *rnd, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateArbitraryValueUpdates(r *rnd, totalTx, keyTxsLimit, maxSize uint64) []upd {
+func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 	//maxStorageSize := 24 * (1 << 10) // limit on contract code
@@ -1366,7 +1366,7 @@ func generateArbitraryValueUpdates(r *rnd, totalTx, keyTxsLimit, maxSize uint64)
 	return updates
 }
 
-func generateUpdates(r *rnd, totalTx, keyTxsLimit uint64) []upd {
+func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
@@ -1383,7 +1383,7 @@ func generateUpdates(r *rnd, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateRandomTxNum(r *rnd, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
+func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
 	txNum := uint64(r.IntN(int(maxTxNum)))
 	for usedTxNums[txNum] {
 		txNum = uint64(r.IntN(int(maxTxNum)))
