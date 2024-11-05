@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -1478,7 +1479,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 }
 
 func (hi *StateAsOfIterF) HasNext() bool {
-	return hi.limit != 0 && hi.nextKey != nil
+	return hi.limit > 0 && hi.nextKey != nil
 }
 
 func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
@@ -1487,7 +1488,7 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 		return nil, nil, hi.ctx.Err()
 	default:
 	}
-	fmt.Printf("[dbg] StateAsOfIterF.next: limit=%d\n", hi.limit)
+	fmt.Printf("[dbg] StateAsOfIterF.next: limit=%d, %s\n", hi.limit, dbg.Stack())
 
 	hi.limit--
 	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
@@ -1625,7 +1626,7 @@ func (hi *StateAsOfIterDB) HasNext() bool {
 	if hi.err != nil {
 		return true
 	}
-	return hi.limit != 0 && hi.nextKey != nil
+	return hi.limit > 0 && hi.nextKey != nil
 }
 
 func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
@@ -2041,7 +2042,7 @@ func (hi *HistoryChangesIterDB) HasNext() bool {
 	if hi.err != nil { // always true, then .Next() call will return this error
 		return true
 	}
-	if hi.limit == 0 { // limit reached
+	if hi.limit <= 0 { // limit reached
 		return false
 	}
 	if hi.nextKey == nil { // EndOfTable
