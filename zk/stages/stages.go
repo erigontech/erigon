@@ -125,7 +125,7 @@ func SequencerZkStages(
 				return stages.SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return stages.UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
+				return stages.UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger, false)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
 				return stages.PruneHashStateStage(p, tx, hashState, ctx)
@@ -328,7 +328,7 @@ func DefaultZkStages(
 				return stages.SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return stages.UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
+				return stages.UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger, false)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx, logger log.Logger) error {
 				return stages.PruneHashStateStage(p, tx, hashState, ctx)

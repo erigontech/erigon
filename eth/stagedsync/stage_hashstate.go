@@ -102,7 +102,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 	return nil
 }
 
-func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) (err error) {
+func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger, quiet bool) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -113,7 +113,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashSta
 	}
 
 	logPrefix := u.LogPrefix()
-	if err = unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx, logger); err != nil {
+	if err = unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx, logger, quiet); err != nil {
 		return err
 	}
 	if err = u.Done(tx); err != nil {
@@ -127,7 +127,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashSta
 	return nil
 }
 
-func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger) error {
+func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, logger log.Logger, quiet bool) error {
 	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(tx, cfg.dirs, ctx, logger)
@@ -143,13 +143,13 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 		}
 		return nil
 	}
-	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */); err != nil {
+	if err := prom.Unwind(logPrefix, s, u, false /* storage */, true /* codes */, quiet); err != nil {
 		return err
 	}
-	if err := prom.Unwind(logPrefix, s, u, false /* storage */, false /* codes */); err != nil {
+	if err := prom.Unwind(logPrefix, s, u, false /* storage */, false /* codes */, quiet); err != nil {
 		return err
 	}
-	if err := prom.Unwind(logPrefix, s, u, true /* storage */, false /* codes */); err != nil {
+	if err := prom.Unwind(logPrefix, s, u, true /* storage */, false /* codes */, quiet); err != nil {
 		return err
 	}
 	return nil
@@ -844,7 +844,7 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator, un
 	return collector.Load(p.tx, kv.HashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
 }
 
-func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool) error {
+func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool, quiet bool) error {
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = kv.StorageChangeSet
@@ -854,7 +854,9 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	from := s.BlockNumber
 	to := u.UnwindPoint
 
-	p.logger.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
+	if !quiet {
+		p.logger.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
+	}
 
 	startkey := hexutility.EncodeTs(to + 1)
 

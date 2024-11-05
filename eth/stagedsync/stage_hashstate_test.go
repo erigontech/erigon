@@ -106,7 +106,7 @@ func TestUnwindHashed(t *testing.T) {
 	}
 	u := &UnwindState{UnwindPoint: 50}
 	s := &StageState{BlockNumber: 100}
-	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, StageHashStateCfg(db2, dirs, historyV3, nil), context.Background(), logger)
+	err = unwindHashStateStageImpl("logPrefix", u, s, tx2, StageHashStateCfg(db2, dirs, historyV3, nil), context.Background(), logger, false)
 	if err != nil {
 		t.Errorf("error while unwind state: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 
 			u := &UnwindState{UnwindPoint: 5}
 			s := &StageState{BlockNumber: 10}
-			if err = unwindHashStateStageImpl("logPrefix", u, s, tx, cfg, ctx, logger); !errors.Is(err, tc.errExp) {
+			if err = unwindHashStateStageImpl("logPrefix", u, s, tx, cfg, ctx, logger, false); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown unwindHashStateStageImpl, got: %v, expected: %v", err, tc.errExp)
 			}
 

@@ -138,7 +138,7 @@ func DefaultStages(ctx context.Context,
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
+				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger, false)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneHashStateStage(p, tx, hashState, ctx)
@@ -318,7 +318,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
+				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger, false)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneHashStateStage(p, tx, hashState, ctx)
@@ -527,7 +527,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
+				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger, false)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneHashStateStage(p, tx, hashState, ctx)
@@ -701,7 +701,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger)
+				return UnwindHashStateStage(u, s, txc.Tx, hashState, ctx, logger, false)
 			},
 		},
 		{
