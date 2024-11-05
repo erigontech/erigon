@@ -181,6 +181,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		}
 		if maxResults > 0 && numberOfResults >= maxResults {
 			nextKey = append(nextKey[:0], k...)
+			fmt.Printf("[dbg] dumper iter acc. break: nextKey %x\n", nextKey)
 			break
 		}
 		if len(v) == 0 {
