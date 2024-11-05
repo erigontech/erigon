@@ -1582,7 +1582,7 @@ func (s *cursor2iter) Close() {
 }
 
 func (s *cursor2iter) HasNext() bool {
-	if s.limit == 0 { // limit reached
+	if s.limit <= 0 { // limit reached
 		return false
 	}
 	if s.nextK == nil { // EndOfTable
@@ -1744,7 +1744,7 @@ func (s *cursorDup2iter) Close() {
 	}
 }
 func (s *cursorDup2iter) HasNext() bool {
-	if s.limit == 0 { // limit reached
+	if s.limit <= 0 { // limit reached
 		return false
 	}
 	if s.nextV == nil { // EndOfTable

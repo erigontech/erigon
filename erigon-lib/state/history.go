@@ -1345,9 +1345,12 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	return val[8:], true, nil
 }
-func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to []byte, roTx kv.Tx, limit int) (stream.KV, error) {
+func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	if !asc {
+		panic("implement me")
+	}
 	hi := &StateAsOfIterF{
-		from: from, to: to, limit: limit,
+		from: from, to: to, limit: limit, orderAscend: asc,
 
 		hc:         ht,
 		startTxNum: startTxNum,
@@ -1388,7 +1391,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		largeValues: ht.h.historyLargeValues,
 		roTx:        roTx,
 		valsTable:   ht.h.historyValsTable,
-		from:        from, to: to, limit: limit,
+		from:        from, to: to, limit: limit, orderAscend: asc,
 
 		startTxNum: startTxNum,
 
@@ -1417,6 +1420,7 @@ type StateAsOfIterF struct {
 	txnKey     [8]byte
 
 	k, v, kBackup, vBackup []byte
+	orderAscend            order.By
 
 	ctx context.Context
 }
@@ -1479,7 +1483,20 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 }
 
 func (hi *StateAsOfIterF) HasNext() bool {
-	return hi.limit > 0 && hi.nextKey != nil
+	if hi.limit <= 0 { // limit reached
+		return false
+	}
+	if hi.nextKey == nil { // EndOfTable
+		return false
+	}
+	if hi.to == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(hi.nextKey, hi.to)
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
@@ -1509,8 +1526,9 @@ type StateAsOfIterDB struct {
 	valsCDup    kv.CursorDupSort
 	valsTable   string
 
-	from, to []byte
-	limit    int
+	from, to    []byte
+	orderAscend order.By
+	limit       int
 
 	nextKey, nextVal []byte
 
@@ -1626,7 +1644,20 @@ func (hi *StateAsOfIterDB) HasNext() bool {
 	if hi.err != nil {
 		return true
 	}
-	return hi.limit > 0 && hi.nextKey != nil
+	if hi.limit <= 0 { // limit reached
+		return false
+	}
+	if hi.nextKey == nil { // EndOfTable
+		return false
+	}
+	if hi.to == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(hi.nextKey, hi.to)
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {

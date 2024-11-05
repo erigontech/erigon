@@ -1952,7 +1952,6 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 
 func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	if !asc {
-		fmt.Printf("[dbg] what 1?\n")
 		panic("implement me")
 	}
 	//histStateIt, err := tx.aggTx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
@@ -1964,7 +1963,7 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	//	return nil, err
 	//}
 	fmt.Printf("[dbg] DomainRange 1: %s, %x, %x\n", dt.d.name, fromKey, toKey)
-	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, tx, limit)
+	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, asc, limit, tx)
 	if err != nil {
 		return nil, err
 	}
