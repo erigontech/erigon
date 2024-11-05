@@ -1051,5 +1051,193 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 }
 
 func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error {
+	if isValidSwitchToCompoundingRequest(s, consolidationRequest) {
+		// source index
+		sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
+		if !exist {
+			log.Warn("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
+			return nil
+		}
+		if err := switchToCompoundingValidator(s, sourceIndex); err != nil {
+			return err
+		}
+		return nil
+	}
+	// Verify that source != target, so a consolidation cannot be used as an exit.
+	if bytes.Equal(consolidationRequest.SourcePubKey[:], consolidationRequest.TargetPubKey[:]) {
+		return nil
+	}
+	// If the pending consolidations queue is full, consolidation requests are ignored
+	if s.GetPendingConsolidations().Len() == int(s.BeaconConfig().PendingConsolidationsLimit) {
+		return nil
+	}
+	// If there is too little available consolidation churn limit, consolidation requests are ignored
+	if getConsolidationChurnLimit(s) <= s.BeaconConfig().MinActivationBalance {
+		return nil
+	}
+	// source/target index and validator
+	sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
+	if !exist {
+		log.Warn("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
+		return nil
+	}
+	targetIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.TargetPubKey)
+	if !exist {
+		log.Warn("Validator index not found for target pubkey", "pubkey", consolidationRequest.TargetPubKey)
+		return nil
+	}
+	sourceValidator, err := s.ValidatorForValidatorIndex(int(sourceIndex))
+	if err != nil {
+		return err
+	}
+	targetValidator, err := s.ValidatorForValidatorIndex(int(targetIndex))
+	if err != nil {
+		return err
+	}
+
+	// Verify source withdrawal credentials
+	hasCorrectCredential := state.HasExecutionWithdrawalCredential(sourceValidator, s.BeaconConfig())
+	sourceWc := sourceValidator.WithdrawalCredentials()
+	isCorrectSourceAddress := bytes.Equal(consolidationRequest.SourceAddress[:], sourceWc[12:])
+	if !(isCorrectSourceAddress && hasCorrectCredential) {
+		return nil
+	}
+	// Verify that target has execution withdrawal credentials
+	if !state.HasExecutionWithdrawalCredential(targetValidator, s.BeaconConfig()) {
+		return nil
+	}
+	// Verify the source and the target are active
+	curEpoch := state.Epoch(s)
+	if !sourceValidator.Active(curEpoch) || !targetValidator.Active(curEpoch) {
+		return nil
+	}
+	// Verify exits for source and target have not been initiated
+	if sourceValidator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch ||
+		targetValidator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
+		return nil
+	}
+	// Verify the source has been active long enough
+	if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+		return nil
+	}
+	// Verify the source has no pending withdrawals in the queue
+	if getPendingBalanceToWithdraw(s, sourceIndex) > 0 {
+		return nil
+	}
+
+	// Initiate source validator exit and append pending consolidation
+	sourceValidator.SetExitEpoch(computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance()))
+	sourceValidator.SetWithdrawableEpoch(sourceValidator.ExitEpoch() + s.BeaconConfig().MinValidatorWithdrawabilityDelay)
+	s.AppendPendingConsolidation(&solid.PendingConsolidation{
+		SourceIndex: sourceIndex,
+		TargetIndex: targetIndex,
+	})
+	if state.HasEth1WithdrawalCredential(targetValidator, s.BeaconConfig()) {
+		return switchToCompoundingValidator(s, targetIndex)
+	}
 	return nil
+}
+
+func isValidSwitchToCompoundingRequest(s abstract.BeaconState, request *solid.ConsolidationRequest) bool {
+	// Switch to compounding requires source and target be equal
+	if !bytes.Equal(request.SourcePubKey[:], request.TargetPubKey[:]) {
+		return false
+	}
+	// Verify pubkey exists
+	vindex, exist := s.ValidatorIndexByPubkey(request.SourcePubKey)
+	if !exist {
+		return false
+	}
+	sourceValidator, err := s.ValidatorForValidatorIndex(int(vindex))
+	if err != nil {
+		log.Warn("Error getting validator for source pubkey", "error", err)
+		return false
+	}
+	// Verify request has been authorized
+	wc := sourceValidator.WithdrawalCredentials()
+	if !bytes.Equal(wc[12:], request.SourceAddress[:]) {
+		return false
+	}
+	// Verify source withdrawal credentials
+	if !state.HasEth1WithdrawalCredential(sourceValidator, s.BeaconConfig()) {
+		return false
+	}
+	// Verify the source is active
+	curEpoch := state.Epoch(s)
+	if !sourceValidator.Active(curEpoch) {
+		return false
+	}
+	// Verify exit for source has not been initiated
+	if sourceValidator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
+		return false
+	}
+	return true
+}
+
+func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
+	validator, err := s.ValidatorForValidatorIndex(int(vindex))
+	if err != nil {
+		return err
+	}
+	// copy the withdrawal credentials
+	wc := validator.WithdrawalCredentials()
+	newWc := common.Hash{}
+	copy(newWc[:], wc[:])
+	newWc[0] = s.BeaconConfig().CompoundingWithdrawalPrefix
+	validator.SetWithdrawalCredentials(newWc)
+	return queueExcessActiveBalance(s, vindex, &validator)
+}
+
+func queueExcessActiveBalance(s abstract.BeaconState, vindex uint64, validator *solid.Validator) error {
+	balance, err := s.ValidatorBalance(int(vindex))
+	if err != nil {
+		return err
+	}
+	if balance > s.BeaconConfig().MinActivationBalance {
+		excessBalance := balance - s.BeaconConfig().MinActivationBalance
+		if err := s.SetValidatorBalance(int(vindex), s.BeaconConfig().MinActivationBalance); err != nil {
+			return err
+		}
+		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
+		// and GENESIS_SLOT to distinguish from a pending deposit request
+		s.AppendPendingDeposit(&solid.PendingDeposit{
+			PubKey:                validator.PublicKey(),
+			WithdrawalCredentials: validator.WithdrawalCredentials(),
+			Amount:                excessBalance,
+			Signature:             bls.InfiniteSignature,
+			Slot:                  s.BeaconConfig().GenesisSlot,
+		})
+	}
+	return nil
+}
+
+func getConsolidationChurnLimit(s abstract.BeaconState) uint64 {
+	return state.GetBalanceChurnLimit(s) - state.GetActivationExitChurnLimit(s)
+}
+
+// compute_consolidation_epoch_and_update_churn
+func computeConsolidationEpochAndUpdateChurn(s abstract.BeaconState, consolidationBalance uint64) uint64 {
+	earlistConsolidationEpoch := max(
+		s.GetEarlistConsolidationEpoch(),
+		state.ComputeActivationExitEpoch(s.BeaconConfig(), state.Epoch(s)),
+	)
+	perEpochConsolidationChurn := getConsolidationChurnLimit(s)
+	// New epoch for consolidations.
+	var consolidationBalanceToConsume uint64
+	if s.GetEarlistConsolidationEpoch() < earlistConsolidationEpoch {
+		consolidationBalanceToConsume = perEpochConsolidationChurn
+	} else {
+		consolidationBalanceToConsume = s.GetConsolidationBalanceToConsume()
+	}
+	// Consolidation doesn't fit in the current earliest epoch.
+	if consolidationBalance > consolidationBalanceToConsume {
+		balanceToProcess := consolidationBalance - consolidationBalanceToConsume
+		additionalEpochs := (balanceToProcess-1)/perEpochConsolidationChurn + 1
+		earlistConsolidationEpoch += additionalEpochs
+		consolidationBalanceToConsume += additionalEpochs * perEpochConsolidationChurn
+	}
+	// Consume the balance and update state variables.
+	s.SetConsolidationBalanceToConsume(consolidationBalanceToConsume - consolidationBalance)
+	s.SetEarlistConsolidationEpoch(earlistConsolidationEpoch)
+	return earlistConsolidationEpoch
 }

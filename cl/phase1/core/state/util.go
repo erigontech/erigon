@@ -27,10 +27,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 )
 
-const (
-	CompoundingWithdrawalPrefix = byte(2) // Electra withdrawal prefixes
-)
-
 func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *lru.Cache[K, V] {
 	dst.Purge()
 	for _, key := range src.Keys() {
@@ -80,7 +76,7 @@ func HasEth1WithdrawalCredential(validator solid.Validator, conf *clparams.Beaco
 
 func HasCompoundingWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {
 	withdrawalCredentials := validator.WithdrawalCredentials()
-	return withdrawalCredentials[0] == CompoundingWithdrawalPrefix
+	return withdrawalCredentials[0] == conf.CompoundingWithdrawalPrefix
 }
 
 func HasExecutionWithdrawalCredential(validator solid.Validator, conf *clparams.BeaconChainConfig) bool {

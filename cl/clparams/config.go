@@ -553,6 +553,7 @@ type BeaconChainConfig struct {
 	TargetNumberOfPeers          uint64 `yaml:"TARGET_NUMBER_OF_PEERS" spec:"true" json:"TARGET_NUMBER_OF_PEERS,string"`                     // TargetNumberOfPeers defines the target number of peers.
 
 	// Electra
+	CompoundingWithdrawalPrefix           byte   `yaml:"COMPOUNDING_WITHDRAWAL_PREFIX" spec:"true" json:"COMPOUNDING_WITHDRAWAL_PREFIX"`                                  // CompoundingWithdrawalPrefix is the prefix for compounding withdrawals.
 	MinPerEpochChurnLimitElectra          uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,string"`                   // MinPerEpochChurnLimitElectra defines the minimum per epoch churn limit for Electra.
 	MaxPerEpochActivationExitChurnLimit   uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT,string"`   // MaxPerEpochActivationExitChurnLimit defines the maximum per epoch activation exit churn limit for Electra.
 	MaxDepositRequestsPerPayload          uint64 `yaml:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`                     // MaxDepositRequestsPerPayload defines the maximum number of deposit requests in a block.
@@ -814,6 +815,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	CustodyRequirement:           1,
 	TargetNumberOfPeers:          70,
 
+	CompoundingWithdrawalPrefix:           0x02,
 	MinPerEpochChurnLimitElectra:          128000000000,
 	MaxPerEpochActivationExitChurnLimit:   256000000000,
 	MaxDepositRequestsPerPayload:          8192,

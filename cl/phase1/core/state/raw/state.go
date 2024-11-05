@@ -265,3 +265,11 @@ func (b *BeaconState) GetDepositRequestsStartIndex() uint64 {
 func (b *BeaconState) GetPendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation] {
 	return b.pendingConsolidations
 }
+
+func (b *BeaconState) GetEarlistConsolidationEpoch() uint64 {
+	return b.earliestConsolidationEpoch
+}
+
+func (b *BeaconState) GetConsolidationBalanceToConsume() uint64 {
+	return b.consolidationBalanceToConsume
+}

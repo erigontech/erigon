@@ -64,7 +64,9 @@ type BeaconStateExtension interface {
 	GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit]
 	GetDepositRequestsStartIndex() uint64
 	GetPendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation]
+	GetEarlistConsolidationEpoch() uint64
 	ComputeExitEpochAndUpdateChurn(exitBalance uint64) uint64
+	GetConsolidationBalanceToConsume() uint64
 }
 
 type BeaconStateBasic interface {
@@ -135,6 +137,8 @@ type BeaconStateMutator interface {
 	SetDepositBalanceToConsume(uint64)
 	SetPendingConsolidations(consolidations *solid.ListSSZ[*solid.PendingConsolidation])
 	SetDepositRequestsStartIndex(uint64)
+	SetConsolidationBalanceToConsume(uint64)
+	SetEarlistConsolidationEpoch(uint64)
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)
@@ -150,6 +154,7 @@ type BeaconStateMutator interface {
 	AppendValidator(in solid.Validator)
 	AppendPendingDeposit(deposit *solid.PendingDeposit)
 	AppendPendingPartialWithdrawal(withdrawal *solid.PendingPartialWithdrawal)
+	AppendPendingConsolidation(consolidation *solid.PendingConsolidation)
 
 	ResetEth1DataVotes()
 	ResetEpochParticipation()
