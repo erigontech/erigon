@@ -1358,7 +1358,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 	}
 	for i, item := range ht.iit.files {
 		if item.endTxNum <= startTxNum {
-			fmt.Printf("[dbg] ht.iit.files skip file: %s, %d, %d\n", item.getter.FileName(), item.endTxNum, startTxNum)
+			fmt.Printf("[dbg] ht.iit.files skip file: %s, %d, %d\n", item.src.decompressor.FileName(), item.endTxNum, startTxNum)
 			continue
 		}
 		fmt.Printf("[dbg] ht.iit.files use file: %s\n", item.src.decompressor.FileName())
