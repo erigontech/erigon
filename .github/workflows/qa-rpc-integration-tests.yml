@@ -119,16 +119,8 @@ jobs:
           erigon_getLatestLogs/test_12.json,\
           erigon_getBalanceChangesInBlock,\
           eth_createAccessList/test_16.json,\
-          parity_getBlockReceipts/test_01.json,\
-          parity_getBlockReceipts/test_02.json,\
-          parity_getBlockReceipts/test_03.json,\
-          parity_getBlockReceipts/test_04.json,\
-          parity_getBlockReceipts/test_05.json,\
-          parity_getBlockReceipts/test_06.json,\
-          parity_getBlockReceipts/test_07.json,\
-          parity_getBlockReceipts/test_08.json,\
-          parity_getBlockReceipts/test_09.json,\
-          parity_getBlockReceipts/test_10.json,\
+#         parity_getBlockReceipts was renamet to eth_getBlockReceipts
+          parity_getBlockReceipts,\
           trace_filter/test_16.json,\
           trace_rawTransaction/test_01.json,\
           trace_rawTransaction/test_03.json,\
