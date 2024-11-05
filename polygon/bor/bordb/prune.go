@@ -97,7 +97,7 @@ func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeSto
 		}
 	}
 
-	if !unwindCfg.KeepEventNums && unwindCfg.Astrid {
+	if !unwindCfg.KeepEventNums {
 		if err := bridge.UnwindBlockNumToEventID(tx, unwindPoint); err != nil {
 			return err
 		}
