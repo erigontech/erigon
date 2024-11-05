@@ -1077,7 +1077,7 @@ func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (of
 		}
 		return false
 	})
-	if foundItem == count {
+	if foundItem == count { // `Search` returns `n` if not found
 		return nil, false
 	}
 	foundOffset := f(uint64(foundItem))

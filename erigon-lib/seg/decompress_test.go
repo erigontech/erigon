@@ -320,11 +320,11 @@ func TestUncompressed(t *testing.T) {
 		//first word is ``
 		k, ok = g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
-		require.Equal(" 0", string(k))
+		require.Equal("", string(k))
 
 		k, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
-		require.Equal(" 0", string(k))
+		require.Equal("", string(k))
 	})
 
 }
