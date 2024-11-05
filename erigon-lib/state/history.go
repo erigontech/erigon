@@ -30,7 +30,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -1501,7 +1500,6 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 		return nil, nil, hi.ctx.Err()
 	default:
 	}
-	fmt.Printf("[dbg] StateAsOfIterF.next: limit=%d, %s\n", hi.limit, dbg.Stack())
 
 	hi.limit--
 	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
@@ -1511,6 +1509,7 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
+	fmt.Printf("[dbg] StateAsOfIterF.next: limit=%d, %x\n", hi.limit, hi.kBackup)
 	return hi.kBackup, hi.vBackup, nil
 }
 
