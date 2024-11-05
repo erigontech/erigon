@@ -1066,30 +1066,24 @@ func (g *Getter) FastNext(buf []byte) ([]byte, uint64) {
 	return buf[:wordLen], postLoopPos
 }
 
-// BinarySearch - doesn't know if file is sorted
-func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (offset uint64)) (foundOffset uint64) {
-	//TODO: unit tests with asserts
+// BinarySearch - !expecting sorted file
+func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (offset uint64)) (value []byte, ok bool) {
 	foundItem := sort.Search(count, func(i int) bool {
 		offset := f(uint64(i))
 		g.Reset(offset)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
-			fmt.Printf("ee: %s, %s,  %d, %d\n", key, fromPrefix, i, bytes.Compare(key, fromPrefix))
 			return bytes.Compare(key, fromPrefix) >= 0
-		} else {
-			panic(1)
 		}
 		return false
 	})
-	fmt.Printf("found:  %d, %d\n", foundItem, count)
-	if foundItem < count {
-		foundOffset = f(uint64(foundItem))
+	if foundItem == count {
+		return nil, false
 	}
-	fmt.Printf("found offset: %d\n", foundOffset)
+	foundOffset := f(uint64(foundItem))
 	g.Reset(foundOffset)
 	if g.HasNext() {
-		key, _ := g.Next(nil)
-		fmt.Printf("found key: %s\n", key)
+		value, _ = g.Next(nil)
 	}
 	if dbg.AssertEnabled && foundItem > 2 {
 		g.Reset(f(uint64(foundItem - 2))) // prev key
@@ -1098,5 +1092,5 @@ func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (of
 			panic(fmt.Errorf("see smaller key: fromPrefix=%x, prevKey=%x", fromPrefix, prevKey))
 		}
 	}
-	return foundOffset
+	return value, true
 }

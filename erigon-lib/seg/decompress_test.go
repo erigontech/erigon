@@ -258,23 +258,23 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer c.Close()
 	slices.Sort(loremStrings)
 	for k, w := range loremStrings {
-		if err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
-			t.Fatal(err)
+		if len(w) == 0 {
+			err = c.AddUncompressedWord([]byte(w))
+			require.NoError(t, err)
+			continue
 		}
+		err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k)))
+		require.NoError(t, err)
 	}
-	if err = c.Compress(); err != nil {
-		t.Fatal(err)
-	}
-	var d *Decompressor
-	if d, err = NewDecompressor(file); err != nil {
-		t.Fatal(err)
-	}
+	err = c.Compress()
+	require.NoError(t, err)
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	t.Cleanup(d.Close)
 	return d
 }
 
@@ -284,6 +284,7 @@ func TestUncompressed(t *testing.T) {
 	g := d.MakeGetter()
 	i := 0
 	var offsets []uint64
+	offsets = append(offsets, 0)
 	for g.HasNext() {
 		w := loremStrings[i]
 		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
@@ -296,11 +297,35 @@ func TestUncompressed(t *testing.T) {
 		offsets = append(offsets, offset)
 	}
 
-	found := g.BinarySearch([]byte("ipsum"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
-	fmt.Printf("found: %d\n", found)
-	g.Reset(found)
-	k, _ := g.Next(nil)
-	fmt.Printf("found: %s\n", k)
+	t.Run("BinarySearch", func(t *testing.T) {
+		require := require.New(t)
+		k, ok := g.BinarySearch([]byte("ipsum"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		require.Equal("ipsum 38", string(k))
+		k, ok = g.BinarySearch([]byte("ipsu"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		require.Equal("ipsum 38", string(k))
+
+		//last word is `voluptate`
+		k, ok = g.BinarySearch([]byte("voluptate"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		require.Equal("voluptate 69", string(k))
+		k, ok = g.BinarySearch([]byte("voluptat"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		require.Equal("voluptate 69", string(k))
+		k, ok = g.BinarySearch([]byte("voluptatez"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.False(ok)
+		require.Equal("", string(k))
+
+		//first word is ``
+		k, ok = g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		require.Equal(" 0", string(k))
+
+		k, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		require.Equal(" 0", string(k))
+	})
 
 }
 
@@ -472,13 +497,15 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 	})
 }
 
-const lorem = `
-lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
+const lorem = `lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
 dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
 consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
 excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
 
-var loremStrings = strings.Split(strings.ReplaceAll(strings.ReplaceAll(lorem, "\n", " "), "\r", ""), " ")
+var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+func rmNewLine(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
+}
 
 func TestDecompressTorrent(t *testing.T) {
 	t.Skip()
