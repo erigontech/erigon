@@ -238,7 +238,7 @@ func Main(ctx *cli.Context) error {
 	}
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
-		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
@@ -311,7 +311,6 @@ func Main(ctx *cli.Context) error {
 	t8logger := log.New("t8ntool")
 	chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil, t8logger)
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, chainReader, getTracer, t8logger)
-
 	if hashError != nil {
 		return NewError(ErrorMissingBlockhash, fmt.Errorf("blockhash error: %v", err))
 	}
@@ -387,87 +386,95 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 	var chainId *uint256.Int
 
 	if txJson.Value != nil {
-		value, overflow = uint256.FromBig((*big.Int)(txJson.Value))
+		value, overflow = uint256.FromBig(txJson.Value.ToInt())
 		if overflow {
 			return nil, fmt.Errorf("value field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.GasPrice != nil {
-		gasPrice, overflow = uint256.FromBig((*big.Int)(txJson.GasPrice))
+		gasPrice, overflow = uint256.FromBig(txJson.GasPrice.ToInt())
 		if overflow {
 			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.ChainID != nil {
-		chainId, overflow = uint256.FromBig((*big.Int)(txJson.ChainID))
+		chainId, overflow = uint256.FromBig(txJson.ChainID.ToInt())
 		if overflow {
 			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
 		}
 	}
 
-	switch txJson.Type {
-	case types.LegacyTxType, types.AccessListTxType:
-		var toAddr = libcommon.Address{}
-		if txJson.To != nil {
-			toAddr = *txJson.To
-		}
-		legacyTx := types.NewTransaction(uint64(txJson.Nonce), toAddr, value, uint64(txJson.Gas), gasPrice, txJson.Input)
-		legacyTx.V.SetFromBig(txJson.V.ToInt())
-		legacyTx.S.SetFromBig(txJson.S.ToInt())
-		legacyTx.R.SetFromBig(txJson.R.ToInt())
+	commonTx := types.CommonTx{
+		Nonce: uint64(txJson.Nonce),
+		To:    txJson.To,
+		Value: value,
+		Gas:   uint64(txJson.Gas),
+		Data:  txJson.Input,
+	}
 
-		if txJson.Type == types.AccessListTxType {
-			accessListTx := types.AccessListTx{
-				LegacyTx:   *legacyTx,
-				ChainID:    chainId,
-				AccessList: *txJson.Accesses,
-			}
-
-			return &accessListTx, nil
-		} else {
-			return legacyTx, nil
+	commonTx.V.SetFromBig(txJson.V.ToInt())
+	commonTx.R.SetFromBig(txJson.R.ToInt())
+	commonTx.S.SetFromBig(txJson.S.ToInt())
+	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
+		legacyTx := types.LegacyTx{
+			//it's ok to copy here - because it's constructor of object - no parallel access yet
+			CommonTx: commonTx, //nolint
+			GasPrice: gasPrice,
 		}
 
-	case types.DynamicFeeTxType:
+		if txJson.Type == types.LegacyTxType {
+			return &legacyTx, nil
+		}
+
+		return &types.AccessListTx{
+			//it's ok to copy here - because it's constructor of object - no parallel access yet
+			LegacyTx:   legacyTx, //nolint
+			ChainID:    chainId,
+			AccessList: *txJson.Accesses,
+		}, nil
+	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
 		var tip *uint256.Int
 		var feeCap *uint256.Int
 		if txJson.Tip != nil {
-			tip, overflow = uint256.FromBig((*big.Int)(txJson.Tip))
+			tip, overflow = uint256.FromBig(txJson.Tip.ToInt())
 			if overflow {
 				return nil, fmt.Errorf("maxPriorityFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
 		if txJson.FeeCap != nil {
-			feeCap, overflow = uint256.FromBig((*big.Int)(txJson.FeeCap))
+			feeCap, overflow = uint256.FromBig(txJson.FeeCap.ToInt())
 			if overflow {
 				return nil, fmt.Errorf("maxFeePerGas field caused an overflow (uint256)")
 			}
 		}
 
 		dynamicFeeTx := types.DynamicFeeTransaction{
-			CommonTx: types.CommonTx{
-				Nonce: uint64(txJson.Nonce),
-				To:    txJson.To,
-				Value: value,
-				Gas:   uint64(txJson.Gas),
-				Data:  txJson.Input,
-			},
+			//it's ok to copy here - because it's constructor of object - no parallel access yet
+			CommonTx:   commonTx, //nolint
 			ChainID:    chainId,
 			Tip:        tip,
 			FeeCap:     feeCap,
 			AccessList: *txJson.Accesses,
 		}
 
-		dynamicFeeTx.V.SetFromBig(txJson.V.ToInt())
-		dynamicFeeTx.S.SetFromBig(txJson.S.ToInt())
-		dynamicFeeTx.R.SetFromBig(txJson.R.ToInt())
+		if txJson.Type == types.DynamicFeeTxType {
+			return &dynamicFeeTx, nil
+		}
 
-		return &dynamicFeeTx, nil
+		auths := make([]types.Authorization, 0)
+		for _, auth := range *txJson.Authorizations {
+			auths = append(auths, auth.ToAuthorization())
+		}
 
-	default:
+		return &types.SetCodeTransaction{
+			// it's ok to copy here - because it's constructor of object - no parallel access yet
+			DynamicFeeTransaction: dynamicFeeTx, //nolint
+			Authorizations:        auths,
+		}, nil
+	} else {
 		return nil, nil
 	}
 }
@@ -599,6 +606,7 @@ func NewHeader(env stEnv) *types.Header {
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
+	header.RequestsHash = env.RequestsHash
 
 	return &header
 }

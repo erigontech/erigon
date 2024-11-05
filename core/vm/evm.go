@@ -189,7 +189,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	p, isPrecompile := evm.precompile(addr)
 	var code []byte
 	if !isPrecompile {
-		code = evm.intraBlockState.GetCode(addr)
+		code = evm.intraBlockState.ResolveCode(addr)
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()
@@ -261,7 +261,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		addrCopy := addr
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		codeHash := evm.intraBlockState.GetCodeHash(addrCopy)
+		codeHash := evm.intraBlockState.ResolveCodeHash(addrCopy)
 		var contract *Contract
 		if typ == CALLCODE {
 			contract = NewContract(caller, caller.Address(), value, gas, evm.config.SkipAnalysis)
@@ -396,7 +396,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gasRemainin
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
 	// Ensure there's no existing contract already at the designated address
-	contractHash := evm.intraBlockState.GetCodeHash(address)
+	contractHash := evm.intraBlockState.ResolveCodeHash(address)
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != emptyCodeHash) {
 		err = ErrContractAddressCollision
 		return nil, libcommon.Address{}, 0, err

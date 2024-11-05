@@ -508,6 +508,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 		ExcessBlobGas: g.ExcessBlobGas,
 		AuRaStep:      g.AuRaStep,
 		AuRaSeal:      g.AuRaSeal,
+		RequestsHash:  g.RequestsHash,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -543,6 +544,15 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.
 			head.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
 		} else {
 			head.ParentBeaconBlockRoot = &libcommon.Hash{}
+		}
+	}
+
+	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
+		// TODO @somnathb1 - if later iterations and/or tests don't need this from genesis.json, remove the following
+		if g.RequestsHash != nil {
+			head.RequestsHash = g.RequestsHash
+		} else {
+			head.RequestsHash = &types.EmptyRootHash
 		}
 	}
 

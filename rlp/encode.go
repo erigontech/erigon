@@ -856,3 +856,22 @@ func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
 	}
 	return nil
 }
+
+func EncodeOptionalAddress(addr *libcommon.Address, w io.Writer, buffer []byte) error {
+	if addr == nil {
+		buffer[0] = 128
+	} else {
+		buffer[0] = 128 + 20
+	}
+
+	if _, err := w.Write(buffer[:1]); err != nil {
+		return err
+	}
+	if addr != nil {
+		if _, err := w.Write(addr.Bytes()); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

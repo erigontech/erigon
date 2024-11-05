@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	// "github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
@@ -593,7 +595,6 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 
 	// Write withdrawals to block
 	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals)
-
 	if err := rawdb.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}

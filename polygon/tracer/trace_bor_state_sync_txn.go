@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -56,7 +57,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	tracer = NewBorStateSyncTxnTracer(tracer, len(stateSyncEvents), stateReceiverContract)
 	rules := chainConfig.Rules(blockNum, blockTime)
 	stateWriter := state.NewNoopWriter()
-	execCb := func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error) {
+	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		return traceBorStateSyncTxn(ctx, ibs, stateWriter, stateReceiverContract, stateSyncEvents, evm, rules, txCtx, refunds)
 	}
 
@@ -75,7 +76,7 @@ func TraceBorStateSyncTxnTraceAPI(
 	blockHash libcommon.Hash,
 	blockNum uint64,
 	blockTime uint64,
-) (*core.ExecutionResult, error) {
+) (*evmtypes.ExecutionResult, error) {
 	stateSyncEvents, err := blockReader.EventsByBlock(ctx, dbTx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
@@ -102,7 +103,7 @@ func traceBorStateSyncTxn(
 	rules *chain.Rules,
 	txCtx evmtypes.TxContext,
 	refunds bool,
-) (*core.ExecutionResult, error) {
+) (*evmtypes.ExecutionResult, error) {
 	for _, eventData := range stateSyncEvents {
 		select {
 		case <-ctx.Done():
@@ -141,7 +142,7 @@ func traceBorStateSyncTxn(
 		evm.Reset(txCtx, ibs)
 	}
 
-	return &core.ExecutionResult{}, nil
+	return &evmtypes.ExecutionResult{}, nil
 }
 
 func initStateSyncTxContext(blockNum uint64, blockHash libcommon.Hash) evmtypes.TxContext {

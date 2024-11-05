@@ -9,17 +9,17 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -32,22 +32,25 @@ const (
 )
 
 type LogIndexCfg struct {
-	tmpdir           string
-	db               kv.RwDB
-	prune            prune.Mode
-	bufLimit         datasize.ByteSize
-	flushEvery       time.Duration
-	noPruneContracts map[libcommon.Address]bool
+	tmpdir     string
+	db         kv.RwDB
+	prune      prune.Mode
+	bufLimit   datasize.ByteSize
+	flushEvery time.Duration
+
+	// For not pruning the logs of this contract since deposit contract logs are needed by CL to validate/produce blocks.
+	// All logs should be available to a validating node through eth_getLogs
+	depositContract *libcommon.Address
 }
 
-func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string, noPruneContracts map[libcommon.Address]bool) LogIndexCfg {
+func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string, depositContract *libcommon.Address) LogIndexCfg {
 	return LogIndexCfg{
-		db:               db,
-		prune:            prune,
-		bufLimit:         bitmapsBufLimit,
-		flushEvery:       bitmapsFlushEvery,
-		tmpdir:           tmpDir,
-		noPruneContracts: noPruneContracts,
+		db:              db,
+		prune:           prune,
+		bufLimit:        bitmapsBufLimit,
+		flushEvery:      bitmapsFlushEvery,
+		tmpdir:          tmpDir,
+		depositContract: depositContract,
 	}
 }
 
@@ -106,7 +109,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-// Add the topics and address index for logs, if not in prune range or addr in noPruneContracts
+// Add the topics and address index for logs, if not in prune range or addr is the deposit contract
 func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, pruneBlock uint64, cfg LogIndexCfg, ctx context.Context, logger log.Logger) error {
 	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -179,15 +182,15 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 		}
 
 		toStore := true
-		// if pruning is enabled, and noPruneContracts isn't configured for the chain, don't index
+		// if pruning is enabled, and depositContract isn't configured for the chain, don't index
 		if blockNum < pruneBlock {
 			toStore = false
-			if cfg.noPruneContracts == nil {
+			if cfg.depositContract == nil {
 				continue
 			}
 			for _, l := range ll {
 				// if any of the log address is in noPrune, store and index all logs for this txId
-				if cfg.noPruneContracts[l.Address] {
+				if *cfg.depositContract == l.Address {
 					toStore = true
 					break
 				}
@@ -431,7 +434,7 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
-	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, s.PruneProgress, pruneTo, ctx, logger, cfg.noPruneContracts); err != nil {
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, s.PruneProgress, pruneTo, ctx, logger, cfg.depositContract); err != nil {
 		return err
 	}
 	if err = s.DoneAt(tx, pruneTo); err != nil {
@@ -447,7 +450,7 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 }
 
 // Prune log indexes as well as logs within the prune range
-func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, pruneTo uint64, ctx context.Context, logger log.Logger, noPruneContracts map[libcommon.Address]bool) error {
+func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, pruneTo uint64, ctx context.Context, logger log.Logger, depositContract *libcommon.Address) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -490,8 +493,8 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, prune
 			toPrune := true
 			for _, l := range logs {
 				// No logs (or sublogs) for this txId should be pruned
-				// if one of the logs belongs to noPruneContracts lis
-				if noPruneContracts != nil && noPruneContracts[l.Address] {
+				// if one of the logs belongs to the deposit contract
+				if depositContract != nil && *depositContract == l.Address {
 					toPrune = false
 					break
 				}

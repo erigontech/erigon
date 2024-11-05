@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -165,7 +166,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	blockCtx = evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
+		Transfer:    consensus.Transfer,
 		GetHash:     getHash,
 		Coinbase:    parent.Coinbase,
 		BlockNumber: parent.Number.Uint64(),
@@ -457,7 +458,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	var excessBlobGas uint64 = 0
 	blockCtx = evmtypes.BlockContext{
 		CanTransfer:   core.CanTransfer,
-		Transfer:      core.Transfer,
+		Transfer:      consensus.Transfer,
 		GetHash:       getHash,
 		Coinbase:      parent.Coinbase,
 		BlockNumber:   parent.Number.Uint64(),

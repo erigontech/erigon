@@ -66,7 +66,7 @@ type BlobsBundleV1 struct {
 	Blobs       []hexutility.Bytes `json:"blobs"       gencodec:"required"`
 }
 
-type ExecutionPayloadBodyV1 struct {
+type ExecutionPayloadBody struct {
 	Transactions []hexutility.Bytes  `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
 }
@@ -84,10 +84,11 @@ type ForkChoiceUpdatedResponse struct {
 }
 
 type GetPayloadResponse struct {
-	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
-	BlockValue            *hexutil.Big      `json:"blockValue"`
-	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
-	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
+	ExecutionPayload      *ExecutionPayload  `json:"executionPayload" gencodec:"required"`
+	BlockValue            *hexutil.Big       `json:"blockValue"`
+	BlobsBundle           *BlobsBundleV1     `json:"blobsBundle"`
+	ExecutionRequests     []hexutility.Bytes `json:"executionRequests"`
+	ShouldOverrideBuilder bool               `json:"shouldOverrideBuilder"`
 }
 
 type StringifiedError struct{ err error }

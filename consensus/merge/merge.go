@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
@@ -131,16 +132,16 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 }
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, chain, syscall, logger)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for _, r := range rewards {
 		state.AddBalance(r.Beneficiary, &r.Amount)
@@ -149,7 +150,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	if withdrawals != nil {
 		if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
 			if err := auraEngine.ExecuteSystemWithdrawals(withdrawals, syscall); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		} else {
 			for _, w := range withdrawals {
@@ -159,21 +160,49 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		}
 	}
 
-	return txs, r, nil
+	var rs types.FlatRequests
+	if config.IsPrague(header.Time) {
+		rs = make(types.FlatRequests, len(types.KnownRequestTypes))
+		allLogs := make(types.Logs, 0)
+		for _, rec := range receipts {
+			allLogs = append(allLogs, rec.Logs...)
+		}
+		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+		}
+		rs[0] = *depositReqs
+		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
+		rs[1] = *withdrawalReq
+		consolidations := misc.DequeueConsolidationRequests7251(syscall)
+		rs[2] = *consolidations
+		if header.RequestsHash != nil {
+			rh := rs.Hash()
+			if *header.RequestsHash != *rh {
+				return nil, nil, nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
+			}
+		}
+	}
+
+	return txs, receipts, rs, nil
 }
 
 func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, error) {
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
 	}
-	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, logger)
+	header.RequestsHash = nil
+	outTxs, outReceipts, rs, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, logger)
+
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
+	if config.IsPrague(header.Time) {
+		header.RequestsHash = rs.Hash()
+	}
+	return types.NewBlockForAsembling(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, rs, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash libcommon.Hash) {
@@ -245,7 +274,6 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	if !chain.Config().IsCancun(header.Time) {
 		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
-
 	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
 		return err
 	}
@@ -253,13 +281,35 @@ func (s *Merge) verifyHeader(chain consensus.ChainHeaderReader, header, parent *
 	if *header.ExcessBlobGas != expectedExcessBlobGas {
 		return fmt.Errorf("invalid excessBlobGas: have %d, want %d", *header.ExcessBlobGas, expectedExcessBlobGas)
 	}
+
+	// Verify existence / non-existence of requestsHash
+	prague := chain.Config().IsPrague(header.Time)
+	if prague && header.RequestsHash == nil {
+		return errors.New("missing requestsHash")
+	}
+	if !prague && header.RequestsHash != nil {
+		return consensus.ErrUnexpectedRequests
+	}
+
 	return nil
 }
 
-func (s *Merge) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	if !misc.IsPoSHeader(block.Header()) {
-		return s.eth1Engine.Seal(chain, block, results, stop)
+func (s *Merge) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
+	if !misc.IsPoSHeader(block.HeaderNoCopy()) {
+		return s.eth1Engine.Seal(chain, blockWithReceipts, results, stop)
 	}
+
+	header := block.Header()
+	header.Nonce = ProofOfStakeNonce
+
+	select {
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
+	default:
+		log.Warn("Sealing result is not read", "sealhash", block.Hash())
+	}
+
 	return nil
 }
 
@@ -282,10 +332,21 @@ func (s *Merge) Initialize(config *chain.Config, chain consensus.ChainHeaderRead
 			return syscall(addr, data, state, header, false /* constCall */)
 		})
 	}
+	if chain.Config().IsPrague(header.Time) {
+		misc.StoreBlockHashesEip2935(header, state, config, chain)
+	}
 }
 
 func (s *Merge) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return s.eth1Engine.APIs(chain)
+}
+
+func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
+	return s.eth1Engine.GetTransferFunc()
+}
+
+func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return s.eth1Engine.GetPostApplyMessageFunc()
 }
 
 func (s *Merge) Close() error {

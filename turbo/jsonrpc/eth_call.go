@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -25,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -256,7 +256,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	// Create a helper to check if a gas allowance results in an executable transaction
-	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
+	executable := func(gas uint64) (bool, *evmtypes.ExecutionResult, error) {
 		result, err := caller.DoCallWithNewGas(ctx, gas)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {

@@ -144,6 +144,10 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalTransactionsBinary error %w", err)
 		}
+
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalRequestsBinary error %w", err)
+		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
@@ -185,6 +189,10 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 		txs, err := types.MarshalTransactionsBinary(body.Transactions)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: MarshalTransactionsBinary error %w", err)
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalRequestsBinary error %w", err)
 		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,

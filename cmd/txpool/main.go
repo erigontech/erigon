@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolutil"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	common2 "github.com/ledgerwatch/erigon/common"
@@ -166,7 +166,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	newTxs := make(chan types.Announcements, 1024)
 	defer close(newTxs)
-	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
+	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpoolutil.AllComponents(ctx, cfg,
 		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient, misc.Eip1559FeeCalculator, logger)
 	if err != nil {
 		return err

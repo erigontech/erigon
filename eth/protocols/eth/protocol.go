@@ -356,7 +356,7 @@ type BlockBodiesRLPPacket66 struct {
 	BlockBodiesRLPPacket
 }
 
-// Unpack retrieves the transactions, uncles, and withdrawals from the range packet and returns
+// Unpack retrieves the transactions, uncles, withdrawals from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
 func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.Withdrawals) {
 	var (

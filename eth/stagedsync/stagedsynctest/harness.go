@@ -47,7 +47,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	borConsensusDB := memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	miningState := stagedsync.NewProposingState(&ethconfig.Defaults.Miner)
+	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDB,
 		borConsensusDB,
@@ -481,13 +481,13 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 
 func (h *Harness) seal(t *testing.T, chr consensus.ChainHeaderReader, eng consensus.Engine, block *types.Block) {
 	h.logger.Info("Sealing mock block", "blockNum", block.Number())
-	sealRes, sealStop := make(chan *types.Block, 1), make(chan struct{}, 1)
-	if err := eng.Seal(chr, block, sealRes, sealStop); err != nil {
+	sealRes, sealStop := make(chan *types.BlockWithReceipts, 1), make(chan struct{}, 1)
+	if err := eng.Seal(chr, &types.BlockWithReceipts{Block: block}, sealRes, sealStop); err != nil {
 		t.Fatal(err)
 	}
 
 	sealedParentBlock := <-sealRes
-	h.sealedHeaders[sealedParentBlock.Number().Uint64()] = sealedParentBlock.Header()
+	h.sealedHeaders[sealedParentBlock.Block.Number().Uint64()] = sealedParentBlock.Block.Header()
 }
 
 func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine {

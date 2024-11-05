@@ -239,12 +239,12 @@ func (v validator) IsProposer(block *types.Block) (bool, error) {
 	return v.Engine.(*bor.Bor).IsProposer(block.Header())
 }
 
-func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
+func (v validator) sealBlocks(blocks []*types.Block, receipts []types.Receipts) ([]*types.Block, error) {
 	sealedBlocks := make([]*types.Block, 0, len(blocks))
 
 	hr := headerReader{v}
 
-	for _, block := range blocks {
+	for i, block := range blocks {
 		header := block.HeaderNoCopy()
 
 		if err := v.Engine.Prepare(hr, header, nil); err != nil {
@@ -255,15 +255,16 @@ func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 			header.ParentHash = parent.Hash()
 		}
 
-		sealResults := make(chan *types.Block, 1)
+		sealResults := make(chan *types.BlockWithReceipts, 1)
 
-		if err := v.Engine.Seal(hr, block, sealResults, nil); err != nil {
+		blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: receipts[i]}
+		if err := v.Engine.Seal(hr, blockWithReceipts, sealResults, nil); err != nil {
 			return nil, err
 		}
 
 		sealedBlock := <-sealResults
-		v.blocks[sealedBlock.NumberU64()] = sealedBlock
-		sealedBlocks = append(sealedBlocks, sealedBlock)
+		v.blocks[sealedBlock.Block.NumberU64()] = sealedBlock.Block
+		sealedBlocks = append(sealedBlocks, sealedBlock.Block)
 	}
 
 	return sealedBlocks, nil
@@ -349,7 +350,7 @@ func TestVerifyHeader(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := v.sealBlocks(chain.Blocks)
+	sealedBlocks, err := v.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)
@@ -403,6 +404,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 	for bi := 0; bi < chainLength; bi++ {
 		for vi, v := range validators {
 			block := chains[vi].Blocks[bi]
+			receipts := chains[vi].Receipts[bi]
 
 			isProposer, err := v.IsProposer(block)
 
@@ -420,7 +422,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 					lastProposerIndex = vi
 				}
 
-				sealedBlocks, err := v.sealBlocks([]*types.Block{block})
+				sealedBlocks, err := v.sealBlocks([]*types.Block{block}, []types.Receipts{receipts})
 
 				if err != nil {
 					t.Fatalf("seal block failed: %v", err)
@@ -449,7 +451,7 @@ func TestSendBlock(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := s.sealBlocks(chain.Blocks)
+	sealedBlocks, err := s.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/xsleonard/go-merkle"
@@ -34,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -65,8 +67,6 @@ var (
 	defaultSprintLength = map[string]uint64{
 		"0": 64,
 	} // Default number of blocks after which to checkpoint and reset the pending votes
-
-	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
 
 	// diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	// diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
@@ -543,12 +543,16 @@ func ValidateHeaderUnusedFields(header *types.Header) error {
 	}
 
 	// Ensure that the block doesn't contain any uncles which are meaningless in PoA
-	if header.UncleHash != uncleHash {
+	if header.UncleHash != types.EmptyUncleHash {
 		return errInvalidUncleHash
 	}
 
 	if header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
+	}
+
+	if header.RequestsHash != nil {
+		return consensus.ErrUnexpectedRequests
 	}
 
 	return misc.VerifyAbsenceOfCancunHeaderFields(header)
@@ -977,11 +981,15 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
 
 	if withdrawals != nil || header.WithdrawalsHash != nil {
-		return nil, nil, consensus.ErrUnexpectedWithdrawals
+		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
+	}
+
+	if header.RequestsHash != nil {
+		return nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
@@ -992,30 +1000,26 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.checkAndCommitSpan: %w", err)
 				c.logger.Error("[bor] committing span", "err", err)
-				return nil, types.Receipts{}, err
+				return nil, types.Receipts{}, nil, err
 			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("Finalize.CommitStates: %w", err)
 				c.logger.Error("[bor] Error while committing states", "err", err)
-				return nil, types.Receipts{}, err
+				return nil, types.Receipts{}, nil, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
 		c.logger.Error("[bor] Error changing contract code", "err", err)
-		return nil, types.Receipts{}, err
+		return nil, types.Receipts{}, nil, err
 	}
-
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	// header.Root = state.IntermediateRoot(chain.Config().IsSpuriousDragon(header.Number.Uint64()))
-	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Set state sync data to blockchain
 	// bc := chain.(*core.BlockChain)
 	// bc.SetStateSync(stateSyncData)
-	return nil, types.Receipts{}, nil
+	return nil, types.Receipts{}, nil, nil
 }
 
 func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.IntraBlockState) error {
@@ -1041,13 +1045,17 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, error) {
+) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// stateSyncData := []*types.StateSyncData{}
 
 	headerNumber := header.Number.Uint64()
 
 	if withdrawals != nil || header.WithdrawalsHash != nil {
-		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
+		return nil, nil, nil, nil, consensus.ErrUnexpectedWithdrawals
+	}
+
+	if header.RequestsHash != nil {
+		return nil, nil, nil, nil, consensus.ErrUnexpectedRequests
 	}
 
 	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
@@ -1058,35 +1066,31 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 			if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("FinalizeAndAssemble.checkAndCommitSpan: %w", err)
 				c.logger.Error("[bor] committing span", "err", err)
-				return nil, nil, types.Receipts{}, err
+				return nil, nil, types.Receipts{}, nil, err
 			}
 			// commit states
 			if err := c.CommitStates(state, header, cx, syscall); err != nil {
 				err := fmt.Errorf("FinalizeAndAssemble.CommitStates: %w", err)
 				c.logger.Error("[bor] committing states", "err", err)
-				return nil, nil, types.Receipts{}, err
+				return nil, nil, types.Receipts{}, nil, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
 		c.logger.Error("[bor] Error changing contract code", "err", err)
-		return nil, nil, types.Receipts{}, err
+		return nil, nil, types.Receipts{}, nil, err
 	}
 
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	// header.Root = state.IntermediateRoot(chain.Config().IsSpuriousDragon(header.Number))
-	header.UncleHash = types.CalcUncleHash(nil)
-
 	// Assemble block
-	block := types.NewBlock(header, txs, nil, receipts, withdrawals)
+	block := types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals)
 
 	// set state sync
 	// bc := chain.(*core.BlockChain)
 	// bc.SetStateSync(stateSyncData)
 
 	// return the final block for sealing
-	return block, txs, receipts, nil
+	return block, txs, receipts, nil, nil
 }
 
 func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
@@ -1108,8 +1112,10 @@ func (c *Bor) Authorize(currentSigner libcommon.Address, signFn SignerFn) {
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	header := block.Header()
+func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
+	header := block.HeaderNoCopy()
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
 
@@ -1186,7 +1192,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 			}
 		}
 		select {
-		case results <- block.WithSeal(header):
+		case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
 		default:
 			c.logger.Warn("Sealing result was not read by miner", "number", number, "sealhash", SealHash(header, c.config))
 		}
@@ -1555,6 +1561,52 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 
 func isSprintStart(number, sprint uint64) bool {
 	return number%sprint == 0
+}
+
+// BorTransfer transfer in Bor
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
+	// get inputs before
+	input1 := db.GetBalance(sender).Clone()
+	input2 := db.GetBalance(recipient).Clone()
+
+	if !bailout {
+		db.SubBalance(sender, amount)
+	}
+	db.AddBalance(recipient, amount)
+
+	// get outputs after
+	output1 := db.GetBalance(sender).Clone()
+	output2 := db.GetBalance(recipient).Clone()
+
+	// add transfer log into state
+	addTransferLog(db, transferLogSig, sender, recipient, amount, input1, input2, output1, output2)
+}
+
+func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
+	return BorTransfer
+}
+
+// AddFeeTransferLog adds fee transfer log into state
+// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
+func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender libcommon.Address, coinbase libcommon.Address, result *evmtypes.ExecutionResult) {
+	output1 := result.SenderInitBalance.Clone()
+	output2 := result.CoinbaseInitBalance.Clone()
+	addTransferLog(
+		ibs,
+		transferFeeLogSig,
+		sender,
+		coinbase,
+		result.FeeTipped,
+		result.SenderInitBalance,
+		result.CoinbaseInitBalance,
+		output1.Sub(output1, result.FeeTipped),
+		output2.Add(output2, result.FeeTipped),
+	)
+
+}
+
+func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return AddFeeTransferLog
 }
 
 // In bor, RLP encoding of BlockExtraData will be stored in the Extra field in the header

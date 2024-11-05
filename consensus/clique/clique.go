@@ -22,8 +22,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"io"
 	"math/big"
 	"math/rand"
@@ -32,12 +30,13 @@ import (
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -45,11 +44,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 const (
@@ -65,8 +66,6 @@ const (
 var (
 	NonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
-
-	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
 
 	DiffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
@@ -379,23 +378,17 @@ func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, un
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, error) {
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	header.UncleHash = types.CalcUncleHash(nil)
-	return txs, r, nil
+) (types.Transactions, types.Receipts, types.FlatRequests, error) {
+	return txs, r, nil, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, error) {
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	header.UncleHash = types.CalcUncleHash(nil)
-
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts, withdrawals), txs, receipts, nil
+	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), txs, receipts, nil, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -410,8 +403,9 @@ func (c *Clique) Authorize(signer libcommon.Address, signFn SignerFn) {
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-
+func (c *Clique) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error {
+	block := blockWithReceipts.Block
+	receipts := blockWithReceipts.Receipts
 	header := block.Header()
 
 	// Sealing the genesis block is not supported
@@ -473,7 +467,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		}
 
 		select {
-		case results <- block.WithSeal(header):
+		case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts}:
 		default:
 			c.logger.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 		}
@@ -642,4 +636,12 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	}
 
 	return res, nil
+}
+
+func (c *Clique) GetTransferFunc() evmtypes.TransferFunc {
+	return consensus.Transfer
+}
+
+func (c *Clique) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
+	return nil
 }

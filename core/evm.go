@@ -22,7 +22,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -62,23 +61,27 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	}
 
 	var transferFunc evmtypes.TransferFunc
-	if engine != nil && engine.Type() == chain.BorConsensus {
-		transferFunc = BorTransfer
+	var postApplyMessageFunc evmtypes.PostApplyMessageFunc
+	if engine != nil {
+		transferFunc = engine.GetTransferFunc()
+		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
-		transferFunc = Transfer
+		transferFunc = consensus.Transfer
+		postApplyMessageFunc = nil
 	}
 	return evmtypes.BlockContext{
-		CanTransfer:   CanTransfer,
-		Transfer:      transferFunc,
-		GetHash:       blockHashFunc,
-		Coinbase:      beneficiary,
-		BlockNumber:   header.Number.Uint64(),
-		Time:          header.Time,
-		Difficulty:    new(big.Int).Set(header.Difficulty),
-		BaseFee:       &baseFee,
-		GasLimit:      header.GasLimit,
-		PrevRanDao:    prevRandDao,
-		ExcessBlobGas: excessBlobGas,
+		CanTransfer:      CanTransfer,
+		Transfer:         transferFunc,
+		GetHash:          blockHashFunc,
+		PostApplyMessage: postApplyMessageFunc,
+		Coinbase:         beneficiary,
+		BlockNumber:      header.Number.Uint64(),
+		Time:             header.Time,
+		Difficulty:       new(big.Int).Set(header.Difficulty),
+		BaseFee:          &baseFee,
+		GasLimit:         header.GasLimit,
+		PrevRanDao:       prevRandDao,
+		ExcessBlobGas:    excessBlobGas,
 	}
 }
 
@@ -129,31 +132,4 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 // This does not take the necessary gas in to account to make the transfer valid.
 func CanTransfer(db evmtypes.IntraBlockState, addr libcommon.Address, amount *uint256.Int) bool {
 	return !db.GetBalance(addr).Lt(amount)
-}
-
-// Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
-	if !bailout {
-		db.SubBalance(sender, amount)
-	}
-	db.AddBalance(recipient, amount)
-}
-
-// BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
-	// get inputs before
-	input1 := db.GetBalance(sender).Clone()
-	input2 := db.GetBalance(recipient).Clone()
-
-	if !bailout {
-		db.SubBalance(sender, amount)
-	}
-	db.AddBalance(recipient, amount)
-
-	// get outputs after
-	output1 := db.GetBalance(sender).Clone()
-	output2 := db.GetBalance(recipient).Clone()
-
-	// add transfer log
-	AddTransferLog(db, sender, recipient, amount, input1, input2, output1, output2)
 }

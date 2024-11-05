@@ -38,8 +38,9 @@ import (
 )
 
 var (
-	EmptyRootHash  = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-	EmptyUncleHash = rlpHash([]*Header(nil))
+	EmptyRootHash     = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	EmptyRequestsHash = libcommon.HexToHash("6036c41849da9c076ed79654d434017387a88fb833c2856b32e18218b3341c5f")
+	EmptyUncleHash    = rlpHash([]*Header(nil))
 
 	ExtraVanityLength = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
 	ExtraSealLength   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
@@ -105,10 +106,25 @@ type Header struct {
 
 	ParentBeaconBlockRoot *libcommon.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 
+	RequestsHash *libcommon.Hash `json:"requestsHash"` // EIP-7685
+
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
+
+	// by default all headers are immutable
+	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
+	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
+	mutable bool
+	hash    atomic.Pointer[libcommon.Hash]
+}
+
+// NewEmptyHeaderForAssembling - returns mutable header object - for assembling/sealing/etc...
+// when sealing done - `block.WithSeal(header)` called - which producing new block with immutable `Header`
+// by default all headers are immutable
+func NewEmptyHeaderForAssembling() *Header {
+	return &Header{mutable: true}
 }
 
 func (h *Header) EncodingSize() int {
@@ -158,6 +174,10 @@ func (h *Header) EncodingSize() int {
 	}
 
 	if h.ParentBeaconBlockRoot != nil {
+		encodingSize += 33
+	}
+
+	if h.RequestsHash != nil {
 		encodingSize += 33
 	}
 
@@ -306,6 +326,16 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 		if _, err := w.Write(h.ParentBeaconBlockRoot.Bytes()); err != nil {
+			return err
+		}
+	}
+
+	if h.RequestsHash != nil {
+		b[0] = 128 + 32
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(h.RequestsHash.Bytes()); err != nil {
 			return err
 		}
 	}
@@ -498,6 +528,23 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.ParentBeaconBlockRoot = new(libcommon.Hash)
 	h.ParentBeaconBlockRoot.SetBytes(b)
 
+	// RequestsHash
+	if b, err = s.Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.RequestsHash = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no RequestsHash): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read RequestsHash: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for RequestsHash: %d", len(b))
+	}
+	h.RequestsHash = new(libcommon.Hash)
+	h.RequestsHash.SetBytes(b)
+
 	if h.Verkle {
 		if h.VerkleProof, err = s.Bytes(); err != nil {
 			return fmt.Errorf("read VerkleProof: %w", err)
@@ -531,8 +578,17 @@ type headerMarshaling struct {
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
-func (h *Header) Hash() libcommon.Hash {
-	return rlpHash(h)
+func (h *Header) Hash() (hash libcommon.Hash) {
+	if !h.mutable {
+		if hash := h.hash.Load(); hash != nil {
+			return *hash
+		}
+	}
+	hash = rlpHash(h)
+	if !h.mutable {
+		h.hash.Store(&hash)
+	}
+	return hash
 }
 
 var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
@@ -555,6 +611,9 @@ func (h *Header) Size() common.StorageSize {
 		s += common.StorageSize(8)
 	}
 	if h.ParentBeaconBlockRoot != nil {
+		s += common.StorageSize(32)
+	}
+	if h.RequestsHash != nil {
 		s += common.StorageSize(32)
 	}
 	return s
@@ -640,8 +699,7 @@ type Block struct {
 	withdrawals  []*Withdrawal
 
 	// caches
-	hash atomic.Value
-	size atomic.Value
+	size atomic.Uint64
 }
 
 // Copy transaction senders from body into the transactions
@@ -805,6 +863,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -831,7 +890,6 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
 		return err
 	}
-
 	return s.ListEnd()
 }
 
@@ -956,15 +1014,22 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
+	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
+	return b
+}
 
+// NewBlockForAsembling - creating new block - which allow mutation of fileds. Use it for block-assembly
+func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
+	b := NewBlock(header, txs, uncles, receipts, withdrawals)
+	b.header.mutable = true
 	return b
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
+	header.hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
-	b.hash.Store(hash)
 	return b
 }
 
@@ -989,7 +1054,7 @@ func NewBlockFromNetwork(header *Header, body *Body) *Block {
 // CopyHeader creates a deep copy of a block header to prevent side effects from
 // modifying a header variable.
 func CopyHeader(h *Header) *Header {
-	cpy := *h
+	cpy := *h //nolint
 	if cpy.Difficulty = new(big.Int); h.Difficulty != nil {
 		cpy.Difficulty.Set(h.Difficulty)
 	}
@@ -1024,6 +1089,15 @@ func CopyHeader(h *Header) *Header {
 		cpy.ParentBeaconBlockRoot = new(libcommon.Hash)
 		cpy.ParentBeaconBlockRoot.SetBytes(h.ParentBeaconBlockRoot.Bytes())
 	}
+	if h.RequestsHash != nil {
+		cpy.RequestsHash = new(libcommon.Hash)
+		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
+	}
+	cpy.mutable = h.mutable
+	if hash := h.hash.Load(); hash != nil {
+		hashCopy := *hash
+		cpy.hash.Store(&hashCopy)
+	}
 	return &cpy
 }
 
@@ -1033,7 +1107,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	bb.size.Store(common.StorageSize(rlp.ListSize(size)))
+	bb.size.Store(rlp.ListSize(size))
 
 	// decode header
 	var h Header
@@ -1059,7 +1133,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
+func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Header
 	headerLen := bb.header.EncodingSize()
 	payloadSize += rlp2.ListPrefixLen(headerLen) + headerLen
@@ -1081,13 +1155,13 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
-func (bb Block) EncodingSize() int {
+func (bb *Block) EncodingSize() int {
 	payloadSize, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
-func (bb Block) EncodeRLP(w io.Writer) error {
+func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 	var b [33]byte
 	// prefix
@@ -1112,6 +1186,7 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -1154,6 +1229,7 @@ func (b *Block) BaseFee() *big.Int {
 func (b *Block) WithdrawalsHash() *libcommon.Hash       { return b.header.WithdrawalsHash }
 func (b *Block) Withdrawals() Withdrawals               { return b.withdrawals }
 func (b *Block) ParentBeaconBlockRoot() *libcommon.Hash { return b.header.ParentBeaconBlockRoot }
+func (b *Block) RequestsHash() *libcommon.Hash          { return b.header.RequestsHash }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1204,12 +1280,12 @@ func (b *Body) RawBody() *RawBody {
 // Size returns the true RLP encoded storage size of the block, either by encoding
 // and returning it, or returning a previously cached value.
 func (b *Block) Size() common.StorageSize {
-	if size := b.size.Load(); size != nil {
-		return size.(common.StorageSize)
+	if size := b.size.Load(); size > 0 {
+		return common.StorageSize(size)
 	}
 	c := writeCounter(0)
 	rlp.Encode(&c, b)
-	b.size.Store(common.StorageSize(c))
+	b.size.Store(uint64(c))
 	return common.StorageSize(c)
 }
 
@@ -1219,7 +1295,7 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
-// HashCheck checks that transactions, receipts, uncles and withdrawals hashes are correct.
+// HashCheck checks that transactions, receipts, uncles, and withdrawals hashes are correct.
 func (b *Block) HashCheck() error {
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
@@ -1246,9 +1322,11 @@ func (b *Block) HashCheck() error {
 	if b.Withdrawals() == nil {
 		return errors.New("body missing Withdrawals")
 	}
+
 	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
+
 	return nil
 }
 
@@ -1279,7 +1357,8 @@ func CopyTxs(in Transactions) Transactions {
 		if txWrapper, ok := tx.(*BlobTxWrapper); ok {
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
-				Tx:          *blobTx,
+				// it's ok to copy here - because it's constructor of object - no parallel access yet
+				Tx:          *blobTx, //nolint
 				Commitments: txWrapper.Commitments.copy(),
 				Blobs:       txWrapper.Blobs.copy(),
 				Proofs:      txWrapper.Proofs.copy(),
@@ -1305,35 +1384,24 @@ func (b *Block) Copy() *Block {
 		}
 	}
 
-	var hashValue atomic.Value
-	if value := b.hash.Load(); value != nil {
-		hash := value.(libcommon.Hash)
-		hashCopy := libcommon.BytesToHash(hash.Bytes())
-		hashValue.Store(hashCopy)
-	}
-
-	var sizeValue atomic.Value
-	if size := b.size.Load(); size != nil {
-		sizeValue.Store(size)
-	}
-
-	return &Block{
+	newB := &Block{
 		header:       CopyHeader(b.header),
 		uncles:       uncles,
 		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
-		hash:         hashValue,
-		size:         sizeValue,
 	}
+	szCopy := b.size.Load()
+	newB.size.Store(szCopy)
+	return newB
 }
 
 // WithSeal returns a new block with the data from b but the header replaced with
 // the sealed one.
 func (b *Block) WithSeal(header *Header) *Block {
-	cpy := *header
-
+	headerCopy := CopyHeader(header)
+	headerCopy.mutable = false
 	return &Block{
-		header:       &cpy,
+		header:       headerCopy,
 		transactions: b.transactions,
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
@@ -1342,14 +1410,7 @@ func (b *Block) WithSeal(header *Header) *Block {
 
 // Hash returns the keccak256 hash of b's header.
 // The hash is computed on the first call and cached thereafter.
-func (b *Block) Hash() libcommon.Hash {
-	if hash := b.hash.Load(); hash != nil {
-		return hash.(libcommon.Hash)
-	}
-	v := b.header.Hash()
-	b.hash.Store(v)
-	return v
-}
+func (b *Block) Hash() libcommon.Hash { return b.header.Hash() }
 
 type Blocks []*Block
 
@@ -1372,6 +1433,7 @@ func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txAmount uin
 type BlockWithReceipts struct {
 	Block    *Block
 	Receipts Receipts
+	Requests FlatRequests
 }
 
 type rlpEncodable interface {

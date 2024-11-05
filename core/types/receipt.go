@@ -253,7 +253,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		}
 		r.Type = b[0]
 		switch r.Type {
-		case AccessListTxType, DynamicFeeTxType, BlobTxType:
+		case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
 			if err := r.decodePayload(s); err != nil {
 				return err
 			}
@@ -451,6 +451,11 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		}
 	case BlobTxType:
 		w.WriteByte(BlobTxType)
+		if err := rlp.Encode(w, data); err != nil {
+			panic(err)
+		}
+	case SetCodeTxType:
+		w.WriteByte(SetCodeTxType)
 		if err := rlp.Encode(w, data); err != nil {
 			panic(err)
 		}

@@ -48,6 +48,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -510,7 +511,7 @@ func (b *SimulatedBackend) PendingCodeAt(ctx context.Context, contract libcommon
 	return b.pendingState.GetCode(contract), nil
 }
 
-func newRevertError(result *core.ExecutionResult) *revertError {
+func newRevertError(result *evmtypes.ExecutionResult) *revertError {
 	reason, errUnpack := abi.UnpackRevert(result.Revert())
 	err := errors.New("execution reverted")
 	if errUnpack == nil {
@@ -548,7 +549,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 	if blockNumber != nil && blockNumber.Cmp(b.pendingBlock.Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	var res *core.ExecutionResult
+	var res *evmtypes.ExecutionResult
 	if err := b.m.DB.View(context.Background(), func(tx kv.Tx) (err error) {
 		s := state.New(b.m.NewStateReader(tx))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
@@ -640,7 +641,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	b.pendingState.SetTxContext(libcommon.Hash{}, libcommon.Hash{}, len(b.pendingBlock.Transactions()))
 
 	// Create a helper to check if a gas allowance results in an executable transaction
-	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
+	executable := func(gas uint64) (bool, *evmtypes.ExecutionResult, error) {
 		call.Gas = gas
 
 		snapshot := b.pendingState.Snapshot()
@@ -694,7 +695,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
-func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*core.ExecutionResult, error) {
+func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*evmtypes.ExecutionResult, error) {
 	const baseFeeUpperLimit = 880000000
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
@@ -823,18 +824,19 @@ type callMsg struct {
 	ethereum.CallMsg
 }
 
-func (m callMsg) From() libcommon.Address       { return m.CallMsg.From }
-func (m callMsg) Nonce() uint64                 { return 0 }
-func (m callMsg) CheckNonce() bool              { return false }
-func (m callMsg) To() *libcommon.Address        { return m.CallMsg.To }
-func (m callMsg) GasPrice() *uint256.Int        { return m.CallMsg.GasPrice }
-func (m callMsg) FeeCap() *uint256.Int          { return m.CallMsg.FeeCap }
-func (m callMsg) Tip() *uint256.Int             { return m.CallMsg.Tip }
-func (m callMsg) Gas() uint64                   { return m.CallMsg.Gas }
-func (m callMsg) Value() *uint256.Int           { return m.CallMsg.Value }
-func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
-func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
-func (m callMsg) IsFree() bool                  { return false }
+func (m callMsg) From() libcommon.Address               { return m.CallMsg.From }
+func (m callMsg) Nonce() uint64                         { return 0 }
+func (m callMsg) CheckNonce() bool                      { return false }
+func (m callMsg) To() *libcommon.Address                { return m.CallMsg.To }
+func (m callMsg) GasPrice() *uint256.Int                { return m.CallMsg.GasPrice }
+func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCap }
+func (m callMsg) Tip() *uint256.Int                     { return m.CallMsg.Tip }
+func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
+func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
+func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
+func (m callMsg) AccessList() types2.AccessList         { return m.CallMsg.AccessList }
+func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
+func (m callMsg) IsFree() bool                          { return false }
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }

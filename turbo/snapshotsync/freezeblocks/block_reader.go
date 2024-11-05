@@ -824,7 +824,6 @@ func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *Segment, buf []by
 	if b == nil {
 		return nil, 0, 0, buf, nil
 	}
-
 	body := new(types.Body)
 	body.Uncles = b.Uncles
 	body.Withdrawals = b.Withdrawals

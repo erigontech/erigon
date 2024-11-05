@@ -29,7 +29,6 @@ import (
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -167,15 +166,6 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 	return cpy, nil
 }
 
-func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) (Transaction, error) {
-	cpy := tx.copy()
-	cpy.R.Set(u256.Num1)
-	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
-	return cpy, nil
-}
-
 // MarshalBinary returns the canonical encoding of the transaction.
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
@@ -193,7 +183,7 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -219,18 +209,8 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode To
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
-	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To.Bytes()); err != nil {
-			return err
-		}
 	}
 	// encode Value
 	if err := tx.Value.EncodeRLP(w); err != nil {
@@ -381,7 +361,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 // Hash computes the hash (but not for signatures!)
 func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
 		tx.ChainID,
@@ -427,17 +407,16 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 }
 
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := tx.from.Load(); sc != nil {
-		zeroAddr := libcommon.Address{}
-		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return sc.(libcommon.Address), nil
+	if from := tx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
 		}
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(addr)
+	tx.from.Store(&addr)
 	return addr, nil
 }
 

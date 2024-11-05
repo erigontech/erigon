@@ -230,6 +230,8 @@ type TxPool struct {
 	isPostAgra              atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
+	pragueTime              *uint64
+	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
@@ -240,7 +242,7 @@ type FeeCalculator interface {
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
-	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64,
+	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime, pragueTime *big.Int, maxBlobsPerBlock uint64,
 	feeCalculator FeeCalculator, logger log.Logger,
 ) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
@@ -311,6 +313,13 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		}
 		cancunTimeU64 := cancunTime.Uint64()
 		res.cancunTime = &cancunTimeU64
+	}
+	if pragueTime != nil {
+		if !pragueTime.IsUint64() {
+			return nil, errors.New("pragueTime overflow")
+		}
+		pragueTimeU64 := pragueTime.Uint64()
+		res.pragueTime = &pragueTimeU64
 	}
 
 	return res, nil
@@ -764,7 +773,8 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
-		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), nil, mt.Tx.Creation, true, true, isShanghai)
+		authorizationLen := uint64(len(mt.Tx.Authorizations))
+		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), authorizationLen, nil, mt.Tx.Creation, true, true, isShanghai)
 		if intrinsicGas > availableGas {
 			// we might find another TX with a low enough intrinsic gas to include so carry on
 			continue
@@ -844,7 +854,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 			return txpoolcfg.TypeNotActivated
 		}
 		if txn.Creation {
-			return txpoolcfg.CreateBlobTxn
+			return txpoolcfg.InvalidCreateTxn
 		}
 		blobCount := uint64(len(txn.BlobHashes))
 		if blobCount == 0 {
@@ -888,6 +898,19 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 	}
 
+	authorizationLen := len(txn.Authorizations)
+	if txn.Type == types.SetCodeTxType {
+		if !p.isPrague() {
+			return txpoolcfg.TypeNotActivated
+		}
+		if txn.Creation {
+			return txpoolcfg.InvalidCreateTxn
+		}
+		if authorizationLen == 0 {
+			return txpoolcfg.NoAuthorizations
+		}
+	}
+
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(&txn.FeeCap) == 1 {
 		if txn.Traced {
@@ -895,7 +918,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.UnderPriced
 	}
-	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), nil, txn.Creation, true, true, isShanghai)
+	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), nil, txn.Creation, true, true, isShanghai)
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
@@ -970,29 +993,32 @@ func requiredBalance(txn *types.TxSlot) *uint256.Int {
 	return total
 }
 
-func (p *TxPool) isShanghai() bool {
+func isTimeBasedForkActivated(isPostFlag *atomic.Bool, forkTime *uint64) bool {
 	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostShanghai.Load()
+	set := isPostFlag.Load()
 	if set {
 		return true
 	}
-	if p.shanghaiTime == nil {
+	if forkTime == nil { // the fork is not enabled
 		return false
 	}
-	shanghaiTime := *p.shanghaiTime
 
-	// a zero here means Shanghai is always active
-	if shanghaiTime == 0 {
-		p.isPostShanghai.Swap(true)
+	// a zero here means the fork is always active
+	if *forkTime == 0 {
+		isPostFlag.Swap(true)
 		return true
 	}
 
 	now := time.Now().Unix()
-	activated := uint64(now) >= shanghaiTime
+	activated := uint64(now) >= *forkTime
 	if activated {
-		p.isPostShanghai.Swap(true)
+		isPostFlag.Swap(true)
 	}
 	return activated
+}
+
+func (p *TxPool) isShanghai() bool {
+	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
 }
 
 func (p *TxPool) isAgra() bool {
@@ -1032,28 +1058,11 @@ func (p *TxPool) isAgra() bool {
 }
 
 func (p *TxPool) isCancun() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
-	set := p.isPostCancun.Load()
-	if set {
-		return true
-	}
-	if p.cancunTime == nil {
-		return false
-	}
-	cancunTime := *p.cancunTime
+	return isTimeBasedForkActivated(&p.isPostCancun, p.cancunTime)
+}
 
-	// a zero here means Cancun is always active
-	if cancunTime == 0 {
-		p.isPostCancun.Swap(true)
-		return true
-	}
-
-	now := time.Now().Unix()
-	activated := uint64(now) >= cancunTime
-	if activated {
-		p.isPostCancun.Swap(true)
-	}
-	return activated
+func (p *TxPool) isPrague() bool {
+	return isTimeBasedForkActivated(&p.isPostPrague, p.pragueTime)
 }
 
 // Check that the serialized txn should not exceed a certain max size

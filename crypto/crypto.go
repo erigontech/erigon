@@ -24,20 +24,19 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"hash"
 	"io"
 	"math/big"
 	"os"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -51,9 +50,8 @@ const RecoveryIDOffset = 64
 const DigestLength = 32
 
 var (
-	secp256k1N     = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
-	secp256k1NBig  = secp256k1N.ToBig()
-	secp256k1halfN = new(uint256.Int).Div(secp256k1N, u256.Num2)
+	secp256k1N    = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
+	secp256k1NBig = secp256k1N.ToBig()
 )
 
 var errInvalidPubkey = errors.New("invalid secp256k1 public key")
@@ -296,21 +294,6 @@ func SaveECDSA(file string, key *ecdsa.PrivateKey) error {
 // GenerateKey generates a new private key.
 func GenerateKey() (*ecdsa.PrivateKey, error) {
 	return ecdsa.GenerateKey(S256(), rand.Reader)
-}
-
-// ValidateSignatureValues verifies whether the signature values are valid with
-// the given chain rules. The v value is assumed to be either 0 or 1.
-func ValidateSignatureValues(v byte, r, s *uint256.Int, homestead bool) bool {
-	if r.IsZero() || s.IsZero() {
-		return false
-	}
-	// reject upper range of s values (ECDSA malleability)
-	// see discussion in secp256k1/libsecp256k1/include/secp256k1.h
-	if homestead && s.Gt(secp256k1halfN) {
-		return false
-	}
-	// Frontier: allow s to be in full N range
-	return r.Lt(secp256k1N) && s.Lt(secp256k1N) && (v == 0 || v == 1)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account

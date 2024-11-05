@@ -116,8 +116,23 @@ func (tr *TRand) RandAccessList(size int) types2.AccessList {
 	return al
 }
 
+func (tr *TRand) RandAuthorizations(size int) []Authorization {
+	auths := make([]Authorization, size)
+	for i := 0; i < size; i++ {
+		auths[i] = Authorization{
+			ChainID: uint256.NewInt(*tr.RandUint64()),
+			Address: tr.RandAddress(),
+			Nonce:   *tr.RandUint64(),
+			V:       *uint256.NewInt(*tr.RandUint64()),
+			R:       *uint256.NewInt(*tr.RandUint64()),
+			S:       *uint256.NewInt(*tr.RandUint64()),
+		}
+	}
+	return auths
+}
+
 func (tr *TRand) RandTransaction() Transaction {
-	txType := tr.RandIntInRange(0, 4) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType
+	txType := tr.RandIntInRange(0, 5) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType
 	to := tr.RandAddress()
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
@@ -132,13 +147,13 @@ func (tr *TRand) RandTransaction() Transaction {
 	switch txType {
 	case LegacyTxType:
 		return &LegacyTx{
-			CommonTx: commonTx,
+			CommonTx: commonTx, //nolint
 			GasPrice: uint256.NewInt(*tr.RandUint64()),
 		}
 	case AccessListTxType:
 		return &AccessListTx{
 			LegacyTx: LegacyTx{
-				CommonTx: commonTx,
+				CommonTx: commonTx, //nolint
 				GasPrice: uint256.NewInt(*tr.RandUint64()),
 			},
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
@@ -146,7 +161,7 @@ func (tr *TRand) RandTransaction() Transaction {
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:   commonTx,
+			CommonTx:   commonTx, //nolint
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
 			Tip:        uint256.NewInt(*tr.RandUint64()),
 			FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -156,7 +171,7 @@ func (tr *TRand) RandTransaction() Transaction {
 		r := *tr.RandUint64()
 		return &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx,
+				CommonTx:   commonTx, //nolint
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				Tip:        uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -164,6 +179,17 @@ func (tr *TRand) RandTransaction() Transaction {
 			},
 			MaxFeePerBlobGas:    uint256.NewInt(r),
 			BlobVersionedHashes: tr.RandHashes(tr.RandIntInRange(1, 2)),
+		}
+	case SetCodeTxType:
+		return &SetCodeTransaction{
+			DynamicFeeTransaction: DynamicFeeTransaction{
+				CommonTx:   commonTx, //nolint
+				ChainID:    uint256.NewInt(*tr.RandUint64()),
+				Tip:        uint256.NewInt(*tr.RandUint64()),
+				FeeCap:     uint256.NewInt(*tr.RandUint64()),
+				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			},
+			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)
@@ -210,6 +236,7 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	}
 	return withdrawals
 }
+
 func (tr *TRand) RandRawBody() *RawBody {
 	return &RawBody{
 		Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
@@ -254,13 +281,13 @@ func isEqualBytes(a, b []byte) bool {
 	return true
 }
 
-func check(t *testing.T, f string, got, want interface{}) {
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("%s mismatch: got %v, want %v", f, got, want)
+func check(t *testing.T, f string, want, got interface{}) {
+	if !reflect.DeepEqual(want, got) {
+		t.Errorf("%s mismatch: want %v, got %v", f, want, got)
 	}
 }
 
-func compareHeaders(t *testing.T, a, b *Header) {
+func checkHeaders(t *testing.T, a, b *Header) {
 	check(t, "Header.ParentHash", a.ParentHash, b.ParentHash)
 	check(t, "Header.UncleHash", a.UncleHash, b.UncleHash)
 	check(t, "Header.Coinbase", a.Coinbase, b.Coinbase)
@@ -283,7 +310,7 @@ func compareHeaders(t *testing.T, a, b *Header) {
 	check(t, "Header.ParentBeaconBlockRoot", a.ParentBeaconBlockRoot, b.ParentBeaconBlockRoot)
 }
 
-func compareWithdrawals(t *testing.T, a, b *Withdrawal) {
+func checkWithdrawals(t *testing.T, a, b *Withdrawal) {
 	check(t, "Withdrawal.Index", a.Index, b.Index)
 	check(t, "Withdrawal.Validator", a.Validator, b.Validator)
 	check(t, "Withdrawal.Address", a.Address, b.Address)
@@ -311,13 +338,29 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.S", s1, s2)
 }
 
-// func compareDeposits(t *testing.T, a, b *Deposit) {
-// 	check(t, "Deposit.Pubkey", a.Index, b.Index)
-// 	check(t, "Deposit.WithdrawalCredentials", a.WithdrawalCredentials, b.WithdrawalCredentials)
-// 	check(t, "Deposit.Amount", a.Amount, b.Amount)
-// 	check(t, "Deposit.Signature", a.Signature, b.Signature)
-// 	check(t, "Deposit.Index", a.Index, b.Index)
-// }
+func compareHeaders(t *testing.T, a, b []*Header) error {
+	auLen, buLen := len(a), len(b)
+	if auLen != buLen {
+		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
+	}
+
+	for i := 0; i < auLen; i++ {
+		checkHeaders(t, a[i], b[i])
+	}
+	return nil
+}
+
+func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
+	awLen, bwLen := len(a), len(b)
+	if awLen != bwLen {
+		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", awLen, bwLen)
+	}
+
+	for i := 0; i < awLen; i++ {
+		checkWithdrawals(t, a[i], b[i])
+	}
+	return nil
+}
 
 func compareRawBodies(t *testing.T, a, b *RawBody) error {
 
@@ -332,24 +375,8 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 		}
 	}
 
-	auLen, buLen := len(a.Uncles), len(b.Uncles)
-	if auLen != buLen {
-		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
-	}
-
-	for i := 0; i < auLen; i++ {
-		compareHeaders(t, a.Uncles[i], b.Uncles[i])
-	}
-
-	awLen, bwLen := len(a.Withdrawals), len(b.Withdrawals)
-	if awLen != bwLen {
-		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", auLen, buLen)
-	}
-
-	for i := 0; i < awLen; i++ {
-		compareWithdrawals(t, a.Withdrawals[i], b.Withdrawals[i])
-	}
-
+	compareHeaders(t, a.Uncles, b.Uncles)
+	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 	return nil
 }
 
@@ -364,32 +391,8 @@ func compareBodies(t *testing.T, a, b *Body) error {
 		compareTransactions(t, a.Transactions[i], b.Transactions[i])
 	}
 
-	auLen, buLen := len(a.Uncles), len(b.Uncles)
-	if auLen != buLen {
-		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
-	}
-
-	for i := 0; i < auLen; i++ {
-		compareHeaders(t, a.Uncles[i], b.Uncles[i])
-	}
-
-	awLen, bwLen := len(a.Withdrawals), len(b.Withdrawals)
-	if awLen != bwLen {
-		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", awLen, bwLen)
-	}
-
-	for i := 0; i < awLen; i++ {
-		compareWithdrawals(t, a.Withdrawals[i], b.Withdrawals[i])
-	}
-
-	// adLen, bdLen := len(a.deposits), len(b.deposits)
-	// if adLen != bdLen {
-	// 	return fmt.Errorf("deposits len mismatch: expected: %v, got: %v", adLen, bdLen)
-	// }
-
-	// for i := 0; i < adLen; i++ {
-	// 	compareDeposits(t, a.deposits[i], b.deposits[i])
-	// }
+	compareHeaders(t, a.Uncles, b.Uncles)
+	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
 
 	return nil
 }
@@ -436,7 +439,7 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		}
 
 		if err := compareBodies(t, enc, dec); err != nil {
-			t.Errorf("error: compareRawBodies: %v", err)
+			t.Errorf("error: compareBodies: %v", err)
 		}
 	}
 }

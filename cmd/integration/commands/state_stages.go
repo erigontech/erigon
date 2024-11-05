@@ -383,7 +383,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			}
 			defer tx.Rollback()
 			minedBlock := <-miner.MiningResultCh
-			checkMinedBlock(nextBlock, minedBlock, chainConfig)
+			checkMinedBlock(nextBlock, minedBlock.Block, chainConfig)
 		}
 
 		// Unwind all stages to `execStage - unwind` block

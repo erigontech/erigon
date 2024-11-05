@@ -21,7 +21,8 @@ type BlockContext struct {
 	// Transfer transfers ether from one account to the other
 	Transfer TransferFunc
 	// GetHash returns the hash corresponding to n
-	GetHash GetHashFunc
+	GetHash          GetHashFunc
+	PostApplyMessage PostApplyMessageFunc
 
 	// Block information
 	Coinbase      common.Address // Provides information for COINBASE
@@ -46,14 +47,59 @@ type TxContext struct {
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
 }
 
+// ExecutionResult includes all output after executing given evm
+// message no matter the execution itself is successful or not.
+type ExecutionResult struct {
+	UsedGas             uint64 // Total used gas but include the refunded gas
+	Err                 error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	Reverted            bool   // Whether the execution was aborted by `REVERT`
+	ReturnData          []byte // Returned data from evm(function result or data supplied with revert opcode)
+	SenderInitBalance   *uint256.Int
+	CoinbaseInitBalance *uint256.Int
+	FeeTipped           *uint256.Int
+}
+
+// Unwrap returns the internal evm error which allows us for further
+// analysis outside.
+func (result *ExecutionResult) Unwrap() error {
+	return result.Err
+}
+
+// Failed returns the indicator whether the execution is successful or not
+func (result *ExecutionResult) Failed() bool { return result.Err != nil }
+
+// Return is a helper function to help caller distinguish between revert reason
+// and function return. Return returns the data after execution if no error occurs.
+func (result *ExecutionResult) Return() []byte {
+	if result.Err != nil {
+		return nil
+	}
+	return common.CopyBytes(result.ReturnData)
+}
+
+// Revert returns the concrete revert reason if the execution is aborted by `REVERT`
+// opcode. Note the reason can be nil if no data supplied with revert opcode.
+func (result *ExecutionResult) Revert() []byte {
+	if !result.Reverted {
+		return nil
+	}
+	return common.CopyBytes(result.ReturnData)
+}
+
 type (
 	// CanTransferFunc is the signature of a transfer guard function
 	CanTransferFunc func(IntraBlockState, common.Address, *uint256.Int) bool
+
 	// TransferFunc is the signature of a transfer function
 	TransferFunc func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool)
+
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
 	GetHashFunc func(uint64) common.Hash
+
+	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
+	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
+	PostApplyMessageFunc func(ibs IntraBlockState, sender common.Address, coinbase common.Address, result *ExecutionResult)
 )
 
 // IntraBlockState is an EVM database for full state querying.
@@ -71,6 +117,12 @@ type IntraBlockState interface {
 	GetCode(common.Address) []byte
 	SetCode(common.Address, []byte)
 	GetCodeSize(common.Address) int
+
+	// eip-7702; delegated designations
+	ResolveCodeHash(common.Address) common.Hash
+	ResolveCode(common.Address) []byte
+	ResolveCodeSize(common.Address) int
+	GetDelegatedDesignation(common.Address) (common.Address, bool)
 
 	AddRefund(uint64)
 	SubRefund(uint64)
@@ -95,7 +147,7 @@ type IntraBlockState interface {
 	Empty(common.Address) bool
 
 	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
-		precompiles []common.Address, txAccesses types2.AccessList)
+		precompiles []common.Address, txAccesses types2.AccessList, authorities []common.Address)
 
 	AddressInAccessList(addr common.Address) bool
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
