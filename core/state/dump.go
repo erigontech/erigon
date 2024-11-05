@@ -186,6 +186,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if len(v) == 0 {
 			continue
 		}
+		fmt.Printf("[dbg] dumper iter acc: %x\n", k)
 
 		if e := accounts.DeserialiseV3(&acc, v); e != nil {
 			return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
@@ -243,6 +244,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					continue // Skip deleted entries
 				}
 				loc := k[20:]
+				fmt.Printf("[dbg] dumper iter storage: %x, %x\n", k[:20], k[20:])
 				account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
 				h, _ := libcommon.HashData(loc)
 				t.Update(h.Bytes(), libcommon.Copy(vs))
