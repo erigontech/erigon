@@ -1413,8 +1413,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	writer := dc.NewWriter()
 	defer writer.close()
 
-	keySize1 := uint64(length.Addr) / 4
-	keySize2 := uint64(length.Addr+length.Hash) / 4
+	keySize1 := uint64(4)
+	keySize2 := uint64(4)
 	totalTx := uint64(300)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
@@ -1466,7 +1466,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	//}
 
 	//it, err := dc.DomainRangeLatest(tx, nil, nil, -1)
-	it, err := dc.DomainRange(context.Background(), tx, nil, nil, 54, order.Asc, -1)
+	it, err := dc.DomainRange(context.Background(), tx, nil, nil, 190, order.Asc, -1)
 	require.NoError(err)
 	keys, vals, err := stream.ToArrayKV(it)
 	require.NoError(err)
