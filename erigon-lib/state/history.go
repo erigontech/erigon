@@ -1458,6 +1458,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		}
 		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
 		if !ok {
+			fmt.Printf("[dbg] StateAsOfIterF advanceInFiles ef.seek not found. %s, %x\n", top.g.FileName(), key)
 			continue
 		}
 
@@ -1470,6 +1471,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
 		if !ok {
+			fmt.Printf("[dbg] StateAsOfIterF advanceInFiles Lookup2 not found. %s, %x\n", top.g.FileName(), key)
 			continue
 		}
 		g := hi.hc.statelessGetter(historyItem.i)
