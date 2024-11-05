@@ -94,10 +94,6 @@ jobs:
           engine_exchangeTransitionConfigurationV1/test_01.json,\
           engine_getClientVersionV1/test_1.json,\
           erigon_getLogsByHash/test_04.json,\
-          erigon_getHeaderByHash/test_02.json,\
-          erigon_getHeaderByHash/test_03.json,\
-          erigon_getHeaderByHash/test_04.json,\
-          erigon_getHeaderByHash/test_06.json,\
           erigon_getLatestLogs/test_01.json,\
           erigon_getLatestLogs/test_02.json,\
           erigon_getLatestLogs/test_03.json,\
