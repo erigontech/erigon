@@ -103,7 +103,9 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		sm.OnHeadState(postState)
 		var s *state.CachingBeaconState
 		for s == nil {
-			s = sm.HeadState()
+			var cn func()
+			s, cn = sm.HeadState()
+			cn()
 		}
 		s.SetSlot(789274827847783)
 

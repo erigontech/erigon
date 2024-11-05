@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -75,6 +76,42 @@ var (
 
 var defaultGraffitiString = "Caplin"
 
+const missedTimeout = 500 * time.Millisecond
+
+func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
+	timer := time.NewTimer(missedTimeout)
+	checkIfSlotIsThere := func() (bool, error) {
+		tx, err := a.indiciesDB.BeginRo(ctx)
+		if err != nil {
+			return false, err
+		}
+		defer tx.Rollback()
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+		if err != nil {
+			return false, err
+		}
+		return blockRoot != (libcommon.Hash{}), nil
+	}
+
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for head state to reach slot %d: %w", epoch, ctx.Err())
+		default:
+		}
+		ready, err := checkIfSlotIsThere()
+		if err != nil {
+			return err
+		}
+		if ready {
+			return nil
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+}
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -83,6 +120,17 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	// wait until the head state is at the target slot or later
+	err = a.waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+	}
+	tx, err := a.indiciesDB.BeginRo(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -105,7 +153,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeeIndex = &zero
 	}
 
-	headState := a.syncedData.HeadState()
+	headState, cn := a.syncedData.HeadState()
+	defer cn()
+
 	if headState == nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
@@ -114,7 +164,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	attestationData, err := a.attestationProducer.ProduceAndCacheAttestationData(
+		tx,
 		headState,
+		a.syncedData.HeadRoot(),
 		*slot,
 		*committeeIndex,
 	)
@@ -180,20 +232,13 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		}
 	}
 
-	s := a.syncedData.HeadState()
-	if s == nil {
+	baseBlockRoot := a.syncedData.HeadRoot()
+	if baseBlockRoot == (libcommon.Hash{}) {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
 			errors.New("node is syncing"),
 		)
 	}
-
-	baseBlockRoot, err := s.BlockRoot()
-	if err != nil {
-		log.Warn("Failed to get block root", "err", err)
-		return nil, err
-	}
-
 	sourceBlock, err := a.blockReader.ReadBlockByRoot(ctx, tx, baseBlockRoot)
 	if err != nil {
 		log.Warn("Failed to get source block", "err", err, "root", baseBlockRoot)
@@ -1161,7 +1206,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		for _, att := range atts {
 			expectedReward, err := computeAttestationReward(s, att)
 			if err != nil {
-				log.Warn("[Block Production] Could not compute expected attestation reward", "reason", err)
+				log.Debug("[Block Production] Could not compute expected attestation reward", "reason", err)
 				continue
 			}
 			if expectedReward == 0 {

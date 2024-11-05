@@ -86,9 +86,11 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	}
 	resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
 	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
+	s, cn := a.syncedData.HeadState()
+	defer cn()
+
 	if a.forkchoiceStore.LowestAvailableSlot() <= slot {
 		// non-finality case
-		s := a.syncedData.HeadState()
 		if s == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
 		}

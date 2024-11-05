@@ -348,15 +348,19 @@ func (ii *InvertedIndex) openDirtyFiles() error {
 }
 
 func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
+	protectFiles := make(map[string]struct{}, len(fNames))
+	for _, f := range fNames {
+		protectFiles[f] = struct{}{}
+	}
 	var toClose []*filesItem
 	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
-	Loop1:
 		for _, item := range items {
-			for _, protectName := range fNames {
-				if item.decompressor != nil && item.decompressor.FileName() == protectName {
-					continue Loop1
+			if item.decompressor != nil {
+				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
+					continue
 				}
 			}
+
 			toClose = append(toClose, item)
 		}
 		return true

@@ -124,7 +124,7 @@ func TestRange(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
 		//[from, to)
-		it, err := tx.Range("Table", []byte("key1"), []byte("key3"))
+		it, err := tx.Range("Table", []byte("key1"), []byte("key3"), order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
 		k, v, err := it.Next()
@@ -142,7 +142,7 @@ func TestRange(t *testing.T) {
 		require.False(t, it.HasNext())
 
 		// [from, nil) means [from, INF)
-		it, err = tx.Range("Table", []byte("key1"), nil)
+		it, err = tx.Range("Table", []byte("key1"), nil, order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		cnt := 0
 		for it.HasNext() {
@@ -156,7 +156,7 @@ func TestRange(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
 		//[from, to)
-		it, err := tx.RangeDescend("Table", []byte("key3"), []byte("key1"), kv.Unlim)
+		it, err := tx.Range("Table", []byte("key3"), []byte("key1"), order.Desc, kv.Unlim)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
 		k, v, err := it.Next()
@@ -172,7 +172,7 @@ func TestRange(t *testing.T) {
 
 		require.False(t, it.HasNext())
 
-		it, err = tx.RangeDescend("Table", nil, nil, 2)
+		it, err = tx.Range("Table", nil, nil, order.Desc, 2)
 		require.NoError(t, err)
 
 		cnt := 0

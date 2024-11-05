@@ -92,7 +92,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 			t.Skip()
 		}
 		i := 0
-		keysCount := binary.BigEndian.Uint32(build[i : i+4])
+		keysCount := uint16(binary.BigEndian.Uint32(build[i : i+4]))
 		i += 4
 		ks := binary.BigEndian.Uint32(build[i : i+4])
 		keysSeed := rand.New(rand.NewSource(int64(ks)))
@@ -105,7 +105,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 		plainKeys := make([][]byte, keysCount)
 		updates := make([]Update, keysCount)
 
-		for k := uint32(0); k < keysCount; k++ {
+		for k := uint16(0); k < keysCount; k++ {
 
 			aux := make([]byte, 32)
 

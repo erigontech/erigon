@@ -226,10 +226,6 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
-	if dbg.NoSync() {
-		a.DisableFsync()
-	}
-
 	return a, nil
 }
 
@@ -287,6 +283,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadi
 	return nil
 }
 
+func (a *Aggregator) StepSize() uint64        { return a.aggregationStep }
 func (a *Aggregator) OnFreeze(f OnFreezeFunc) { a.onFreeze = f }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
@@ -1631,12 +1628,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	}
 
 	step := a.visibleFilesMinimaxTxNum.Load() / a.StepSize()
-	lastInDB := max(
-		lastIdInDB(a.db, a.d[kv.AccountsDomain]),
-		lastIdInDB(a.db, a.d[kv.CodeDomain]),
-		lastIdInDB(a.db, a.d[kv.StorageDomain]),
-		lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
-	log.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
+
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -1656,6 +1648,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			lastIdInDB(a.db, a.d[kv.CodeDomain]),
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
 			lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+		log.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])

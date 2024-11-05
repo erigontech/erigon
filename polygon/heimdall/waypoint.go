@@ -23,6 +23,14 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
+func AsWaypoints[T Waypoint](wp []T) Waypoints {
+	waypoints := make(Waypoints, len(wp))
+	for i, w := range wp {
+		waypoints[i] = w
+	}
+	return waypoints
+}
+
 type Waypoint interface {
 	Entity
 	fmt.Stringer
