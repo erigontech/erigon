@@ -600,6 +600,7 @@ func (c HistoryCollation) Close() {
 
 // [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
+
 	if h.snapshotsDisabled {
 		return HistoryCollation{}, nil
 	}
@@ -632,6 +633,9 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
 	historyComp = seg.NewWriter(comp, h.compression)
+	if h.compression != seg.CompressNone {
+		panic(1)
+	}
 
 	keysCursor, err := roTx.CursorDupSort(h.indexKeysTable)
 	if err != nil {
