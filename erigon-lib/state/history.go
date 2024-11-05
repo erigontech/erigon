@@ -1644,10 +1644,7 @@ func (hi *StateAsOfIterDB) HasNext() bool {
 	if hi.err != nil {
 		return true
 	}
-	if hi.limit <= 0 { // limit reached
-		return false
-	}
-	if hi.nextKey == nil { // EndOfTable
+	if hi.limit <= 0 || hi.nextKey == nil { // Limit or EndOfTable
 		return false
 	}
 	if hi.to == nil { // s.nextK == nil check is above
