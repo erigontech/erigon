@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -261,6 +262,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	slices.Sort(loremStrings)
 	for k, w := range loremStrings {
 		if err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
 			t.Fatal(err)
@@ -281,16 +283,25 @@ func TestUncompressed(t *testing.T) {
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
+	var offsets []uint64
 	for g.HasNext() {
 		w := loremStrings[i]
 		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
 		expected = expected[:len(expected)/2]
-		actual, _ := g.NextUncompressed()
+		actual, offset := g.NextUncompressed()
 		if bytes.Equal(expected, actual) {
 			t.Errorf("expected %s, actual %s", expected, actual)
 		}
 		i++
+		offsets = append(offsets, offset)
 	}
+
+	found := g.BinarySearch([]byte("ipsum"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+	fmt.Printf("found: %d\n", found)
+	g.Reset(found)
+	k, _ := g.Next(nil)
+	fmt.Printf("found: %s\n", k)
+
 }
 
 func TestDecompressor_OpenCorrupted(t *testing.T) {
@@ -461,12 +472,13 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 	})
 }
 
-const lorem = `Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
-dolore magna aliqua Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
-consequat Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
-Excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
+const lorem = `
+lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
+dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
+consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
+excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
 
-var loremStrings = strings.Split(lorem, " ")
+var loremStrings = strings.Split(strings.ReplaceAll(strings.ReplaceAll(lorem, "\n", " "), "\r", ""), " ")
 
 func TestDecompressTorrent(t *testing.T) {
 	t.Skip()

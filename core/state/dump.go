@@ -136,6 +136,10 @@ func NewDumper(db kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) 
 	}
 }
 
+var TooMuchIterations = fmt.Errorf("[rpc] Dumper: too much iterations protection triggered")
+
+const DumperIterationsHardLimit = 10_000_000
+
 func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress libcommon.Address, maxResults int) ([]byte, error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = libcommon.Hash{}
@@ -160,6 +164,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		return nil, err
 	}
 
+	var hardLimit = DumperIterationsHardLimit
+
 	t := time.Now()
 	var nextKey []byte
 	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults)
@@ -168,7 +174,6 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	}
 	fmt.Printf("[dbg] after DomainRange: %s\n", time.Since(t))
 	defer it.Close()
-	i := 0
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -181,8 +186,6 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if len(v) == 0 {
 			continue
 		}
-		i++
-		fmt.Printf("[dbg] iter: %d\n", i)
 
 		if e := accounts.DeserialiseV3(&acc, v); e != nil {
 			return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
@@ -211,12 +214,15 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		addrList = append(addrList, libcommon.BytesToAddress(k))
 
 		numberOfResults++
+
+		if hardLimit--; hardLimit < 0 {
+			return nil, TooMuchIterations
+		}
 	}
 	it.Close()
 
 	fmt.Printf("[dbg] first loop done: %d\n", len(addrList))
 
-	j := 0
 	for i, addr := range addrList {
 		account := accountList[i]
 
@@ -229,8 +235,6 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			}
 			defer r.Close()
 			for r.HasNext() {
-				j++
-				fmt.Printf("[dbg] iter j: %d\n", j)
 				k, vs, err := r.Next()
 				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
@@ -242,6 +246,10 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 				account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
 				h, _ := libcommon.HashData(loc)
 				t.Update(h.Bytes(), libcommon.Copy(vs))
+
+				if hardLimit--; hardLimit < 0 {
+					return nil, TooMuchIterations
+				}
 			}
 			r.Close()
 
