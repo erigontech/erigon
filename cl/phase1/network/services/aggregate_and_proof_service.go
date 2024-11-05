@@ -121,7 +121,12 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		committeeIndex = index
 	}
 
-	return a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	var (
+		aggregateVerificationData *AggregateVerificationData
+		attestingIndices          []uint64
+		seenIndex                 seenAggregateIndex
+	)
+	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
 		if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
 			return ErrIgnore
@@ -152,7 +157,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 
 		// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
-		seenIndex := seenAggregateIndex{
+		seenIndex = seenAggregateIndex{
 			epoch: target.Epoch,
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
@@ -165,7 +170,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return err
 		}
 		// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
-		attestingIndices, err := headState.GetAttestingIndicies(aggregate, false)
+		attestingIndices, err = headState.GetAttestingIndicies(aggregate, false)
 		if err != nil {
 			return err
 		}
@@ -197,37 +202,39 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 
 		// aggregate signatures for later verification
-		aggregateVerificationData, err := GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
+		aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 		if err != nil {
 			return err
 		}
+		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
+		monitor.ObserveCommitteeSize(float64(len(committee)))
+		return nil
+	}); err != nil {
+		return err
+	}
+	// further processing will be done after async signature verification
+	aggregateVerificationData.F = func() {
+		a.opPool.AttestationsPool.Insert(
+			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
+			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
+		)
+		a.forkchoiceStore.ProcessAttestingIndicies(
+			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
+			attestingIndices,
+		)
+		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
+	}
+	// for this specific request, collect data for potential peer banning or gossip publishing
+	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
 
-		// further processing will be done after async signature verification
-		aggregateVerificationData.F = func() {
-			monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
-			monitor.ObserveCommitteeSize(float64(len(committee)))
-			a.opPool.AttestationsPool.Insert(
-				aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
-				aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
-			)
-			a.forkchoiceStore.ProcessAttestingIndicies(
-				aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
-				attestingIndices,
-			)
-			a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
-		}
-		// for this specific request, collect data for potential peer banning or gossip publishing
-		aggregateVerificationData.GossipData = aggregateAndProof.GossipData
+	if aggregateAndProof.ImmediateProcess {
+		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	}
 
-		if aggregateAndProof.ImmediateProcess {
-			return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
-		}
+	// push the signatures to verify asynchronously and run final functions after that.
+	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
 
-		// push the signatures to verify asynchronously and run final functions after that.
-		a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
-
-		return ErrIgnore
-	})
+	return ErrIgnore
 
 }
 
