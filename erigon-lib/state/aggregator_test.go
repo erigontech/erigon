@@ -1050,7 +1050,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
 		require.NoError(tb, err)
 
-		n, err = rnd.Read(values[:rnd.Intn(valueSize)+1])
+		n, err = rnd.Read(values[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
 		err = collector.Collect(key, values[:n])
