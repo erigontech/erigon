@@ -87,17 +87,18 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	selectionProof := contributionAndProof.SelectionProof
 	aggregationBits := contributionAndProof.Contribution.AggregationBits
 
-	// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
-	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(contributionAndProof.Contribution.Slot) {
-		return ErrIgnore
-	}
-
-	// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
-	if bytes.Equal(aggregationBits, make([]byte, len(aggregationBits))) { // check if the aggregation bits are all zeros
-		return errors.New("contribution has no participants")
-	}
-
 	return s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+
+		// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
+		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(contributionAndProof.Contribution.Slot) {
+			return ErrIgnore
+		}
+
+		// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
+		if bytes.Equal(aggregationBits, make([]byte, len(aggregationBits))) { // check if the aggregation bits are all zeros
+			return errors.New("contribution has no participants")
+		}
+
 		// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
 		if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
 			return errors.New("subcommittee index is out of range")

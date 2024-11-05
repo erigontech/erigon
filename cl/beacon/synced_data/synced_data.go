@@ -140,3 +140,11 @@ func (s *SyncedDataManager) HeadRoot() common.Hash {
 func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
 	return s.headState.CommitteeCount(epoch)
 }
+
+func (s *SyncedDataManager) UnsetHeadState() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.headRoot = atomic.Value{}
+	s.headSlot.Store(uint64(0))
+	s.headState = nil
+}

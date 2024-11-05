@@ -72,17 +72,14 @@ func NewSyncCommitteeMessagesService(
 
 // ProcessMessage processes a sync committee message
 func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessage) error {
-	//return ErrIgnore
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
-	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Slot) {
-		return ErrIgnore
-	}
-
 	return s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
+		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Slot) {
+			return ErrIgnore
+		}
 		// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
 		// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
 		subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.ValidatorIndex)

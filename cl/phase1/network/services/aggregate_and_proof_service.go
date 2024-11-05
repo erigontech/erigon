@@ -212,6 +212,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	}); err != nil {
 		return err
 	}
+	if a.test {
+		return nil
+	}
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
 		a.opPool.AttestationsPool.Insert(
