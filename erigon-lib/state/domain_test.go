@@ -1416,8 +1416,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	keySize1 := uint64(4)
 	keySize2 := uint64(4)
 	totalTx := uint64(300)
-	keyTxsLimit := uint64(50)
-	keyLimit := uint64(200)
+	keyTxsLimit := uint64(2)
+	keyLimit := uint64(10)
 
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)

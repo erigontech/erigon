@@ -1968,12 +1968,11 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 		return nil, err
 	}
 	fmt.Printf("[dbg] DomainRange 2: %s\n", dt.d.name)
-	//lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
-	return stream.UnionKV(histStateIt, stream.EmptyKV, limit), nil
+	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
+	if err != nil {
+		return nil, err
+	}
+	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
 func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (stream.KV, error) {
