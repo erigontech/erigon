@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -257,22 +258,23 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer c.Close()
+	slices.Sort(loremStrings)
 	for k, w := range loremStrings {
-		if err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
-			t.Fatal(err)
+		if len(w) == 0 {
+			err = c.AddUncompressedWord([]byte(w))
+			require.NoError(t, err)
+			continue
 		}
+		err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k)))
+		require.NoError(t, err)
 	}
-	if err = c.Compress(); err != nil {
-		t.Fatal(err)
-	}
-	var d *Decompressor
-	if d, err = NewDecompressor(file); err != nil {
-		t.Fatal(err)
-	}
+	err = c.Compress()
+	require.NoError(t, err)
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	t.Cleanup(d.Close)
 	return d
 }
 
@@ -505,12 +507,15 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 	})
 }
 
-const lorem = `Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
-dolore magna aliqua Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
-consequat Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
-Excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
+const lorem = `lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
+dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
+consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
+excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
 
-var loremStrings = strings.Split(lorem, " ")
+var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+func rmNewLine(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
+}
 
 func TestDecompressTorrent(t *testing.T) {
 	t.Skip()
