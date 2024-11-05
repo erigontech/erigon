@@ -53,7 +53,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	rnd := rand.New(rand.NewSource(2342))
+	rnd := newRnd(2342)
 	maxTx := stepSize * 8
 
 	// 1. generate data
