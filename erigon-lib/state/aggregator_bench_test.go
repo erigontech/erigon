@@ -109,7 +109,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 }
 
 func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
-	rnd := rand.New(rand.NewSource(int64(seed)))
+	rnd := newRnd(seed)
 	keys := make(chan []byte, 1)
 	go func() {
 		for {
@@ -127,10 +127,10 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 }
 
 func Benchmark_BtreeIndex_Allocation(b *testing.B) {
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(0)
 	for i := 0; i < b.N; i++ {
 		now := time.Now()
-		count := rnd.Intn(1000000000)
+		count := rnd.IntN(1000000000)
 		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
 		bt.traverseDfs()
 		fmt.Printf("alloc %v\n", time.Since(now))

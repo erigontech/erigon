@@ -52,16 +52,15 @@ import (
 )
 
 type rnd struct {
+	*rand.Rand
 	src *rand.ChaCha8
-	gen *rand.Rand
 }
 
 func newRnd(seed uint64) *rnd {
 	_ = seed
 	src := rand.NewChaCha8([32]byte{})
-	return &rnd{src: src, gen: rand.New(src)}
+	return &rnd{Rand: rand.New(src), src: src}
 }
-func (r *rnd) Uint64N(n uint64) uint64          { return r.gen.Uint64N(n) }
 func (r *rnd) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
 func (r *rnd) Read(p []byte) (n int, err error) { return r.src.Read(p) }
 
@@ -1468,8 +1467,6 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 
 	aggStep := uint64(25)
 	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
-	defer db.Close()
-	defer d.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)

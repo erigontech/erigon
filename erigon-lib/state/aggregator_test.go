@@ -71,7 +71,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	defer domains.Close()
 
 	txs := uint64(1000)
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(0)
 
 	var (
 		commKey1 = []byte("someCommKey")
@@ -187,7 +187,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	defer domains.Close()
 
 	txs := uint64(1000)
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(0)
 
 	agg.commitmentValuesTransform = true
 
@@ -317,7 +317,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
-	rnd := rand.New(rand.NewSource(time.Now().Unix()))
+	rnd := newRnd(0)
 
 	someKey := []byte("somekey")
 	txs := (aggStep / 2) * 19
@@ -777,7 +777,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	txs := aggStep * 5
 	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -916,7 +916,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	txs := (aggStep) * StepsInColdFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	keys := make([][]byte, txs/2)
 
 	var prev1, prev2 []byte
