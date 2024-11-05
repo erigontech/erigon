@@ -18,11 +18,13 @@ package synced_data
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
@@ -94,8 +96,22 @@ func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 		return ErrNotSynced
 	}
 	s.mu.RLock()
+	trace := dbg.Stack()
+	ch := make(chan struct{})
+	go func() {
+		select {
+		case <-time.After(100 * time.Second):
+			fmt.Println("ViewHeadState timeout", trace)
+		case <-ch:
+			return
+		}
+	}()
 	defer s.mu.RUnlock()
-	return fn(s.headState)
+	if err := fn(s.headState); err != nil {
+		return err
+	}
+	ch <- struct{}{}
+	return nil
 }
 
 func (s *SyncedDataManager) Syncing() bool {
