@@ -1,20 +1,21 @@
 package l1infotree
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	zkTypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/erigon/core/types"
-	"time"
-	"github.com/ledgerwatch/erigon/zk/contracts"
-	"github.com/ledgerwatch/log/v3"
+	"errors"
 	"fmt"
 	"sort"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"time"
+
 	"github.com/iden3/go-iden3-crypto/keccak256"
-	"errors"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/zk/contracts"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	zkTypes "github.com/ledgerwatch/erigon/zk/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Syncer interface {
@@ -137,7 +138,7 @@ LOOP:
 	defer ticker.Stop()
 	processed := 0
 
-	tree, err := initialiseL1InfoTree(hermezDb)
+	tree, err := InitialiseL1InfoTree(hermezDb)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +239,7 @@ func chunkLogs(slice []types.Log, chunkSize int) [][]types.Log {
 	return chunks
 }
 
-func initialiseL1InfoTree(hermezDb *hermez_db.HermezDb) (*L1InfoTree, error) {
+func InitialiseL1InfoTree(hermezDb *hermez_db.HermezDb) (*L1InfoTree, error) {
 	leaves, err := hermezDb.GetAllL1InfoTreeLeaves()
 	if err != nil {
 		return nil, err

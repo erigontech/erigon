@@ -101,7 +101,7 @@ jwt.hex
 
 .tool-versions
 
-*__debug_bin*
+**/*__debug_bin*
 yarn.lock
 node_modules
 
@@ -110,3 +110,6 @@ node_modules
 /config.yml
 
 vendor
+
+**/cover.out
+**/cover.html
