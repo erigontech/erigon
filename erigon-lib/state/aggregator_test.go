@@ -1030,7 +1030,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	values := make([]byte, valueSize)
 
 	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
@@ -1112,7 +1112,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byte, [][]byte) {
 	tb.Helper()
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	values := make([][]byte, keyCount)
 	keys := make([][]byte, keyCount)
 
@@ -1123,7 +1123,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 		require.NoError(tb, err)
 		keys[i] = common.Copy(bk[:n])
 
-		n, err = rnd.Read(bv[:rnd.Intn(valueSize)+1])
+		n, err = rnd.Read(bv[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
 		values[i] = common.Copy(bv[:n])
