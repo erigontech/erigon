@@ -37,9 +37,13 @@ func (e *HTTPError) Error() string {
 func JSONRPCCall(url, method string, parameters ...interface{}) (types.Response, error) {
 	const jsonRPCVersion = "2.0"
 
-	params, err := json.Marshal(parameters)
-	if err != nil {
-		return types.Response{}, err
+	params := []byte{}
+	if len(parameters) != 0 {
+		var err error
+		params, err = json.Marshal(parameters)
+		if err != nil {
+			return types.Response{}, err
+		}
 	}
 
 	req := types.Request{
@@ -96,9 +100,13 @@ func JSONRPCBatchCall(url string, methods []string, parameterGroups ...[]interfa
 	batchRequest := make([]types.Request, 0, len(methods))
 
 	for i, method := range methods {
-		params, err := json.Marshal(parameterGroups[i])
-		if err != nil {
-			return nil, err
+		params := []byte{}
+		if len(parameterGroups[i]) != 0 {
+			var err error
+			params, err = json.Marshal(parameterGroups[i])
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		req := types.Request{
