@@ -1431,7 +1431,6 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		var idxVal []byte
 		//if hi.compressVals {
 		idxVal, _ = top.g.Next(nil)
-		fmt.Printf("[dbg] StateAsOfIterF advanceInFiles: %s, %x, to: %x\n", top.g.FileName(), key, hi.to)
 		//} else {
 		//	idxVal, _ = top.g.NextUncompressed()
 		//}
@@ -1442,6 +1441,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 			//	top.key, _ = top.g.NextUncompressed()
 			//}
 			if hi.to == nil || bytes.Compare(top.key, hi.to) < 0 {
+				fmt.Printf("[dbg] StateAsOfIterF advanceInFiles keep: %s, %x, to: %x\n", top.g.FileName(), top.key, hi.to)
 				heap.Push(&hi.h, top)
 			}
 		}
