@@ -64,7 +64,8 @@ func newRnd(seed uint64) *rndGen {
 func (r *rndGen) IntN(n int) int { return int(r.Uint64N(uint64(n))) }
 
 func (r *rndGen) Read(p []byte) (n int, err error) { //nolint
-	return r.src.Read(p) //nolint
+	//nolint:typecheck
+	return r.src.Read(p) //nolint:typecheck
 }
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {

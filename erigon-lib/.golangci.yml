@@ -22,6 +22,7 @@ linters:
     - testifylint #TODO: enable me
     - perfsprint #TODO: enable me
     - protogetter
+    - typecheck
   enable:
     - unconvert
     - predeclared
