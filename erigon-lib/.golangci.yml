@@ -112,6 +112,7 @@ issues:
         - unused
         - gocritic
         - perfsprint
+        - typecheck
     - path: hack\.go
       linters:
         - gosec
