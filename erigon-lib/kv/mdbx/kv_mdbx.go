@@ -1582,16 +1582,20 @@ func (s *cursor2iter) Close() {
 }
 
 func (s *cursor2iter) HasNext() bool {
-	if s.limit <= 0 || s.nextV == nil { // Limit or EndOfTable
+	if s.limit == 0 { // limit reached
 		return false
 	}
-	if s.toPrefix != nil {
-		//Asc:  [from, to) AND from < to
-		//Desc: [from, to) AND from > to
-		cmp := bytes.Compare(s.nextK, s.toPrefix)
-		return (bool(s.orderAscend) && cmp < 0) || (!bool(s.orderAscend) && cmp > 0)
+	if s.nextK == nil { // EndOfTable
+		return false
 	}
-	return true
+	if s.toPrefix == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(s.nextK, s.toPrefix)
+	return (bool(s.orderAscend) && cmp < 0) || (!bool(s.orderAscend) && cmp > 0)
 }
 
 func (s *cursor2iter) Next() (k, v []byte, err error) {
@@ -1740,16 +1744,20 @@ func (s *cursorDup2iter) Close() {
 	}
 }
 func (s *cursorDup2iter) HasNext() bool {
-	if s.limit <= 0 || s.nextV == nil { // Limit or EndOfTable
+	if s.limit == 0 { // limit reached
 		return false
 	}
-	if s.toPrefix != nil {
-		//Asc:  [from, to) AND from < to
-		//Desc: [from, to) AND from > to
-		cmp := bytes.Compare(s.nextV, s.toPrefix)
-		return (s.orderAscend && cmp < 0) || (!s.orderAscend && cmp > 0)
+	if s.nextV == nil { // EndOfTable
+		return false
 	}
-	return true
+	if s.toPrefix == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(s.nextV, s.toPrefix)
+	return (s.orderAscend && cmp < 0) || (!s.orderAscend && cmp > 0)
 }
 func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	select {

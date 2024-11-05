@@ -600,7 +600,6 @@ func (c HistoryCollation) Close() {
 
 // [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
-
 	if h.snapshotsDisabled {
 		return HistoryCollation{}, nil
 	}
@@ -633,9 +632,6 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
 	historyComp = seg.NewWriter(comp, h.compression)
-	if h.compression != seg.CompressNone {
-		panic(1)
-	}
 
 	keysCursor, err := roTx.CursorDupSort(h.indexKeysTable)
 	if err != nil {
@@ -1353,18 +1349,19 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		panic("implement me")
 	}
 	hi := &StateAsOfIterF{
-		from: from, to: to, limit: limit, orderAscend: asc,
+		from: from, toPrefix: to, limit: limit, orderAscend: asc,
 
 		hc:         ht,
 		startTxNum: startTxNum,
 
 		ctx: ctx,
 	}
-	fmt.Printf("[dbg] ht.iit.files: %d, %x, %x\n", len(ht.iit.files), from, to)
 	for i, item := range ht.iit.files {
 		if item.endTxNum <= startTxNum {
+			fmt.Printf("[dbg] ht.iit.files skip file: %s, %d, %d\n", item.getter.FileName(), item.endTxNum, startTxNum)
 			continue
 		}
+		fmt.Printf("[dbg] ht.iit.files use file: %s\n", item.src.decompressor.FileName())
 		// TODO: seek(from)
 		g := seg.NewReader(item.src.decompressor.MakeGetter(), ht.h.compression)
 
@@ -1394,7 +1391,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		largeValues: ht.h.historyLargeValues,
 		roTx:        roTx,
 		valsTable:   ht.h.historyValsTable,
-		from:        from, to: to, limit: limit, orderAscend: asc,
+		from:        from, toPrefix: to, limit: limit, orderAscend: asc,
 
 		startTxNum: startTxNum,
 
@@ -1405,8 +1402,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		dbit.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	//return stream.UnionKV(hi, dbit, limit), nil
-	return stream.UnionKV(hi, stream.EmptyKV, limit), nil
+	return stream.UnionKV(hi, dbit, limit), nil
 }
 
 // StateAsOfIter - returns state range at given time in history
@@ -1414,9 +1410,9 @@ type StateAsOfIterF struct {
 	hc    *HistoryRoTx
 	limit int
 
-	from, to []byte
-	nextVal  []byte
-	nextKey  []byte
+	from, toPrefix []byte
+	nextVal        []byte
+	nextKey        []byte
 
 	h          ReconHeap
 	startTxNum uint64
@@ -1448,7 +1444,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 			//} else {
 			//	top.key, _ = top.g.NextUncompressed()
 			//}
-			if hi.to == nil || bytes.Compare(top.key, hi.to) < 0 {
+			if hi.toPrefix == nil || bytes.Compare(top.key, hi.toPrefix) < 0 {
 				heap.Push(&hi.h, top)
 			}
 		}
@@ -1465,7 +1461,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 			fmt.Printf("[dbg] StateAsOfIterF advanceInFiles ef.seek not found. %s, %x\n", top.g.FileName(), hi.nextKey)
 			continue
 		}
-		fmt.Printf("[dbg] StateAsOfIterF advanceInFiles keep: %s, %x, to: %x\n", top.g.FileName(), top.key, hi.to)
+		fmt.Printf("[dbg] StateAsOfIterF advanceInFiles keep: %s, %x, to: %x\n", top.g.FileName(), top.key, hi.toPrefix)
 
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], n)
@@ -1489,16 +1485,20 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 }
 
 func (hi *StateAsOfIterF) HasNext() bool {
-	if hi.limit <= 0 || hi.nextKey == nil { // Limit or EndOfTable
+	if hi.limit == 0 { // limit reached
 		return false
 	}
-	if hi.to != nil {
-		//Asc:  [from, to) AND from < to
-		//Desc: [from, to) AND from > to
-		cmp := bytes.Compare(hi.nextKey, hi.to)
-		return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
+	if hi.nextKey == nil { // EndOfTable
+		return false
 	}
-	return true
+	if hi.toPrefix == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
@@ -1528,9 +1528,9 @@ type StateAsOfIterDB struct {
 	valsCDup    kv.CursorDupSort
 	valsTable   string
 
-	from, to    []byte
-	orderAscend order.By
-	limit       int
+	from, toPrefix []byte
+	orderAscend    order.By
+	limit          int
 
 	nextKey, nextVal []byte
 
@@ -1590,7 +1590,7 @@ func (hi *StateAsOfIterDB) advanceLargeVals() error {
 		if err != nil {
 			return err
 		}
-		if hi.to != nil && bytes.Compare(k[:len(k)-8], hi.to) >= 0 {
+		if hi.toPrefix != nil && bytes.Compare(k[:len(k)-8], hi.toPrefix) >= 0 {
 			break
 		}
 		if !bytes.Equal(seek[:len(k)-8], k[:len(k)-8]) {
@@ -1624,7 +1624,7 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 		if err != nil {
 			return err
 		}
-		if hi.to != nil && bytes.Compare(k, hi.to) >= 0 {
+		if hi.toPrefix != nil && bytes.Compare(k, hi.toPrefix) >= 0 {
 			break
 		}
 		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
@@ -1646,16 +1646,20 @@ func (hi *StateAsOfIterDB) HasNext() bool {
 	if hi.err != nil {
 		return true
 	}
-	if hi.limit <= 0 || hi.nextKey == nil { // Limit or EndOfTable
+	if hi.limit == 0 { // limit reached
 		return false
 	}
-	if hi.to != nil {
-		//Asc:  [from, to) AND from < to
-		//Desc: [from, to) AND from > to
-		cmp := bytes.Compare(hi.nextKey, hi.to)
-		return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
+	if hi.nextKey == nil { // EndOfTable
+		return false
 	}
-	return true
+	if hi.toPrefix == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {

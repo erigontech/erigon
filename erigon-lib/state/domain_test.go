@@ -1406,7 +1406,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
 	d.compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
-	d.filenameBase = kv.FileCommitmentDomain
+	d.filenameBase = kv.FileAccountDomain
 
 	dc := d.BeginFilesRo()
 	defer d.Close()
@@ -1454,7 +1454,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	//		v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
 	//		require.NoError(err)
 	//		require.True(ok)
-	//		require.EqualValuesf(updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
+	//		require.EqualValuesf(updates[i-1].value, v¬, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
 	//	}
 	//	if len(updates) == 0 {
 	//		continue
