@@ -410,7 +410,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 						})
 					}
 
-				case "aplication/profile":
+				case "application/profile":
 					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
 						return codec.WriteJSON(ctx1, &nodeResponse{
 							Id: requestId,
