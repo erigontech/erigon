@@ -98,14 +98,6 @@ jobs:
           erigon_getHeaderByHash/test_03.json,\
           erigon_getHeaderByHash/test_04.json,\
           erigon_getHeaderByHash/test_06.json,\
-          erigon_getHeaderByNumber/test_01.json,\
-          erigon_getHeaderByNumber/test_02.json,\
-          erigon_getHeaderByNumber/test_03.json,\
-          erigon_getHeaderByNumber/test_04.json,\
-          erigon_getHeaderByNumber/test_05.json,\
-          erigon_getHeaderByNumber/test_06.json,\
-          erigon_getHeaderByNumber/test_07.json,\
-          erigon_getHeaderByNumber/test_08.json,\
           erigon_getLatestLogs/test_01.json,\
           erigon_getLatestLogs/test_02.json,\
           erigon_getLatestLogs/test_03.json,\
