@@ -61,8 +61,12 @@ func newRnd(seed uint64) *rndGen {
 	src := rand.NewChaCha8([32]byte{})
 	return &rndGen{Rand: rand.New(src), src: src}
 }
-func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
-func (r *rndGen) Read(p []byte) (n int, err error) { return r.src.Read(p) } //nolint:typecheck
+func (r *rndGen) IntN(n int) int { return int(r.Uint64N(uint64(n))) }
+
+// nolin
+func (r *rndGen) Read(p []byte) (n int, err error) {
+	return r.src.Read(p) //nolint
+}
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
