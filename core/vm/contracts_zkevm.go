@@ -299,6 +299,34 @@ func (c *bigModExp_zkevm) RequiredGas(input []byte) uint64 {
 	} else {
 		input = input[:0]
 	}
+
+	// Retrieve the operands and execute the exponentiation
+	var (
+		base       = new(big.Int).SetBytes(getData(input, 0, baseLen.Uint64()))
+		exp        = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), expLen.Uint64()))
+		mod        = new(big.Int).SetBytes(getData(input, baseLen.Uint64()+expLen.Uint64(), modLen.Uint64()))
+		baseBitLen = base.BitLen()
+		expBitLen  = exp.BitLen()
+		modBitLen  = mod.BitLen()
+	)
+
+	// zk special cases
+	// - if mod = 0 we consume gas as normal
+	// - if base is 0 and mod < 8192 we consume gas as normal
+	// - if neither of the above are true we check for reverts and return 0 gas fee
+
+	if modBitLen == 0 {
+		// consume as normal - will return 0
+	} else if baseBitLen == 0 {
+		if modBitLen > 8192 {
+			return 0
+		} else {
+			// consume as normal - will return 0
+		}
+	} else if baseBitLen > 8192 || expBitLen > 8192 || modBitLen > 8192 {
+		return 0
+	}
+
 	// Retrieve the head 32 bytes of exp for the adjusted exponent length
 	var expHead *big.Int
 	if big.NewInt(int64(len(input))).Cmp(baseLen) <= 0 {
@@ -373,21 +401,36 @@ func (c *bigModExp_zkevm) Run(input []byte) ([]byte, error) {
 	} else {
 		input = input[:0]
 	}
-	// Handle a special case when both the base and mod length is zero
-	if baseLen == 0 && modLen == 0 {
-		return []byte{}, nil
-	}
+
 	// Retrieve the operands and execute the exponentiation
 	var (
-		base = new(big.Int).SetBytes(getData(input, 0, baseLen))
-		exp  = new(big.Int).SetBytes(getData(input, baseLen, expLen))
-		mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
-		v    []byte
+		base       = new(big.Int).SetBytes(getData(input, 0, baseLen))
+		exp        = new(big.Int).SetBytes(getData(input, baseLen, expLen))
+		mod        = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
+		v          []byte
+		baseBitLen = base.BitLen()
+		expBitLen  = exp.BitLen()
+		modBitLen  = mod.BitLen()
 	)
+
+	if modBitLen == 0 {
+		return []byte{}, nil
+	}
+
+	if baseBitLen == 0 {
+		if modBitLen > 8192 {
+			return nil, ErrExecutionReverted
+		} else {
+			return common.LeftPadBytes([]byte{}, int(modLen)), nil
+		}
+	}
+
+	// limit to 8192 bits for base, exp, and mod in ZK
+	if baseBitLen > 8192 || expBitLen > 8192 || modBitLen > 8192 {
+		return nil, ErrExecutionReverted
+	}
+
 	switch {
-	case mod.BitLen() == 0:
-		// Modulo 0 is undefined, return zero
-		return common.LeftPadBytes([]byte{}, int(modLen)), nil
 	case base.Cmp(libcommon.Big1) == 0:
 		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
 		v = base.Mod(base, mod).Bytes()
