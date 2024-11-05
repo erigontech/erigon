@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
@@ -127,7 +126,7 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 }
 
 func Benchmark_BtreeIndex_Allocation(b *testing.B) {
-	rnd := newRnd(0)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	for i := 0; i < b.N; i++ {
 		now := time.Now()
 		count := rnd.IntN(1000000000)
@@ -139,7 +138,7 @@ func Benchmark_BtreeIndex_Allocation(b *testing.B) {
 
 func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 	defer os.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
@@ -193,12 +192,12 @@ func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
 	compress := seg.CompressNone
 	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			p := rnd.Intn(len(keys))
+			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
@@ -249,7 +248,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		b.Skip("requires existing KV index file at ../../data/storage.kv")
 	}
 
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 
 	defer os.RemoveAll(tmp)
