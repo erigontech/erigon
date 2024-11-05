@@ -1487,6 +1487,7 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 		return nil, nil, hi.ctx.Err()
 	default:
 	}
+	fmt.Printf("[dbg] StateAsOfIterF.next: limit=%d\n", hi.limit)
 
 	hi.limit--
 	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
