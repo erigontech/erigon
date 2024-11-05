@@ -517,6 +517,10 @@ func (b *BeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionC
 	return b.ExecutionChanges
 }
 
+func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
+	return b.ExecutionRequests
+}
+
 type DenebBeaconBlock struct {
 	Block     *BeaconBlock              `json:"block"`
 	KZGProofs *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`

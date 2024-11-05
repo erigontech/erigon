@@ -131,13 +131,9 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
-	if err := solid.RangeErr[*cltypes.AttesterSlashing](blockBody.GetAttesterSlashings(), func(index int, slashing *cltypes.AttesterSlashing, length int) error {
-		if err = impl.ProcessAttesterSlashing(s, slashing); err != nil {
-			return fmt.Errorf("ProcessAttesterSlashing: %s", err)
-		}
-		return nil
-	}); err != nil {
-		return nil, nil, nil, err
+	// attester slashings
+	if err := forEachProcess(s, blockBody.GetAttesterSlashings(), impl.ProcessAttesterSlashing); err != nil {
+		return nil, nil, nil, fmt.Errorf("ProcessProposerSlashing: %s", err)
 	}
 
 	// Process each attestations
@@ -146,13 +142,8 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 
 	// Process each deposit
-	if err := solid.RangeErr[*cltypes.Deposit](blockBody.GetDeposits(), func(index int, deposit *cltypes.Deposit, length int) error {
-		if err = impl.ProcessDeposit(s, deposit); err != nil {
-			return fmt.Errorf("ProcessDeposit: %s", err)
-		}
-		return nil
-	}); err != nil {
-		return nil, nil, nil, err
+	if err := forEachProcess(s, blockBody.GetDeposits(), impl.ProcessDeposit); err != nil {
+		return nil, nil, nil, fmt.Errorf("ProcessDeposit: %s", err)
 	}
 
 	// Process each voluntary exit.
@@ -173,7 +164,28 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
+	if s.Version() >= clparams.ElectraVersion {
+		if err := forEachProcess(s, blockBody.GetExecutionRequests().Deposits, impl.ProcessDepositRequest); err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessDepositRequest: %s", err)
+		}
+		if err := forEachProcess(s, blockBody.GetExecutionRequests().Withdrawals, impl.ProcessWithdrawalRequest); err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessWithdrawalRequest: %s", err)
+		}
+		if err := forEachProcess(s, blockBody.GetExecutionRequests().Consolidations, impl.ProcessConsolidationRequest); err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessConsolidationRequest: %s", err)
+		}
+	}
+
 	return
+}
+
+func forEachProcess[T solid.EncodableHashableSSZ](
+	s abstract.BeaconState,
+	list *solid.ListSSZ[T],
+	f func(s abstract.BeaconState, item T) error) error {
+	return solid.RangeErr(list, func(index int, item T, length int) error {
+		return f(s, item)
+	})
 }
 
 func processRandao(impl BlockProcessor, s abstract.BeaconState, body cltypes.GenericBeaconBody, block cltypes.GenericBeaconBlock) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
@@ -285,9 +297,9 @@ func processBlsToExecutionChanges(impl BlockOperationProcessor, s abstract.Beaco
 			return err
 		}
 
-		// Perform full validation if requested.
-		wc := validator.WithdrawalCredentials()
 		if impl.FullValidate() {
+			// Perform full validation if requested.
+			wc := validator.WithdrawalCredentials()
 			// Check the validator's withdrawal credentials prefix.
 			if wc[0] != byte(beaconConfig.BLSWithdrawalPrefixByte) {
 				return errors.New("invalid withdrawal credentials prefix")

@@ -485,3 +485,7 @@ func (b *BlindedBeaconBody) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitmen
 func (b *BlindedBeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionChange] {
 	return b.ExecutionChanges
 }
+
+func (b *BlindedBeaconBody) GetExecutionRequests() *ExecutionRequests {
+	return b.ExecutionRequests
+}
