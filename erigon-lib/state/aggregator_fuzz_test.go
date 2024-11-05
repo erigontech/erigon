@@ -51,10 +51,10 @@ func Fuzz_BtreeIndex_Allocation(f *testing.F) {
 	})
 }
 
-func Fuzz_AggregatorV3_Merge(t *testing.F) {
-	db, agg := testFuzzDbAndAggregatorv3(t, 10)
+func Fuzz_AggregatorV3_Merge(f *testing.F) {
+	db, agg := testFuzzDbAndAggregatorv3(f, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
-	require.NoError(t, err)
+	require.NoError(f, err)
 	defer func() {
 		if rwTx != nil {
 			rwTx.Rollback()
@@ -64,7 +64,7 @@ func Fuzz_AggregatorV3_Merge(t *testing.F) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
-	require.NoError(t, err)
+	require.NoError(f, err)
 	defer domains.Close()
 
 	const txs = uint64(1000)
@@ -77,9 +77,9 @@ func Fuzz_AggregatorV3_Merge(t *testing.F) {
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	var maxWrite, otherMaxWrite uint64
-	//t.Add([]common.Address{common.HexToAddress("0x123"), common.HexToAddress("0x456")})
-	//t.Add([]common.Hash{common.HexToHash("0x123"), common.HexToHash("0x456")})
-	t.Fuzz(func(t *testing.T, data []byte) {
+	//f.Add([]common.Address{common.HexToAddress("0x123"), common.HexToAddress("0x456")})
+	//f.Add([]common.Hash{common.HexToHash("0x123"), common.HexToHash("0x456")})
+	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) < int(txs*(length.Addr+length.Hash)) {
 			t.Skip()
 		}
@@ -174,10 +174,10 @@ func Fuzz_AggregatorV3_Merge(t *testing.F) {
 
 }
 
-func Fuzz_AggregatorV3_MergeValTransform(t *testing.F) {
-	db, agg := testFuzzDbAndAggregatorv3(t, 10)
+func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
+	db, agg := testFuzzDbAndAggregatorv3(f, 10)
 	rwTx, err := db.BeginRwNosync(context.Background())
-	require.NoError(t, err)
+	require.NoError(f, err)
 	defer func() {
 		if rwTx != nil {
 			rwTx.Rollback()
@@ -186,7 +186,7 @@ func Fuzz_AggregatorV3_MergeValTransform(t *testing.F) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
-	require.NoError(t, err)
+	require.NoError(f, err)
 	defer domains.Close()
 
 	const txs = uint64(1000)
@@ -198,7 +198,7 @@ func Fuzz_AggregatorV3_MergeValTransform(t *testing.F) {
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	//var maxWrite, otherMaxWrite uint64
-	t.Fuzz(func(t *testing.T, data []byte) {
+	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) < int(txs*(length.Addr+length.Hash)) {
 			t.Skip()
 		}
@@ -267,19 +267,19 @@ func Fuzz_AggregatorV3_MergeValTransform(t *testing.F) {
 	})
 }
 
-func testFuzzDbAndAggregatorv3(t *testing.F, aggStep uint64) (kv.RwDB, *Aggregator) {
-	t.Helper()
-	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
+func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.RwDB, *Aggregator) {
+	f.Helper()
+	require := require.New(f)
+	dirs := datadir.New(f.TempDir())
 	logger := log.New()
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
-	t.Cleanup(db.Close)
+	f.Cleanup(db.Close)
 
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
-	t.Cleanup(agg.Close)
+	f.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
 	agg.DisableFsync()
