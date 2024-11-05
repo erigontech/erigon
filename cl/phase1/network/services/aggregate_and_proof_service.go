@@ -178,8 +178,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return errors.New("no attesting indicies")
 		}
 
-		monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
-
 		// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
 		if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {
 			return errors.New("committee index not in committee")
@@ -206,6 +204,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if err != nil {
 			return err
 		}
+
+		monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
 		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 		monitor.ObserveCommitteeSize(float64(len(committee)))
 		return nil
