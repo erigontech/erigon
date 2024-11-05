@@ -166,27 +166,26 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &req); err != nil && !errors.Is(err, services.ErrIgnore) {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+
+	encodedSSZ, err := req.EncodeSSZ(nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Broadcast to gossip
-	if a.sentinel != nil {
-		encodedSSZ, err := req.EncodeSSZ(nil)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &cltypes.SignedVoluntaryExitWithGossipData{
+		GossipData: &sentinel.GossipData{
 			Data: encodedSSZ,
 			Name: gossip.TopicNameVoluntaryExit,
-		}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
+		},
+		SignedVoluntaryExit:   &req,
+		ImmediateVerification: true,
+	}); err != nil && !errors.Is(err, services.ErrIgnore) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
+	a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
+
 	// Only write 200
 	w.WriteHeader(http.StatusOK)
 }

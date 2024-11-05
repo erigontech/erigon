@@ -34,11 +34,12 @@ import (
 )
 
 type voluntaryExitService struct {
-	operationsPool    pool.OperationsPool
-	emitters          *beaconevents.EventEmitter
-	syncedDataManager synced_data.SyncedData
-	beaconCfg         *clparams.BeaconChainConfig
-	ethClock          eth_clock.EthereumClock
+	operationsPool         pool.OperationsPool
+	emitters               *beaconevents.EventEmitter
+	syncedDataManager      synced_data.SyncedData
+	beaconCfg              *clparams.BeaconChainConfig
+	ethClock               eth_clock.EthereumClock
+	batchSignatureVerifier *BatchSignatureVerifier
 }
 
 func NewVoluntaryExitService(
@@ -47,19 +48,21 @@ func NewVoluntaryExitService(
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
+	batchSignatureVerifier *BatchSignatureVerifier,
 ) VoluntaryExitService {
 	return &voluntaryExitService{
-		operationsPool:    operationsPool,
-		emitters:          emitters,
-		syncedDataManager: syncedDataManager,
-		beaconCfg:         beaconCfg,
-		ethClock:          ethClock,
+		operationsPool:         operationsPool,
+		emitters:               emitters,
+		syncedDataManager:      syncedDataManager,
+		beaconCfg:              beaconCfg,
+		ethClock:               ethClock,
+		batchSignatureVerifier: batchSignatureVerifier,
 	}
 }
 
-func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedVoluntaryExit) error {
+func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedVoluntaryExitWithGossipData) error {
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
-	voluntaryExit := msg.VoluntaryExit
+	voluntaryExit := msg.SignedVoluntaryExit.VoluntaryExit
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
 	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
@@ -69,6 +72,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	var (
 		signingRoot common.Hash
 		pk          common.Bytes48
+		domain      []byte
 	)
 
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#voluntary-exits
@@ -110,7 +114,6 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		// assert bls.Verify(validator.pubkey, signing_root, signed_voluntary_exit.signature)
 		pk = val.PublicKey()
 		domainType := s.beaconCfg.DomainVoluntaryExit
-		var domain []byte
 		if state.Version() < clparams.DenebVersion {
 			domain, err = state.GetDomain(domainType, voluntaryExit.Epoch)
 		} else if state.Version() >= clparams.DenebVersion {
@@ -124,14 +127,32 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}); err != nil {
 		return err
 	}
-
-	if valid, err := blsVerify(msg.Signature[:], signingRoot[:], pk[:]); err != nil {
+	signingRoot, err := computeSigningRoot(voluntaryExit, domain)
+	if err != nil {
 		return err
-	} else if !valid {
-		return errors.New("ProcessVoluntaryExit: BLS verification failed")
 	}
 
-	s.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.ValidatorIndex, msg)
-	s.emitters.Operation().SendVoluntaryExit(msg)
-	return nil
+	aggregateVerificationData := &AggregateVerificationData{
+		Signatures: [][]byte{msg.SignedVoluntaryExit.Signature[:]},
+		SignRoots:  [][]byte{signingRoot[:]},
+		Pks:        [][]byte{pk[:]},
+		GossipData: msg.GossipData,
+		F: func() {
+			s.operationsPool.VoluntaryExitsPool.Insert(voluntaryExit.ValidatorIndex, msg.SignedVoluntaryExit)
+			s.emitters.Operation().SendVoluntaryExit(msg.SignedVoluntaryExit)
+		},
+	}
+
+	if msg.ImmediateVerification {
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+	}
+
+	// push the signatures to verify asynchronously and run final functions after that.
+	s.batchSignatureVerifier.AsyncVerifyVoluntaryExit(aggregateVerificationData)
+
+	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
+	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
+	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
+	// gossip ourselves or ban the peer which sent that particular invalid signature.
+	return ErrIgnore
 }

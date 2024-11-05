@@ -204,8 +204,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
-		obj := &cltypes.SignedVoluntaryExit{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := &cltypes.SignedVoluntaryExitWithGossipData{
+			GossipData:          copyOfSentinelData(data),
+			SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
+		}
+		if err := obj.SignedVoluntaryExit.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.voluntaryExitService.ProcessMessage(ctx, data.SubnetId, obj)
