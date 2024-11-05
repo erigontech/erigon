@@ -297,33 +297,43 @@ func TestUncompressed(t *testing.T) {
 		offsets = append(offsets, offset)
 	}
 
-	t.Run("BinarySearch", func(t *testing.T) {
+	t.Run("BinarySearch middle", func(t *testing.T) {
 		require := require.New(t)
-		k, ok := g.BinarySearch([]byte("ipsum"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		_, ok := g.BinarySearch([]byte("ipsum"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
+		k, _ := g.Next(nil)
 		require.Equal("ipsum 38", string(k))
-		k, ok = g.BinarySearch([]byte("ipsu"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		_, ok = g.BinarySearch([]byte("ipsu"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
+		k, _ = g.Next(nil)
 		require.Equal("ipsum 38", string(k))
-
+	})
+	t.Run("BinarySearch end of file", func(t *testing.T) {
+		require := require.New(t)
 		//last word is `voluptate`
-		k, ok = g.BinarySearch([]byte("voluptate"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		_, ok := g.BinarySearch([]byte("voluptate"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
+		k, _ := g.Next(nil)
 		require.Equal("voluptate 69", string(k))
-		k, ok = g.BinarySearch([]byte("voluptat"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		_, ok = g.BinarySearch([]byte("voluptat"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
+		k, _ = g.Next(nil)
 		require.Equal("voluptate 69", string(k))
-		k, ok = g.BinarySearch([]byte("voluptatez"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		_, ok = g.BinarySearch([]byte("voluptatez"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.False(ok)
-		require.Equal("", string(k))
+	})
 
+	t.Run("BinarySearch begin of file", func(t *testing.T) {
+		require := require.New(t)
 		//first word is ``
-		k, ok = g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		_, ok := g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
+		k, _ := g.Next(nil)
 		require.Equal("", string(k))
 
-		k, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		_, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
+		k, _ = g.Next(nil)
 		require.Equal("", string(k))
 	})
 

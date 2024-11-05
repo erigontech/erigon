@@ -1365,7 +1365,11 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		var offset uint64
 		if len(from) > 0 {
 			n := item.src.decompressor.Count() / 2
-			offset = g.BinarySearch(from, n, idx.OrdinalLookup)
+			var ok bool
+			offset, ok = g.BinarySearch(from, n, idx.OrdinalLookup)
+			if !ok {
+				offset = 0
+			}
 		}
 		g.Reset(offset)
 		if g.HasNext() {

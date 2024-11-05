@@ -1066,31 +1066,27 @@ func (g *Getter) FastNext(buf []byte) ([]byte, uint64) {
 	return buf[:wordLen], postLoopPos
 }
 
-// BinarySearch - !expecting sorted file
-func (g *Getter) BinarySearch(fromPrefix []byte, count int, f func(i uint64) (offset uint64)) (value []byte, ok bool) {
+// BinarySearch - !expecting sorted file - does Seek `g` to key which >= `fromPrefix` by using BinarySearch - means unoptimal and touching many places in file
+// use `.Next` to read found
+// at `ok = false` leaving `g` in unpredictible state
+func (g *Getter) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool) {
+	var key []byte
 	foundItem := sort.Search(count, func(i int) bool {
-		offset := f(uint64(i))
+		offset := getOffset(uint64(i))
 		g.Reset(offset)
 		if g.HasNext() {
-			key, _ := g.Next(nil)
-			return bytes.Compare(key, fromPrefix) >= 0
+			key, _ = g.Next(key[:0])
+			return bytes.Compare(key, seek) >= 0
 		}
 		return false
 	})
 	if foundItem == count { // `Search` returns `n` if not found
-		return nil, false
+		return 0, false
 	}
-	foundOffset := f(uint64(foundItem))
+	foundOffset = getOffset(uint64(foundItem))
 	g.Reset(foundOffset)
-	if g.HasNext() {
-		value, _ = g.Next(nil)
+	if !g.HasNext() {
+		return 0, false
 	}
-	if dbg.AssertEnabled && foundItem > 2 {
-		g.Reset(f(uint64(foundItem - 2))) // prev key
-		prevKey, _ := g.Next(nil)
-		if bytes.Compare(prevKey, fromPrefix) >= 0 {
-			panic(fmt.Errorf("see smaller key: fromPrefix=%x, prevKey=%x", fromPrefix, prevKey))
-		}
-	}
-	return value, true
+	return foundOffset, true
 }
