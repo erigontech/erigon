@@ -1404,6 +1404,76 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
+	d.History.compression = seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressKeys | seg.CompressVals
+	d.filenameBase = kv.FileCommitmentDomain
+
+	dc := d.BeginFilesRo()
+	defer d.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(3000)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(200)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.SetTxNum(updates[i].txNum)
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	writer.SetTxNum(totalTx)
+
+	err = writer.Flush(context.Background(), tx)
+	require.NoError(err)
+
+	// aggregate
+	collateAndMerge(t, db, tx, d, totalTx)
+	require.NoError(tx.Commit())
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(err)
+	defer tx.Rollback()
+	dc.Close()
+
+	dc = d.BeginFilesRo()
+	defer dc.Close()
+
+	kc := 0
+	for key, updates := range data {
+		kc++
+		for i := 1; i < len(updates); i++ {
+			v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
+			require.NoError(err)
+			require.True(ok)
+			require.EqualValuesf(updates[i-1].value, v, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
+		}
+		if len(updates) == 0 {
+			continue
+		}
+		v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
+		require.NoError(err)
+		require.EqualValuesf(updates[len(updates)-1].value, v, "key %x latest", []byte(key))
+		require.True(ok)
+	}
+}
+
+func TestDomainRange(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	require := require.New(t)
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = false
 	d.History.compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
 	d.compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileAccountDomain
@@ -1446,24 +1516,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	dc = d.BeginFilesRo()
 	defer dc.Close()
-
-	//kc := 0
-	//for key, updates := range data {
-	//	kc++
-	//	for i := 1; i < len(updates); i++ {
-	//		v, ok, err := dc.GetAsOf([]byte(key), updates[i].txNum, tx)
-	//		require.NoError(err)
-	//		require.True(ok)
-	//		require.EqualValuesf(updates[i-1].value, v¬, "(%d/%d) key %x, txn %d", kc, len(data), []byte(key), updates[i-1].txNum)
-	//	}
-	//	if len(updates) == 0 {
-	//		continue
-	//	}
-	//	v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
-	//	require.NoError(err)
-	//	require.EqualValuesf(updates[len(updates)-1].value, v, "key %x latest", []byte(key))
-	//	require.True(ok)
-	//}
 
 	//it, err := dc.DomainRangeLatest(tx, nil, nil, -1)
 	it, err := dc.DomainRange(context.Background(), tx, nil, nil, 190, order.Asc, -1)
