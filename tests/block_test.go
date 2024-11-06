@@ -29,6 +29,7 @@ import (
 )
 
 func TestBlockchain(t *testing.T) {
+	t.Parallel()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
