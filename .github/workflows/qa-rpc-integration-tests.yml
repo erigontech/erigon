@@ -97,7 +97,7 @@ jobs:
          debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,\
 # Erigon bug https://github.com/erigontech/erigon/issues/12603
           erigon_getLatestLogs,erigon_getLogsByHash/test_04.json,\
-# remoce this line after https://github.com/erigontech/rpc-tests/pull/281
+# remove this line after https://github.com/erigontech/rpc-tests/pull/281
           parity_getBlockReceipts,\
 # to investigate
           debug_traceBlockByHash,\
