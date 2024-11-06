@@ -97,12 +97,13 @@ jobs:
          debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,\
 # Erigon bug https://github.com/erigontech/erigon/issues/12603
           erigon_getLatestLogs,erigon_getLogsByHash/test_04.json,\
+# Erigon bug https://github.com/erigontech/erigon/issues/12637
+          debug_traceBlockByNumber/test_05.tar,debug_traceBlockByNumber/test_08.tar,debug_traceBlockByNumber/test_09.tar,debug_traceBlockByNumber/test_10.tar,debug_traceBlockByNumber/test_11.tar,debug_traceBlockByNumber/test_12.tar,\
 # remove this line after https://github.com/erigontech/rpc-tests/pull/281
           parity_getBlockReceipts,\
 # to investigate
           debug_traceBlockByHash,\
           debug_traceCallMany/test_02.tar,debug_traceCallMany/test_04.tar,debug_traceCallMany/test_05.tar,debug_traceCallMany/test_06.tar,debug_traceCallMany/test_07.tar,debug_traceCallMany/test_09.json,debug_traceCallMany/test_10.tar,\
-          debug_traceBlockByNumber/test_05.tar,debug_traceBlockByNumber/test_08.tar,debug_traceBlockByNumber/test_09.tar,debug_traceBlockByNumber/test_10.tar,debug_traceBlockByNumber/test_11.tar,debug_traceBlockByNumber/test_12.tar,\
           debug_traceTransaction,\
           engine_exchangeCapabilities/test_1.json,\
           engine_exchangeTransitionConfigurationV1/test_01.json,\
