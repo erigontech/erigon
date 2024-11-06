@@ -245,7 +245,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 }
 
 func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
-	max := uint64(0)
+	_max := uint64(0)
 	for _, p := range p {
 		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
@@ -261,16 +261,16 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 			return 0, err
 		}
 
-		if max < to {
-			max = to
+		if _max < to {
+			_max = to
 		}
 
 	}
-	if max == 0 { // to prevent underflow
+	if _max == 0 { // to prevent underflow
 		return 0, nil
 	}
 
-	return max*1_000 - 1, nil
+	return _max*1_000 - 1, nil
 }
 
 var errWrongVersion = errors.New("wrong version")
@@ -464,17 +464,17 @@ func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint6
 }
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
-	var max uint64
+	var _max uint64
 
 	if list, err := snaptype.Segments(dir); err == nil {
 		for _, info := range list {
-			if Seedable(chain, info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > max {
-				max = info.To
+			if Seedable(chain, info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > _max {
+				_max = info.To
 			}
 		}
 	}
 
-	return max
+	return _max
 }
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
@@ -498,14 +498,14 @@ func KnownCfg(networkName string) *Cfg {
 	return newCfg(networkName, c.Typed(knownTypes[networkName]))
 }
 
-func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.Version) *Cfg {
+func VersionedCfg(networkName string, preferred snaptype.Version, _min snaptype.Version) *Cfg {
 	c, ok := knownPreverified[networkName]
 
 	if !ok {
 		return newCfg(networkName, Preverified{})
 	}
 
-	return newCfg(networkName, c.Versioned(preferred, min))
+	return newCfg(networkName, c.Versioned(preferred, _min))
 }
 
 var KnownWebseeds = map[string][]string{
