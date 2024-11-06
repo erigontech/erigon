@@ -204,7 +204,6 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	if startNum > endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
-	fmt.Printf("[dbg] getModifiedAccountsV3: %d - %d\n", startNum, endNum)
 	//[from, to)
 	startTxNum, err := txNumsReader.Min(tx, startNum)
 	if err != nil {
