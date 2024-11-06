@@ -215,6 +215,8 @@ du -hsc /erigon/snapshots/*
 - `--internalcl` is enabled by default. to disable use `--externalcl`
 - `--prune` flags changed: default `--prune.mode=archive`, FullNode: `--prune.mode=full`, MinimalNode (EIP-4444):
   `--prune.mode=minimal`.
+- `debug_getModifiedAccountsByNumber` - may return more accounts. If account X changed value V1->V2->V1 within 1 block (
+  but different transactions)
 
 ### Logging
 
