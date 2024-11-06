@@ -14,6 +14,7 @@ import (
 
 	common "github.com/erigontech/erigon-lib/common"
 	abstract "github.com/erigontech/erigon/cl/abstract"
+	synced_data "github.com/erigontech/erigon/cl/beacon/synced_data"
 	state "github.com/erigontech/erigon/cl/phase1/core/state"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -118,11 +119,12 @@ func (c *MockSyncedDataHeadSlotCall) DoAndReturn(f func() uint64) *MockSyncedDat
 }
 
 // HeadState mocks base method.
-func (m *MockSyncedData) HeadState() *state.CachingBeaconState {
+func (m *MockSyncedData) HeadState() (*state.CachingBeaconState, synced_data.CancelFn) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "HeadState")
 	ret0, _ := ret[0].(*state.CachingBeaconState)
-	return ret0
+	ret1, _ := ret[1].(synced_data.CancelFn)
+	return ret0, ret1
 }
 
 // HeadState indicates an expected call of HeadState.
@@ -138,67 +140,30 @@ type MockSyncedDataHeadStateCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSyncedDataHeadStateCall) Return(arg0 *state.CachingBeaconState) *MockSyncedDataHeadStateCall {
-	c.Call = c.Call.Return(arg0)
+func (c *MockSyncedDataHeadStateCall) Return(arg0 *state.CachingBeaconState, arg1 synced_data.CancelFn) *MockSyncedDataHeadStateCall {
+	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSyncedDataHeadStateCall) Do(f func() *state.CachingBeaconState) *MockSyncedDataHeadStateCall {
+func (c *MockSyncedDataHeadStateCall) Do(f func() (*state.CachingBeaconState, synced_data.CancelFn)) *MockSyncedDataHeadStateCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSyncedDataHeadStateCall) DoAndReturn(f func() *state.CachingBeaconState) *MockSyncedDataHeadStateCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// HeadStateMutator mocks base method.
-func (m *MockSyncedData) HeadStateMutator() abstract.BeaconStateMutator {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "HeadStateMutator")
-	ret0, _ := ret[0].(abstract.BeaconStateMutator)
-	return ret0
-}
-
-// HeadStateMutator indicates an expected call of HeadStateMutator.
-func (mr *MockSyncedDataMockRecorder) HeadStateMutator() *MockSyncedDataHeadStateMutatorCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeadStateMutator", reflect.TypeOf((*MockSyncedData)(nil).HeadStateMutator))
-	return &MockSyncedDataHeadStateMutatorCall{Call: call}
-}
-
-// MockSyncedDataHeadStateMutatorCall wrap *gomock.Call
-type MockSyncedDataHeadStateMutatorCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockSyncedDataHeadStateMutatorCall) Return(arg0 abstract.BeaconStateMutator) *MockSyncedDataHeadStateMutatorCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockSyncedDataHeadStateMutatorCall) Do(f func() abstract.BeaconStateMutator) *MockSyncedDataHeadStateMutatorCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSyncedDataHeadStateMutatorCall) DoAndReturn(f func() abstract.BeaconStateMutator) *MockSyncedDataHeadStateMutatorCall {
+func (c *MockSyncedDataHeadStateCall) DoAndReturn(f func() (*state.CachingBeaconState, synced_data.CancelFn)) *MockSyncedDataHeadStateCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // HeadStateReader mocks base method.
-func (m *MockSyncedData) HeadStateReader() abstract.BeaconStateReader {
+func (m *MockSyncedData) HeadStateReader() (abstract.BeaconStateReader, synced_data.CancelFn) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "HeadStateReader")
 	ret0, _ := ret[0].(abstract.BeaconStateReader)
-	return ret0
+	ret1, _ := ret[1].(synced_data.CancelFn)
+	return ret0, ret1
 }
 
 // HeadStateReader indicates an expected call of HeadStateReader.
@@ -214,19 +179,19 @@ type MockSyncedDataHeadStateReaderCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSyncedDataHeadStateReaderCall) Return(arg0 abstract.BeaconStateReader) *MockSyncedDataHeadStateReaderCall {
-	c.Call = c.Call.Return(arg0)
+func (c *MockSyncedDataHeadStateReaderCall) Return(arg0 abstract.BeaconStateReader, arg1 synced_data.CancelFn) *MockSyncedDataHeadStateReaderCall {
+	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSyncedDataHeadStateReaderCall) Do(f func() abstract.BeaconStateReader) *MockSyncedDataHeadStateReaderCall {
+func (c *MockSyncedDataHeadStateReaderCall) Do(f func() (abstract.BeaconStateReader, synced_data.CancelFn)) *MockSyncedDataHeadStateReaderCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSyncedDataHeadStateReaderCall) DoAndReturn(f func() abstract.BeaconStateReader) *MockSyncedDataHeadStateReaderCall {
+func (c *MockSyncedDataHeadStateReaderCall) DoAndReturn(f func() (abstract.BeaconStateReader, synced_data.CancelFn)) *MockSyncedDataHeadStateReaderCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

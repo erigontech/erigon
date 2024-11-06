@@ -56,7 +56,8 @@ func (f *ForkChoiceStore) OnAttestation(
 			return err
 		}
 	}
-	headState := f.syncedDataManager.HeadState()
+	headState, cn := f.syncedDataManager.HeadState()
+	defer cn()
 	var attestationIndicies []uint64
 	var err error
 	target := data.Target

@@ -21,7 +21,6 @@ import (
 	_ "embed"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/spf13/afero"
 
@@ -127,9 +126,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	bs, err := store.GetStateAtBlockRoot(headRoot, true)
 	require.NoError(t, err)
 	sd.OnHeadState(bs)
-	for sd.HeadState() == nil {
-		time.Sleep(time.Millisecond)
-	}
+
 	require.NoError(t, err)
 }
 

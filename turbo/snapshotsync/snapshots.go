@@ -256,7 +256,7 @@ type DirtySegment struct {
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
 	return &DirtySegment{
-		segType: snaptype.BeaconBlocks,
+		segType: segType,
 		version: version,
 		Range:   Range{from, to},
 		frozen:  frozen,
@@ -863,7 +863,7 @@ func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 		return 0
 	}
 
-	var max uint64
+	var _max uint64
 
 	dirty.Walk(func(segments []*DirtySegment) bool {
 		for _, seg := range segments {
@@ -871,30 +871,30 @@ func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 				break
 			}
 
-			max = seg.to - 1
+			_max = seg.to - 1
 		}
 
 		return true
 	})
 
-	return max
+	return _max
 }
 
 func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) uint64 {
 	tx := s.ViewType(segtype.Type())
 	defer tx.Close()
 
-	var max uint64
+	var _max uint64
 
 	for _, seg := range tx.Segments {
 		if !seg.IsIndexed() {
 			break
 		}
 
-		max = seg.to - 1
+		_max = seg.to - 1
 	}
 
-	return max
+	return _max
 }
 
 func (s *RoSnapshots) Ls() {

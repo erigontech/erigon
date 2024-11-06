@@ -132,6 +132,8 @@ func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 		net = "sepolia"
 	case HoleskyGenesisHash:
 		net = "holesky"
+	case BorMainnetGenesisHash:
+		return "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
 	default:
 		return ""
 	}
