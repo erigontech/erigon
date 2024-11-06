@@ -19,13 +19,13 @@ on:
 
 jobs:
   tests:
-    strategy:
-      matrix:
-        # list of os: https://github.com/actions/virtual-environments
-        os:
-          - ubuntu-22.04
-          - macos-14
-    # runs-on: ${{ matrix.os }}
+    # strategy:
+    #   matrix:
+    #     # list of os: https://github.com/actions/virtual-environments
+    #     os:
+    #       - ubuntu-22.04
+    #       - macos-14
+    # # runs-on: ${{ matrix.os }}
     runs-on: ubuntu-latest-erigontests-large
 
     steps:
