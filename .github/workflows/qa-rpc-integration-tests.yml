@@ -92,7 +92,7 @@ jobs:
           eth_getBlockByHash,eth_getBlockByNumber,\
 # Erigon bugs
           debug_accountRange,debug_storageRangeAt,\
-# need update rpc-test - because Erigon is correct
+# need update rpc-test - because Erigon is correct (@AskAlexSharov will do)
          debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,\
 # to investigate
           debug_traceBlockByHash,\
