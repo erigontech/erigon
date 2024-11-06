@@ -21,6 +21,7 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -136,7 +137,7 @@ func NewDumper(db kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) 
 	}
 }
 
-var TooMuchIterations = fmt.Errorf("[rpc] Dumper: too much iterations protection triggered")
+var TooMuchIterations = errors.New("[rpc] dumper: too much iterations protection triggered")
 
 const DumperIterationsHardLimit = 10_000_000
 

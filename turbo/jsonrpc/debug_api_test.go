@@ -304,12 +304,12 @@ func TestAccountRange(t *testing.T) {
 
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
-		n := rpc.BlockNumber(1)
+		//n := rpc.BlockNumber(1)
 		//result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		//require.NoError(t, err)
 		//require.Equal(t, 2, len(result.Accounts))
 		//
-		n = rpc.BlockNumber(7)
+		n := rpc.BlockNumber(7)
 		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
 		require.Equal(t, 3, len(result.Accounts))
