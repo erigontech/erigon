@@ -235,7 +235,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 	if err != nil {
 		return nil, err
 	}
-	maxTxNum, _ := txNumsReader.Max(tx, blockNumber)
+	maxTxNum, err := txNumsReader.Max(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
