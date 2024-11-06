@@ -1897,15 +1897,12 @@ func (hi *HistoryChangesIterFiles) HasNext() bool {
 	if hi.err != nil { // always true, then .Next() call will return this error
 		return true
 	}
-	if hi.limit <= 0 || hi.nextKey == nil { // Limit or EndOfTable
+	if hi.limit == 0 { // limit reached
 		return false
 	}
-	//if hi.to != nil {
-	//	//Asc:  [from, to) AND from < to
-	//	//Desc: [from, to) AND from > to
-	//	cmp := bytes.Compare(hi.nextKey, hi.to)
-	//	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
-	//}
+	if hi.nextKey == nil { // EndOfTable
+		return false
+	}
 	return true
 }
 
@@ -2073,15 +2070,12 @@ func (hi *HistoryChangesIterDB) HasNext() bool {
 	if hi.err != nil { // always true, then .Next() call will return this error
 		return true
 	}
-	if hi.limit <= 0 || hi.nextKey == nil { // Limit or EndOfTable
+	if hi.limit == 0 { // limit reached
 		return false
 	}
-	//if hi.to != nil {
-	//	//Asc:  [from, to) AND from < to
-	//	//Desc: [from, to) AND from > to
-	//	cmp := bytes.Compare(hi.nextKey, hi.to)
-	//	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
-	//}
+	if hi.nextKey == nil { // EndOfTable
+		return false
+	}
 	return true
 }
 
