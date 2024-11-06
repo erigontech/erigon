@@ -96,21 +96,23 @@ func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 		return ErrNotSynced
 	}
 	s.mu.RLock()
-	trace := dbg.Stack()
-	ch := make(chan struct{})
-	go func() {
-		select {
-		case <-time.After(100 * time.Second):
-			fmt.Println("ViewHeadState timeout", trace)
-		case <-ch:
-			return
-		}
-	}()
+	if dbg.CaplinSyncedDataMangerDeadlockDetection {
+		trace := dbg.Stack()
+		ch := make(chan struct{})
+		go func() {
+			select {
+			case <-time.After(100 * time.Second):
+				fmt.Println("ViewHeadState timeout", trace)
+			case <-ch:
+				return
+			}
+		}()
+		defer close(ch)
+	}
 	defer s.mu.RUnlock()
 	if err := fn(s.headState); err != nil {
 		return err
 	}
-	ch <- struct{}{}
 	return nil
 }
 
