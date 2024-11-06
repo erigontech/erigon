@@ -21,14 +21,13 @@ import (
 	"errors"
 	"fmt"
 
-	jsoniter "github.com/json-iterator/go"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -205,7 +204,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	if startNum > endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
-
+	fmt.Printf("[dbg] getModifiedAccountsV3: %d - %d\n", startNum, endNum)
 	//[from, to)
 	startTxNum, err := txNumsReader.Min(tx, startNum)
 	if err != nil {
