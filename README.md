@@ -214,8 +214,9 @@ du -hsc /erigon/snapshots/*
     - can symlink/mount latest state to fast drive and history to cheap drive
     - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
 - **`--prune` flags changed**: see `--prune.mode` (default: `archive`, full: `full`, EIP-4444: `minimal`)
-- ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
-- Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
+- **Other changes:** 
+  - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
+  - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
 
 ### Logging
 
