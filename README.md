@@ -203,7 +203,7 @@ du -hsc /erigon/snapshots/*
 
 ### Erigon3 changes from Erigon2
 
-- **Initial sync doesn't re-exec from 0:** it downloading 99% LatestState and History
+- **Initial sync doesn't re-exec from 0:** downloading 99% LatestState and History
 - **Per-Transaction granularity of history** (Erigon2 had per-block). Means:
     - Can execute 1 historical transaction - without executing it's block
     - `debug_getModifiedAccountsByNumber` - may return more accounts. If account X changed value V1->V2->V1 within 1
