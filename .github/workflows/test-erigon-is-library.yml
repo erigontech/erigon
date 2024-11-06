@@ -1,4 +1,4 @@
-name: Library integration tests
+name: Integration tests
 on:
   push:
     branches:
