@@ -232,6 +232,7 @@ func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]com
 		if err != nil {
 			return nil, err
 		}
+		//TODO: data is sorted, enough to compare with prevKey
 		if _, ok := saw[common.BytesToAddress(k)]; !ok {
 			saw[common.BytesToAddress(k)] = struct{}{}
 			result = append(result, common.BytesToAddress(k))
