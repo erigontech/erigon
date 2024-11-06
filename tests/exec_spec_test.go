@@ -26,7 +26,6 @@ import (
 )
 
 func TestExecutionSpec(t *testing.T) {
-	t.Parallel()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
