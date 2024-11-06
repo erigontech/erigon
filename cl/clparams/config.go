@@ -815,6 +815,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	CustodyRequirement:           1,
 	TargetNumberOfPeers:          70,
 
+	// Electra
 	CompoundingWithdrawalPrefix:           0x02,
 	MinPerEpochChurnLimitElectra:          128000000000,
 	MaxPerEpochActivationExitChurnLimit:   256000000000,

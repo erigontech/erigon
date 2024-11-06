@@ -751,7 +751,7 @@ func IsAttestationApplicable(s abstract.BeaconState, attestation *solid.Attestat
 	}
 	cIndex := data.CommitteeIndex
 	if s.Version().AfterOrEqual(clparams.ElectraVersion) {
-		index, err := attestation.ElectraSingleCommitteeIndex()
+		index, err := attestation.SingleCommitteeIndexFromBits()
 		if err != nil {
 			return err
 		}

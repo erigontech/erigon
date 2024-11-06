@@ -113,7 +113,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := aggregate.ElectraSingleCommitteeIndex()
+		index, err := aggregate.SingleCommitteeIndexFromBits()
 		if err != nil {
 			return err
 		}

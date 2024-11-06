@@ -45,7 +45,7 @@ type Attestation struct {
 	CommitteeBits   *BitVector        `json:"committee_bits,omitempty"` // Electra EIP-7549
 }
 
-func (a *Attestation) ElectraSingleCommitteeIndex() (uint64, error) {
+func (a *Attestation) SingleCommitteeIndexFromBits() (uint64, error) {
 	bits := a.CommitteeBits.GetOnIndices()
 	if len(bits) == 0 {
 		return 0, errors.New("no committee bits set in electra attestation")

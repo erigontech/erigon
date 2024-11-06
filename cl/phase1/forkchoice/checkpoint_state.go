@@ -123,7 +123,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 	cIndex := attestation.Data.CommitteeIndex
 	clversion := c.beaconConfig.GetCurrentStateVersion(epoch)
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := attestation.ElectraSingleCommitteeIndex()
+		index, err := attestation.SingleCommitteeIndexFromBits()
 		if err != nil {
 			return nil, err
 		}

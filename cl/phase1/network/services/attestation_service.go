@@ -112,7 +112,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	)
 
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := att.Attestation.ElectraSingleCommitteeIndex()
+		index, err := att.Attestation.SingleCommitteeIndexFromBits()
 		if err != nil {
 			return err
 		}

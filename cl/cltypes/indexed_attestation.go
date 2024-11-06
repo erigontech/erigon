@@ -48,7 +48,7 @@ func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
 		attLimit = attestingIndicesLimit
 	}
 	return &IndexedAttestation{
-		AttestingIndices: solid.NewRawUint64List(attLimit, nil),
+		AttestingIndices: solid.NewRawUint64List(attLimit, []uint64{}),
 		Data:             &solid.AttestationData{},
 	}
 }

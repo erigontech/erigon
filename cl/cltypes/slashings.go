@@ -62,8 +62,8 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *AttesterSlashing) DecodeSSZ(buf []byte, version int) error {
-	a.Attestation_1 = new(IndexedAttestation)
-	a.Attestation_2 = new(IndexedAttestation)
+	a.Attestation_1 = NewIndexedAttestation(clparams.StateVersion(version))
+	a.Attestation_2 = NewIndexedAttestation(clparams.StateVersion(version))
 	return ssz2.UnmarshalSSZ(buf, version, a.Attestation_1, a.Attestation_2)
 }
 
