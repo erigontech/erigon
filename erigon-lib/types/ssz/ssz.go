@@ -85,7 +85,7 @@ func UnmarshalUint64SSZ(x []byte) uint64 {
 	return binary.LittleEndian.Uint64(x)
 }
 
-func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint64, version int) ([]T, error) {
+func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -96,7 +96,7 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint6
 		elementsNum = currentOffset / 4
 	}
 	inPos := 4
-	if uint64(elementsNum) > max {
+	if uint64(elementsNum) > _max {
 		return nil, ErrTooBigList
 	}
 	objs := make([]T, elementsNum)

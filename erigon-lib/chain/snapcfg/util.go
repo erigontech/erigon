@@ -245,7 +245,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 }
 
 func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
-	max := uint64(0)
+	_max := uint64(0)
 	for _, p := range p {
 		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
@@ -261,16 +261,16 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 			return 0, err
 		}
 
-		if max < to {
-			max = to
+		if _max < to {
+			_max = to
 		}
 
 	}
-	if max == 0 { // to prevent underflow
+	if _max == 0 { // to prevent underflow
 		return 0, nil
 	}
 
-	return max*1_000 - 1, nil
+	return _max*1_000 - 1, nil
 }
 
 var errWrongVersion = errors.New("wrong version")

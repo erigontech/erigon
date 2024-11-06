@@ -1323,9 +1323,9 @@ func (it *InvertedIterator1) advanceInFiles() {
 		}
 		if !bytes.Equal(key, it.key) {
 			ef, _ := eliasfano32.ReadEliasFano(val)
-			min := ef.Get(0)
-			max := ef.Max()
-			if min < it.endTxNum && max >= it.startTxNum { // Intersection of [min; max) and [it.startTxNum; it.endTxNum)
+			_min := ef.Get(0)
+			_max := ef.Max()
+			if _min < it.endTxNum && _max >= it.startTxNum { // Intersection of [min; max) and [it.startTxNum; it.endTxNum)
 				it.key = key
 				it.nextFileKey = key
 				return
