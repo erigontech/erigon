@@ -211,12 +211,13 @@ du -hsc /erigon/snapshots/*
     - Erigon3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in
       Erigon2 - because per-transaction history granularity)
 - **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
+- **Store most of data in immutable files (segments/snapshots):**
+    - can symlink/mount latest state to fast drive and history to cheap drive
+    - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
 - `--prune` flags changed: default `--prune.mode=archive`, FullNode: `--prune.mode=full`, MinimalNode (EIP-4444):
-  `--prune.mode=minimal`.
+  `--prune.mode=minimal`
 - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
 - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
-- `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. To prevent it's grow: recommend `--batchSize <= 1G`
-- can symlink/mount latest state to fast drive and history to cheap drive
 
 ### Logging
 
