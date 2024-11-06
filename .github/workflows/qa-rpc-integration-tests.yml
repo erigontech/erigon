@@ -103,6 +103,8 @@ jobs:
           debug_traceBlockByNumber/test_05.tar,debug_traceBlockByNumber/test_08.tar,debug_traceBlockByNumber/test_09.tar,debug_traceBlockByNumber/test_10.tar,debug_traceBlockByNumber/test_11.tar,debug_traceBlockByNumber/test_12.tar,\
 # remove this line after https://github.com/erigontech/rpc-tests/pull/281
           parity_getBlockReceipts,\
+# require Erigon (just rpcdaemon is not enough)
+          eth_getTransactionByHash,txpool_content,txpool_status,\
 # to investigate
           debug_traceBlockByHash,\
           debug_traceCallMany/test_02.tar,debug_traceCallMany/test_04.tar,debug_traceCallMany/test_05.tar,debug_traceCallMany/test_06.tar,debug_traceCallMany/test_07.tar,debug_traceCallMany/test_09.json,debug_traceCallMany/test_10.tar,\
@@ -115,7 +117,6 @@ jobs:
           admin_peers/test_01.json,\
           erigon_nodeInfo/test_1.json,\
           eth_coinbase/test_01.json,\
-          eth_getTransactionByHash/test_02.json,\
           eth_getWork/test_01.json,\
           eth_mining/test_01.json,\
           eth_protocolVersion/test_1.json,\
@@ -123,8 +124,6 @@ jobs:
           eth_submitWork/test_1.json,\
           net_peerCount/test_1.json,\
           net_version/test_1.json,\
-          txpool_content/test_01.json,\
-          txpool_status/test_1.json,\
           web3_clientVersion/test_1.json,\
           eth_estimateGas/test_14.json,\
           trace_replayBlockTransactions/test_29.tar
