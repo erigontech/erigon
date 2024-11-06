@@ -8,16 +8,15 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-var (
-	errTimestampTooOld = errors.New("timestamp too old")
-)
+var errTimestampTooOld = errors.New("timestamp too old")
 
 func checkTime(
 	r *http.Request,
 	seconds int,
 	ethAPI EthAPI,
 ) error {
-	i, err := ethAPI.GetBlockByNumber(r.Context(), rpc.LatestBlockNumber, false)
+	fullTx := false
+	i, err := ethAPI.GetBlockByNumber(r.Context(), rpc.LatestBlockNumber, &fullTx)
 	if err != nil {
 		return err
 	}
