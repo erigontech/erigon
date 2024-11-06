@@ -1040,25 +1040,25 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 		}
 	}
 
-	var min uint64
+	var _min uint64
 
 	for _, info := range lastSegments {
 		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
-			if min == 0 || lastInfo.From() < min {
-				min = lastInfo.From()
+			if _min == 0 || lastInfo.From() < _min {
+				_min = lastInfo.From()
 			}
 		}
 	}
 
 	for segType, info := range lastSegments {
 		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
-			if lastInfo.From() > min {
+			if lastInfo.From() > _min {
 				for _, ent := range entries {
 					if info, err := ent.Info(); err == nil {
 						snapInfo, ok := info.Sys().(downloader.SnapInfo)
 
 						if ok && snapInfo.Type().Enum() == segType &&
-							snapInfo.From() == min {
+							snapInfo.From() == _min {
 							lastSegments[segType] = info
 						}
 					}
@@ -1088,17 +1088,17 @@ func (u *snapshotUploader) maxSeedableHeader() uint64 {
 }
 
 func (u *snapshotUploader) minBlockNumber() uint64 {
-	var min uint64
+	var _min uint64
 
 	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
 		for _, info := range list {
-			if u.seedable(info) && min == 0 || info.From < min {
-				min = info.From
+			if u.seedable(info) && _min == 0 || info.From < _min {
+				_min = info.From
 			}
 		}
 	}
 
-	return min
+	return _min
 }
 
 func expandHomeDir(dirpath string) string {

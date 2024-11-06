@@ -498,14 +498,14 @@ func KnownCfg(networkName string) *Cfg {
 	return newCfg(networkName, c.Typed(knownTypes[networkName]))
 }
 
-func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.Version) *Cfg {
+func VersionedCfg(networkName string, preferred snaptype.Version, _min snaptype.Version) *Cfg {
 	c, ok := knownPreverified[networkName]
 
 	if !ok {
 		return newCfg(networkName, Preverified{})
 	}
 
-	return newCfg(networkName, c.Versioned(preferred, min))
+	return newCfg(networkName, c.Versioned(preferred, _min))
 }
 
 var KnownWebseeds = map[string][]string{
