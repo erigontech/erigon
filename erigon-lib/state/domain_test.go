@@ -58,15 +58,13 @@ type rndGen struct {
 }
 
 func newRnd(seed uint64) *rndGen {
-	src := rand.NewChaCha8([32]byte{byte(seed)})
-	oldSrc := randOld.NewSource(int64(seed))
-	return &rndGen{Rand: rand.New(src), oldGen: randOld.New(oldSrc)}
+	return &rndGen{
+		Rand:   rand.New(rand.NewChaCha8([32]byte{byte(seed)})),
+		oldGen: randOld.New(randOld.NewSource(int64(seed))),
+	}
 }
-func (r *rndGen) IntN(n int) int { return int(r.Uint64N(uint64(n))) }
-
-func (r *rndGen) Read(p []byte) (n int, err error) {
-	return r.oldGen.Read(p) // seems `go1.22` doesn't have `Read` method on `math/v2` generator
-}
+func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
+func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
