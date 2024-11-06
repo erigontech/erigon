@@ -109,7 +109,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
-	rnd := rand.New(rand.NewSource(time.Now().Unix()))
+	rnd := newRnd(0)
 
 	someKey := []byte("somekey")
 	txs := (aggStep / 2) * 19
@@ -429,7 +429,7 @@ func fillRawdbTxNumsIndexForSharedDomains(t *testing.T, rwTx kv.RwTx, maxTx, com
 	}
 }
 
-func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum uint64, rnd *rnd, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
+func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum uint64, rnd *rndGen, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
 	t.Helper()
 	usedKeys := make(map[string]struct{}, keysCount*maxTxNum)
 	for txNum := uint64(1); txNum <= maxTxNum; txNum++ {
@@ -445,14 +445,14 @@ func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum
 	return usedKeys
 }
 
-func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txNum uint64, rnd *rnd, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
+func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txNum uint64, rnd *rndGen, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
 	t.Helper()
 	domains.SetTxNum(txNum)
 
 	getKey := func() ([]byte, bool) {
-		r := int(rnd.Uint64N(100))
+		r := rnd.IntN(100)
 		if r < 50 && len(prevKeys) > 0 {
-			ri := int(rnd.Uint64N(uint64(len(prevKeys))))
+			ri := rnd.IntN(len(prevKeys))
 			for k := range prevKeys {
 				if ri == 0 {
 					return []byte(k), true
@@ -471,7 +471,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 	for j := uint64(0); j < keysCount; j++ {
 		key, existed := getKey()
 
-		r := int(rnd.Uint64N(101))
+		r := rnd.IntN(101)
 		switch {
 		case r <= 33:
 			buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
@@ -484,7 +484,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			require.NoError(t, err)
 
 		case r > 33 && r <= 66:
-			codeUpd := make([]byte, int(rnd.Uint64N(24576)))
+			codeUpd := make([]byte, rnd.IntN(24576))
 			_, err := rnd.Read(codeUpd)
 			require.NoError(t, err)
 			for limit := 1000; len(key) > length.Addr && limit > 0; limit-- {
@@ -569,7 +569,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	txs := aggStep * 5
 	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	keys := make([][]byte, txs)
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -708,7 +708,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	txs := (aggStep) * StepsInColdFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	keys := make([][]byte, txs/2)
 
 	var prev1, prev2 []byte
@@ -822,7 +822,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, logger log.Logger, compressFlags seg.FileCompression) string {
 	tb.Helper()
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	values := make([]byte, valueSize)
 
 	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
@@ -842,7 +842,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
 		require.NoError(tb, err)
 
-		n, err = rnd.Read(values[:rnd.Intn(valueSize)+1])
+		n, err = rnd.Read(values[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
 		err = collector.Collect(key, values[:n])
@@ -904,7 +904,7 @@ func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) 
 func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byte, [][]byte) {
 	tb.Helper()
 
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	values := make([][]byte, keyCount)
 	keys := make([][]byte, keyCount)
 
@@ -915,7 +915,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 		require.NoError(tb, err)
 		keys[i] = common.Copy(bk[:n])
 
-		n, err = rnd.Read(bv[:rnd.Intn(valueSize)+1])
+		n, err = rnd.Read(bv[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
 		values[i] = common.Copy(bv[:n])
