@@ -73,7 +73,7 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 		headerReader: br,
 		stateReader:  stateReader,
 		tracer:       tracer,
-		evm:          vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cc, vm.Config{NoBaseFee: true}),
+		evm:          vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cc, vm.Config{}),
 		vmConfig:     &vm.Config{NoBaseFee: true},
 		ibs:          state.New(stateReader),
 	}
