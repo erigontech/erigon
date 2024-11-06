@@ -758,22 +758,22 @@ func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
 }
 
 func (u *snapshotUploader) maxUploadedHeader() uint64 {
-	var max uint64
+	var _max uint64
 
 	if len(u.files) > 0 {
 		for _, state := range u.files {
 			if state.local && state.remote {
 				if state.info != nil {
 					if state.info.Type.Enum() == coresnaptype.Enums.Headers {
-						if state.info.To > max {
-							max = state.info.To
+						if state.info.To > _max {
+							_max = state.info.To
 						}
 					}
 				} else {
 					if info, _, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
 						if info.Type.Enum() == coresnaptype.Enums.Headers {
-							if info.To > max {
-								max = info.To
+							if info.To > _max {
+								_max = info.To
 							}
 						}
 						state.info = &info
@@ -783,7 +783,7 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 		}
 	}
 
-	return max
+	return _max
 }
 
 type dirEntry struct {

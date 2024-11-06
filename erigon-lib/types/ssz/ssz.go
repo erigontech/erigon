@@ -121,7 +121,7 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 	return objs, nil
 }
 
-func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, max uint64, version int) ([]T, error) {
+func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, _max uint64, version int) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -131,7 +131,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	if uint32(len(buf))%bytesPerElement != 0 {
 		return nil, ErrBufferNotRounded
 	}
-	if elementsNum > max {
+	if elementsNum > _max {
 		return nil, ErrTooBigList
 	}
 	objs := make([]T, elementsNum)
@@ -144,7 +144,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	return objs, nil
 }
 
-func DecodeHashList(bytes []byte, start, end, max uint32) ([]common.Hash, error) {
+func DecodeHashList(bytes []byte, start, end, _max uint32) ([]common.Hash, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -154,7 +154,7 @@ func DecodeHashList(bytes []byte, start, end, max uint32) ([]common.Hash, error)
 	if uint32(len(buf))%length.Hash != 0 {
 		return nil, ErrBufferNotRounded
 	}
-	if elementsNum > max {
+	if elementsNum > _max {
 		return nil, ErrTooBigList
 	}
 	objs := make([]common.Hash, elementsNum)
@@ -164,7 +164,7 @@ func DecodeHashList(bytes []byte, start, end, max uint32) ([]common.Hash, error)
 	return objs, nil
 }
 
-func DecodeNumbersList(bytes []byte, start, end uint32, max uint64) ([]uint64, error) {
+func DecodeNumbersList(bytes []byte, start, end uint32, _max uint64) ([]uint64, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -174,7 +174,7 @@ func DecodeNumbersList(bytes []byte, start, end uint32, max uint64) ([]uint64, e
 	if uint64(len(buf))%length.BlockNum != 0 {
 		return nil, ErrBufferNotRounded
 	}
-	if elementsNum > max {
+	if elementsNum > _max {
 		return nil, ErrTooBigList
 	}
 	objs := make([]uint64, elementsNum)
@@ -195,12 +195,12 @@ func CalculateIndiciesLimit(maxCapacity, numItems, size uint64) uint64 {
 	return numItems
 }
 
-func DecodeString(bytes []byte, start, end, max uint64) ([]byte, error) {
+func DecodeString(bytes []byte, start, end, _max uint64) ([]byte, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
 	buf := bytes[start:end]
-	if uint64(len(buf)) > max {
+	if uint64(len(buf)) > _max {
 		return nil, ErrTooBigList
 	}
 	return buf, nil

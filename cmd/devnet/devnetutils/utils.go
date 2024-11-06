@@ -142,10 +142,10 @@ func GenerateTopic(signature string) []libcommon.Hash {
 }
 
 // RandomNumberInRange returns a random number between min and max NOT inclusive
-func RandomNumberInRange(min, max uint64) (uint64, error) {
-	if max <= min {
-		return 0, fmt.Errorf("Invalid range: upper bound %d less or equal than lower bound %d", max, min)
+func RandomNumberInRange(_min, _max uint64) (uint64, error) {
+	if _max <= _min {
+		return 0, fmt.Errorf("Invalid range: upper bound %d less or equal than lower bound %d", _max, _min)
 	}
 
-	return uint64(RandomInt(int(max-min)) + int(min)), nil
+	return uint64(RandomInt(int(_max-_min)) + int(_min)), nil
 }
