@@ -1,4 +1,4 @@
-name: TEST MICHELE - Integration tests
+name: TEST MICHELE - Integration tests 
 on:
   push:
     branches:
