@@ -90,8 +90,12 @@ jobs:
           erigon_getHeaderByHash,erigon_getHeaderByNumber,eth_feeHistory,\
 # total difficulty field was removed, then added back
           eth_getBlockByHash,eth_getBlockByNumber,\
+# Erigon bugs
+          debug_accountRange,debug_storageRangeAt,\
+# need update rpc-test - because Erigon is correct
+         debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,\
 # to investigate
-          debug_accountRange,debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,debug_storageRangeAt,debug_traceBlockByHash,\
+          debug_traceBlockByHash,\
           debug_traceCallMany/test_02.tar,debug_traceCallMany/test_04.tar,debug_traceCallMany/test_05.tar,debug_traceCallMany/test_06.tar,debug_traceCallMany/test_07.tar,debug_traceCallMany/test_09.json,debug_traceCallMany/test_10.tar,\
           debug_traceBlockByNumber/test_05.tar,debug_traceBlockByNumber/test_08.tar,debug_traceBlockByNumber/test_09.tar,debug_traceBlockByNumber/test_10.tar,debug_traceBlockByNumber/test_11.tar,debug_traceBlockByNumber/test_12.tar,\
           debug_traceTransaction,\
