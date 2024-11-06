@@ -86,6 +86,25 @@ jobs:
           
           # Run RPC integration test runner via http
           python3 ./run_tests.py -p 8545 --continue -f --json-diff -x \
+# false positives: Erigon return expected response. but rpc-test somehow doesn't see 1 field.
+          erigon_getHeaderByHash,erigon_getHeaderByNumber,eth_feeHistory,\
+# total difficulty field was removed, then added back
+          eth_getBlockByHash/test_01.json,\
+          eth_getBlockByHash/test_02.json,\
+          eth_getBlockByHash/test_05.json,\
+          eth_getBlockByHash/test_06.json,\
+          eth_getBlockByHash/test_07.json,\
+          eth_getBlockByHash/test_08.json,\
+          eth_getBlockByNumber/test_01.json,\
+          eth_getBlockByNumber/test_02.json,\
+          eth_getBlockByNumber/test_04.json,\
+          eth_getBlockByNumber/test_05.json,\
+          eth_getBlockByNumber/test_06.json,\
+          eth_getBlockByNumber/test_07.json,\
+          eth_getBlockByNumber/test_08.json,\
+          eth_getBlockByNumber/test_12.json,\
+          eth_getBlockByNumber/test_13.json,\
+# to investigate
           debug_accountRange,debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,debug_storageRangeAt,debug_traceBlockByHash,\
           debug_traceCallMany/test_02.tar,debug_traceCallMany/test_04.tar,debug_traceCallMany/test_05.tar,debug_traceCallMany/test_06.tar,debug_traceCallMany/test_07.tar,debug_traceCallMany/test_09.json,debug_traceCallMany/test_10.tar,\
           debug_traceBlockByNumber/test_05.tar,debug_traceBlockByNumber/test_08.tar,debug_traceBlockByNumber/test_09.tar,debug_traceBlockByNumber/test_10.tar,debug_traceBlockByNumber/test_11.tar,debug_traceBlockByNumber/test_12.tar,\
@@ -124,21 +143,6 @@ jobs:
           admin_peers/test_01.json,\
           erigon_nodeInfo/test_1.json,\
           eth_coinbase/test_01.json,\
-          eth_getBlockByHash/test_01.json,\
-          eth_getBlockByHash/test_02.json,\
-          eth_getBlockByHash/test_05.json,\
-          eth_getBlockByHash/test_06.json,\
-          eth_getBlockByHash/test_07.json,\
-          eth_getBlockByHash/test_08.json,\
-          eth_getBlockByNumber/test_01.json,\
-          eth_getBlockByNumber/test_02.json,\
-          eth_getBlockByNumber/test_04.json,\
-          eth_getBlockByNumber/test_05.json,\
-          eth_getBlockByNumber/test_06.json,\
-          eth_getBlockByNumber/test_07.json,\
-          eth_getBlockByNumber/test_08.json,\
-          eth_getBlockByNumber/test_12.json,\
-          eth_getBlockByNumber/test_13.json,\
           eth_getTransactionByHash/test_02.json,\
           eth_getWork/test_01.json,\
           eth_mining/test_01.json,\
@@ -151,8 +155,6 @@ jobs:
           txpool_status/test_1.json,\
           web3_clientVersion/test_1.json,\
           eth_estimateGas/test_14.json,\
-# false positives: Erigon return expected response. but rpc-test somehow doesn't see 1 field.
-          erigon_getHeaderByHash,erigon_getHeaderByNumber,eth_feeHistory,\
           trace_replayBlockTransactions/test_29.tar
           
           # Capture test runner script exit status
