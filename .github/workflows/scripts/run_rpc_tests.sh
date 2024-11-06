@@ -5,13 +5,13 @@ set +e # Disable exit on error
 python3 ./run_tests.py -p 8545 --continue -f --json-diff -x \
 # Erigon2 and Erigon3 never supported this api methods
 trace_rawTransaction,\
-# false positives: Erigon return expected response. but rpc-test somehow doesn't see 1 field.
+# false positives: Erigon return expected response. but rpc-test somehow doesn\'t see 1 field.
 erigon_getHeaderByHash,erigon_getHeaderByNumber,eth_feeHistory,\
 # total difficulty field was removed, then added back
 eth_getBlockByHash,eth_getBlockByNumber,\
 # Erigon bugs
 debug_accountRange,debug_storageRangeAt,\
-# need update rpc-test - because Erigon is correct (@AskAlexSharov will do after https://github.com/erigontech/erigon/pull/12634)
+# need update rpc-test - because Erigon is correct \(@AskAlexSharov will do after https://github.com/erigontech/erigon/pull/12634\)
 debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,\
 # Erigon bug https://github.com/erigontech/erigon/issues/12603
 erigon_getLatestLogs,erigon_getLogsByHash/test_04.json,\
