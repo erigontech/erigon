@@ -210,7 +210,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := txNumsReader.Max(tx, endNum-1)
+	endTxNum, err := txNumsReader.Max(tx, endNum)
 	if err != nil {
 		return nil, err
 	}
