@@ -28,8 +28,6 @@ import (
 )
 
 func TestDifficulty(t *testing.T) {
-	//t.Parallel()
-
 	dt := new(testMatcher)
 
 	dt.walk(t, difficultyTestDir, func(t *testing.T, name string, superTest map[string]json.RawMessage) {
