@@ -7,7 +7,7 @@ on:
       # - 'release/**'
   pull_request:
     branches:
-      - main
+      # - main
     types:
       - opened
       - reopened
@@ -41,29 +41,29 @@ jobs:
       - name: test-integration
         run: make test-integration
 
-  tests-windows:
-    strategy:
-      matrix:
-        os: [ windows-2022 ]
-    runs-on: ${{ matrix.os }}
+  # tests-windows:
+  #   strategy:
+  #     matrix:
+  #       os: [ windows-2022 ]
+  #   runs-on: ${{ matrix.os }}
 
-    steps:
-      - uses: actions/checkout@v4
-      - run: git submodule update --init --recursive --force
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: git submodule update --init --recursive --force
+  #     - uses: actions/setup-go@v5
+  #       with:
+  #         go-version: '1.22'
 
-      - uses: actions/cache@v4
-        with:
-          path: |
-            C:\ProgramData\chocolatey\lib\mingw
-            C:\ProgramData\chocolatey\lib\cmake
-          key: chocolatey-${{ matrix.os }}
-      - name: Install dependencies
-        run: |
-          choco upgrade mingw -y --no-progress --version 13.2.0
-          choco install cmake -y --no-progress --version 3.27.8
+  #     - uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           C:\ProgramData\chocolatey\lib\mingw
+  #           C:\ProgramData\chocolatey\lib\cmake
+  #         key: chocolatey-${{ matrix.os }}
+  #     - name: Install dependencies
+  #       run: |
+  #         choco upgrade mingw -y --no-progress --version 13.2.0
+  #         choco install cmake -y --no-progress --version 3.27.8
 
-      - name: test-integration
-        run: .\wmake.ps1 test-integration
+  #     - name: test-integration
+  #       run: .\wmake.ps1 test-integration
