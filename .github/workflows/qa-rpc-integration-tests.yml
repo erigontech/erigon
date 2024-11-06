@@ -96,6 +96,8 @@ jobs:
          debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,\
 # Erigon bug https://github.com/erigontech/erigon/issues/12603
           erigon_getLatestLogs,erigon_getLogsByHash/test_04.json,\
+# remoce this line after https://github.com/erigontech/rpc-tests/pull/281
+          parity_getBlockReceipts,\
 # to investigate
           debug_traceBlockByHash,\
           debug_traceCallMany/test_02.tar,debug_traceCallMany/test_04.tar,debug_traceCallMany/test_05.tar,debug_traceCallMany/test_06.tar,debug_traceCallMany/test_07.tar,debug_traceCallMany/test_09.json,debug_traceCallMany/test_10.tar,\
@@ -106,16 +108,6 @@ jobs:
           engine_getClientVersionV1/test_1.json,\
           erigon_getBalanceChangesInBlock,\
           eth_createAccessList/test_16.json,\
-          parity_getBlockReceipts/test_01.json,\
-          parity_getBlockReceipts/test_02.json,\
-          parity_getBlockReceipts/test_03.json,\
-          parity_getBlockReceipts/test_04.json,\
-          parity_getBlockReceipts/test_05.json,\
-          parity_getBlockReceipts/test_06.json,\
-          parity_getBlockReceipts/test_07.json,\
-          parity_getBlockReceipts/test_08.json,\
-          parity_getBlockReceipts/test_09.json,\
-          parity_getBlockReceipts/test_10.json,\
           trace_filter/test_16.json,\
           trace_rawTransaction/test_01.json,\
           trace_rawTransaction/test_03.json,\
