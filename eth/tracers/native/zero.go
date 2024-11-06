@@ -115,7 +115,7 @@ func (t *zeroTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
 		t.addAccountToTrace(caller)
 		t.addSLOADToAccount(caller, slot)
-	case stackLen >= 1 && op == vm.SSTORE:
+	case stackLen >= 2 && op == vm.SSTORE:
 		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
 		t.addAccountToTrace(caller)
 		t.addSSTOREToAccount(caller, slot, stackData[stackLen-2].Clone())
