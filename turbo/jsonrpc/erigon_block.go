@@ -239,8 +239,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 	if err != nil {
 		return nil, err
 	}
-	maxTxNum++
-	it, err := tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(minTxNum), int(maxTxNum), order.Asc, -1)
+	it, err := tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(minTxNum), int(maxTxNum+1), order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}
