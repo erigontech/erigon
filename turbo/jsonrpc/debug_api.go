@@ -226,17 +226,15 @@ func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]com
 	defer it.Close()
 
 	var result []common.Address
-	saw := make(map[common.Address][]byte)
+	saw := make(map[common.Address]struct{})
 	for it.HasNext() {
-		k, v, err := it.Next()
+		k, _, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		if sawV, ok := saw[common.BytesToAddress(k)]; !ok {
-			saw[common.BytesToAddress(k)] = v
+		if _, ok := saw[common.BytesToAddress(k)]; !ok {
+			saw[common.BytesToAddress(k)] = struct{}{}
 			result = append(result, common.BytesToAddress(k))
-		} else {
-			fmt.Printf("[dbg] sawV: %x %x->%x\n", k, sawV, v)
 		}
 	}
 	return result, nil
