@@ -208,8 +208,7 @@ du -hsc /erigon/snapshots/*
     - Can execute 1 historical transaction - without executing it's block
     - `debug_getModifiedAccountsByNumber` - may return more accounts. If account X changed value V1->V2->V1 within 1
       block (but different transactions)
-    - Erigon3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in
-      Erigon2 - because per-transaction history granularity)
+    - Erigon3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper)
 - **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
