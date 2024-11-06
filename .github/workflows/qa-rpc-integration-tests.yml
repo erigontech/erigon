@@ -17,6 +17,7 @@ on:
 jobs:
   integration-test-suite:
     runs-on: [ self-hosted, Erigon3 ]
+    timeout-minutes: 15
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
