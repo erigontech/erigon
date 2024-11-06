@@ -104,7 +104,6 @@ jobs:
 # to investigate
           debug_traceBlockByHash,\
           debug_traceCallMany/test_02.tar,debug_traceCallMany/test_04.tar,debug_traceCallMany/test_05.tar,debug_traceCallMany/test_06.tar,debug_traceCallMany/test_07.tar,debug_traceCallMany/test_09.json,debug_traceCallMany/test_10.tar,\
-          debug_traceTransaction,\
           engine_exchangeCapabilities/test_1.json,\
           engine_exchangeTransitionConfigurationV1/test_01.json,\
           engine_getClientVersionV1/test_1.json,\
