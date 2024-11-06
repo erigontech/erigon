@@ -82,15 +82,15 @@ func (it *IPTracker) PredictEndpoint() string {
 
 	// The current strategy is simple: find the endpoint with most statements.
 	counts := make(map[string]int)
-	maxcount, max := 0, ""
+	maxcount, _max := 0, ""
 	for _, s := range it.statements {
 		c := counts[s.endpoint] + 1
 		counts[s.endpoint] = c
 		if c > maxcount && c >= it.minStatements {
-			maxcount, max = c, s.endpoint
+			maxcount, _max = c, s.endpoint
 		}
 	}
-	return max
+	return _max
 }
 
 // AddStatement records that a certain host thinks our external endpoint is the one given.

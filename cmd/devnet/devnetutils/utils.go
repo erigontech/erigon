@@ -117,14 +117,14 @@ func UniqueIDFromEnode(enode string) (string, error) {
 	return enode[:i], nil
 }
 
-func RandomInt(max int) int {
-	if max == 0 {
+func RandomInt(_max int) int {
+	if _max == 0 {
 		return 0
 	}
 
 	var n uint16
 	binary.Read(rand.Reader, binary.LittleEndian, &n)
-	return int(n) % (max + 1)
+	return int(n) % (_max + 1)
 }
 
 // NamespaceAndSubMethodFromMethod splits a parent method into namespace and the actual method
