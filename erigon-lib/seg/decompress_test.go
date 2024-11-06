@@ -566,10 +566,6 @@ func generateRandWords() {
 	WORDS[N-1] = []byte{}
 }
 
-func randIntInRange(min, max int) int {
-	return (rand.Intn(max-min) + min)
-}
-
 func clearPrevDict() {
 	WORDS = [N][]byte{}
 	WORD_FLAGS = [N]bool{}

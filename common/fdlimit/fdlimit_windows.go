@@ -26,17 +26,17 @@ const hardlimit = 16384
 
 // Raise tries to maximize the file descriptor allowance of this process
 // to the maximum hard-limit allowed by the OS.
-func Raise(max uint64) (uint64, error) {
+func Raise(_max uint64) (uint64, error) {
 	// This method is NOP by design:
 	//  * Linux/Darwin counterparts need to manually increase per process limits
 	//  * On Windows Go uses the CreateFile API, which is limited to 16K files, non
 	//    changeable from within a running process
 	// This way we can always "request" raising the limits, which will either have
 	// or not have effect based on the platform we're running on.
-	if max > hardlimit {
+	if _max > hardlimit {
 		return hardlimit, fmt.Errorf("file descriptor limit (%d) reached", hardlimit)
 	}
-	return max, nil
+	return _max, nil
 }
 
 // Current retrieves the number of file descriptors allowed to be opened by this
