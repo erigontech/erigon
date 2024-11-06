@@ -221,6 +221,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 // getModifiedAccountsV3 returns a list of addresses that were modified in the block range
 // [startNum:endNum)
 func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+	fmt.Printf("[dbg] getModifiedAccountsV3: %d-%d\n", startTxNum, endTxNum)
 	it, err := tx.HistoryRange(kv.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
@@ -235,6 +236,8 @@ func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]com
 		}
 		changedAddrs[common.BytesToAddress(k)] = struct{}{}
 	}
+
+	fmt.Printf("[dbg] getModifiedAccountsV3: len(changedAddrs)=%d\n", changedAddrs)
 
 	if len(changedAddrs) == 0 {
 		return nil, nil
