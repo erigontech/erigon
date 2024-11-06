@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
@@ -584,20 +585,14 @@ type DenebSignedBeaconBlock struct {
 	Blobs       *solid.ListSSZ[*Blob]     `json:"blobs"`
 }
 
-func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *DenebSignedBeaconBlock {
-	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
-	b := &DenebSignedBeaconBlock{
-		SignedBlock: NewSignedBeaconBlock(beaconCfg, clparams.DenebVersion),
-		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
-		Blobs:       solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
+func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *DenebSignedBeaconBlock {
+	if version < clparams.DenebVersion {
+		log.Warn("DenebSignedBeaconBlock: version is not after DenebVersion")
+		return nil
 	}
-	return b
-}
-
-func NewElectraSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *DenebSignedBeaconBlock {
 	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
 	b := &DenebSignedBeaconBlock{
-		SignedBlock: NewSignedBeaconBlock(beaconCfg, clparams.ElectraVersion),
+		SignedBlock: NewSignedBeaconBlock(beaconCfg, version),
 		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
 		Blobs:       solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
 	}

@@ -1030,11 +1030,9 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	version clparams.StateVersion,
 	r *http.Request,
 ) (*cltypes.DenebSignedBeaconBlock, error) {
-	var block *cltypes.DenebSignedBeaconBlock
-	if version.AfterOrEqual(clparams.ElectraVersion) {
-		block = cltypes.NewElectraSignedBeaconBlock(a.beaconChainCfg)
-	} else {
-		block = cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg)
+	block := cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg, version)
+	if block == nil {
+		return nil, errors.New("failed to create block")
 	}
 	// check content type
 	switch r.Header.Get("Content-Type") {

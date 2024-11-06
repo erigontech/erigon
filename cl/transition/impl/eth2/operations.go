@@ -546,6 +546,13 @@ func (I *impl) processAttestationPostAltair(
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 
+	if s.Version() >= clparams.ElectraVersion {
+		// assert index == 0
+		if data.CommitteeIndex != 0 {
+			return nil, errors.New("processAttestationPostAltair: committee index must be 0")
+		}
+	}
+
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
 		stateSlot-data.Slot,
@@ -1072,7 +1079,7 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		return nil
 	}
 	// If there is too little available consolidation churn limit, consolidation requests are ignored
-	if getConsolidationChurnLimit(s) <= s.BeaconConfig().MinActivationBalance {
+	if state.GetConsolidationChurnLimit(s) <= s.BeaconConfig().MinActivationBalance {
 		return nil
 	}
 	// source/target index and validator
@@ -1185,34 +1192,7 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	copy(newWc[:], wc[:])
 	newWc[0] = s.BeaconConfig().CompoundingWithdrawalPrefix
 	validator.SetWithdrawalCredentials(newWc)
-	return queueExcessActiveBalance(s, vindex, &validator)
-}
-
-func queueExcessActiveBalance(s abstract.BeaconState, vindex uint64, validator *solid.Validator) error {
-	balance, err := s.ValidatorBalance(int(vindex))
-	if err != nil {
-		return err
-	}
-	if balance > s.BeaconConfig().MinActivationBalance {
-		excessBalance := balance - s.BeaconConfig().MinActivationBalance
-		if err := s.SetValidatorBalance(int(vindex), s.BeaconConfig().MinActivationBalance); err != nil {
-			return err
-		}
-		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
-		// and GENESIS_SLOT to distinguish from a pending deposit request
-		s.AppendPendingDeposit(&solid.PendingDeposit{
-			PubKey:                validator.PublicKey(),
-			WithdrawalCredentials: validator.WithdrawalCredentials(),
-			Amount:                excessBalance,
-			Signature:             bls.InfiniteSignature,
-			Slot:                  s.BeaconConfig().GenesisSlot,
-		})
-	}
-	return nil
-}
-
-func getConsolidationChurnLimit(s abstract.BeaconState) uint64 {
-	return state.GetBalanceChurnLimit(s) - state.GetActivationExitChurnLimit(s)
+	return state.QueueExcessActiveBalance(s, vindex, &validator)
 }
 
 // compute_consolidation_epoch_and_update_churn
@@ -1221,7 +1201,7 @@ func computeConsolidationEpochAndUpdateChurn(s abstract.BeaconState, consolidati
 		s.GetEarlistConsolidationEpoch(),
 		state.ComputeActivationExitEpoch(s.BeaconConfig(), state.Epoch(s)),
 	)
-	perEpochConsolidationChurn := getConsolidationChurnLimit(s)
+	perEpochConsolidationChurn := state.GetConsolidationChurnLimit(s)
 	// New epoch for consolidations.
 	var consolidationBalanceToConsume uint64
 	if s.GetEarlistConsolidationEpoch() < earlistConsolidationEpoch {

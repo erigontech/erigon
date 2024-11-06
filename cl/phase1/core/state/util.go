@@ -19,6 +19,7 @@ package state
 import (
 	"sort"
 
+	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -142,13 +143,36 @@ func GetActivationExitChurnLimit(s abstract.BeaconState) uint64 {
 }
 
 func GetBalanceChurnLimit(s abstract.BeaconState) uint64 {
-	// churn = max(
-	//	  MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,
-	//    get_total_active_balance(state) // CHURN_LIMIT_QUOTIENT
-	// )
 	churn := max(
 		s.BeaconConfig().MinPerEpochChurnLimitElectra,
 		s.GetTotalActiveBalance()/s.BeaconConfig().ChurnLimitQuotient,
 	)
 	return churn - churn%s.BeaconConfig().EffectiveBalanceIncrement
+}
+
+func GetConsolidationChurnLimit(s abstract.BeaconState) uint64 {
+	return GetBalanceChurnLimit(s) - GetActivationExitChurnLimit(s)
+}
+
+func QueueExcessActiveBalance(s abstract.BeaconState, vindex uint64, validator *solid.Validator) error {
+	balance, err := s.ValidatorBalance(int(vindex))
+	if err != nil {
+		return err
+	}
+	if balance > s.BeaconConfig().MinActivationBalance {
+		excessBalance := balance - s.BeaconConfig().MinActivationBalance
+		if err := s.SetValidatorBalance(int(vindex), s.BeaconConfig().MinActivationBalance); err != nil {
+			return err
+		}
+		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
+		// and GENESIS_SLOT to distinguish from a pending deposit request
+		s.AppendPendingDeposit(&solid.PendingDeposit{
+			PubKey:                validator.PublicKey(),
+			WithdrawalCredentials: validator.WithdrawalCredentials(),
+			Amount:                excessBalance,
+			Signature:             bls.InfiniteSignature,
+			Slot:                  s.BeaconConfig().GenesisSlot,
+		})
+	}
+	return nil
 }
