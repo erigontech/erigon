@@ -758,22 +758,22 @@ func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
 }
 
 func (u *snapshotUploader) maxUploadedHeader() uint64 {
-	var max uint64
+	var _max uint64
 
 	if len(u.files) > 0 {
 		for _, state := range u.files {
 			if state.local && state.remote {
 				if state.info != nil {
 					if state.info.Type.Enum() == coresnaptype.Enums.Headers {
-						if state.info.To > max {
-							max = state.info.To
+						if state.info.To > _max {
+							_max = state.info.To
 						}
 					}
 				} else {
 					if info, _, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
 						if info.Type.Enum() == coresnaptype.Enums.Headers {
-							if info.To > max {
-								max = info.To
+							if info.To > _max {
+								_max = info.To
 							}
 						}
 						state.info = &info
@@ -783,7 +783,7 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 		}
 	}
 
-	return max
+	return _max
 }
 
 type dirEntry struct {
@@ -1040,25 +1040,25 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 		}
 	}
 
-	var min uint64
+	var _min uint64
 
 	for _, info := range lastSegments {
 		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
-			if min == 0 || lastInfo.From() < min {
-				min = lastInfo.From()
+			if _min == 0 || lastInfo.From() < _min {
+				_min = lastInfo.From()
 			}
 		}
 	}
 
 	for segType, info := range lastSegments {
 		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
-			if lastInfo.From() > min {
+			if lastInfo.From() > _min {
 				for _, ent := range entries {
 					if info, err := ent.Info(); err == nil {
 						snapInfo, ok := info.Sys().(downloader.SnapInfo)
 
 						if ok && snapInfo.Type().Enum() == segType &&
-							snapInfo.From() == min {
+							snapInfo.From() == _min {
 							lastSegments[segType] = info
 						}
 					}
@@ -1088,17 +1088,17 @@ func (u *snapshotUploader) maxSeedableHeader() uint64 {
 }
 
 func (u *snapshotUploader) minBlockNumber() uint64 {
-	var min uint64
+	var _min uint64
 
 	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
 		for _, info := range list {
-			if u.seedable(info) && min == 0 || info.From < min {
-				min = info.From
+			if u.seedable(info) && _min == 0 || info.From < _min {
+				_min = info.From
 			}
 		}
 	}
 
-	return min
+	return _min
 }
 
 func expandHomeDir(dirpath string) string {

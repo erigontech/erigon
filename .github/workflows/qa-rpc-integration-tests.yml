@@ -16,7 +16,8 @@ on:
 
 jobs:
   integration-test-suite:
-    runs-on: [self-hosted, Erigon3]
+    runs-on: [ self-hosted, Erigon3 ]
+    timeout-minutes: 15
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
@@ -85,141 +86,37 @@ jobs:
           rm -rf ./mainnet/results/
           
           # Run RPC integration test runner via http
-          python3 ./run_tests.py -p 8545 --continue -f --json-diff -x debug_,\
+          python3 ./run_tests.py -p 8545 --continue -f --json-diff -x \
+# false positives: Erigon return expected response. but rpc-test somehow doesn't see 1 field.
+          erigon_getHeaderByHash,erigon_getHeaderByNumber,eth_feeHistory,\
+# total difficulty field was removed, then added back
+          eth_getBlockByHash,eth_getBlockByNumber,\
+# Erigon bugs
+          debug_accountRange,debug_storageRangeAt,\
+# need update rpc-test - because Erigon is correct (@AskAlexSharov will do after https://github.com/erigontech/erigon/pull/12634)
+         debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,\
+# Erigon bug https://github.com/erigontech/erigon/issues/12603
+          erigon_getLatestLogs,erigon_getLogsByHash/test_04.json,\
+# Erigon bug https://github.com/erigontech/erigon/issues/12637
+          debug_traceBlockByNumber/test_05.tar,debug_traceBlockByNumber/test_08.tar,debug_traceBlockByNumber/test_09.tar,debug_traceBlockByNumber/test_10.tar,debug_traceBlockByNumber/test_11.tar,debug_traceBlockByNumber/test_12.tar,\
+# remove this line after https://github.com/erigontech/rpc-tests/pull/281
+          parity_getBlockReceipts,\
+# to investigate
+          debug_traceBlockByHash,\
+          debug_traceCallMany/test_02.tar,debug_traceCallMany/test_04.tar,debug_traceCallMany/test_05.tar,debug_traceCallMany/test_06.tar,debug_traceCallMany/test_07.tar,debug_traceCallMany/test_09.json,debug_traceCallMany/test_10.tar,\
+          debug_traceTransaction,\
           engine_exchangeCapabilities/test_1.json,\
           engine_exchangeTransitionConfigurationV1/test_01.json,\
           engine_getClientVersionV1/test_1.json,\
-          erigon_getLogsByHash/test_04.json,\
-          erigon_getHeaderByHash/test_02.json,\
-          erigon_getHeaderByHash/test_03.json,\
-          erigon_getHeaderByHash/test_04.json,\
-          erigon_getHeaderByHash/test_06.json,\
-          erigon_getHeaderByNumber/test_01.json,\
-          erigon_getHeaderByNumber/test_02.json,\
-          erigon_getHeaderByNumber/test_03.json,\
-          erigon_getHeaderByNumber/test_04.json,\
-          erigon_getHeaderByNumber/test_05.json,\
-          erigon_getHeaderByNumber/test_06.json,\
-          erigon_getHeaderByNumber/test_07.json,\
-          erigon_getHeaderByNumber/test_08.json,\
-          erigon_getLatestLogs/test_01.json,\
-          erigon_getLatestLogs/test_02.json,\
-          erigon_getLatestLogs/test_03.json,\
-          erigon_getLatestLogs/test_04.json,\
-          erigon_getLatestLogs/test_05.json,\
-          erigon_getLatestLogs/test_06.json,\
-          erigon_getLatestLogs/test_08.json,\
-          erigon_getLatestLogs/test_09.json,\
-          erigon_getLatestLogs/test_10.json,\
-          erigon_getLatestLogs/test_11.json,\
-          erigon_getLatestLogs/test_12.json,\
           erigon_getBalanceChangesInBlock,\
-          eth_callBundle/test_09.json,\
-          eth_callBundle/test_12.json,\
-          eth_createAccessList/test_06.json,\
-          eth_createAccessList/test_07.json,\
-          eth_createAccessList/test_15.json,\
           eth_createAccessList/test_16.json,\
-          eth_getBlockTransactionCountByHash/test_02.json,\
-          eth_getBlockTransactionCountByNumber/test_08.json,\
-          eth_getUncleCountByBlockHash/test_03.json,\
-          parity_getBlockReceipts/test_01.json,\
-          parity_getBlockReceipts/test_02.json,\
-          parity_getBlockReceipts/test_03.json,\
-          parity_getBlockReceipts/test_04.json,\
-          parity_getBlockReceipts/test_05.json,\
-          parity_getBlockReceipts/test_06.json,\
-          parity_getBlockReceipts/test_07.json,\
-          parity_getBlockReceipts/test_08.json,\
-          parity_getBlockReceipts/test_09.json,\
-          parity_getBlockReceipts/test_10.json,\
-          trace_call/test_02.json,\
-          trace_call/test_04.tar,\
-          trace_call/test_08.tar,\
-          trace_call/test_11.tar,\
-          trace_call/test_13.json,\
-          trace_call/test_17.tar,\
-          trace_call/test_19.tar,\
-          trace_call/test_20.json,\
-          trace_callMany/test_01.json,\
-          trace_callMany/test_02.json,\
-          trace_callMany/test_03.json,\
-          trace_callMany/test_04.json,\
-          trace_callMany/test_05.json,\
-          trace_callMany/test_06.json,\
-          trace_callMany/test_07.json,\
-          trace_callMany/test_08.json,\
-          trace_callMany/test_09.json,\
-          trace_callMany/test_10.json,\
-          trace_callMany/test_11.json,\
-          trace_callMany/test_12.json,\
           trace_filter/test_16.json,\
           trace_rawTransaction/test_01.json,\
           trace_rawTransaction/test_03.json,\
-          trace_replayBlockTransactions/test_01.tar,\
-          trace_replayBlockTransactions/test_02.tar,\
-          trace_replayBlockTransactions/test_03.tar,\
-          trace_replayBlockTransactions/test_04.tar,\
-          trace_replayBlockTransactions/test_05.tar,\
-          trace_replayBlockTransactions/test_08.tar,\
-          trace_replayBlockTransactions/test_10.json,\
-          trace_replayBlockTransactions/test_11.json,\
-          trace_replayBlockTransactions/test_13.tar,\
-          trace_replayBlockTransactions/test_14.tar,\
-          trace_replayBlockTransactions/test_15.tar,\
-          trace_replayBlockTransactions/test_16.tar,\
-          trace_replayBlockTransactions/test_17.tar,\
-          trace_replayBlockTransactions/test_18.tar,\
-          trace_replayBlockTransactions/test_19.tar,\
-          trace_replayBlockTransactions/test_20.tar,\
-          trace_replayBlockTransactions/test_21.tar,\
-          trace_replayBlockTransactions/test_22.tar,\
-          trace_replayBlockTransactions/test_23.tar,\
-          trace_replayBlockTransactions/test_24.tar,\
-          trace_replayBlockTransactions/test_25.tar,\
-          trace_replayTransaction/test_02.tar,\
-          trace_replayTransaction/test_03.tar,\
-          trace_replayTransaction/test_04.tar,\
-          trace_replayTransaction/test_05.tar,\
-          trace_replayTransaction/test_06.tar,\
-          trace_replayTransaction/test_07.tar,\
-          trace_replayTransaction/test_10.tar,\
-          trace_replayTransaction/test_11.tar,\
-          trace_replayTransaction/test_14.tar,\
-          trace_replayTransaction/test_16.tar,\
-          trace_replayTransaction/test_18.tar,\
-          trace_replayTransaction/test_23.tar,\
-          trace_replayTransaction/test_24.json,\
-          trace_replayTransaction/test_29.tar,\
           admin_nodeInfo/test_01.json,\
           admin_peers/test_01.json,\
           erigon_nodeInfo/test_1.json,\
           eth_coinbase/test_01.json,\
-          eth_feeHistory/test_01.json,\
-          eth_feeHistory/test_02.json,\
-          eth_feeHistory/test_03.json,\
-          eth_feeHistory/test_04.json,\
-          eth_feeHistory/test_05.json,\
-          eth_feeHistory/test_06.json,\
-          eth_feeHistory/test_08.json,\
-          eth_feeHistory/test_09.json,\
-          eth_feeHistory/test_10.json,\
-          eth_feeHistory/test_11.json,\
-          eth_getBlockByHash/test_01.json,\
-          eth_getBlockByHash/test_02.json,\
-          eth_getBlockByHash/test_05.json,\
-          eth_getBlockByHash/test_06.json,\
-          eth_getBlockByHash/test_07.json,\
-          eth_getBlockByHash/test_08.json,\
-          eth_getBlockByNumber/test_01.json,\
-          eth_getBlockByNumber/test_02.json,\
-          eth_getBlockByNumber/test_04.json,\
-          eth_getBlockByNumber/test_05.json,\
-          eth_getBlockByNumber/test_06.json,\
-          eth_getBlockByNumber/test_07.json,\
-          eth_getBlockByNumber/test_08.json,\
-          eth_getBlockByNumber/test_12.json,\
-          eth_getBlockByNumber/test_13.json,\
           eth_getTransactionByHash/test_02.json,\
           eth_getWork/test_01.json,\
           eth_mining/test_01.json,\
@@ -228,35 +125,18 @@ jobs:
           eth_submitWork/test_1.json,\
           net_peerCount/test_1.json,\
           net_version/test_1.json,\
-          trace_call/test_05.json,\
-          trace_call/test_07.json,\
-          trace_call/test_12.json,\
-          trace_call/test_14.json,\
-          trace_call/test_15.json,\
-          trace_call/test_16.json,\
-          trace_call/test_18.json,\
           txpool_content/test_01.json,\
           txpool_status/test_1.json,\
           web3_clientVersion/test_1.json,\
           eth_estimateGas/test_14.json,\
-          trace_replayBlockTransactions/test_26.tar,\
-          trace_replayBlockTransactions/test_28.tar,\
-          trace_replayBlockTransactions/test_29.tar,\
-          trace_replayBlockTransactions/test_31.tar,\
-          trace_replayBlockTransactions/test_32.tar,\
-          trace_replayBlockTransactions/test_33.tar,\
-          trace_replayBlockTransactions/test_34.tar,\
-          trace_replayBlockTransactions/test_35.tar,\
-          trace_replayTransaction/test_31.json,\
-          trace_replayTransaction/test_32.json,\
-          trace_replayTransaction/test_34.json
+          trace_replayBlockTransactions/test_29.tar
           
           # Capture test runner script exit status
           test_exit_status=$?
           
           # Save the subsection reached status
           echo "::set-output name=test_executed::true"
-        
+          
           # Check test runner exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "tests completed successfully"
@@ -265,7 +145,7 @@ jobs:
           else
             echo "error detected during tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-            
+          
             # Save failed results to a directory with timestamp and commit hash
             cp -r ${{ runner.workspace }}/rpc-tests/integration/mainnet/results/ $RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_$commit_http/
           fi
