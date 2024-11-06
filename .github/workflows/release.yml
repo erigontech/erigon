@@ -44,6 +44,16 @@ on:
         type: boolean
         default: false
         description: 'publish_latest_tag: when set then docker image with tag :latest will be also published'
+      with_assertor:
+        required: false
+        type: boolean
+        default: false
+        description: 'with_assertor: when set then the workflow will run the Kurtosis Assertor'
+      enable_pectra_assertor:
+        required: false
+        type: boolean
+        default: false
+        description: 'enable_pectra_assertor: when set then the workflow will run the Pectra Assertor tests'
 
 jobs:
 
@@ -213,3 +223,14 @@ jobs:
             --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
             "${{ inputs.release_version }}" \
             *.tar.gz ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+
+  run-kurtosis-assertoor:
+    if: ${{ inputs.with_assertor }}
+    needs: build-release
+		# TODO: change the branch to main before merging
+    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@feat/assertor-release-workflow
+    with:
+      checkout_ref: ${{ github.sha }}
+      os: "ubuntu-latest"
+      docker_build_tag: ${{ inputs.release_version }}
+      enable_pectra_tests: ${{ inputs.enable_pectra_assertor }}
