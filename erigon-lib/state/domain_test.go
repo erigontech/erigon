@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"math/rand/v2"
@@ -63,9 +64,9 @@ func newRnd(seed uint64) *rndGen {
 }
 func (r *rndGen) IntN(n int) int { return int(r.Uint64N(uint64(n))) }
 
-func (r *rndGen) Read(p []byte) (n int, err error) { //nolint
-	//nolint:typecheck
-	return r.src.Read(p) //nolint:typecheck
+func (r *rndGen) Read(p []byte) (n int, err error) {
+	var a io.Reader = r.src
+	return a.Read(p)
 }
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
