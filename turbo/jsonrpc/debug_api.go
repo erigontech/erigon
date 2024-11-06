@@ -213,12 +213,12 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
+	return getModifiedAccounts(tx.(kv.TemporalTx), startTxNum, endTxNum)
 }
 
-// getModifiedAccountsV3 returns a list of addresses that were modified in the block range
+// getModifiedAccounts returns a list of addresses that were modified in the block range
 // [startNum:endNum)
-func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
 	it, err := tx.HistoryRange(kv.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
@@ -285,7 +285,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
+	return getModifiedAccounts(tx.(kv.TemporalTx), startTxNum, endTxNum)
 }
 
 func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
