@@ -110,7 +110,6 @@ jobs:
           engine_getClientVersionV1/test_1.json,\
           erigon_getBalanceChangesInBlock,\
           eth_createAccessList/test_16.json,\
-          trace_filter/test_16.json,\
           trace_rawTransaction/test_01.json,\
           trace_rawTransaction/test_03.json,\
           admin_nodeInfo/test_01.json,\
