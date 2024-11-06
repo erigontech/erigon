@@ -20,7 +20,8 @@
     "erc20Revert:sepolia": "npx hardhat compile && npx hardhat run scripts/ERC20-revert.js --network sepolia",
     "chainCall:local": "npx hardhat compile && npx hardhat run scripts/chain-call.js --network local",
     "chainCall:sepolia": "npx hardhat compile && npx hardhat run scripts/chain-call.js --network sepolia",
-    "create:local": "npx hardhat compile && npx hardhat run scripts/create.js --network local"
+    "create:local": "npx hardhat compile && npx hardhat run scripts/create.js --network local",
+    "keccak:local": "npx hardhat compile && npx hardhat run scripts/keccak-loop.js --network local"
   },
   "keywords": [],
   "author": "",

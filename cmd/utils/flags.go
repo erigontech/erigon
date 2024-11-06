@@ -748,6 +748,11 @@ var (
 		Usage: "The interval at which the sequencer checks the L1 for new GER information",
 		Value: 1 * time.Minute,
 	}
+	SealBatchImmediatelyOnOverflow = cli.BoolFlag{
+		Name:  "zkevm.seal-batch-immediately-on-overflow",
+		Usage: "Seal the batch immediately when detecting a counter overflow",
+		Value: false,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",

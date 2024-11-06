@@ -440,8 +440,8 @@ func sequencingBatchStep(
 								ocs, _ := batchCounters.CounterStats(l1TreeUpdateIndex != 0)
 								// was not included in this batch because it overflowed: counter x, counter y
 								log.Info(transactionNotAddedText, "Counters context:", ocs, "overflow transactions", batchState.overflowTransactions)
-								if batchState.reachedOverflowTransactionLimit() {
-									log.Info(fmt.Sprintf("[%s] closing batch due to counters", logPrefix), "counters: ", batchState.overflowTransactions)
+								if batchState.reachedOverflowTransactionLimit() || cfg.zk.SealBatchImmediatelyOnOverflow {
+									log.Info(fmt.Sprintf("[%s] closing batch due to counters", logPrefix), "counters: ", batchState.overflowTransactions, "immediate", cfg.zk.SealBatchImmediatelyOnOverflow)
 									runLoopBlocks = false
 									break LOOP_TRANSACTIONS
 								}
