@@ -1275,7 +1275,6 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 
 func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string]map[string][]upd {
 	tb.Helper()
-	defer func(t time.Time) { fmt.Printf("domain_test.go:1262: %s\n", time.Since(t)) }(time.Now())
 
 	doms := make(map[string]map[string][]upd)
 	r := newRnd(31)
@@ -1482,8 +1481,8 @@ func TestDomainRange(t *testing.T) {
 	writer := dc.NewWriter()
 	defer writer.close()
 
-	keySize1 := uint64(4)
-	keySize2 := uint64(4)
+	keySize1 := uint64(2)
+	keySize2 := uint64(2)
 	totalTx := uint64(300)
 	keyTxsLimit := uint64(2)
 	keyLimit := uint64(10)
@@ -1516,13 +1515,22 @@ func TestDomainRange(t *testing.T) {
 	dc = d.BeginFilesRo()
 	defer dc.Close()
 
-	//it, err := dc.DomainRangeLatest(tx, nil, nil, -1)
 	it, err := dc.DomainRange(context.Background(), tx, nil, nil, 190, order.Asc, -1)
 	require.NoError(err)
 	keys, vals, err := stream.ToArrayKV(it)
 	require.NoError(err)
+	require.Equal(5, len(keys))
+	require.Equal(5, len(vals))
 	fmt.Printf("keys: %x\n", keys)
-	fmt.Printf("vals: %x\n", vals)
+
+	//it, err := dc.DomainRange(context.Background(), tx, []byte{""}, nil, 190, order.Asc, -1)
+	//require.NoError(err)
+	//keys, vals, err := stream.ToArrayKV(it)
+	//require.NoError(err)
+	//require.Equal(5, len(keys))
+	//require.Equal(5, len(vals))
+
+	t.Fail()
 }
 
 func TestDomain_CanPruneAfterAggregation(t *testing.T) {
