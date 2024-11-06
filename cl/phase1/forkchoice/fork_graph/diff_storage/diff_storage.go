@@ -20,8 +20,8 @@ import (
 	"bytes"
 	"io"
 	"sync"
+	"sync/atomic"
 
-	"github.com/alecthomas/atomic"
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
@@ -51,9 +51,8 @@ type ChainDiffStorage struct {
 
 func NewChainDiffStorage(diffFn func(w io.Writer, old, new []byte) error, applyFn func(in, out []byte, diff []byte, reverse bool) ([]byte, error)) *ChainDiffStorage {
 	return &ChainDiffStorage{
-		diffFn:     diffFn,
-		applyFn:    applyFn,
-		dumpsCount: atomic.NewInt32(0),
+		diffFn:  diffFn,
+		applyFn: applyFn,
 	}
 }
 
