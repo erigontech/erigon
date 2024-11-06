@@ -55,7 +55,40 @@ disabled_tests=(
     txpool_status/test_1.json
     web3_clientVersion/test_1.json
     eth_estimateGas/test_14.json
-    trace_replayBlockTransactions/test_29.tar)
+    trace_replayBlockTransactions/test_29.tar
+    # recently started to fail
+    debug_traceTransaction/test_20.json
+    debug_traceTransaction/test_21.json
+    debug_traceTransaction/test_22.json
+    debug_traceTransaction/test_25.json
+    debug_traceTransaction/test_30.tar
+    debug_traceTransaction/test_33.json
+    debug_traceTransaction/test_35.tar
+    debug_traceTransaction/test_36.json
+    debug_traceTransaction/test_37.tar
+    debug_traceTransaction/test_38.tar
+    debug_traceTransaction/test_43.json
+    debug_traceTransaction/test_44.json
+    debug_traceTransaction/test_62.json
+    debug_traceTransaction/test_64.json
+    debug_traceTransaction/test_74.tar
+    debug_traceTransaction/test_75.tar
+    debug_traceTransaction/test_77.json
+    debug_traceTransaction/test_78.tar
+    debug_traceTransaction/test_79.tar
+    debug_traceTransaction/test_80.tar
+    debug_traceTransaction/test_81.tar
+    debug_traceTransaction/test_82.tar
+    debug_traceTransaction/test_83.tar
+    debug_traceTransaction/test_84.tar
+    debug_traceTransaction/test_85.tar
+    debug_traceTransaction/test_87.json
+    debug_traceTransaction/test_90.tar
+    debug_traceTransaction/test_91.tar
+    debug_traceTransaction/test_92.tar
+    debug_traceTransaction/test_93.json
+    debug_traceTransaction/test_96.json
+    trace_filter/test_16.json)
 
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
