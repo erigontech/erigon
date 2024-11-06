@@ -151,7 +151,7 @@ func DecompressPubkey(pubkey []byte) (*ecdsa.PublicKey, error) {
 // when constructing a PrivateKey.
 func CompressPubkey(pubkey *ecdsa.PublicKey) []byte {
 	// NOTE: the coordinates may be validated with
-	// secp256k1.ParsePubKey(FromECDSAPub(pubkey))
+	// secp256k1.ParsePubKey(MarshalPubkey(pubkey))
 	var x, y secp256k1.FieldVal
 	x.SetByteSlice(pubkey.X.Bytes())
 	y.SetByteSlice(pubkey.Y.Bytes())

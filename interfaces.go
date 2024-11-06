@@ -110,6 +110,26 @@ type SyncProgress struct {
 	HighestBlock  uint64 // Highest alleged block number in the chain
 	PulledStates  uint64 // Number of state trie entries already downloaded
 	KnownStates   uint64 // Total number of state trie entries known about
+
+	// "snap sync" fields.
+	SyncedAccounts      uint64 // Number of accounts downloaded
+	SyncedAccountBytes  uint64 // Number of account trie bytes persisted to disk
+	SyncedBytecodes     uint64 // Number of bytecodes downloaded
+	SyncedBytecodeBytes uint64 // Number of bytecode bytes downloaded
+	SyncedStorage       uint64 // Number of storage slots downloaded
+	SyncedStorageBytes  uint64 // Number of storage trie bytes persisted to disk
+
+	HealedTrienodes     uint64 // Number of state trie nodes downloaded
+	HealedTrienodeBytes uint64 // Number of state trie bytes persisted to disk
+	HealedBytecodes     uint64 // Number of bytecodes downloaded
+	HealedBytecodeBytes uint64 // Number of bytecodes persisted to disk
+
+	HealingTrienodes uint64 // Number of state trie nodes pending
+	HealingBytecode  uint64 // Number of bytecodes pending
+
+	// "transaction indexing" fields
+	TxIndexFinishedBlocks  uint64 // Number of blocks whose transactions are already indexed
+	TxIndexRemainingBlocks uint64 // Number of blocks whose transactions are not indexed yet
 }
 
 // ChainSyncReader wraps access to the node's current sync status. If there's no

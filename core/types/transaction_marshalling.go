@@ -245,6 +245,55 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 			return nil, err
 		}
 		return tx, nil
+
+	case ArbitrumDepositTxType:
+		tx := new(ArbitrumDepositTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumInternalTxType:
+		tx := new(ArbitrumInternalTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumUnsignedTxType:
+		tx := new(ArbitrumUnsignedTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumContractTxType:
+		tx := new(ArbitrumContractTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumRetryTxType:
+		tx := new(ArbitrumRetryTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumSubmitRetryableTxType:
+		tx := new(ArbitrumSubmitRetryableTx)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	case ArbitrumLegacyTxType:
+		tx := new(ArbitrumLegacyTxData)
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+	//default:
+	//	arbParsing = false
+	//}
+	//}
+	//if !arbParsing {
+	//switch b[0] {
+	//case AccessListTxType:
+	//inner = new(AccessListTx)
+	//case DynamicFeeTxType:
+	//inner = new(DynamicFeeTransaction)
+	//case BlobTxType:
+	//inner = new(BlobTx)
+	//default:
 	default:
 		return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}

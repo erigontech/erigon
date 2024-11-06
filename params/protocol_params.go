@@ -30,6 +30,7 @@ const (
 	MinGasLimit          uint64 = 5000               // Minimum the gas limit may ever be.
 	MaxGasLimit          uint64 = 0x7fffffffffffffff // Maximum the gas limit may ever be.
 	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
+	SloadGas             uint64 = 50                 // Multiplied by the number of 32-byte words that are copied (round up) for any *COPY operation and added.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
 	CallValueTransferGas  uint64 = 9000  // Paid for CALL when the value transfer is non-zero.

@@ -23,7 +23,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
-	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
+	if err := CheckTxFee(txn.GetPrice().ToBig(), txn.GetGas(), api.FeeCap); err != nil {
 		return common.Hash{}, err
 	}
 	if !txn.Protected() && !api.AllowUnprotectedTxs {
@@ -70,9 +70,9 @@ func (api *APIImpl) SendTransaction(_ context.Context, txObject interface{}) (co
 	return common.Hash{0}, fmt.Errorf(NotImplemented, "eth_sendTransaction")
 }
 
-// checkTxFee is an internal function used to check whether the fee of
+// CheckTxFee is an internal function used to check whether the fee of
 // the given transaction is _reasonable_(under the cap).
-func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
+func CheckTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
 	// Short circuit if there is no gasCap for transaction fee at all.
 	if gasCap == 0 {
 		return nil
