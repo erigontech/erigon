@@ -252,13 +252,13 @@ func GetSignaturesOnAggregate(
 	}
 
 	// [REJECT] Verifying here the validator signatures for the aggregate
-	signature3, signatureRoot3, pubKey3, err := AggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
+	signature36, signatureRoot3, pubKey3, err := AggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
 	if err != nil {
 		return nil, err
 	}
 
 	return &AggregateVerificationData{
-		Signatures: [][]byte{signature1, signature2, signature3},
+		Signatures: [][]byte{signature1, signature2, signature36},
 		SignRoots:  [][]byte{signatureRoot1, signatureRoot2, signatureRoot3},
 		Pks:        [][]byte{pubKey1, pubKey2, pubKey3},
 	}, nil
