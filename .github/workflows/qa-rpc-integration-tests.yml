@@ -86,7 +86,7 @@ jobs:
           rm -rf ./mainnet/results/
           
           # Run RPC integration test runner via http
-          ${{ github.workspace }}/erigon/.github/workflows/scripts/run_tests.py
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
           
           # Capture test runner script exit status
           test_exit_status=$?
