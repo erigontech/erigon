@@ -490,6 +490,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
 		}
+
+		// Keep gnosis out for a bit
 		if s.currentState.BeaconConfig().ConfigName == "gnosis" {
 			return nil
 		}
