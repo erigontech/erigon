@@ -1544,8 +1544,6 @@ func TestDomainRange(t *testing.T) {
 		require.Equal(5, len(keys))
 		require.Equal(5, len(vals))
 	}
-
-	t.Fail()
 }
 
 func TestDomain_CanPruneAfterAggregation(t *testing.T) {
