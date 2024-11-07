@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/turbo/trie"
@@ -175,6 +177,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	}
 	fmt.Printf("[dbg] after DomainRange: %s\n", time.Since(t))
 	defer it.Close()
+	it = stream.TraceDuo(it, log.New(), "dumper")
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -218,9 +221,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 		numberOfResults++
 
-		if hardLimit--; hardLimit < 0 {
-			return nil, TooMuchIterations
-		}
+		//if hardLimit--; hardLimit < 0 {
+		//	return nil, TooMuchIterations
+		//}
 	}
 	it.Close()
 
