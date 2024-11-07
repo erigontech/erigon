@@ -6,16 +6,26 @@ set +e # Disable exit on error
 disabled_tests=(
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
+
     # false positives: Erigon return expected response. but rpc-test somehow doesn't see 1 field.
     eth_feeHistory
+
     # total difficulty field was removed, then added back
-    eth_getBlockByHash,eth_getBlockByNumber
+    eth_getBlockByHash
+    eth_getBlockByNumber
+
     # Erigon bugs
-    debug_accountRange,debug_storageRangeAt
+    debug_accountRange
+    debug_storageRangeAt
+
     # need update rpc-test - because Erigon is correct (@AskAlexSharov will do after https://github.com/erigontech/erigon/pull/12634)
-    debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber
+    debug_getModifiedAccountsByHash
+    debug_getModifiedAccountsByNumber
+
     # Erigon bug https://github.com/erigontech/erigon/issues/12603
-    erigon_getLatestLogs,erigon_getLogsByHash/test_04.json
+    erigon_getLatestLogs
+    erigon_getLogsByHash/test_04.json
+
     # Erigon bug https://github.com/erigontech/erigon/issues/12637
     debug_traceBlockByNumber/test_05.tar
     debug_traceBlockByNumber/test_08.tar
@@ -23,8 +33,10 @@ disabled_tests=(
     debug_traceBlockByNumber/test_10.tar
     debug_traceBlockByNumber/test_11.tar
     debug_traceBlockByNumber/test_12.tar
+
     # remove this line after https://github.com/erigontech/rpc-tests/pull/281
     parity_getBlockReceipts
+
     # to investigate
     debug_traceBlockByHash
     debug_traceCallMany/test_02.tar
@@ -56,6 +68,7 @@ disabled_tests=(
     web3_clientVersion/test_1.json
     eth_estimateGas/test_14.json
     trace_replayBlockTransactions/test_29.tar
+
     # recently started to fail
     debug_traceTransaction/test_20.json
     debug_traceTransaction/test_21.json
