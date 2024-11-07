@@ -19,14 +19,15 @@ on:
 
 jobs:
   tests:
-    # strategy:
-    #   matrix:
-    #     # list of os: https://github.com/actions/virtual-environments
-    #     os:
-    #       - ubuntu-22.04
-    #       - macos-14
-    # # runs-on: ${{ matrix.os }}
-    runs-on: ubuntu-latest-erigontests-large
+    strategy:
+      matrix:
+        # list of os: https://github.com/actions/virtual-environments
+        os:
+          - ubuntu-22.04
+          - macos-14
+          - ubuntu-latest-erigontests-large
+    runs-on: ${{ matrix.os }}
+    # runs-on: ubuntu-latest-erigontests-large
 
     steps:
       - name: test new runner
