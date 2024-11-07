@@ -2409,7 +2409,11 @@ func (hi *DomainLatestIterFile) HasNext() bool {
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.to)
-	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
+	res := (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
+	if !res {
+		log.Warn("[dbg] DomainLatestIterFile.HasNext3")
+	}
+	return res
 }
 
 func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
