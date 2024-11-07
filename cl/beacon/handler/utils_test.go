@@ -86,7 +86,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	fcu.Pool = opPool
 
 	if useRealSyncDataMgr {
-		syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
+		syncedData = synced_data.NewSyncedDataManager(&bcfg, true, 0)
 	} else {
 		syncedData = sync_mock_services.NewMockSyncedData(ctrl)
 	}

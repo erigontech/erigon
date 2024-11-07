@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -43,12 +44,12 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	s, cn := a.syncedData.HeadState()
-	defer cn()
-	if s == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
+
+	dependentRoot, err := a.getDependentRoot(epoch)
+	if err != nil {
+		return nil, err
 	}
-	dependentRoot := a.getDependentRoot(s, epoch)
+
 	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch {
 		tx, err := a.indiciesDB.BeginRo(r.Context())
 		if err != nil {
@@ -89,51 +90,56 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 	wg := sync.WaitGroup{}
 
-	for slot := expectedSlot; slot < expectedSlot+a.beaconChainCfg.SlotsPerEpoch; slot++ {
-		// Lets do proposer index computation
-		mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
-			a.beaconChainCfg.EpochsPerHistoricalVector
-		// Input for the seed hash.
-		mix := s.GetRandaoMix(int(mixPosition))
-		input := shuffling2.GetSeed(a.beaconChainCfg, mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
-		slotByteArray := make([]byte, 8)
-		binary.LittleEndian.PutUint64(slotByteArray, slot)
+	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+		for slot := expectedSlot; slot < expectedSlot+a.beaconChainCfg.SlotsPerEpoch; slot++ {
+			// Lets do proposer index computation
+			mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
+				a.beaconChainCfg.EpochsPerHistoricalVector
+			// Input for the seed hash.
+			mix := s.GetRandaoMix(int(mixPosition))
+			input := shuffling2.GetSeed(a.beaconChainCfg, mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
+			slotByteArray := make([]byte, 8)
+			binary.LittleEndian.PutUint64(slotByteArray, slot)
 
-		// Add slot to the end of the input.
-		inputWithSlot := append(input[:], slotByteArray...)
-		hash := sha256.New()
+			// Add slot to the end of the input.
+			inputWithSlot := append(input[:], slotByteArray...)
+			hash := sha256.New()
 
-		// Calculate the hash.
-		hash.Write(inputWithSlot)
-		seed := hash.Sum(nil)
+			// Calculate the hash.
+			hash.Write(inputWithSlot)
+			seed := hash.Sum(nil)
 
-		indices := s.GetActiveValidatorsIndices(epoch)
+			indices := s.GetActiveValidatorsIndices(epoch)
 
-		// Write the seed to an array.
-		seedArray := [32]byte{}
-		copy(seedArray[:], seed)
-		wg.Add(1)
+			// Write the seed to an array.
+			seedArray := [32]byte{}
+			copy(seedArray[:], seed)
+			wg.Add(1)
 
-		// Do it in parallel
-		go func(i, slot uint64, indicies []uint64, seedArray [32]byte) {
-			defer wg.Done()
-			proposerIndex, err := shuffling2.ComputeProposerIndex(s.BeaconState, indices, seedArray)
-			if err != nil {
-				panic(err)
-			}
-			var pk libcommon.Bytes48
-			pk, err = s.ValidatorPublicKey(int(proposerIndex))
-			if err != nil {
-				panic(err)
-			}
-			duties[i] = proposerDuties{
-				Pubkey:         pk,
-				ValidatorIndex: proposerIndex,
-				Slot:           slot,
-			}
-		}(slot-expectedSlot, slot, indices, seedArray)
+			// Do it in parallel
+			go func(i, slot uint64, indicies []uint64, seedArray [32]byte) {
+				defer wg.Done()
+				proposerIndex, err := shuffling2.ComputeProposerIndex(s.BeaconState, indices, seedArray)
+				if err != nil {
+					panic(err)
+				}
+				var pk libcommon.Bytes48
+				pk, err = s.ValidatorPublicKey(int(proposerIndex))
+				if err != nil {
+					panic(err)
+				}
+				duties[i] = proposerDuties{
+					Pubkey:         pk,
+					ValidatorIndex: proposerIndex,
+					Slot:           slot,
+				}
+			}(slot-expectedSlot, slot, indices, seedArray)
+		}
+		wg.Wait()
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	wg.Wait()
 
 	return newBeaconResponse(duties).WithFinalized(false).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).With("dependent_root", dependentRoot), nil
 }
