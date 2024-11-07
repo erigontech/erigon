@@ -2406,7 +2406,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	fmt.Printf("[dbg] dom.Next: %x\n", hi.kBackup)
 	order.Asc.Assert(hi.kBackup, hi.nextKey)
 	// TODO: remove `common.Copy`. it protecting from some existing bug.
-	return common.Copy(hi.kBackup), hi.vBackup, nil
+	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
 func (d *Domain) stepsRangeInDBAsStr(tx kv.Tx) string {
