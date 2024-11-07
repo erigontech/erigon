@@ -1490,9 +1490,11 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 
 func (hi *StateAsOfIterF) HasNext() bool {
 	if hi.limit == 0 { // limit reached
+		log.Warn("[dbg] StateAsOfIterF.HasNext1")
 		return false
 	}
 	if hi.nextKey == nil { // EndOfTable
+		log.Warn("[dbg] StateAsOfIterF.HasNext2")
 		return false
 	}
 	if hi.toPrefix == nil { // s.nextK == nil check is above
@@ -1654,12 +1656,15 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 
 func (hi *StateAsOfIterDB) HasNext() bool {
 	if hi.err != nil {
+		log.Warn("[dbg] StateAsOfIterDB.HasNext1")
 		return true
 	}
 	if hi.limit == 0 { // limit reached
+		log.Warn("[dbg] StateAsOfIterDB.HasNext2")
 		return false
 	}
 	if hi.nextKey == nil { // EndOfTable
+		log.Warn("[dbg] StateAsOfIterDB.HasNext3")
 		return false
 	}
 	if hi.toPrefix == nil { // s.nextK == nil check is above

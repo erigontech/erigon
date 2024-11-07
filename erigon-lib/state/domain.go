@@ -1976,11 +1976,12 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
-		aggStep:   dt.d.aggregationStep,
-		roTx:      roTx,
-		valsTable: dt.d.valsTable,
-		logger:    dt.d.logger,
-		h:         &CursorHeap{},
+		orderAscend: order.Asc,
+		aggStep:     dt.d.aggregationStep,
+		roTx:        roTx,
+		valsTable:   dt.d.valsTable,
+		logger:      dt.d.logger,
+		h:           &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
@@ -2229,16 +2230,15 @@ type DomainLatestIterFile struct {
 	roTx      kv.Tx
 	valsTable string
 
-	limit int
-
-	from, to []byte
-	nextVal  []byte
-	nextKey  []byte
+	limit       int
+	largeVals   bool
+	from, to    []byte
+	orderAscend order.By
 
 	h *CursorHeap
 
+	nextKey, nextVal       []byte
 	k, v, kBackup, vBackup []byte
-	largeVals              bool
 
 	logger log.Logger
 }
@@ -2394,7 +2394,23 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 }
 
 func (hi *DomainLatestIterFile) HasNext() bool {
-	return hi.limit != 0 && hi.nextKey != nil
+	log.Warn("[dbg] StateAsOfIterF.HasNext2")
+	if hi.limit == 0 { // limit reached
+		log.Warn("[dbg] StateAsOfIterF.HasNext1")
+		return false
+	}
+	if hi.nextKey == nil { // EndOfTable
+		log.Warn("[dbg] StateAsOfIterF.HasNext2")
+		return false
+	}
+	if hi.to == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(hi.nextKey, hi.to)
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
