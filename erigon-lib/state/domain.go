@@ -2272,7 +2272,6 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 		if key, value, err = valsCursor.Seek(hi.from); err != nil {
 			return err
 		}
-		fmt.Printf("[dbg] rangeLatest2: %x\n", key)
 		if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
 			stepBytes := value[:8]
 			value = value[8:]
