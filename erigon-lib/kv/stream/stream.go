@@ -21,6 +21,7 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"golang.org/x/exp/constraints"
 )
 
@@ -446,4 +447,50 @@ func (it *PaginatedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v = it.keys[it.i], it.values[it.i]
 	it.i++
 	return k, v, nil
+}
+
+// ---- tracing ----
+
+// Traced - does `log.Warn` every .Next() call
+type Traced[T any] struct {
+	it     Uno[T]
+	logger log.Logger
+	prefix string
+}
+
+func Trace[T any](it Uno[T], logger log.Logger, prefix string) *Traced[T] {
+	return &Traced[T]{it: it, logger: logger, prefix: prefix}
+}
+func (m *Traced[T]) HasNext() bool { return m.it.HasNext() }
+func (m *Traced[T]) Next() (k T, err error) {
+	k, err = m.it.Next()
+	log.Warn(m.prefix, "key", k)
+	return k, err
+}
+func (m *Traced[T]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
+}
+
+// TracedDuo - does `log.Warn` every .Next() call
+type TracedDuo[K, V any] struct {
+	it     Duo[K, V]
+	logger log.Logger
+	prefix string
+}
+
+func TraceDuo[K, V any](it Duo[K, V], logger log.Logger, prefix string) *TracedDuo[K, V] {
+	return &TracedDuo[K, V]{it: it, logger: logger, prefix: prefix}
+}
+func (m *TracedDuo[K, V]) HasNext() bool { return m.it.HasNext() }
+func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
+	k, v, err = m.it.Next()
+	log.Warn(m.prefix, "key", k)
+	return k, v, err
+}
+func (m *TracedDuo[K, V]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
 }

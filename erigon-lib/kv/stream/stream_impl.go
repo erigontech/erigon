@@ -33,6 +33,11 @@ var (
 	EmptyKVS = &EmptyTrio[[]byte, []byte, uint64]{}
 )
 
+var (
+	TracedU64 = &Traced[uint64]{}
+	TracedKV  = &TracedDuo[[]byte, []byte]{}
+)
+
 func FilterU64(it U64, filter func(k uint64) bool) *Filtered[uint64] {
 	return Filter[uint64](it, filter)
 }

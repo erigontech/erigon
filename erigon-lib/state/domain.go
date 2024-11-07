@@ -1962,13 +1962,16 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	if err != nil {
 		return nil, err
 	}
-	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
+	return stream.UnionKV(histStateIt, lastestStateIt.Trace(""), limit), nil
 }
 
-func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (stream.KV, error) {
-	s := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dt,
+func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+	s := &DomainLatestIterFile{
+		from: fromKey, to: toKey, limit: limit,
+		aggStep:   dt.d.aggregationStep,
 		roTx:      roTx,
 		valsTable: dt.d.valsTable,
+		logger:    dt.d.logger,
 		h:         &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
@@ -2214,8 +2217,7 @@ func (sr *SegStreamReader) Next() (k, v []byte, err error) {
 }
 
 type DomainLatestIterFile struct {
-	dc *DomainRoTx
-
+	aggStep   uint64
 	roTx      kv.Tx
 	valsTable string
 
@@ -2229,9 +2231,14 @@ type DomainLatestIterFile struct {
 
 	k, v, kBackup, vBackup []byte
 	largeVals              bool
+
+	logger log.Logger
 }
 
 func (hi *DomainLatestIterFile) Close() {
+}
+func (hi *DomainLatestIterFile) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
+	return stream.TraceDuo(hi, hi.logger, "[dbg] DomainLatestIterFile.Next "+prefix)
 }
 func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	// Implementation:

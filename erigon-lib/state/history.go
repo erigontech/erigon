@@ -1353,7 +1353,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 
 		hc:         ht,
 		startTxNum: startTxNum,
-		ctx:        ctx,
+		ctx:        ctx, logger: ht.h.logger,
 	}
 	if err := hi.init(ht.iit.files); err != nil {
 		hi.Close() //it's responsibility of constructor (our) to close resource on error
@@ -1368,14 +1368,14 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 
 		startTxNum: startTxNum,
 
-		ctx: ctx,
+		ctx: ctx, logger: ht.h.logger,
 	}
 	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
 	if err := dbit.advance(); err != nil {
 		dbit.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	return stream.UnionKV(hi, dbit, limit), nil
+	return stream.UnionKV(hi.Trace(""), dbit.Trace(""), limit), nil
 }
 
 // StateAsOfIter - returns state range at given time in history
@@ -1395,7 +1395,8 @@ type StateAsOfIterF struct {
 	k, v, kBackup, vBackup []byte
 	orderAscend            order.By
 
-	ctx context.Context
+	logger log.Logger
+	ctx    context.Context
 }
 
 func (hi *StateAsOfIterF) Close() {
@@ -1427,6 +1428,10 @@ func (hi *StateAsOfIterF) init(files visibleFiles) error {
 	}
 	binary.BigEndian.PutUint64(hi.startTxKey[:], hi.startTxNum)
 	return hi.advanceInFiles()
+}
+
+func (hi *StateAsOfIterF) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
+	return stream.TraceDuo(hi, hi.logger, "[dbg] StateAsOfIterF.Next "+prefix)
 }
 
 func (hi *StateAsOfIterF) advanceInFiles() error {
@@ -1539,13 +1544,18 @@ type StateAsOfIterDB struct {
 	k, v, kBackup, vBackup []byte
 	err                    error
 
-	ctx context.Context
+	logger log.Logger
+	ctx    context.Context
 }
 
 func (hi *StateAsOfIterDB) Close() {
 	if hi.valsC != nil {
 		hi.valsC.Close()
 	}
+}
+
+func (hi *StateAsOfIterDB) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
+	return stream.TraceDuo(hi, hi.logger, "[dbg] StateAsOfIterDB.Next "+prefix)
 }
 
 func (hi *StateAsOfIterDB) advance() (err error) {
