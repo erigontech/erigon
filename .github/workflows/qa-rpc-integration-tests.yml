@@ -1,7 +1,7 @@
 name: QA - RPC Integration Tests
 
 on:
-  workflow_dispatch:     # Run manually
+  workflow_dispatch: # Run manually
   push:
     branches:
       - main
@@ -16,7 +16,7 @@ on:
 
 jobs:
   integration-test-suite:
-    runs-on: [ self-hosted, Erigon3 ]
+    runs-on: [self-hosted, Erigon3]
     timeout-minutes: 15
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
@@ -32,7 +32,8 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.0.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          # git -c advice.detachedHead=false clone --depth 1 --branch v1.0.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch feature/add_creationMethod_for_parity_traces https://github.com/jsvisa/erigon-rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
@@ -53,12 +54,12 @@ jobs:
         working-directory: ${{ github.workspace }}/build/bin
         run: |
           echo "RpcDaemon starting..."
-          
+
           ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
-          
+
           echo "RpcDaemon started"
 
       - name: Wait for port 8545 to be opened
@@ -88,13 +89,13 @@ jobs:
           # Run RPC integration test runner via http
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
           ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
-          
+
           # Capture test runner script exit status
           test_exit_status=$?
-          
+
           # Save the subsection reached status
           echo "::set-output name=test_executed::true"
-          
+
           # Check test runner exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "tests completed successfully"
@@ -103,7 +104,7 @@ jobs:
           else
             echo "error detected during tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-          
+
             # Save failed results to a directory with timestamp and commit hash
             cp -r ${{ runner.workspace }}/rpc-tests/integration/mainnet/results/ $RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_$commit_http/
           fi
@@ -141,7 +142,7 @@ jobs:
           if [ -z "$db_version" ]; then
             db_version="no-version"
           fi
-          
+
           python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
 
       - name: Action for Success
@@ -153,4 +154,3 @@ jobs:
         run: |
           echo "::error::Error detected during tests"
           exit 1
-
