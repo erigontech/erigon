@@ -338,8 +338,13 @@ func (a *ApiHandler) writeValidatorsResponse(
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
+
 	if *slot < a.forkchoiceStore.LowestAvailableSlot() {
-		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
+		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, getter, *slot)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -347,7 +352,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 			http.Error(w, fmt.Errorf("state not found for slot %v", *slot).Error(), http.StatusNotFound)
 			return
 		}
-		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
+		balances, err := a.stateReader.ReadValidatorsBalances(tx, getter, *slot)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -454,6 +459,11 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		return nil, err
 	}
 
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
+
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		var (
 			resp *beaconhttp.BeaconResponse
@@ -483,14 +493,14 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 
 	if *slot < a.forkchoiceStore.LowestAvailableSlot() {
-		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
+		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, getter, *slot)
 		if err != nil {
 			return nil, err
 		}
 		if validatorSet == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found"))
 		}
-		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
+		balances, err := a.stateReader.ReadValidatorsBalances(tx, getter, *slot)
 		if err != nil {
 			return nil, err
 		}
@@ -603,8 +613,13 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 		return
 	}
 
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
+
 	if *slot < a.forkchoiceStore.LowestAvailableSlot() {
-		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
+		balances, err := a.stateReader.ReadValidatorsBalances(tx, getter, *slot)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
