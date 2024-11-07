@@ -1519,7 +1519,6 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
-	fmt.Printf("[dbg] histFiles.Next: %x\n", hi.kBackup)
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	return hi.kBackup, hi.vBackup, nil
 }
