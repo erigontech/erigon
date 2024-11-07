@@ -1678,7 +1678,7 @@ func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
-	fmt.Printf("[dbg] hist.Next: %d\n", hi.kBackup)
+	fmt.Printf("[dbg] hist.Next: %x\n", hi.kBackup)
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	return hi.kBackup, hi.vBackup, nil
 }
