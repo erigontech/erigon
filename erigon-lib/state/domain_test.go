@@ -1465,9 +1465,9 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 func TestDomainRange(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
-	require := require.New(t)
+	require, ctx := require.New(t), context.Background()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -1500,14 +1500,14 @@ func TestDomainRange(t *testing.T) {
 	}
 	writer.SetTxNum(totalTx)
 
-	err = writer.Flush(context.Background(), tx)
+	err = writer.Flush(ctx, tx)
 	require.NoError(err)
 
 	// aggregate
 	collateAndMerge(t, db, tx, d, totalTx)
 	require.NoError(tx.Commit())
 
-	tx, err = db.BeginRw(context.Background())
+	tx, err = db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
 	dc.Close()
@@ -1516,7 +1516,7 @@ func TestDomainRange(t *testing.T) {
 	defer dc.Close()
 
 	{
-		it, err := dc.ht.WalkAsOf(context.Background(), 190, nil, nil, order.Asc, -1, tx)
+		it, err := dc.ht.WalkAsOf(ctx, 190, nil, nil, order.Asc, -1, tx)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
@@ -1535,12 +1535,15 @@ func TestDomainRange(t *testing.T) {
 		require.Equal(3, len(vals))
 	}
 
-	//it, err := dc.DomainRange(context.Background(), tx, []byte{""}, nil, 190, order.Asc, -1)
-	//require.NoError(err)
-	//keys, vals, err := stream.ToArrayKV(it)
-	//require.NoError(err)
-	//require.Equal(5, len(keys))
-	//require.Equal(5, len(vals))
+	{
+		it, err := dc.DomainRange(ctx, tx, []byte(""), nil, 190, order.Asc, -1)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(5, len(keys))
+		require.Equal(5, len(vals))
+	}
 
 	t.Fail()
 }
@@ -1548,10 +1551,10 @@ func TestDomainRange(t *testing.T) {
 func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	t.Parallel()
 
-	aggStep := uint64(25)
+	aggStep, ctx := uint64(25), context.Background()
 	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
