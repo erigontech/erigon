@@ -17,6 +17,7 @@ on:
 jobs:
   integration-test-suite:
     runs-on: [ self-hosted, Erigon3 ]
+    timeout-minutes: 15
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
@@ -83,97 +84,10 @@ jobs:
 
           cd ${{ runner.workspace }}/rpc-tests/integration
           rm -rf ./mainnet/results/
-          
+                    
           # Run RPC integration test runner via http
-          python3 ./run_tests.py -p 8545 --continue -f --json-diff -x \
-          debug_accountRange,debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber,debug_storageRangeAt,debug_traceBlockByHash,\
-          debug_traceCallMany/test_02.tar,debug_traceCallMany/test_04.tar,debug_traceCallMany/test_05.tar,debug_traceCallMany/test_06.tar,debug_traceCallMany/test_07.tar,debug_traceCallMany/test_09.json,debug_traceCallMany/test_10.tar,\
-          debug_traceBlockByNumber/test_05.tar,debug_traceBlockByNumber/test_08.tar,debug_traceBlockByNumber/test_09.tar,debug_traceBlockByNumber/test_10.tar,debug_traceBlockByNumber/test_11.tar,debug_traceBlockByNumber/test_12.tar,\
-          debug_traceTransaction,\
-          engine_exchangeCapabilities/test_1.json,\
-          engine_exchangeTransitionConfigurationV1/test_01.json,\
-          engine_getClientVersionV1/test_1.json,\
-          erigon_getLogsByHash/test_04.json,\
-          erigon_getHeaderByHash/test_02.json,\
-          erigon_getHeaderByHash/test_03.json,\
-          erigon_getHeaderByHash/test_04.json,\
-          erigon_getHeaderByHash/test_06.json,\
-          erigon_getHeaderByNumber/test_01.json,\
-          erigon_getHeaderByNumber/test_02.json,\
-          erigon_getHeaderByNumber/test_03.json,\
-          erigon_getHeaderByNumber/test_04.json,\
-          erigon_getHeaderByNumber/test_05.json,\
-          erigon_getHeaderByNumber/test_06.json,\
-          erigon_getHeaderByNumber/test_07.json,\
-          erigon_getHeaderByNumber/test_08.json,\
-          erigon_getLatestLogs/test_01.json,\
-          erigon_getLatestLogs/test_02.json,\
-          erigon_getLatestLogs/test_03.json,\
-          erigon_getLatestLogs/test_04.json,\
-          erigon_getLatestLogs/test_05.json,\
-          erigon_getLatestLogs/test_06.json,\
-          erigon_getLatestLogs/test_08.json,\
-          erigon_getLatestLogs/test_09.json,\
-          erigon_getLatestLogs/test_10.json,\
-          erigon_getLatestLogs/test_11.json,\
-          erigon_getLatestLogs/test_12.json,\
-          erigon_getBalanceChangesInBlock,\
-          eth_createAccessList/test_16.json,\
-          parity_getBlockReceipts/test_01.json,\
-          parity_getBlockReceipts/test_02.json,\
-          parity_getBlockReceipts/test_03.json,\
-          parity_getBlockReceipts/test_04.json,\
-          parity_getBlockReceipts/test_05.json,\
-          parity_getBlockReceipts/test_06.json,\
-          parity_getBlockReceipts/test_07.json,\
-          parity_getBlockReceipts/test_08.json,\
-          parity_getBlockReceipts/test_09.json,\
-          parity_getBlockReceipts/test_10.json,\
-          trace_filter/test_16.json,\
-          trace_rawTransaction/test_01.json,\
-          trace_rawTransaction/test_03.json,\
-          admin_nodeInfo/test_01.json,\
-          admin_peers/test_01.json,\
-          erigon_nodeInfo/test_1.json,\
-          eth_coinbase/test_01.json,\
-          eth_feeHistory/test_01.json,\
-          eth_feeHistory/test_02.json,\
-          eth_feeHistory/test_03.json,\
-          eth_feeHistory/test_04.json,\
-          eth_feeHistory/test_05.json,\
-          eth_feeHistory/test_06.json,\
-          eth_feeHistory/test_08.json,\
-          eth_feeHistory/test_09.json,\
-          eth_feeHistory/test_10.json,\
-          eth_feeHistory/test_11.json,\
-          eth_getBlockByHash/test_01.json,\
-          eth_getBlockByHash/test_02.json,\
-          eth_getBlockByHash/test_05.json,\
-          eth_getBlockByHash/test_06.json,\
-          eth_getBlockByHash/test_07.json,\
-          eth_getBlockByHash/test_08.json,\
-          eth_getBlockByNumber/test_01.json,\
-          eth_getBlockByNumber/test_02.json,\
-          eth_getBlockByNumber/test_04.json,\
-          eth_getBlockByNumber/test_05.json,\
-          eth_getBlockByNumber/test_06.json,\
-          eth_getBlockByNumber/test_07.json,\
-          eth_getBlockByNumber/test_08.json,\
-          eth_getBlockByNumber/test_12.json,\
-          eth_getBlockByNumber/test_13.json,\
-          eth_getTransactionByHash/test_02.json,\
-          eth_getWork/test_01.json,\
-          eth_mining/test_01.json,\
-          eth_protocolVersion/test_1.json,\
-          eth_submitHashrate/test_1.json,\
-          eth_submitWork/test_1.json,\
-          net_peerCount/test_1.json,\
-          net_version/test_1.json,\
-          txpool_content/test_01.json,\
-          txpool_status/test_1.json,\
-          web3_clientVersion/test_1.json,\
-          eth_estimateGas/test_14.json,\
-          trace_replayBlockTransactions/test_29.tar
+          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
           
           # Capture test runner script exit status
           test_exit_status=$?

@@ -90,86 +90,86 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 	selectionProof := contributionAndProof.SelectionProof
 	aggregationBits := contributionAndProof.Contribution.AggregationBits
 
-	headState, cn := s.syncedDataManager.HeadState()
-	defer cn()
-	if headState == nil {
-		return ErrIgnore
-	}
+	return s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 
-	// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
-	if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
-		return errors.New("subcommittee index is out of range")
-	}
-
-	aggregatorPubKey, err := headState.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
-	if err != nil {
-		return err
-	}
-	subcommiteePubsKeys, err := s.getSyncSubcommitteePubkeys(headState, contributionAndProof.Contribution.SubcommitteeIndex)
-	if err != nil {
-		return err
-	}
-
-	// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
-	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(contributionAndProof.Contribution.Slot) {
-		return ErrIgnore
-	}
-
-	// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
-	if bytes.Equal(aggregationBits, make([]byte, len(aggregationBits))) { // check if the aggregation bits are all zeros
-		return errors.New("contribution has no participants")
-	}
-
-	modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
-	hashSignature := utils.Sha256(selectionProof[:])
-	if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
-		return errors.New("selects the validator as an aggregator")
-	}
-
-	// [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
-	if !slices.Contains(subcommiteePubsKeys, aggregatorPubKey) {
-		return errors.New("aggregator's validator index is not in subcommittee")
-	}
-
-	// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
-	if s.wasContributionSeen(contributionAndProof) {
-		return ErrIgnore
-	}
-
-	// aggregate signatures for later verification
-	aggregateVerificationData, err := s.GetSignaturesOnContributionSignatures(headState, contributionAndProof, signedContribution, subcommiteePubsKeys)
-	if err != nil {
-		return err
-	}
-
-	aggregateVerificationData.GossipData = signedContribution.GossipData
-
-	// further processing will be done after async signature verification
-	aggregateVerificationData.F = func() {
-		// mark the valid contribution as seen
-		s.markContributionAsSeen(contributionAndProof)
-
-		// emit contribution_and_proof
-		s.emitters.Operation().SendContributionProof(signedContribution.SignedContributionAndProof)
-		// add the contribution to the pool
-		err = s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
-		if errors.Is(err, sync_contribution_pool.ErrIsSuperset) {
-			return
+		// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
+		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(contributionAndProof.Contribution.Slot) {
+			return ErrIgnore
 		}
-	}
 
-	if signedContribution.ImmediateVerification {
-		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
-	}
+		// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
+		if bytes.Equal(aggregationBits, make([]byte, len(aggregationBits))) { // check if the aggregation bits are all zeros
+			return errors.New("contribution has no participants")
+		}
 
-	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchSignatureVerifier.AsyncVerifySyncContribution(aggregateVerificationData)
+		// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
+		if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
+			return errors.New("subcommittee index is out of range")
+		}
 
-	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in BatchVerification function. After validating signatures, if they are valid we will publish the
-	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return ErrIgnore
+		aggregatorPubKey, err := headState.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
+		if err != nil {
+			return err
+		}
+		subcommiteePubsKeys, err := s.getSyncSubcommitteePubkeys(headState, contributionAndProof.Contribution.SubcommitteeIndex)
+		if err != nil {
+			return err
+		}
+
+		modulo := max(1, s.beaconCfg.SyncCommitteeSize/s.beaconCfg.SyncCommitteeSubnetCount/s.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
+		hashSignature := utils.Sha256(selectionProof[:])
+		if !s.test && binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
+			return errors.New("selects the validator as an aggregator")
+		}
+
+		// [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
+		if !slices.Contains(subcommiteePubsKeys, aggregatorPubKey) {
+			return errors.New("aggregator's validator index is not in subcommittee")
+		}
+
+		// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
+		if s.wasContributionSeen(contributionAndProof) {
+			return ErrIgnore
+		}
+
+
+    // aggregate signatures for later verification
+    aggregateVerificationData, err := s.GetSignaturesOnContributionSignatures(headState, contributionAndProof, signedContribution, subcommiteePubsKeys)
+    if err != nil {
+      return err
+    }
+
+    aggregateVerificationData.GossipData = signedContribution.GossipData
+
+    // further processing will be done after async signature verification
+    aggregateVerificationData.F = func() {
+
+      // mark the valid contribution as seen
+      s.markContributionAsSeen(contributionAndProof)
+
+      // emit contribution_and_proof
+
+      s.emitters.Operation().SendContributionProof(signedContribution.SignedContributionAndProof)
+      // add the contribution to the pool
+      err = s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
+      if errors.Is(err, sync_contribution_pool.ErrIsSuperset) {
+        return
+      }
+    }
+
+    if signedContribution.ImmediateVerification {
+      return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+    }
+
+    // push the signatures to verify asynchronously and run final functions after that.
+    s.batchSignatureVerifier.AsyncVerifySyncContribution(aggregateVerificationData)
+
+    // As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
+    // gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
+    // in BatchVerification function. After validating signatures, if they are valid we will publish the
+    // gossip ourselves or ban the peer which sent that particular invalid signature.
+    return ErrIgnore
+  }
 }
 
 func (s *syncContributionService) GetSignaturesOnContributionSignatures(

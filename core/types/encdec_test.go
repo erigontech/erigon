@@ -44,8 +44,8 @@ func NewTRand() *TRand {
 	return &TRand{rnd: rand.New(src)}
 }
 
-func (tr *TRand) RandIntInRange(min, max int) int {
-	return (tr.rnd.Intn(max-min) + min)
+func (tr *TRand) RandIntInRange(_min, _max int) int {
+	return (tr.rnd.Intn(_max-_min) + _min)
 }
 
 func (tr *TRand) RandUint64() *uint64 {

@@ -486,9 +486,6 @@ func FetchWithRetryEx[T any](
 ) (result *T, err error) {
 	attempt := 0
 	// create a new ticker for retrying the request
-	if client.retryBackOff < apiHeimdallTimeout {
-		client.retryBackOff = apiHeimdallTimeout + time.Second*2
-	}
 	ticker := time.NewTicker(client.retryBackOff)
 	defer ticker.Stop()
 
