@@ -1494,6 +1494,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		hi.nextVal, _ = g.Next(nil)
 		return nil
 	}
+	fmt.Printf("[dbg] StateAsOfIterF nothing left on heap\n")
 	hi.nextKey = nil
 	return nil
 }
