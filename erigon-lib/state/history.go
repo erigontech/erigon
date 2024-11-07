@@ -1426,7 +1426,7 @@ func (hi *StateAsOfIterF) init(files visibleFiles) error {
 		g.Reset(offset)
 		if g.HasNext() {
 			key, offset := g.Next(nil)
-			fmt.Printf("[dbg] add file1: %s, %d, %x, txNums=%d-%d, startTxNum=%x\n", item.src.decompressor.FileName(), offset, key, item.startTxNum, hi.startTxNum)
+			fmt.Printf("[dbg] add file1: %s, %d, %x, txNums=%d-%d, startTxNum=%d\n", item.src.decompressor.FileName(), offset, key, item.startTxNum, hi.startTxNum)
 			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
 		}
 	}
