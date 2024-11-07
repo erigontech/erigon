@@ -1955,11 +1955,11 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	if !asc {
 		panic("implement me")
 	}
-	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, asc, -1, tx)
+	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, asc, kv.Unlim, tx)
 	if err != nil {
 		return nil, err
 	}
-	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, -1)
+	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
