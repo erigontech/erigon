@@ -7,7 +7,7 @@ disabled_tests=(
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
     # false positives: Erigon return expected response. but rpc-test somehow doesn't see 1 field.
-    erigon_getHeaderByHash,erigon_getHeaderByNumber,eth_feeHistory
+    eth_feeHistory
     # total difficulty field was removed, then added back
     eth_getBlockByHash,eth_getBlockByNumber
     # Erigon bugs
