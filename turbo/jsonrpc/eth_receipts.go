@@ -303,10 +303,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				continue
 			}
 			blockHash = header.Hash()
-
-			if err != nil {
-				return nil, err
-			}
 			exec.ChangeBlock(header)
 		}
 
