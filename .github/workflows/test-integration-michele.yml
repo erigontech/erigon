@@ -31,5 +31,6 @@ jobs:
     steps:
       - name: test new runner
         run: |
+          set +x
           echo "I am being served by this runner: $RUNNER_NAME"
     
