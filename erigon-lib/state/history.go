@@ -1514,6 +1514,7 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
+	fmt.Printf("[dbg] histFiles.Next: %x\n", hi.kBackup)
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	return hi.kBackup, hi.vBackup, nil
 }
@@ -1678,7 +1679,6 @@ func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
-	fmt.Printf("[dbg] hist.Next: %x\n", hi.kBackup)
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	return hi.kBackup, hi.vBackup, nil
 }
@@ -1920,6 +1920,7 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
+	fmt.Printf("[dbg] hist.Next: %x\n", hi.kBackup)
 	return hi.kBackup, hi.vBackup, nil
 }
 
@@ -2090,6 +2091,7 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, uint64, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, 0, err
 	}
+	order.Asc.Assert(hi.k, hi.nextKey)
 	return hi.k, hi.v, hi.step, nil
 }
 
