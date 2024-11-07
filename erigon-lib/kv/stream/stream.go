@@ -462,10 +462,14 @@ type Traced[T any] struct {
 func Trace[T any](it Uno[T], logger log.Logger, prefix string) *Traced[T] {
 	return &Traced[T]{it: it, logger: logger, prefix: prefix}
 }
-func (m *Traced[T]) HasNext() bool { return m.it.HasNext() }
+func (m *Traced[T]) HasNext() bool {
+	res := m.it.HasNext()
+	log.Warn(m.prefix, "hasNext", res)
+	return res
+}
 func (m *Traced[T]) Next() (k T, err error) {
 	k, err = m.it.Next()
-	log.Warn(m.prefix, "key", fmt.Sprintf("%x", k))
+	log.Warn(m.prefix, "next", fmt.Sprintf("%x", k))
 	return k, err
 }
 func (m *Traced[T]) Close() {
@@ -484,10 +488,14 @@ type TracedDuo[K, V any] struct {
 func TraceDuo[K, V any](it Duo[K, V], logger log.Logger, prefix string) *TracedDuo[K, V] {
 	return &TracedDuo[K, V]{it: it, logger: logger, prefix: prefix}
 }
-func (m *TracedDuo[K, V]) HasNext() bool { return m.it.HasNext() }
+func (m *TracedDuo[K, V]) HasNext() bool {
+	res := m.it.HasNext()
+	log.Warn(m.prefix, "hasNext", res)
+	return res
+}
 func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v, err = m.it.Next()
-	log.Warn(m.prefix, "key", fmt.Sprintf("%x", k))
+	log.Warn(m.prefix, "next", fmt.Sprintf("%x", k))
 	return k, v, err
 }
 func (m *TracedDuo[K, V]) Close() {
