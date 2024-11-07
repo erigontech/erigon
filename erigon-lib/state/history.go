@@ -1507,7 +1507,7 @@ func (hi *StateAsOfIterF) HasNext() bool {
 	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
 	res := (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 	if !res {
-		log.Warn("[dbg] StateAsOfIterF.HasNext3", "from", hi.from, "to", hi.toPrefix, "now", hi.nextKey)
+		log.Warn(fmt.Sprintf("[dbg] StateAsOfIterF.HasNext3 from=%x, to=%x, now=%x", hi.from, hi.toPrefix, hi.nextKey))
 	}
 	return res
 }
