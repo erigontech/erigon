@@ -1521,7 +1521,8 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
-	return hi.kBackup, hi.vBackup, nil
+	// TODO: remove `common.Copy`. it protecting from some existing bug.
+	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
 // StateAsOfIterDB - returns state range at given time in history
@@ -1690,7 +1691,8 @@ func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
-	return hi.kBackup, hi.vBackup, nil
+	// TODO: remove `common.Copy`. it protecting from some existing bug.
+	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
 func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
