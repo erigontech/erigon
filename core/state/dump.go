@@ -188,10 +188,10 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			fmt.Printf("[dbg] dumper iter acc. break: nextKey %x, k %x\n", nextKey, k)
 			break
 		}
-		if len(v) == 0 {
-			fmt.Printf("[dbg] empty val???: k %x\n", k)
-			continue
-		}
+		//if len(v) == 0 {
+		//	fmt.Printf("[dbg] empty val???: k %x\n", k)
+		//	continue
+		//}
 		fmt.Printf("[dbg] dumper iter acc: %x\n", k)
 
 		if e := accounts.DeserialiseV3(&acc, v); e != nil {
