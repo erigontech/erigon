@@ -2348,7 +2348,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						k = k[:len(k)-8]
 						ci1.key = common.Copy(k)
 						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+						endTxNum := step * hi.aggStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 						ci1.endTxNum = endTxNum
 
 						ci1.val = common.Copy(v)
@@ -2366,7 +2366,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						v := stepBytesWithValue[8:]
 						ci1.key = common.Copy(k)
 						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+						endTxNum := step * hi.aggStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 						ci1.endTxNum = endTxNum
 
 						ci1.val = common.Copy(v)
