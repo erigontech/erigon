@@ -1959,16 +1959,18 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	if err != nil {
 		return nil, err
 	}
-	keys, _, _ := stream.ToArrayKV(histStateIt)
-	fmt.Printf("[dbg] keys: %x\n", keys)
+
+	//keys, _, _ := stream.ToArrayKV(histStateIt)
+	//fmt.Printf("[dbg] keys: %x\n", keys)
 
 	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
 	if err != nil {
 		return nil, err
 	}
-	keys2, _, _ := stream.ToArrayKV(lastestStateIt)
-	fmt.Printf("[dbg] keys3: %x\n", keys2)
-	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
+	//keys2, _, _ := stream.ToArrayKV(lastestStateIt)
+	//fmt.Printf("[dbg] keys3: %x\n", keys2)
+	//return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
+	return stream.UnionKV(stream.TraceDuo(histStateIt, dt.d.logger, "histStateIt"), stream.TraceDuo(lastestStateIt, dt.d.logger, "lastestStateIt"), limit), nil
 }
 
 func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
