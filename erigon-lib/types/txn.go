@@ -324,7 +324,7 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 		}
 	} else {
 		if !sig.V.LtUint64(1 << 8) {
-			return 0, 0, fmt.Errorf("v is loo large: %s", &sig.V)
+			return 0, 0, fmt.Errorf("v is too big: %s", &sig.V)
 		}
 		yParity = byte(sig.V.Uint64())
 	}
@@ -592,7 +592,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		}
 	} else {
 		if ctx.Signature.V.GtUint64(1) {
-			return 0, fmt.Errorf("%w: v is loo large: %s", ErrParseTxn, &ctx.Signature.V)
+			return 0, fmt.Errorf("%w: v is too big: %s", ErrParseTxn, &ctx.Signature.V)
 		}
 	}
 
