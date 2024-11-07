@@ -394,7 +394,11 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon
 }
 
 func (ot *OeTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ot.captureStartOrEnter(false /* deep */, vm.CALL, from, to, precompile, create, input, gas, value, code)
+	typ := vm.CALL
+	if create {
+		typ = vm.CREATE
+	}
+	ot.captureStartOrEnter(false /* deep */, typ, from, to, precompile, create, input, gas, value, code)
 }
 
 func (ot *OeTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
