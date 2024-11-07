@@ -1968,11 +1968,12 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 		return nil, err
 	}
 	fmt.Printf("[dbg] DomainRange 2: %s\n", dt.d.name)
-	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
-	if err != nil {
-		return nil, err
-	}
-	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
+	//lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
+	return stream.UnionKV(histStateIt, stream.EmptyKV, limit), nil
 }
 
 func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (stream.KV, error) {
@@ -2264,6 +2265,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 		if key, value, err = valsCursor.Seek(hi.from); err != nil {
 			return err
 		}
+		fmt.Printf("[dbg] rangeLatest: %x\n", key)
 		if key != nil && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
 			k := key[:len(key)-8]
 			stepBytes := key[len(key)-8:]
@@ -2281,6 +2283,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 		if key, value, err = valsCursor.Seek(hi.from); err != nil {
 			return err
 		}
+		fmt.Printf("[dbg] rangeLatest2: %x\n", key)
 		if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
 			stepBytes := value[:8]
 			value = value[8:]
@@ -2302,6 +2305,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 		}
 
 		key := btCursor.Key()
+		fmt.Printf("[dbg] rangeLatest3: %x\n", key)
 		if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
 			val := btCursor.Value()
 			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
@@ -2324,6 +2328,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				if ci1.btCursor.Next() {
 					ci1.key = ci1.btCursor.Key()
 					ci1.val = ci1.btCursor.Value()
+					fmt.Printf("[dbg] advInFiles1: %x\n", ci1.key)
 					if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
 						heap.Push(hi.h, ci1)
 					}
@@ -2346,6 +2351,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						}
 					}
 
+					fmt.Printf("[dbg] advInFiles2: %x\n", k)
 					if len(k) > 0 && (hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
 						stepBytes := k[len(k)-8:]
 						k = k[:len(k)-8]
@@ -2364,6 +2370,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						return err
 					}
 
+					fmt.Printf("[dbg] advInFiles3: %x\n", k)
 					if len(k) > 0 && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
 						stepBytes := stepBytesWithValue[:8]
 						v := stepBytesWithValue[8:]

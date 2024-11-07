@@ -1515,13 +1515,25 @@ func TestDomainRange(t *testing.T) {
 	dc = d.BeginFilesRo()
 	defer dc.Close()
 
-	it, err := dc.DomainRange(context.Background(), tx, nil, nil, 190, order.Asc, -1)
-	require.NoError(err)
-	keys, vals, err := stream.ToArrayKV(it)
-	require.NoError(err)
-	require.Equal(5, len(keys))
-	require.Equal(5, len(vals))
-	fmt.Printf("keys: %x\n", keys)
+	{
+		it, err := dc.ht.WalkAsOf(context.Background(), 190, nil, nil, order.Asc, -1, tx)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		fmt.Printf("keys: %x\n", keys)
+		require.NoError(err)
+		require.Equal(3, len(keys))
+		require.Equal(3, len(vals))
+	}
+
+	{
+		it, err := dc.DomainRangeLatest(tx, nil, nil, -1)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		fmt.Printf("keys: %x\n", keys)
+		require.NoError(err)
+		require.Equal(3, len(keys))
+		require.Equal(3, len(vals))
+	}
 
 	//it, err := dc.DomainRange(context.Background(), tx, []byte{""}, nil, 190, order.Asc, -1)
 	//require.NoError(err)

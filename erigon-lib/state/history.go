@@ -1356,31 +1356,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 
 		ctx: ctx,
 	}
-	for i, item := range ht.iit.files {
-		if item.endTxNum <= startTxNum {
-			continue
-		}
-		// TODO: seek(from)
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), ht.h.compression)
-
-		idx := ht.iit.statelessIdxReader(i)
-		var offset uint64
-		if len(from) > 0 {
-			n := item.src.decompressor.Count() / 2
-			var ok bool
-			offset, ok = g.BinarySearch(from, n, idx.OrdinalLookup)
-			if !ok {
-				offset = 0
-			}
-		}
-		g.Reset(offset)
-		if g.HasNext() {
-			key, offset := g.Next(nil)
-			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
-		}
-	}
-	binary.BigEndian.PutUint64(hi.startTxKey[:], startTxNum)
-	if err := hi.advanceInFiles(); err != nil {
+	if err := hi.init(ht.iit.files); err != nil {
 		hi.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
@@ -1424,6 +1400,34 @@ type StateAsOfIterF struct {
 }
 
 func (hi *StateAsOfIterF) Close() {
+}
+
+func (hi *StateAsOfIterF) init(files visibleFiles) error {
+	for i, item := range files {
+		if item.endTxNum <= hi.startTxNum {
+			continue
+		}
+		// TODO: seek(from)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), hi.hc.h.compression)
+
+		idx := hi.hc.iit.statelessIdxReader(i)
+		var offset uint64
+		if len(hi.from) > 0 {
+			n := item.src.decompressor.Count() / 2
+			var ok bool
+			offset, ok = g.BinarySearch(hi.from, n, idx.OrdinalLookup)
+			if !ok {
+				offset = 0
+			}
+		}
+		g.Reset(offset)
+		if g.HasNext() {
+			key, offset := g.Next(nil)
+			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+		}
+	}
+	binary.BigEndian.PutUint64(hi.startTxKey[:], hi.startTxNum)
+	return hi.advanceInFiles()
 }
 
 func (hi *StateAsOfIterF) advanceInFiles() error {
