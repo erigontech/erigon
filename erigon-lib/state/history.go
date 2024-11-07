@@ -1353,8 +1353,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 
 		hc:         ht,
 		startTxNum: startTxNum,
-
-		ctx: ctx,
+		ctx:        ctx,
 	}
 	if err := hi.init(ht.iit.files); err != nil {
 		hi.Close() //it's responsibility of constructor (our) to close resource on error
