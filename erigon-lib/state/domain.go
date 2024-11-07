@@ -1962,6 +1962,8 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	if err != nil {
 		return nil, err
 	}
+	keys2, _, _ := stream.ToArrayKV(lastestStateIt)
+	fmt.Printf("[dbg] keys3: %x\n", keys2)
 	return stream.UnionKV(histStateIt, lastestStateIt.Trace(""), limit), nil
 }
 
