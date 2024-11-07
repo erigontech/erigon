@@ -1422,6 +1422,7 @@ func (hi *StateAsOfIterF) init(files visibleFiles) error {
 				offset = 0
 			}
 		}
+		fmt.Printf("[dbg] add file: %s\n", item.src.decompressor.FileName())
 		g.Reset(offset)
 		if g.HasNext() {
 			key, offset := g.Next(nil)
@@ -1466,6 +1467,8 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		}
 		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
 		if !ok {
+			ef, _ := eliasfano32.ReadEliasFano(idxVal)
+			fmt.Printf("[dbg] EF not ok: %s, %d-%d, %d. ef=%d-%d\n", top.g.FileName(), top.startTxNum, top.endTxNum, hi.startTxNum, ef.Get(0), ef.Get(ef.Count()-1))
 			continue
 		}
 
