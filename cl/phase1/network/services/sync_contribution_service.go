@@ -132,44 +132,43 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 			return ErrIgnore
 		}
 
+		// aggregate signatures for later verification
+		aggregateVerificationData, err := s.GetSignaturesOnContributionSignatures(headState, contributionAndProof, signedContribution, subcommiteePubsKeys)
+		if err != nil {
+			return err
+		}
 
-    // aggregate signatures for later verification
-    aggregateVerificationData, err := s.GetSignaturesOnContributionSignatures(headState, contributionAndProof, signedContribution, subcommiteePubsKeys)
-    if err != nil {
-      return err
-    }
+		aggregateVerificationData.GossipData = signedContribution.GossipData
 
-    aggregateVerificationData.GossipData = signedContribution.GossipData
+		// further processing will be done after async signature verification
+		aggregateVerificationData.F = func() {
 
-    // further processing will be done after async signature verification
-    aggregateVerificationData.F = func() {
+			// mark the valid contribution as seen
+			s.markContributionAsSeen(contributionAndProof)
 
-      // mark the valid contribution as seen
-      s.markContributionAsSeen(contributionAndProof)
+			// emit contribution_and_proof
 
-      // emit contribution_and_proof
+			s.emitters.Operation().SendContributionProof(signedContribution.SignedContributionAndProof)
+			// add the contribution to the pool
+			err = s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
+			if errors.Is(err, sync_contribution_pool.ErrIsSuperset) {
+				return
+			}
+		}
 
-      s.emitters.Operation().SendContributionProof(signedContribution.SignedContributionAndProof)
-      // add the contribution to the pool
-      err = s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
-      if errors.Is(err, sync_contribution_pool.ErrIsSuperset) {
-        return
-      }
-    }
+		if signedContribution.ImmediateVerification {
+			return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		}
 
-    if signedContribution.ImmediateVerification {
-      return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
-    }
+		// push the signatures to verify asynchronously and run final functions after that.
+		s.batchSignatureVerifier.AsyncVerifySyncContribution(aggregateVerificationData)
 
-    // push the signatures to verify asynchronously and run final functions after that.
-    s.batchSignatureVerifier.AsyncVerifySyncContribution(aggregateVerificationData)
-
-    // As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-    // gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-    // in BatchVerification function. After validating signatures, if they are valid we will publish the
-    // gossip ourselves or ban the peer which sent that particular invalid signature.
-    return ErrIgnore
-  }
+		// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
+		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
+		// in BatchVerification function. After validating signatures, if they are valid we will publish the
+		// gossip ourselves or ban the peer which sent that particular invalid signature.
+		return ErrIgnore
+	})
 }
 
 func (s *syncContributionService) GetSignaturesOnContributionSignatures(
