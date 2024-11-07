@@ -1455,14 +1455,18 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 			//}
 			if hi.toPrefix == nil || bytes.Compare(top.key, hi.toPrefix) < 0 {
 				heap.Push(&hi.h, top)
+			} else {
+				fmt.Printf("[dbg] StateAsOfIterF skip0: %s, %d-%d, %d\n", top.g.FileName(), top.startTxNum, top.endTxNum, hi.startTxNum)
 			}
 		}
 
 		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { //TODO: replace by seekInFiles()
+			fmt.Printf("[dbg] StateAsOfIterF skip1: %s, %d-%d, %d\n", top.g.FileName(), top.startTxNum, top.endTxNum, hi.startTxNum)
 			continue
 		}
 
 		if bytes.Equal(key, hi.nextKey) {
+			fmt.Printf("[dbg] StateAsOfIterF skip2: %s, %d-%d, %d\n", top.g.FileName(), top.startTxNum, top.endTxNum, hi.startTxNum)
 			continue
 		}
 		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
@@ -1481,6 +1485,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
 		if !ok {
+			fmt.Printf("[dbg] StateAsOfIterF skip4: %s, %d-%d, %d\n", top.g.FileName(), top.startTxNum, top.endTxNum, hi.startTxNum)
 			continue
 		}
 		g := hi.hc.statelessGetter(historyItem.i)
