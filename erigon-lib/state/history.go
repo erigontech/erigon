@@ -1344,12 +1344,13 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	return val[8:], true, nil
 }
+
 func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if !asc {
 		panic("implement me")
 	}
 	hi := &StateAsOfIterF{
-		from: from, toPrefix: to, limit: limit, orderAscend: asc,
+		from: from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 
 		hc:         ht,
 		startTxNum: startTxNum,
@@ -1364,7 +1365,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		largeValues: ht.h.historyLargeValues,
 		roTx:        roTx,
 		valsTable:   ht.h.historyValsTable,
-		from:        from, toPrefix: to, limit: limit, orderAscend: asc,
+		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 
 		startTxNum: startTxNum,
 

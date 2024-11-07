@@ -1955,20 +1955,14 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	if !asc {
 		panic("implement me")
 	}
-	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, asc, limit, tx)
+	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, asc, -1, tx)
 	if err != nil {
 		return nil, err
 	}
-
-	//keys, _, _ := stream.ToArrayKV(histStateIt)
-	//fmt.Printf("[dbg] keys: %x\n", keys)
-
-	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
+	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, -1)
 	if err != nil {
 		return nil, err
 	}
-	//keys2, _, _ := stream.ToArrayKV(lastestStateIt)
-	//fmt.Printf("[dbg] keys3: %x\n", keys2)
 	//return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 	return stream.UnionKV(stream.TraceDuo(histStateIt, dt.d.logger, "histStateIt"), stream.TraceDuo(lastestStateIt, dt.d.logger, "lastestStateIt"), limit), nil
 }
