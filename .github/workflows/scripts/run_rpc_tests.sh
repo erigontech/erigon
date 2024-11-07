@@ -37,7 +37,6 @@ disabled_tests=(
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
-    erigon_getBalanceChangesInBlock
     eth_createAccessList/test_16.json
     admin_nodeInfo/test_01.json
     admin_peers/test_01.json
