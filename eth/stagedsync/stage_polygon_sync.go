@@ -281,7 +281,7 @@ type polygonSyncStageService struct {
 	sync            *polygonsync.Sync
 	syncStore       polygonsync.Store
 	events          *polygonsync.TipEvents
-	p2p             p2p.Service
+	p2p             *p2p.Service
 	executionEngine *polygonSyncStageExecutionEngine
 	heimdall        heimdall.Service
 	heimdallStore   heimdall.Store

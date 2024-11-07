@@ -45,75 +45,51 @@ const (
 	blockDownloaderEstimatedRamPerWorker = estimate.EstimatedRamPerWorker(1 * datasize.GB)
 )
 
-type BlockDownloader interface {
-	DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (tip *types.Header, err error)
-	DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (tip *types.Header, err error)
-}
-
 func NewBlockDownloader(
 	logger log.Logger,
-	p2pService p2p.Service,
+	p2pService p2pService,
 	waypointReader waypointReader,
 	checkpointVerifier WaypointHeadersVerifier,
 	milestoneVerifier WaypointHeadersVerifier,
 	blocksVerifier BlocksVerifier,
 	store Store,
 	blockLimit uint,
-) BlockDownloader {
-	return newBlockDownloader(
-		logger,
-		p2pService,
-		waypointReader,
-		checkpointVerifier,
-		milestoneVerifier,
-		blocksVerifier,
-		store,
-		notEnoughPeersBackOffDuration,
-		blockDownloaderEstimatedRamPerWorker.WorkersByRAMOnly(),
-		blockLimit,
-	)
-}
-
-func newBlockDownloader(
-	logger log.Logger,
-	p2pService p2p.Service,
-	waypointReader waypointReader,
-	checkpointVerifier WaypointHeadersVerifier,
-	milestoneVerifier WaypointHeadersVerifier,
-	blocksVerifier BlocksVerifier,
-	store Store,
-	notEnoughPeersBackOffDuration time.Duration,
-	maxWorkers int,
-	blockLimit uint,
-) *blockDownloader {
-	return &blockDownloader{
-		logger:                        logger,
-		p2pService:                    p2pService,
-		waypointReader:                waypointReader,
-		checkpointVerifier:            checkpointVerifier,
-		milestoneVerifier:             milestoneVerifier,
-		blocksVerifier:                blocksVerifier,
-		store:                         store,
-		notEnoughPeersBackOffDuration: notEnoughPeersBackOffDuration,
-		maxWorkers:                    maxWorkers,
-		blockLimit:                    blockLimit,
+	opts ...BlockDownloaderOption,
+) *BlockDownloader {
+	bd := &BlockDownloader{
+		logger:             logger,
+		p2pService:         p2pService,
+		waypointReader:     waypointReader,
+		checkpointVerifier: checkpointVerifier,
+		milestoneVerifier:  milestoneVerifier,
+		blocksVerifier:     blocksVerifier,
+		store:              store,
+		retryBackOff:       notEnoughPeersBackOffDuration,
+		maxWorkers:         blockDownloaderEstimatedRamPerWorker.WorkersByRAMOnly(),
+		blockLimit:         blockLimit,
 	}
+
+	for _, opt := range opts {
+		opt(bd)
+	}
+
+	return bd
 }
 
-type blockDownloader struct {
-	logger                        log.Logger
-	p2pService                    p2p.Service
-	waypointReader                waypointReader
-	checkpointVerifier            WaypointHeadersVerifier
-	milestoneVerifier             WaypointHeadersVerifier
-	blocksVerifier                BlocksVerifier
-	store                         Store
-	notEnoughPeersBackOffDuration time.Duration
-	maxWorkers                    int
-	blockLimit                    uint
+type BlockDownloader struct {
+	logger             log.Logger
+	p2pService         p2pService
+	waypointReader     waypointReader
+	checkpointVerifier WaypointHeadersVerifier
+	milestoneVerifier  WaypointHeadersVerifier
+	blocksVerifier     BlocksVerifier
+	store              Store
+	retryBackOff       time.Duration
+	maxWorkers         int
+	blockLimit         uint
 }
 
-func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
+func (d *BlockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
 	checkpoints, err := d.waypointReader.CheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
@@ -122,7 +98,7 @@ func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, st
 	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(checkpoints), d.checkpointVerifier)
 }
 
-func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
+func (d *BlockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (*types.Header, error) {
 	milestones, err := d.waypointReader.MilestonesFromBlock(ctx, start)
 	if err != nil {
 		return nil, err
@@ -151,7 +127,7 @@ func (d *blockDownloader) DownloadBlocksUsingMilestones(ctx context.Context, sta
 	return d.downloadBlocksUsingWaypoints(ctx, heimdall.AsWaypoints(milestones), d.milestoneVerifier)
 }
 
-func (d *blockDownloader) downloadBlocksUsingWaypoints(
+func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 	ctx context.Context,
 	waypoints heimdall.Waypoints,
 	verifier WaypointHeadersVerifier,
@@ -200,10 +176,10 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 				syncLogPrefix("can't use any peers to download blocks, will try again in a bit"),
 				"start", waypoints[0].StartBlock(),
 				"end", endBlockNum,
-				"sleepSeconds", d.notEnoughPeersBackOffDuration.Seconds(),
+				"retryBackOffSecs", d.retryBackOff.Seconds(),
 			)
 
-			if err := common.Sleep(ctx, d.notEnoughPeersBackOffDuration); err != nil {
+			if err := common.Sleep(ctx, d.retryBackOff); err != nil {
 				return nil, err
 			}
 
@@ -330,7 +306,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(
 	return lastBlock.Header(), nil
 }
 
-func (d *blockDownloader) fetchVerifiedBlocks(
+func (d *BlockDownloader) fetchVerifiedBlocks(
 	ctx context.Context,
 	waypoint heimdall.Waypoint,
 	peerId *p2p.PeerId,
@@ -389,7 +365,7 @@ func (d *blockDownloader) fetchVerifiedBlocks(
 	return blocks, headers.TotalSize + bodies.TotalSize, nil
 }
 
-func (d *blockDownloader) limitWaypoints(waypoints []heimdall.Waypoint) []heimdall.Waypoint {
+func (d *BlockDownloader) limitWaypoints(waypoints []heimdall.Waypoint) []heimdall.Waypoint {
 	if d.blockLimit == 0 {
 		return waypoints
 	}

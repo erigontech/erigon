@@ -239,13 +239,14 @@ func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	statusDataFactory := libsentry.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
 		return &sentry.StatusData{}, nil
 	})
+	peerPenalizer := NewPeerPenalizer(sentryClient)
 	return &messageListenerTest{
 		ctx:                   ctx,
 		ctxCancel:             cancel,
 		t:                     t,
 		logger:                logger,
 		sentryClient:          sentryClient,
-		messageListener:       newMessageListener(logger, sentryClient, statusDataFactory, NewPeerPenalizer(sentryClient)),
+		messageListener:       NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer),
 		inboundMessagesStream: inboundMessagesStream,
 		peerEventsStream:      peerEventsStream,
 	}
@@ -257,7 +258,7 @@ type messageListenerTest struct {
 	t                     *testing.T
 	logger                log.Logger
 	sentryClient          *direct.MockSentryClient
-	messageListener       *messageListener
+	messageListener       *MessageListener
 	inboundMessagesStream chan *delayedMessage[*sentry.InboundMessage]
 	peerEventsStream      chan *delayedMessage[*sentry.PeerEvent]
 }

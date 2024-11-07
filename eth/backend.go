@@ -215,7 +215,7 @@ type Ethereum struct {
 	silkwormRPCDaemonService *silkworm.RpcDaemonService
 	silkwormSentryService    *silkworm.SentryService
 
-	polygonSyncService  polygonsync.Service
+	polygonSyncService  *polygonsync.Service
 	polygonDownloadSync *stagedsync.Sync
 	polygonBridge       bridge.PolygonBridge
 	heimdallService     heimdall.Service
@@ -1003,7 +1003,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			executionRpc,
-			blockReader,
 			config.LoopBlockLimit,
 			polygonBridge,
 			heimdallService,
