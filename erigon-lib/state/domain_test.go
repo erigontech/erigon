@@ -1531,8 +1531,8 @@ func TestDomainRange(t *testing.T) {
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
-		require.Equal(3, len(keys))
-		require.Equal(3, len(vals))
+		require.Equal(5, len(keys))
+		require.Equal(5, len(vals))
 	}
 
 	{
