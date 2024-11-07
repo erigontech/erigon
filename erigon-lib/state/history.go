@@ -1456,10 +1456,8 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		}
 		n, ok := eliasfano32.Seek(idxVal, hi.startTxNum)
 		if !ok {
-			fmt.Printf("[dbg] StateAsOfIterF advanceInFiles ef.seek not found. %s, %x\n", top.g.FileName(), hi.nextKey)
 			continue
 		}
-		fmt.Printf("[dbg] StateAsOfIterF advanceInFiles keep: %s, %x, to: %x\n", top.g.FileName(), top.key, hi.toPrefix)
 
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], n)
