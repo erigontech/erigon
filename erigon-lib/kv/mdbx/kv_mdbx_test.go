@@ -125,7 +125,7 @@ func TestRange(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
 		//[from, to)
-		it, err := tx.Range("Table", []byte("key1"), []byte("key3"))
+		it, err := tx.Range("Table", []byte("key1"), []byte("key3"), order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
 		k, v, err := it.Next()
@@ -143,7 +143,7 @@ func TestRange(t *testing.T) {
 		require.False(t, it.HasNext())
 
 		// [from, nil) means [from, INF)
-		it, err = tx.Range("Table", []byte("key1"), nil)
+		it, err = tx.Range("Table", []byte("key1"), nil, order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		cnt := 0
 		for it.HasNext() {
@@ -157,7 +157,7 @@ func TestRange(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
 		//[from, to)
-		it, err := tx.RangeDescend("Table", []byte("key3"), []byte("key1"), kv.Unlim)
+		it, err := tx.Range("Table", []byte("key3"), []byte("key1"), order.Desc, kv.Unlim)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
 		k, v, err := it.Next()
@@ -173,7 +173,7 @@ func TestRange(t *testing.T) {
 
 		require.False(t, it.HasNext())
 
-		it, err = tx.RangeDescend("Table", nil, nil, 2)
+		it, err = tx.Range("Table", nil, nil, order.Desc, 2)
 		require.NoError(t, err)
 
 		cnt := 0
@@ -669,12 +669,12 @@ func TestBeginRwWithDoneContext(t *testing.T) {
 func testCloseWaitsAfterTxBegin(
 	t *testing.T,
 	count int,
-	txBeginFunc func(kv.RwDB) (kv.StatelessReadTx, error),
-	txEndFunc func(kv.StatelessReadTx) error,
+	txBeginFunc func(kv.RwDB) (kv.Getter, error),
+	txEndFunc func(kv.Getter) error,
 ) {
 	t.Helper()
 	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
-	var txs []kv.StatelessReadTx
+	var txs []kv.Getter
 	for i := 0; i < count; i++ {
 		tx, err := txBeginFunc(db)
 		require.Nil(t, err)
@@ -709,48 +709,48 @@ func TestCloseWaitsAfterTxBegin(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			1,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
-			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRoAndCommit3", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			3,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
-			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRoAndRollback", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			1,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
-			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRoAndRollback3", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			3,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRo(ctx) },
-			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRo(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRwAndCommit", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			1,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRw(ctx) },
-			func(tx kv.StatelessReadTx) error { return tx.Commit() },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRw(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 	t.Run("BeginRwAndRollback", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
 			1,
-			func(db kv.RwDB) (kv.StatelessReadTx, error) { return db.BeginRw(ctx) },
-			func(tx kv.StatelessReadTx) error { tx.Rollback(); return nil },
+			func(db kv.RwDB) (kv.Getter, error) { return db.BeginRw(ctx) },
+			func(tx kv.Getter) error { tx.Rollback(); return nil },
 		)
 	})
 }

@@ -25,9 +25,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -36,112 +33,87 @@ import (
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rlp"
-	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
 func TraceBorStateSyncTxnDebugAPI(
 	ctx context.Context,
-	dbTx kv.Tx,
 	chainConfig *chain.Config,
 	traceConfig *tracersConfig.TraceConfig,
 	ibs *state.IntraBlockState,
-	blockReader services.FullBlockReader,
 	blockHash libcommon.Hash,
 	blockNum uint64,
 	blockTime uint64,
 	blockCtx evmtypes.BlockContext,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
-) error {
-	stateSyncEvents, err := blockReader.EventsByBlock(ctx, dbTx, blockHash, blockNum)
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-
+	msgs []*types.Message,
+) (usedGas uint64, err error) {
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
 	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
-		return err
+		return usedGas, err
 	}
 
 	defer cancel()
 	stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
-	tracer = NewBorStateSyncTxnTracer(tracer, len(stateSyncEvents), stateReceiverContract)
+	tracer = NewBorStateSyncTxnTracer(tracer, len(msgs), stateReceiverContract)
 	rules := chainConfig.Rules(blockNum, blockTime)
 	stateWriter := state.NewNoopWriter()
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
-		return traceBorStateSyncTxn(ctx, ibs, stateWriter, stateReceiverContract, stateSyncEvents, evm, rules, txCtx, refunds)
+		res, err := traceBorStateSyncTxn(ctx, ibs, stateWriter, msgs, evm, rules, txCtx, refunds)
+		if err != nil {
+			return res, err
+		}
+		usedGas = res.UsedGas
+		return res, nil
 	}
 
-	return transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
+	err = transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
+	return usedGas, err
 }
 
 func TraceBorStateSyncTxnTraceAPI(
 	ctx context.Context,
-	dbTx kv.Tx,
 	vmConfig *vm.Config,
 	chainConfig *chain.Config,
-	blockReader services.FullBlockReader,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	blockCtx evmtypes.BlockContext,
 	blockHash libcommon.Hash,
 	blockNum uint64,
 	blockTime uint64,
+	msgs []*types.Message,
 ) (*evmtypes.ExecutionResult, error) {
-	stateSyncEvents, err := blockReader.EventsByBlock(ctx, dbTx, blockHash, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
 	stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
 	if vmConfig.Tracer != nil {
-		vmConfig.Tracer = NewBorStateSyncTxnTracer(vmConfig.Tracer, len(stateSyncEvents), stateReceiverContract)
+		vmConfig.Tracer = NewBorStateSyncTxnTracer(vmConfig.Tracer, len(msgs), stateReceiverContract)
 	}
 
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
 	rules := chainConfig.Rules(blockNum, blockTime)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, *vmConfig)
-	return traceBorStateSyncTxn(ctx, ibs, stateWriter, stateReceiverContract, stateSyncEvents, evm, rules, txCtx, true)
+
+	return traceBorStateSyncTxn(ctx, ibs, stateWriter, msgs, evm, rules, txCtx, true)
 }
 
 func traceBorStateSyncTxn(
 	ctx context.Context,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
-	stateReceiverContract libcommon.Address,
-	stateSyncEvents []rlp.RawValue,
+	msgs []*types.Message,
 	evm *vm.EVM,
 	rules *chain.Rules,
 	txCtx evmtypes.TxContext,
 	refunds bool,
 ) (*evmtypes.ExecutionResult, error) {
-	for _, eventData := range stateSyncEvents {
+	for _, msg := range msgs {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
-
-		msg := types.NewMessage(
-			state.SystemAddress, // from
-			&stateReceiverContract,
-			0,         // nonce
-			u256.Num0, // amount
-			core.SysCallGasLimit,
-			u256.Num0, // gasPrice
-			nil,       // feeCap
-			nil,       // tip
-			eventData,
-			nil,   // accessList
-			false, // checkNonce
-			true,  // isFree
-			nil,   // maxFeePerBlobGas
-		)
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		_, err := core.ApplyMessage(evm, msg, gp, refunds, false /* gasBailout */)

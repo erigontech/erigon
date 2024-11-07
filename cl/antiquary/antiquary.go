@@ -157,7 +157,7 @@ func (a *Antiquary) Loop() error {
 	}
 
 	logInterval := time.NewTicker(30 * time.Second)
-	if err := a.sn.ReopenFolder(); err != nil {
+	if err := a.sn.OpenFolder(); err != nil {
 		return err
 	}
 	defer logInterval.Stop()
@@ -294,7 +294,7 @@ func (a *Antiquary) antiquate() error {
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.sn.Salt, a.dirs, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
-	if err := a.sn.ReopenFolder(); err != nil {
+	if err := a.sn.OpenFolder(); err != nil {
 		return err
 	}
 	tx, err := a.mainDB.BeginRw(a.ctx)
@@ -312,7 +312,7 @@ func (a *Antiquary) antiquate() error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if err := a.sn.ReopenFolder(); err != nil {
+	if err := a.sn.OpenFolder(); err != nil {
 		return err
 	}
 
@@ -393,7 +393,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	a.logger.Info("[Antiquary] Finished Antiquating blobs", "from", currentBlobsProgress, "to", to)
-	if err := a.sn.ReopenFolder(); err != nil {
+	if err := a.sn.OpenFolder(); err != nil {
 		return err
 	}
 

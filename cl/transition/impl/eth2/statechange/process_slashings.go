@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/threading"
 )
@@ -56,6 +57,7 @@ func processSlashings(s abstract.BeaconState, slashingMultiplier uint64) error {
 }
 
 func ProcessSlashings(state abstract.BeaconState) error {
+	defer monitor.ObserveElaspedTime(monitor.ProcessSlashingsTime).End()
 	// Depending on the version of the state, use different multipliers
 	switch state.Version() {
 	case clparams.Phase0Version:

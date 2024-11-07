@@ -33,26 +33,25 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/consensuschain"
-
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/tests"
@@ -245,10 +244,6 @@ func Main(ctx *cli.Context) error {
 		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
-	if chainConfig.IsPrague(prestate.Env.Timestamp) && prestate.Env.Requests == nil {
-		return NewError(ErrorVMConfig, errors.New("prague config but missing 'requests' in env section"))
-	}
-
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
 	env := prestate.Env
 	if isMerged {
@@ -287,7 +282,7 @@ func Main(ctx *cli.Context) error {
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
 		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
 	}
-	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals, prestate.Env.Requests)
+	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
 	var hashError error
 	getHash := func(num uint64) libcommon.Hash {
@@ -617,7 +612,7 @@ func NewHeader(env stEnv) *types.Header {
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
-	header.RequestsRoot = env.RequestsRoot
+	header.RequestsHash = env.RequestsHash
 
 	return &header
 }

@@ -34,15 +34,14 @@ import (
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/erigontech/erigon/turbo/services"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
@@ -50,11 +49,10 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/crypto/cryptopool"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 const (
@@ -380,19 +378,19 @@ func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, un
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain consensus.ChainReader, syscall consensus.SystemCall, logger log.Logger,
-) (types.Transactions, types.Receipts, types.Requests, error) {
+) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	return txs, r, nil, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, requests types.Requests, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
-) (*types.Block, types.Transactions, types.Receipts, error) {
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain consensus.ChainReader, syscall consensus.SystemCall, call consensus.Call, logger log.Logger,
+) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	// Assemble and return the final block for sealing
-	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals, requests), txs, receipts, nil
+	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), txs, receipts, nil, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

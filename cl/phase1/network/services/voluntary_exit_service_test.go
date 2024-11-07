@@ -20,10 +20,12 @@ import (
 	"context"
 	"log"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
 	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -60,12 +62,16 @@ func (t *voluntaryExitTestSuite) SetupTest() {
 	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconCfg = &clparams.BeaconChainConfig{}
-	t.voluntaryExitService = NewVoluntaryExitService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, t.ethClock)
+	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	batchCheckInterval = 1 * time.Millisecond
+	go batchSignatureVerifier.Start()
+	t.voluntaryExitService = NewVoluntaryExitService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, t.ethClock, batchSignatureVerifier)
 	// mock global functions
 	t.mockFuncs = &mockFuncs{
 		ctrl: t.gomockCtrl,
 	}
 	blsVerify = t.mockFuncs.BlsVerify
+	blsVerifyMultipleSignatures = t.mockFuncs.BlsVerifyMultipleSignatures
 }
 
 func (t *voluntaryExitTestSuite) TearDownTest() {
@@ -74,25 +80,29 @@ func (t *voluntaryExitTestSuite) TearDownTest() {
 func (t *voluntaryExitTestSuite) TestProcessMessage() {
 	curEpoch := uint64(100)
 	mockValidatorIndex := uint64(10)
-	mockMsg := &cltypes.SignedVoluntaryExit{
-		VoluntaryExit: &cltypes.VoluntaryExit{
-			Epoch:          1,
-			ValidatorIndex: mockValidatorIndex,
+	mockMsg := &cltypes.SignedVoluntaryExitWithGossipData{
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+			VoluntaryExit: &cltypes.VoluntaryExit{
+				Epoch:          1,
+				ValidatorIndex: mockValidatorIndex,
+			},
+			Signature: [96]byte{},
 		},
-		Signature: [96]byte{},
+		GossipData:            nil,
+		ImmediateVerification: true,
 	}
 
 	tests := []struct {
 		name    string
 		mock    func()
-		msg     *cltypes.SignedVoluntaryExit
+		msg     *cltypes.SignedVoluntaryExitWithGossipData
 		wantErr bool
 		err     error
 	}{
 		{
 			name: "validator already in pool",
 			mock: func() {
-				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg)
+				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg.SignedVoluntaryExit)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -101,7 +111,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		{
 			name: "state is nil",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(nil)
+				t.syncedData.EXPECT().HeadStateReader().Return(nil, synced_data.EmptyCancel)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -112,7 +122,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 			mock: func() {
 				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(nil, errors.New("not found")).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -133,7 +143,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 			},
 			msg:     mockMsg,
@@ -154,7 +164,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 			},
 			msg:     mockMsg,
@@ -175,15 +185,15 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
 				mockState.EXPECT().Version().Return(clparams.AltairVersion).Times(1)
-				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
+				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.SignedVoluntaryExit.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(1)
+				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -203,17 +213,19 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 				)
 				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				t.syncedData.EXPECT().HeadStateReader().Return(mockState, synced_data.EmptyCancel).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
 				mockState.EXPECT().Version().Return(clparams.AltairVersion).Times(1)
-				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
+				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.SignedVoluntaryExit.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
+
+				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
 			},
 			msg:     mockMsg,
+			err:     ErrIgnore,
 			wantErr: false,
 		},
 	}

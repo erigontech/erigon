@@ -209,7 +209,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
-		emitters, synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig), blobStorage, validatorMonitor)
+		emitters, synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig), blobStorage, validatorMonitor, false)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 
@@ -236,7 +236,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 		case "on_merge_block":
 			return nil
 		case "on_block":
-			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig())
+			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig(), clparams.DenebVersion)
 			err := spectest.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
 			require.NoError(t, err, stepstr)
 			blobs := solid.NewStaticListSSZ[*cltypes.Blob](6, len(cltypes.Blob{}))
@@ -305,7 +305,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 
 func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e *ForkChoiceChecks) {
 	if e.Head != nil {
-		root, v, err := store.GetHead()
+		root, v, err := store.GetHead(nil)
 		require.NoError(t, err, stepstr)
 		if e.Head.Root != nil {
 			assert.EqualValues(t, *e.Head.Root, root, stepstr)

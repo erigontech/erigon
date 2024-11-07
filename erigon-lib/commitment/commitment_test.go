@@ -139,6 +139,29 @@ func TestBranchData_MergeHexBranches3(t *testing.T) {
 	//_, _ = tm, am
 }
 
+func TestDecodeBranchWithLeafHashes(t *testing.T) {
+	// enc := "00061614a8f8d73af90eee32dc9729ce8d5bb762f30d21a434a8f8d73af90eee32dc9729ce8d5bb762f30d21a49f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033203c7e2acaef5400189202e1a6a3b0b3d9add71fb52ad24ae35be6b6c85ca78bb51214ba7a3b7b095d3370c022ca655c790f0c0ead66f52025c143802ceb44bbe35e883927edb5933fc33416d4cc354dd88c7bcf1aad66a1"
+	// unfoldBranchDataFromString(t, enc)
+
+	row, bm := generateCellRow(t, 16)
+
+	for i := 0; i < len(row); i++ {
+		if row[i].accountAddrLen > 0 {
+			rand.Read(row[i].stateHash[:])
+			row[i].stateHashLen = 32
+		}
+	}
+
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
+		return row[i], nil
+	})
+	require.NoError(t, err)
+
+	fmt.Printf("%s\n", enc.String())
+
+}
+
 // helper to decode row of cells from string
 func unfoldBranchDataFromString(tb testing.TB, encs string) (row []*cell, am uint16) {
 	tb.Helper()

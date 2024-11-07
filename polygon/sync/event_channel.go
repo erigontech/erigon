@@ -27,7 +27,7 @@ import (
 
 // EventChannel is a buffered channel that drops oldest events when full.
 type EventChannel[TEvent any] struct {
-	opts       EventChannelOptions
+	opts       eventChannelOptions
 	events     chan TEvent
 	queue      *list.List
 	queueCap   uint
@@ -35,12 +35,12 @@ type EventChannel[TEvent any] struct {
 	queueCond  *sync.Cond
 }
 
-func NewEventChannel[TEvent any](capacity uint, opts ...EventChannelOption) *EventChannel[TEvent] {
+func NewEventChannel[TEvent any](capacity uint, opts ...eventChannelOption) *EventChannel[TEvent] {
 	if capacity == 0 {
 		panic("NewEventChannel: capacity must be > 0")
 	}
 
-	defaultOpts := EventChannelOptions{}
+	defaultOpts := eventChannelOptions{}
 	for _, opt := range opts {
 		opt(&defaultOpts)
 	}
@@ -141,16 +141,16 @@ func (ec *EventChannel[TEvent]) Run(ctx context.Context) error {
 	}
 }
 
-type EventChannelOptions struct {
+type eventChannelOptions struct {
 	logger    log.Logger
 	loggerLvl log.Lvl
 	loggerId  string
 }
 
-type EventChannelOption func(opts *EventChannelOptions)
+type eventChannelOption func(opts *eventChannelOptions)
 
-func WithEventChannelLogging(logger log.Logger, lvl log.Lvl, id string) EventChannelOption {
-	return func(opts *EventChannelOptions) {
+func WithEventChannelLogging(logger log.Logger, lvl log.Lvl, id string) eventChannelOption {
+	return func(opts *eventChannelOptions) {
 		opts.logger = logger
 		opts.loggerLvl = lvl
 		opts.loggerId = id

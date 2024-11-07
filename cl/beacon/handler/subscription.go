@@ -52,11 +52,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	headState := a.syncedData.HeadState()
-	if headState == nil {
-		http.Error(w, "head state not available", http.StatusServiceUnavailable)
-		return
-	}
+
 	var err error
 	// process each sub request
 	for _, subRequest := range req {
@@ -71,11 +67,18 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 				syncnets = append(syncnets, uint64(i))
 			}
 		} else {
+			headState, cn := a.syncedData.HeadState()
+			defer cn()
+			if headState == nil {
+				http.Error(w, "head state not available", http.StatusServiceUnavailable)
+				return
+			}
 			syncnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			cn()
 		}
 
 		// subscribe to subnets

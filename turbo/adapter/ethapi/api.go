@@ -30,11 +30,11 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	types2 "github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers/logger"
@@ -307,8 +307,8 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.ParentBeaconBlockRoot != nil {
 		result["parentBeaconBlockRoot"] = head.ParentBeaconBlockRoot
 	}
-	if head.RequestsRoot != nil {
-		result["requestsRoot"] = head.RequestsRoot
+	if head.RequestsHash != nil {
+		result["requestsHash"] = head.RequestsHash
 	}
 
 	return result
@@ -365,10 +365,6 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 
 	if block.Withdrawals() != nil {
 		fields["withdrawals"] = block.Withdrawals()
-	}
-
-	if block.Requests() != nil {
-		fields["requests"] = block.Requests()
 	}
 
 	return fields, nil

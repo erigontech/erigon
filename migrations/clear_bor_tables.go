@@ -23,7 +23,7 @@ var ClearBorTables = Migration{
 			return err
 		}
 
-		if err := reset2.ResetBorHeimdall(context.Background(), tx); err != nil {
+		if err := reset2.ResetBorHeimdall(context.Background(), tx, db); err != nil {
 			return err
 		}
 

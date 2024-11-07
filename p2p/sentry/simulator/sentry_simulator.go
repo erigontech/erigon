@@ -25,18 +25,17 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	isentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	coretypes "github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p"
@@ -44,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -98,18 +98,18 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 
 	knownSnapshots.InitSegments(files)
 
-	//s.knownSnapshots.ReopenList([]string{ent2.Name()}, false)
+	//s.knownSnapshots.OpenList([]string{ent2.Name()}, false)
 	activeSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		ProduceE2:    false,
 		NoDownloader: true,
 	}, torrentDir, 0, logger)
 
-	if err := activeSnapshots.ReopenFolder(); err != nil {
+	if err := activeSnapshots.OpenFolder(); err != nil {
 		return nil, err
 	}
 
 	config := sync.NewDefaultTorrentClientConfig(chain, snapshotLocation, logger)
-	downloader, err := sync.NewTorrentClient(config)
+	downloader, err := sync.NewTorrentClient(ctx, config)
 
 	if err != nil {
 		return nil, err
@@ -121,7 +121,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		messageReceivers: map[isentry.MessageId][]isentry.Sentry_MessagesServer{},
 		knownSnapshots:   knownSnapshots,
 		activeSnapshots:  activeSnapshots,
-		blockReader:      freezeblocks.NewBlockReader(activeSnapshots, nil),
+		blockReader:      freezeblocks.NewBlockReader(activeSnapshots, nil, nil, nil),
 		logger:           logger,
 		downloader:       downloader,
 		chain:            chain,
@@ -439,7 +439,7 @@ func (s *server) getHeader(ctx context.Context, blockNum uint64) (*coretypes.Hea
 			}
 		}
 
-		s.activeSnapshots.ReopenSegments([]snaptype.Type{coresnaptype.Headers}, true)
+		s.activeSnapshots.OpenSegments([]snaptype.Type{coresnaptype.Headers}, true)
 
 		header, err = s.blockReader.Header(ctx, nil, common.Hash{}, blockNum)
 
@@ -455,7 +455,7 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*corety
 	return s.blockReader.HeaderByHash(ctx, nil, hash)
 }
 
-func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.VisibleSegment) error {
+func (s *server) downloadHeaders(ctx context.Context, header *snapshotsync.VisibleSegment) error {
 	fileName := snaptype.SegmentFileName(0, header.From(), header.To(), coresnaptype.Enums.Headers)
 	session := sync.NewTorrentSession(s.downloader, s.chain)
 
@@ -471,5 +471,5 @@ func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Visib
 
 	info, _, _ := snaptype.ParseFileName(session.LocalFsRoot(), fileName)
 
-	return coresnaptype.Headers.BuildIndexes(ctx, info, nil, session.LocalFsRoot(), nil, log.LvlDebug, s.logger)
+	return coresnaptype.Headers.BuildIndexes(ctx, info, nil, nil, session.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }

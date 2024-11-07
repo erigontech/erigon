@@ -56,7 +56,8 @@ func (f *ForkChoiceStore) OnAttestation(
 			return err
 		}
 	}
-	headState := f.syncedDataManager.HeadState()
+	headState, cn := f.syncedDataManager.HeadState()
+	defer cn()
 	var attestationIndicies []uint64
 	var err error
 	target := data.Target
@@ -94,7 +95,6 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	data := attestation.Data
 	targetState, err := f.getCheckpointState(target)
 	if err != nil {
 		return nil, err
@@ -105,7 +105,7 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	}
 	// Now we need to find the attesting indicies.
 	attestationIndicies, err = targetState.getAttestingIndicies(
-		data,
+		attestation,
 		attestation.AggregationBits.Bytes(),
 	)
 	if err != nil {
@@ -133,12 +133,7 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	data := attestation.Data
-	if err != nil {
-		return nil, err
-	}
-
-	attestationIndicies, err = s.GetAttestingIndicies(data, attestation.AggregationBits.Bytes(), true)
+	attestationIndicies, err = s.GetAttestingIndicies(attestation, true)
 	if err != nil {
 		return nil, err
 	}

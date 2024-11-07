@@ -39,13 +39,12 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/txpool"
 	libtypes "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -550,8 +549,8 @@ const N = 50
 var dummyBlobTxs = [N]*BlobTx{}
 var dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
 
-func randIntInRange(min, max int) int {
-	return (rand.Intn(max-min) + min)
+func randIntInRange(_min, _max int) int {
+	return (rand.Intn(_max-_min) + _min)
 }
 
 func randAddr() *libcommon.Address {

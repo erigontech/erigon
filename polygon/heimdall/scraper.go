@@ -19,6 +19,7 @@ package heimdall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	commonerrors "github.com/erigontech/erigon-lib/common/errors"
@@ -66,7 +67,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := s.store.LastEntityId(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("can't get last id: %w", err)
 		}
 
 		idRange, err := s.fetcher.FetchEntityIdRange(ctx)
@@ -76,7 +77,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 				continue
 			}
 
-			return err
+			return fmt.Errorf("can't fetch id range: %w", err)
 		}
 
 		if hasLastKnownId {
@@ -104,13 +105,13 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 						"err", err,
 					)
 				} else {
-					return err
+					return fmt.Errorf("can't fetch entity range: %d-%d: %w", idRange.Start, idRange.End, err)
 				}
 			}
 
 			for i, entity := range entities {
 				if err = s.store.PutEntity(ctx, idRange.Start+uint64(i), entity); err != nil {
-					return err
+					return fmt.Errorf("can't put entity: %d: %w", idRange.Start+uint64(i), err)
 				}
 			}
 

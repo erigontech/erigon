@@ -25,9 +25,8 @@ import (
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 )
 
 // ErrNoChainID is returned whenever the user failed to specify a chain id.

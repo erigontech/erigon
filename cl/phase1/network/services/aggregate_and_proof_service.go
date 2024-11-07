@@ -98,12 +98,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *cltypes.SignedAggregateAndProofData,
 ) error {
-	headState := a.syncedDataManager.HeadState()
+	headState, cn := a.syncedDataManager.HeadState()
+	defer cn()
 	if headState == nil {
 		return ErrIgnore
 	}
 	selectionProof := aggregateAndProof.SignedAggregateAndProof.Message.SelectionProof
 	aggregateData := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data
+	aggregate := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate
 	target := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Target
 	slot := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Slot
 	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex
@@ -113,9 +115,27 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return ErrIgnore
 	}
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
+	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
+	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := aggregate.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return err
+		}
+		committeeIndex = index
+	}
 	// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
 	if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
 		return ErrIgnore
+	}
+
+	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
+	committeeCountPerSlot := headState.CommitteeCount(target.Epoch)
+	if committeeIndex >= committeeCountPerSlot {
+		return errors.New("invalid committee index in aggregate and proof")
+	}
+	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
+	if aggregateData.Target.Epoch != epoch {
+		return errors.New("invalid target epoch in aggregate and proof")
 	}
 	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 	finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
@@ -141,27 +161,20 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return ErrIgnore
 	}
 
-	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
-	committeeCountPerSlot := headState.CommitteeCount(target.Epoch)
-	if aggregateData.CommitteeIndex >= committeeCountPerSlot {
-		return errors.New("invalid committee index in aggregate and proof")
-	}
-	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
-	if aggregateData.Target.Epoch != epoch {
-		return errors.New("invalid target epoch in aggregate and proof")
-	}
 	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 	if err != nil {
 		return err
 	}
 	// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
-	attestingIndices, err := headState.GetAttestingIndicies(aggregateData, aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits.Bytes(), false)
+	attestingIndices, err := headState.GetAttestingIndicies(aggregate, false)
 	if err != nil {
 		return err
 	}
 	if len(attestingIndices) == 0 {
 		return errors.New("no attesting indicies")
 	}
+
+	monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
 
 	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
 	if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {
@@ -183,27 +196,16 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		log.Warn("receveived aggregate and proof from invalid aggregator")
 		return errors.New("invalid aggregate and proof")
 	}
-	attestingIndicies, err := headState.GetAttestingIndicies(
-		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data,
-		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits.Bytes(),
-		true,
-	)
-	if err != nil {
-		return err
-	}
-	if len(attestingIndicies) == 0 {
-		return errors.New("no attesting indicies")
-	}
 
 	// aggregate signatures for later verification
-	aggregateVerificationData, err := GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndicies)
+	aggregateVerificationData, err := GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
 	if err != nil {
 		return err
 	}
 
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
-		monitor.ObserveAggregateQuality(len(attestingIndicies), len(committee))
+		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 		monitor.ObserveCommitteeSize(float64(len(committee)))
 		a.opPool.AttestationsPool.Insert(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
@@ -211,7 +213,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		)
 		a.forkchoiceStore.ProcessAttestingIndicies(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
-			attestingIndicies,
+			attestingIndices,
 		)
 		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
 	}
@@ -370,11 +372,13 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		headState := a.syncedDataManager.HeadState()
-		if headState == nil {
-			continue
-		}
+
 		a.aggregatesScheduledForLaterExecution.Range(func(key, value any) bool {
+			if a.syncedDataManager.Syncing() {
+				// Discard the job if we can't get the head state
+				a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
+				return false
+			}
 			job := value.(*aggregateJob)
 			// check if it has expired
 			if time.Since(job.creationTime) > attestationJobExpiry {
@@ -382,14 +386,14 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 				return true
 			}
 			aggregateData := job.aggregate.SignedAggregateAndProof.Message.Aggregate.Data
-			if aggregateData.Slot > headState.Slot() {
+			if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
 				return true
 			}
-
 			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
 				log.Trace("blob sidecar verification failed", "err", err)
 				return true
 			}
+
 			a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
 		})

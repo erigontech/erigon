@@ -76,7 +76,7 @@ type History struct {
 	compressCfg seg.Cfg
 	compression seg.FileCompression
 
-	//TODO: re-visit this check - maybe we don't need it. It's abot kill in the middle of merge
+	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
 	integrityCheck func(fromStep, toStep uint64) bool
 
 	// not large:
@@ -292,13 +292,16 @@ func (h *History) openDirtyFiles() error {
 }
 
 func (h *History) closeWhatNotInList(fNames []string) {
+	protectFiles := make(map[string]struct{}, len(fNames))
+	for _, f := range fNames {
+		protectFiles[f] = struct{}{}
+	}
 	var toClose []*filesItem
 	h.dirtyFiles.Walk(func(items []*filesItem) bool {
-	Loop1:
 		for _, item := range items {
-			for _, protectName := range fNames {
-				if item.decompressor != nil && item.decompressor.FileName() == protectName {
-					continue Loop1
+			if item.decompressor != nil {
+				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
+					continue
 				}
 			}
 			toClose = append(toClose, item)
@@ -1184,6 +1187,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	historyItem, ok := ht.getFile(histTxNum)
 	if !ok {
+		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.h.aggregationStep)
 		return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, ht.h.filenameBase, histTxNum/ht.h.aggregationStep, histTxNum/ht.h.aggregationStep)
 	}
 	reader := ht.statelessIdxReader(historyItem.i)
@@ -1733,13 +1737,7 @@ func (ht *HistoryRoTx) idxRangeRecent(key []byte, startTxNum, endTxNum int, asc 
 			toTxNum = uint64(endTxNum)
 		}
 		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
-		var it stream.KV
-		var err error
-		if asc {
-			it, err = roTx.RangeAscend(ht.h.historyValsTable, from, to, limit)
-		} else {
-			it, err = roTx.RangeDescend(ht.h.historyValsTable, from, to, limit)
-		}
+		it, err := roTx.Range(ht.h.historyValsTable, from, to, asc, limit)
 		if err != nil {
 			return nil, err
 		}

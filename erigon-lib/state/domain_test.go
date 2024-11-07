@@ -24,7 +24,8 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
-	"math/rand"
+	randOld "math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sort"
@@ -50,6 +51,20 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types"
 )
+
+type rndGen struct {
+	*rand.Rand
+	oldGen *randOld.Rand
+}
+
+func newRnd(seed uint64) *rndGen {
+	return &rndGen{
+		Rand:   rand.New(rand.NewChaCha8([32]byte{byte(seed)})),
+		oldGen: randOld.New(randOld.NewSource(int64(seed))),
+	}
+}
+func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
+func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
@@ -652,6 +667,39 @@ func TestDomain_Delete(t *testing.T) {
 	}
 }
 
+func TestNewSegStreamReader(t *testing.T) {
+	logger := log.New()
+	keyCount := 1000
+	valSize := 4
+
+	fpath := generateKV(t, t.TempDir(), length.Addr, valSize, keyCount, logger, seg.CompressNone)
+	dec, err := seg.NewDecompressor(fpath)
+	require.NoError(t, err)
+
+	defer dec.Close()
+	r := seg.NewReader(dec.MakeGetter(), seg.CompressNone)
+
+	sr := NewSegStreamReader(r, -1)
+	require.NotNil(t, sr)
+	defer sr.Close()
+
+	count := 0
+	var prevK []byte
+	for sr.HasNext() {
+		k, v, err := sr.Next()
+		if prevK != nil {
+			require.True(t, bytes.Compare(prevK, k) < 0)
+		}
+		prevK = common.Copy(k)
+
+		require.NoError(t, err)
+		require.NotEmpty(t, v)
+
+		count++
+	}
+	require.EqualValues(t, keyCount, count)
+}
+
 // firstly we write all the data to domain
 // then we collate-merge-prune
 // then check.
@@ -1229,10 +1277,7 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 	tb.Helper()
 
 	doms := make(map[string]map[string][]upd)
-	seed := 31
-	//seed := time.Now().Unix()
-	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
-	r := rand.New(rand.NewSource(0))
+	r := newRnd(31)
 
 	accs := make(map[string][]upd)
 	stor := make(map[string][]upd)
@@ -1260,11 +1305,7 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 	tb.Helper()
 
 	data := make(map[string][]upd)
-	//seed := time.Now().Unix()
-	seed := 31
-	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
-
-	r := rand.New(rand.NewSource(0))
+	r := newRnd(31)
 	if keyLimit == 1 {
 		key1 := generateRandomKey(r, keySize1)
 		data[key1] = generateUpdates(r, totalTx, keyTxsLimit)
@@ -1280,24 +1321,24 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 	return data
 }
 
-func generateRandomKey(r *rand.Rand, size uint64) string {
+func generateRandomKey(r *rndGen, size uint64) string {
 	return string(generateRandomKeyBytes(r, size))
 }
 
-func generateRandomKeyBytes(r *rand.Rand, size uint64) []byte {
+func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
 
 	return key
 }
 
-func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-		jitter := r.Intn(10e7)
+		jitter := r.IntN(10e7)
 		value := types.EncodeAccountBytesV3(i, uint256.NewInt(i*10e4+uint64(jitter)), nil, 0)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
@@ -1308,7 +1349,7 @@ func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize uint64) []upd {
+func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 	//maxStorageSize := 24 * (1 << 10) // limit on contract code
@@ -1316,7 +1357,7 @@ func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize u
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 
-		value := make([]byte, r.Intn(int(maxSize)))
+		value := make([]byte, r.IntN(int(maxSize)))
 		r.Read(value)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
@@ -1327,7 +1368,7 @@ func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize u
 	return updates
 }
 
-func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
@@ -1344,10 +1385,10 @@ func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
-	txNum := uint64(r.Intn(int(maxTxNum)))
+func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
+	txNum := uint64(r.IntN(int(maxTxNum)))
 	for usedTxNums[txNum] {
-		txNum = uint64(r.Intn(int(maxTxNum)))
+		txNum = uint64(r.IntN(int(maxTxNum)))
 	}
 
 	return txNum
@@ -1428,8 +1469,6 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 
 	aggStep := uint64(25)
 	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
-	defer db.Close()
-	defer d.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -2279,7 +2318,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	var ki int
 	for key, updates := range data {
 
-		v, found, st, en, err := dc.getFromFiles([]byte(key))
+		v, found, st, en, err := dc.getFromFiles([]byte(key), 0)
 		require.True(t, found)
 		require.NoError(t, err)
 		for i := len(updates) - 1; i >= 0; i-- {

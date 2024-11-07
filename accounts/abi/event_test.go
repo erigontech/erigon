@@ -28,12 +28,12 @@ import (
 	"strings"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/crypto"
 )
 
 var jsonEventTransfer = []byte(`{

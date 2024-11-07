@@ -2,15 +2,8 @@ name: QA - Constrained Tip tracking
 
 on:
   schedule:
-    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
+    - cron: '0 20 * * 0'  # Run on Sunday at 08:00 PM UTC
   workflow_dispatch:     # Run manually
-  pull_request:
-    branches:
-      - qa_tests_constrained_tip_tracking
-    types:
-      - opened
-      - synchronize
-      - ready_for_review
 
 jobs:
   constrained-tip-tracking-test:

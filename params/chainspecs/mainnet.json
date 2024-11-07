@@ -19,6 +19,6 @@
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1681338455,
   "cancunTime": 1710338135,
-  "depositContract": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
+  "depositContractAddress": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
   "ethash": {}
 }

@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"sync"
 
@@ -70,7 +71,7 @@ type ApiHandler struct {
 	beaconChainCfg  *clparams.BeaconChainConfig
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	operationsPool  pool.OperationsPool
-	syncedData      *synced_data.SyncedDataManager
+	syncedData      synced_data.SyncedData
 	stateReader     *historical_states_reader.HistoricalStatesReader
 	sentinel        sentinel.SentinelClient
 	blobStoage      blob_storage.BlobStorage
@@ -107,6 +108,7 @@ type ApiHandler struct {
 	proposerSlashingService          services.ProposerSlashingService
 	builderClient                    builder.BuilderClient
 	validatorsMonitor                monitor.ValidatorMonitor
+	enableMemoizedHeadState          bool
 }
 
 func NewApiHandler(
@@ -118,7 +120,7 @@ func NewApiHandler(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	operationsPool pool.OperationsPool,
 	rcsn freezeblocks.BeaconSnapshotReader,
-	syncedData *synced_data.SyncedDataManager,
+	syncedData synced_data.SyncedData,
 	stateReader *historical_states_reader.HistoricalStatesReader,
 	sentinel sentinel.SentinelClient,
 	version string,
@@ -141,6 +143,7 @@ func NewApiHandler(
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
 	validatorMonitor monitor.ValidatorMonitor,
+	enableMemoizedHeadState bool,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -183,6 +186,7 @@ func NewApiHandler(
 		proposerSlashingService:          proposerSlashingService,
 		builderClient:                    builderClient,
 		validatorsMonitor:                validatorMonitor,
+		enableMemoizedHeadState:          enableMemoizedHeadState,
 	}
 }
 
@@ -351,4 +355,18 @@ func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.init()
 	})
 	a.mux.ServeHTTP(w, r)
+}
+
+func (a *ApiHandler) getHead() (common.Hash, uint64, int, error) {
+	if a.enableMemoizedHeadState {
+		if a.syncedData.Syncing() {
+			return common.Hash{}, 0, http.StatusServiceUnavailable, errors.New("beacon node is syncing")
+		}
+		return a.syncedData.HeadRoot(), a.syncedData.HeadSlot(), 0, nil
+	}
+	blockRoot, blockSlot, err := a.forkchoiceStore.GetHead(nil)
+	if err != nil {
+		return common.Hash{}, 0, http.StatusInternalServerError, err
+	}
+	return blockRoot, blockSlot, 0, nil
 }

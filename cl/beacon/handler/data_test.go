@@ -61,7 +61,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 			logger.SetHandler(log.DiscardHandler())
 		}
 	}
-	_, blocks, _, _, postState, handler, _, sm, fcu, _ := setupTestingHandler(c.t, c.v, logger)
+	_, blocks, _, _, postState, handler, _, sm, fcu, _ := setupTestingHandler(c.t, c.v, logger, true)
 
 	var err error
 
@@ -103,7 +103,9 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		sm.OnHeadState(postState)
 		var s *state.CachingBeaconState
 		for s == nil {
-			s = sm.HeadState()
+			var cn func()
+			s, cn = sm.HeadState()
+			cn()
 		}
 		s.SetSlot(789274827847783)
 

@@ -27,28 +27,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -65,12 +66,17 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
 	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
+	bridgeStore := bridge.NewDbStore(m.DB)
+	heimdallStore := heimdall.NewDbStore(m.DB)
+
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDB,
 		borConsensusDB,
 		miningState,
 		*cfg.ChainConfig,
 		heimdallClient,
+		heimdallStore,
+		bridgeStore,
 		blockReader,
 		nil, // headerDownloader
 		nil, // penalize
@@ -286,7 +292,7 @@ func (h *Harness) SetMiningBlockEmptyHeader(ctx context.Context, t *testing.T, p
 
 func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		spanIter, err := tx.Range(kv.BorSpans, nil, nil)
+		spanIter, err := tx.Range(kv.BorSpans, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -321,7 +327,7 @@ func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, 
 
 func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uint64, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		eventsIter, err := tx.Range(kv.BorEvents, nil, nil)
+		eventsIter, err := tx.Range(kv.BorEvents, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -347,7 +353,7 @@ func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uin
 func (h *Harness) ReadLastStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
 	nums = map[uint64]uint64{}
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil)
+		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -410,6 +416,15 @@ func createGenesisInitData(t *testing.T, chainConfig *chain.Config) *genesisInit
 	}
 }
 
+type dummySpanReader struct {
+	consensus.ChainHeaderReader
+}
+
+// BorSpan mocks base method - this is required for pre-astrid testing
+func (m dummySpanReader) BorSpan(arg0 uint64) *heimdall.Span {
+	return nil
+}
+
 func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.Controller, cfg HarnessCfg) {
 	if cfg.GenerateChainNumBlocks == 0 {
 		return
@@ -423,7 +438,7 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 	})
 	require.NoError(t, err)
 	h.sealedHeaders[parentBlock.Number().Uint64()] = parentBlock.Header()
-	mockChainHR := h.mockChainHeaderReader(ctrl)
+	mockChainHR := dummySpanReader{h.mockChainHeaderReader(ctrl)}
 
 	chainPack, err := core.GenerateChain(
 		h.chainConfig,
@@ -594,7 +609,7 @@ func (h *Harness) mockBorSpanner() {
 	h.borSpanner.
 		EXPECT().
 		GetCurrentProducers(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ uint64, _ consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+		DoAndReturn(func(_ uint64, _ bor.ChainHeaderReader) ([]*valset.Validator, error) {
 			res := make([]*valset.Validator, len(h.heimdallNextMockSpan.SelectedProducers))
 			for i := range h.heimdallNextMockSpan.SelectedProducers {
 				res[i] = &h.heimdallNextMockSpan.SelectedProducers[i]

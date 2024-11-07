@@ -30,6 +30,8 @@ import (
 
 	"github.com/gballet/go-verkle"
 
+	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -37,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/ethdb/cbor"
 	"github.com/erigontech/erigon/rlp"
@@ -352,7 +354,7 @@ func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, header
 }
 
 // DeleteHeader - dangerous, use PruneBlocks/TruncateBlocks methods
-func DeleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
+func DeleteHeader(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
@@ -571,7 +573,6 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
 	body.Withdrawals = bodyForStorage.Withdrawals
-	body.Requests = bodyForStorage.Requests
 
 	if bodyForStorage.TxCount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxCount))
@@ -616,7 +617,6 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		TxCount:     types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
-		Requests:    body.Requests,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
@@ -639,7 +639,6 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 		TxCount:     types.TxCountToTxAmount(len(body.Transactions)),
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
-		Requests:    body.Requests,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
@@ -662,7 +661,7 @@ func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []commo
 }
 
 // DeleteBody removes all block body data associated with a hash.
-func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
+func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}
@@ -910,7 +909,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.Requests)
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -1205,9 +1204,9 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
-func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int) error {
+func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration) error {
+	t := time.Now()
 	c, err := tx.RwCursor(table)
-
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
@@ -1227,13 +1226,18 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 		if blockNum >= pruneTo {
 			break
 		}
-		select {
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
 		if err = c.DeleteCurrent(); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+		}
+		if i%100 == 0 {
+			select {
+			case <-ctx.Done():
+				return common.ErrStopped
+			default:
+			}
+			if time.Since(t) > timeout {
+				break
+			}
 		}
 	}
 	return nil

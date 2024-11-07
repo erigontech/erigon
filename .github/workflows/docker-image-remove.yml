@@ -1,0 +1,44 @@
+name: Remove docker image
+run-name: Request to remove erigontech/erigon:${{ inputs.docker_image_tag }} by @${{ github.actor }}
+
+env:
+  DOCKERHUB_REPOSITORY: "erigontech/erigon"
+  API_URL: "https://hub.docker.com/v2/repositories/erigontech/erigon/tags"
+
+on:
+  push:
+    branches-ignore:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      docker_image_tag:
+        required: true
+        type: string
+        default: 'not_yet_defined'
+        description: 'Docker image tag to remove from hub.docker.com. Works only for erigontech/erigon'
+
+jobs:
+
+  build-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: Remove docker image
+
+    steps:
+
+      - name: Run API Call
+        env:
+          TOKEN: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+        run: |
+          output_code=$(curl --write-out %{http_code} --output curl-output.log \
+                    -s -X DELETE -H "Accept: application/json" \
+                    -H "Authorization: JWT ${{ env.TOKEN }}" \
+                    ${{ env.API_URL }}/${{ inputs.docker_image_tag }} )
+          if [ $output_code -ne 204 ]; then
+            echo "ERROR: failed to remove docker image ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.docker_image_tag }}"
+            echo "ERROR: API response: $(cat curl-output.log)."
+            exit 1
+          else
+            echo "SUCCESS: docker image ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.docker_image_tag }} removed."
+            exit 0
+          fi

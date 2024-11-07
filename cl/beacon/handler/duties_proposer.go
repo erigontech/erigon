@@ -43,7 +43,8 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	s := a.syncedData.HeadState()
+	s, cn := a.syncedData.HeadState()
+	defer cn()
 	if s == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is syncing"))
 	}
@@ -83,25 +84,17 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 			With("dependent_root", dependentRoot), nil
 	}
 
-	// We need to compute our duties
-	state := a.syncedData.HeadState()
-	if state == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
-
-	}
-
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 
 	duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 	wg := sync.WaitGroup{}
 
 	for slot := expectedSlot; slot < expectedSlot+a.beaconChainCfg.SlotsPerEpoch; slot++ {
-		var proposerIndex uint64
 		// Lets do proposer index computation
 		mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
 			a.beaconChainCfg.EpochsPerHistoricalVector
 		// Input for the seed hash.
-		mix := state.GetRandaoMix(int(mixPosition))
+		mix := s.GetRandaoMix(int(mixPosition))
 		input := shuffling2.GetSeed(a.beaconChainCfg, mix, epoch, a.beaconChainCfg.DomainBeaconProposer)
 		slotByteArray := make([]byte, 8)
 		binary.LittleEndian.PutUint64(slotByteArray, slot)
@@ -114,7 +107,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		hash.Write(inputWithSlot)
 		seed := hash.Sum(nil)
 
-		indices := state.GetActiveValidatorsIndices(epoch)
+		indices := s.GetActiveValidatorsIndices(epoch)
 
 		// Write the seed to an array.
 		seedArray := [32]byte{}
@@ -124,12 +117,12 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		// Do it in parallel
 		go func(i, slot uint64, indicies []uint64, seedArray [32]byte) {
 			defer wg.Done()
-			proposerIndex, err = shuffling2.ComputeProposerIndex(state.BeaconState, indices, seedArray)
+			proposerIndex, err := shuffling2.ComputeProposerIndex(s.BeaconState, indices, seedArray)
 			if err != nil {
 				panic(err)
 			}
 			var pk libcommon.Bytes48
-			pk, err = state.ValidatorPublicKey(int(proposerIndex))
+			pk, err = s.ValidatorPublicKey(int(proposerIndex))
 			if err != nil {
 				panic(err)
 			}
