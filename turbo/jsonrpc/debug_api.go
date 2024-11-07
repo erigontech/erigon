@@ -109,7 +109,6 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		return state.IteratorDump{}, err
 	}
 	defer tx.Rollback()
-	fmt.Printf("[dbg] AccountRange limits: %t, %t, %d\n", excludeCode, excludeStorage, maxResults)
 
 	var blockNumber uint64
 

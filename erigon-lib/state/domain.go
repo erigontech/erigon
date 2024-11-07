@@ -2391,6 +2391,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
+	fmt.Printf("[dbg] hist.Next: %d\n", hi.kBackup)
 	order.Asc.Assert(hi.kBackup, hi.nextKey)
 	// TODO: remove `common.Copy`. it protecting from some existing bug.
 	return common.Copy(hi.kBackup), hi.vBackup, nil
