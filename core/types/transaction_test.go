@@ -549,8 +549,8 @@ const N = 50
 var dummyBlobTxs = [N]*BlobTx{}
 var dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
 
-func randIntInRange(min, max int) int {
-	return (rand.Intn(max-min) + min)
+func randIntInRange(_min, _max int) int {
+	return (rand.Intn(_max-_min) + _min)
 }
 
 func randAddr() *libcommon.Address {

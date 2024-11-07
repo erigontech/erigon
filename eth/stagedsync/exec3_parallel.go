@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -335,7 +336,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 			defer tx.Rollback()
 			pe.doms.SetTx(tx)
 
-			applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+			applyCtx, cancelApplyCtx = context.WithCancel(ctx) //nolint:fatcontext
 			defer cancelApplyCtx()
 			pe.applyLoopWg.Add(1)
 			go pe.applyLoop(applyCtx, maxTxNum, &blockComplete, pe.rwLoopErrCh)

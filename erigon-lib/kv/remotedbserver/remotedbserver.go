@@ -605,15 +605,13 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 			}
 			reply.Timestamps = append(reply.Timestamps, v)
 			limit--
-		}
-		if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
-			next, err := it.Next()
-			if err != nil {
-				return err
-			}
-			reply.NextPageToken, err = marshalPagination(&remote.IndexPagination{NextTimeStamp: int64(next), Limit: int64(limit)})
-			if err != nil {
-				return err
+
+			if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
+				reply.NextPageToken, err = marshalPagination(&remote.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
+				if err != nil {
+					return err
+				}
+				break
 			}
 		}
 		return nil
@@ -691,15 +689,13 @@ func (s *KvServer) DomainRange(_ context.Context, req *remote.DomainRangeReq) (*
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 			limit--
-		}
-		if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
-			nextK, _, err := it.Next()
-			if err != nil {
-				return err
-			}
-			reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: nextK, Limit: int64(limit)})
-			if err != nil {
-				return err
+
+			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
+				reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: k, Limit: int64(limit)})
+				if err != nil {
+					return err
+				}
+				break
 			}
 		}
 		return nil

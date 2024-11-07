@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/rand"
 	"testing"
 	"time"
 
@@ -53,7 +52,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	rnd := rand.New(rand.NewSource(2342))
+	rnd := newRnd(2342)
 	maxTx := stepSize * 8
 
 	// 1. generate data
@@ -134,7 +133,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	maxTx := stepSize
 	hashes := make([][]byte, maxTx)
 	count := 10
-	rnd := rand.New(rand.NewSource(0))
+	rnd := newRnd(0)
 	ac.Close()
 	err = rwTx.Commit()
 	require.NoError(t, err)
@@ -180,7 +179,7 @@ Loop:
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
 
-	unwindTo := uint64(commitStep * rnd.Intn(int(maxTx)/commitStep))
+	unwindTo := uint64(commitStep * rnd.IntN(int(maxTx)/commitStep))
 	domains.currentChangesAccumulator = nil
 
 	acu := agg.BeginFilesRo()
