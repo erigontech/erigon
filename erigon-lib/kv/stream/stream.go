@@ -18,6 +18,7 @@ package stream
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -464,7 +465,7 @@ func Trace[T any](it Uno[T], logger log.Logger, prefix string) *Traced[T] {
 func (m *Traced[T]) HasNext() bool { return m.it.HasNext() }
 func (m *Traced[T]) Next() (k T, err error) {
 	k, err = m.it.Next()
-	log.Warn(m.prefix, "key", k)
+	log.Warn(m.prefix, "key", fmt.Sprintf("%x", k))
 	return k, err
 }
 func (m *Traced[T]) Close() {
@@ -486,7 +487,7 @@ func TraceDuo[K, V any](it Duo[K, V], logger log.Logger, prefix string) *TracedD
 func (m *TracedDuo[K, V]) HasNext() bool { return m.it.HasNext() }
 func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v, err = m.it.Next()
-	log.Warn(m.prefix, "key", k)
+	log.Warn(m.prefix, "key", fmt.Sprintf("%x", k))
 	return k, v, err
 }
 func (m *TracedDuo[K, V]) Close() {
