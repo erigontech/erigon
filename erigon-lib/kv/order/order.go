@@ -37,7 +37,7 @@ func FromBool(v bool) By {
 	return Desc
 }
 
-func Must(asc By, k1, k2 []byte) {
+func (asc By) Assert(k1, k2 []byte) {
 	if !dbg.AssertEnabled {
 		return
 	}
@@ -52,5 +52,17 @@ func Must(asc By, k1, k2 []byte) {
 	}
 	if bytes.Compare(k1, k2) < 0 {
 		panic(fmt.Sprintf("epect: %x >= %x", k1, k2))
+	}
+}
+
+func (asc By) AssertList(keys [][]byte) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	if len(keys) < 2 {
+		return
+	}
+	for i := 0; i < len(keys)-2; i++ {
+		asc.Assert(keys[i], keys[i+1])
 	}
 }

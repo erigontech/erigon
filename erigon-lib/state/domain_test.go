@@ -1519,8 +1519,8 @@ func TestDomainRange(t *testing.T) {
 		it, err := dc.ht.WalkAsOf(context.Background(), 190, nil, nil, order.Asc, -1, tx)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
-		fmt.Printf("keys: %x\n", keys)
 		require.NoError(err)
+		order.Asc.AssertList(keys)
 		require.Equal(3, len(keys))
 		require.Equal(3, len(vals))
 	}
@@ -1529,8 +1529,8 @@ func TestDomainRange(t *testing.T) {
 		it, err := dc.DomainRangeLatest(tx, nil, nil, -1)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
-		fmt.Printf("keys: %x\n", keys)
 		require.NoError(err)
+		order.Asc.AssertList(keys)
 		require.Equal(3, len(keys))
 		require.Equal(3, len(vals))
 	}

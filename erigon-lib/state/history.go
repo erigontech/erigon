@@ -1515,7 +1515,7 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
-	order.Must(hi.orderAscend, hi.kBackup, hi.nextKey)
+	order.Assert(hi.orderAscend, hi.kBackup, hi.nextKey)
 	return hi.kBackup, hi.vBackup, nil
 }
 
@@ -1679,7 +1679,7 @@ func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
-	order.Must(hi.orderAscend, hi.kBackup, hi.nextKey)
+	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	return hi.kBackup, hi.vBackup, nil
 }
 

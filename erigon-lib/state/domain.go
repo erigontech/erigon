@@ -2351,7 +2351,6 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						}
 					}
 
-					fmt.Printf("[dbg] advInFiles2: %x\n", k)
 					if len(k) > 0 && (hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
 						stepBytes := k[len(k)-8:]
 						k = k[:len(k)-8]
@@ -2370,7 +2369,6 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						return err
 					}
 
-					fmt.Printf("[dbg] advInFiles3: %x\n", k)
 					if len(k) > 0 && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
 						stepBytes := stepBytesWithValue[:8]
 						v := stepBytesWithValue[8:]
@@ -2408,8 +2406,9 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
-	order.Must(order.Asc, hi.kBackup, hi.nextKey)
-	return hi.kBackup, hi.vBackup, nil
+	order.Assert(order.Asc, hi.kBackup, hi.nextKey)
+	// TODO: remove `common.Copy`. it protecting from some existing bug.
+	return common.Copy(hi.kBackup), hi.vBackup, nil
 }
 
 func (d *Domain) stepsRangeInDBAsStr(tx kv.Tx) string {
