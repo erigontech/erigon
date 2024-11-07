@@ -1950,6 +1950,7 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 	return v, endTxNum / dt.d.aggregationStep, foundInFile, nil
 }
 
+// DomainRange - if key doesn't exists in history - then look in latest state
 func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	if !asc {
 		panic("implement me")
