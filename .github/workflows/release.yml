@@ -57,7 +57,7 @@ on:
 
 jobs:
 
-  build_release:
+  build-release:
     ## runs-on: ubuntu-22.04
     runs-on: ubuntu-latest-devops-xxlarge
     timeout-minutes: 60
@@ -225,8 +225,8 @@ jobs:
             *.tar.gz ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
 
   run-kurtosis-assertoor:
-    needs: build_release
-    if: ${{ inputs.with_assertor }}
+    needs: build-release
+    if: ${{ inputs.with_assertor == true }}
 		# TODO: change the branch to main before merging
     uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@feat/assertor-release-workflow
     with:
