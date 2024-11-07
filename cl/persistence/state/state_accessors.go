@@ -28,7 +28,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
-// InitializeValidatorTable initializes the validator table in the database.
+// InitializeStaticTables initializes the static table in the database.
 func InitializeStaticTables(tx kv.RwTx, state *state.CachingBeaconState) error {
 	var err error
 	if err = tx.ClearBucket(kv.ValidatorPublicKeys); err != nil {
