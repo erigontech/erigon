@@ -27,7 +27,6 @@ jobs:
           - macos-14
         # Performance vs. cost will be assessed and only one runner will eventually be left
           - ubuntu-latest-erigontests-large
-          - ubuntu-latest-erigontests-xlarge
     runs-on: ${{ matrix.os }}
 
     steps:
