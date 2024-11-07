@@ -1425,7 +1425,6 @@ func (hi *StateAsOfIterF) init(files visibleFiles) error {
 		g.Reset(offset)
 		if g.HasNext() {
 			key, offset := g.Next(nil)
-			fmt.Printf("[dbg] add file1: %s, %d, %x, txNums=%d-%d, startTxNum=%d\n", item.src.decompressor.FileName(), offset, key, item.startTxNum, item.endTxNum, hi.startTxNum)
 			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
 		}
 	}
@@ -1504,11 +1503,7 @@ func (hi *StateAsOfIterF) HasNext() bool {
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
-	res := (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
-	if !res {
-		log.Warn(fmt.Sprintf("[dbg] StateAsOfIterF.HasNext3 from=%x, to=%x, now=%x", hi.from, hi.toPrefix, hi.nextKey))
-	}
-	return res
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
@@ -1660,15 +1655,12 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 
 func (hi *StateAsOfIterDB) HasNext() bool {
 	if hi.err != nil {
-		log.Warn("[dbg] StateAsOfIterDB.HasNext1")
 		return true
 	}
 	if hi.limit == 0 { // limit reached
-		log.Warn("[dbg] StateAsOfIterDB.HasNext2")
 		return false
 	}
 	if hi.nextKey == nil { // EndOfTable
-		log.Warn("[dbg] StateAsOfIterDB.HasNext3")
 		return false
 	}
 	if hi.toPrefix == nil { // s.nextK == nil check is above
@@ -1678,11 +1670,7 @@ func (hi *StateAsOfIterDB) HasNext() bool {
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
-	res := (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
-	if !res {
-		log.Warn("[dbg] StateAsOfIterDB.HasNext4")
-	}
-	return res
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
