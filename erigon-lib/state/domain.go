@@ -2317,7 +2317,6 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				if ci1.btCursor.Next() {
 					ci1.key = ci1.btCursor.Key()
 					ci1.val = ci1.btCursor.Value()
-					fmt.Printf("[dbg] advInFiles1: %x\n", ci1.key)
 					if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
 						heap.Push(hi.h, ci1)
 					}
