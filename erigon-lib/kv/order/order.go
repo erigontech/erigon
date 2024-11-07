@@ -45,12 +45,12 @@ func Must(asc By, k1, k2 []byte) {
 		return
 	}
 	if asc {
-		if bytes.Compare(k1, k2) <= 0 {
+		if bytes.Compare(k1, k2) > 0 {
 			panic(fmt.Sprintf("epect: %x <= %x", k1, k2))
 		}
-	} else {
-		if bytes.Compare(k1, k2) >= 0 {
-			panic(fmt.Sprintf("epect: %x >= %x", k1, k2))
-		}
+		return
+	}
+	if bytes.Compare(k1, k2) < 0 {
+		panic(fmt.Sprintf("epect: %x >= %x", k1, k2))
 	}
 }
