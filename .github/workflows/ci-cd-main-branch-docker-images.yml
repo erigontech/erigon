@@ -170,8 +170,10 @@ jobs:
 
   run-kurtosis-assertoor:
     needs: [define_matrix, Build]
-    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
+    # TODO: change @feat/assertor-release-workflow to @main before merging
+    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@feat/assertor-release-workflow
     with:
       checkout_ref: ${{ github.sha }}
       os: ${{ needs.define_matrix.outputs.os }}
       docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}
+      enable_pectra_tests: ${{ github.ref_name == 'release/2.61' }}
