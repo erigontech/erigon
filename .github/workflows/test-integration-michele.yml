@@ -29,9 +29,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
       - name: test new runner
         run: |
           set +x
           echo "I am being served by this runner: $RUNNER_NAME"
+      - uses: actions/checkout@v4
+      - run: git submodule update --init --recursive --force
     
