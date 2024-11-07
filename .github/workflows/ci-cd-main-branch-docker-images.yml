@@ -9,6 +9,7 @@ env:
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
+  KEEP_IMAGES: 100
 
 on:
   push:
@@ -127,7 +128,7 @@ jobs:
           --push \
           --platform linux/amd64,linux/arm64 .
 
-      - name: export and print docker build tag
+      - name: export and print docker build tag, cleanup old docker images
         id: built_tag_export
         env:
           BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
@@ -136,6 +137,36 @@ jobs:
           echo The following docker images have been published:
           echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ env.BUILD_VERSION }}"
           echo "${{ env.DOCKERHUB_REPOSITORY }}:main-latest"
+          echo
+          echo "Cleanup old docker images matching pattern tag ~= main-XXXXXXX"
+          curl_cmd="curl -s -H \"Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}\" "
+          dockerhub_url='https://hub.docker.com/v2/namespaces/erigontech/repositories/erigon'
+          my_list () {
+            # First page:
+            next_page="$dockerhub_url/tags?page=1&page_size=100"
+            while [ "$next_page" != "null" ]
+              do
+              # Print tags and push dates for tags matching "main-":
+              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep 'main-'
+              next_page=`$curl_cmd $next_page | jq '.next' | sed -e 's/^\"//' -e 's/\"$//'`
+            done
+            }
+
+            my_list | tail -n+${{ env.KEEP_IMAGES }} | while read line; do
+              echo -n "Removing docker image/published - $line "
+              current_image=$(echo $line | sed -e 's/^\(main-.\{7\}\) .*/\1/')
+              output_code=$(curl --write-out %{http_code} --output curl-output.log \
+                    -s -X DELETE -H "Accept: application/json" \
+                    -H "Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}" \
+                    https://hub.docker.com/v2/repositories/erigontech/erigon/tags/${current_image} )
+              if [ $output_code -ne 204 ]; then
+                echo "ERROR: failed to remove docker image erigon:${current_image}"
+                echo "ERROR: API response: $(cat curl-output.log)."
+              else
+                echo -n " - removed. "
+              fi
+              echo "Done."
+            done
 
   run-kurtosis-assertoor:
     needs: [define_matrix, Build]

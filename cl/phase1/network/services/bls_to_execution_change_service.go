@@ -23,12 +23,13 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 )
@@ -69,26 +70,29 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return ErrIgnore
 	}
 	change := msg.SignedBLSToExecutionChange.Message
-	stateReader := s.syncedDataManager.HeadStateReader()
-	if stateReader == nil {
-		return ErrIgnore
-	}
-	stateMutator := s.syncedDataManager.HeadStateMutator()
-	if stateMutator == nil {
-		return ErrIgnore
-	}
 
-	// [IGNORE] current_epoch >= CAPELLA_FORK_EPOCH, where current_epoch is defined by the current wall-clock time.
-	if !(stateReader.Version() >= clparams.CapellaVersion) {
-		return ErrIgnore
+	var (
+		wc, genesisValidatorRoot common.Hash
+	)
+	if err := s.syncedDataManager.ViewHeadState(func(stateReader *state.CachingBeaconState) error {
+		// [IGNORE] current_epoch >= CAPELLA_FORK_EPOCH, where current_epoch is defined by the current wall-clock time.
+		if stateReader.Version() < clparams.CapellaVersion {
+			return ErrIgnore
+		}
+		// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/beacon-chain.md#new-process_bls_to_execution_change
+		// assert address_change.validator_index < len(state.validators)
+		validator, err := stateReader.ValidatorForValidatorIndex(int(change.ValidatorIndex))
+		if err != nil {
+			return fmt.Errorf("unable to retrieve validator: %v", err)
+		}
+		wc = validator.WithdrawalCredentials()
+
+		// assert bls.Verify(address_change.from_bls_pubkey, signing_root, signed_address_change.signature)
+		genesisValidatorRoot = stateReader.GenesisValidatorsRoot()
+		return nil
+	}); err != nil {
+		return err
 	}
-	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/capella/beacon-chain.md#new-process_bls_to_execution_change
-	// assert address_change.validator_index < len(state.validators)
-	validator, err := stateReader.ValidatorForValidatorIndex(int(change.ValidatorIndex))
-	if err != nil {
-		return fmt.Errorf("unable to retrieve validator: %v", err)
-	}
-	wc := validator.WithdrawalCredentials()
 
 	// assert validator.withdrawal_credentials[:1] == BLS_WITHDRAWAL_PREFIX
 	if wc[0] != byte(s.beaconCfg.BLSWithdrawalPrefixByte) {
@@ -103,8 +107,6 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		return errors.New("invalid withdrawal credentials hash")
 	}
 
-	// assert bls.Verify(address_change.from_bls_pubkey, signing_root, signed_address_change.signature)
-	genesisValidatorRoot := stateReader.GenesisValidatorsRoot()
 	domain, err := fork.ComputeDomain(s.beaconCfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(uint32(s.beaconCfg.GenesisForkVersion)), genesisValidatorRoot)
 	if err != nil {
 		return err
@@ -120,17 +122,6 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 		Pks:        [][]byte{change.From[:]},
 		GossipData: msg.GossipData,
 		F: func() {
-			// validator.withdrawal_credentials = (
-			//    ETH1_ADDRESS_WITHDRAWAL_PREFIX
-			//    + b'\x00' * 11
-			//    + address_change.to_execution_address
-			// )
-			newWc := libcommon.Hash{}
-			newWc[0] = byte(s.beaconCfg.ETH1AddressWithdrawalPrefixByte)
-			copy(newWc[1:], make([]byte, 11))
-			copy(newWc[12:], change.To[:])
-			stateMutator.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), newWc)
-
 			s.emitters.Operation().SendBlsToExecution(msg.SignedBLSToExecutionChange)
 			s.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
 		},

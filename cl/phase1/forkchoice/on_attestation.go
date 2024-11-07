@@ -56,19 +56,24 @@ func (f *ForkChoiceStore) OnAttestation(
 			return err
 		}
 	}
-	headState := f.syncedDataManager.HeadState()
+
 	var attestationIndicies []uint64
 	var err error
 	target := data.Target
 
-	if headState == nil {
+	if f.syncedDataManager.Syncing() {
 		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
 			target,
 			attestation,
 			fromBlock,
 		)
 	} else {
-		attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
+		if err := f.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 	if err != nil {
 		return err

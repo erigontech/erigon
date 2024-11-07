@@ -47,7 +47,7 @@ type AggregateAndProofService Service[*cltypes.SignedAggregateAndProofData]
 type AttestationService Service[*AttestationWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/voluntary_exit_service_mock.go -package=mock_services . VoluntaryExitService
-type VoluntaryExitService Service[*cltypes.SignedVoluntaryExit]
+type VoluntaryExitService Service[*cltypes.SignedVoluntaryExitWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/bls_to_execution_change_service_mock.go -package=mock_services . BLSToExecutionChangeService
 type BLSToExecutionChangeService Service[*cltypes.SignedBLSToExecutionChangeWithGossipData]

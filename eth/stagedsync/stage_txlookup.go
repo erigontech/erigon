@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -251,21 +252,33 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	} else {
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
-	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes
-	blockTo = min(blockTo, blockFrom+10)
+
+	pruneTimeout := time.Hour // aggressive pruning at non-chain-tip
+	if !s.CurrentSyncCycle.IsInitialCycle {
+		pruneTimeout = 250 * time.Millisecond
+		// can't prune much on non-chain-tip: because tx_lookup has crypto-hashed-keys. 1 block producing hundreds of random deletes: ~2pages updated per delete
+		blockTo = min(blockTo, blockFrom+10)
+	}
 
 	if blockFrom < blockTo {
-		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
-			return fmt.Errorf("prune TxLookUp: %w", err)
-		}
+		t := time.Now()
+		var pruneBlockNum = blockFrom
+		for ; pruneBlockNum < blockTo; pruneBlockNum++ {
+			err = deleteTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger)
+			if err != nil {
+				return fmt.Errorf("prune TxLookUp: %w", err)
+			}
+			if cfg.borConfig != nil && pruneBor {
+				if err = deleteBorTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger); err != nil {
+					return fmt.Errorf("prune BorTxLookUp: %w", err)
+				}
+			}
 
-		if cfg.borConfig != nil && pruneBor {
-			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
-				return fmt.Errorf("prune BorTxLookUp: %w", err)
+			if time.Since(t) > pruneTimeout {
+				break
 			}
 		}
-
-		if err = s.DoneAt(tx, blockTo); err != nil {
+		if err = s.DoneAt(tx, pruneBlockNum); err != nil {
 			return err
 		}
 	}
@@ -279,8 +292,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 }
 
 // deleteTxLookupRange - [blockFrom, blockTo)
-func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) error {
-	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
+	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
 		if err != nil {
@@ -306,6 +319,10 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
 	}, logger)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // deleteTxLookupRange - [blockFrom, blockTo)

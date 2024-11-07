@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
@@ -96,24 +97,18 @@ func NewBlockService(
 
 // ProcessMessage processes a block message according to https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedBeaconBlock) error {
-	headState := b.syncedData.HeadState()
-	if headState == nil {
-		b.scheduleBlockForLaterProcessing(msg)
-		return ErrIgnore
-	}
 
 	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 
-	currentSlot := b.ethClock.GetCurrentSlot()
+	if b.syncedData.Syncing() {
+		return ErrIgnore
+	}
+
+	currentSlot := b.syncedData.HeadSlot()
 
 	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
 	//signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
 	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
-		return ErrIgnore
-	}
-	// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
-	// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
-	if blockEpoch <= headState.FinalizedCheckpoint().Epoch {
 		return ErrIgnore
 	}
 
@@ -126,10 +121,30 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return ErrIgnore
 	}
 
-	if ok, err := eth2.VerifyBlockSignature(headState, msg); err != nil {
+	// headState, cn := b.syncedData.HeadState()
+	// defer cn()
+	// if headState == nil {
+	// 	b.scheduleBlockForLaterProcessing(msg)
+	// 	return ErrIgnore
+	// }
+	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
+		// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
+		if blockEpoch <= headState.FinalizedCheckpoint().Epoch {
+			return ErrIgnore
+		}
+
+		if ok, err := eth2.VerifyBlockSignature(headState, msg); err != nil {
+			return err
+		} else if !ok {
+			return ErrInvalidSignature
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, ErrIgnore) {
+			b.scheduleBlockForLaterProcessing(msg)
+		}
 		return err
-	} else if !ok {
-		return ErrInvalidSignature
 	}
 
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
@@ -146,8 +161,8 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlock) {
 		return ErrInvalidCommitmentsCount
 	}
-	b.publishBlockGossipEvent(msg)
 
+	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
 		if err == forkchoice.ErrEIP4844DataNotAvailable {

@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/threading"
 )
@@ -33,7 +34,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 	flagsTotalBalances := make([]uint64, len(weights))
 
 	numWorkers := runtime.NumCPU()
-	wp := threading.CreateWorkerPool(numWorkers)
+	wp := threading.NewParallelExecutor()
 	flagsTotalBalancesShards := make([][]uint64, len(weights))
 	shardSize := s.ValidatorLength() / numWorkers
 
@@ -69,7 +70,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 		}
 	}
 
-	wp.WaitAndClose()
+	wp.Execute()
 
 	for i := range weights {
 		for j := 0; j < numWorkers; j++ {
@@ -285,6 +286,7 @@ func processRewardsAndPenaltiesPhase0(s abstract.BeaconState, eligibleValidators
 
 // ProcessRewardsAndPenalties applies rewards/penalties accumulated during previous epoch.
 func ProcessRewardsAndPenalties(s abstract.BeaconState, eligibleValidators []uint64, unslashedIndicies [][]bool) error {
+	defer monitor.ObserveElaspedTime(monitor.ProcessRewardsAndPenaltiesTime).End()
 	if state.Epoch(s) == s.BeaconConfig().GenesisEpoch {
 		return nil
 	}

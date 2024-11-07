@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
@@ -379,7 +380,7 @@ func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity
 
 func (s txEntityStore[TEntity]) RangeFromId(ctx context.Context, startId uint64) ([]TEntity, error) {
 	startKey := entityStoreKey(startId)
-	it, err := s.tx.Range(s.table, startKey[:], nil)
+	it, err := s.tx.Range(s.table, startKey[:], nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}

@@ -58,6 +58,7 @@ var (
 
 	workers, reconWorkers uint64
 	dbWriteMap            bool
+	chaosMonkey           bool
 )
 
 func must(err error) {
@@ -203,4 +204,8 @@ func withCommitment(cmd *cobra.Command) {
 
 func withUnwindTypes(cmd *cobra.Command) {
 	cmd.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "types to unwind for polygon sync")
+}
+
+func withChaosMonkey(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&chaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
 }

@@ -146,7 +146,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed
 // removal of intermediate segments after a merge operation
-func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
+func removeBorOverlaps(dir string, active []snaptype.FileInfo, _max uint64) {
 	list, err := snaptype.Segments(dir)
 
 	if err != nil {
@@ -165,12 +165,12 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 
 	// added overhead to make sure we don't delete in the
 	// current 500k block segment
-	if max > 500_001 {
-		max -= 500_001
+	if _max > 500_001 {
+		_max -= 500_001
 	}
 
 	for _, f := range l {
-		if max < f.From {
+		if _max < f.From {
 			continue
 		}
 

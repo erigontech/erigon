@@ -74,64 +74,62 @@ func NewSyncCommitteeMessagesService(
 func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessageWithGossipData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	headState := s.syncedDataManager.HeadState()
-	if headState == nil {
+
+	return s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
+		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot) {
+			return ErrIgnore
+		}
+		// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
+		// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
+		subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.SyncCommitteeMessage.ValidatorIndex)
+		if err != nil {
+			return err
+		}
+		seenSyncCommitteeMessageIdentifier := seenSyncCommitteeMessage{
+			subnet:         *subnet,
+			slot:           msg.SyncCommitteeMessage.Slot,
+			validatorIndex: msg.SyncCommitteeMessage.ValidatorIndex,
+		}
+
+		if !slices.Contains(subnets, *subnet) {
+			return fmt.Errorf("validator is not into any subnet %d", *subnet)
+		}
+		// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
+		if _, ok := s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier]; ok {
+			return ErrIgnore
+		}
+		// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
+		signature, signingRoot, pubKey, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
+		if !s.test && err != nil {
+			return err
+		}
+		aggregateVerificationData := &AggregateVerificationData{
+			Signatures: [][]byte{signature},
+			SignRoots:  [][]byte{signingRoot},
+			Pks:        [][]byte{pubKey},
+			GossipData: msg.GossipData,
+			F: func() {
+				s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
+				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
+				// Aggregate the message
+				s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+			},
+		}
+
+		if msg.ImmediateVerification {
+			return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		}
+
+		// push the signatures to verify asynchronously and run final functions after that.
+		s.batchSignatureVerifier.AsyncVerifySyncCommitteeMessage(aggregateVerificationData)
+
+		// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
+		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
+		// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
+		// gossip ourselves or ban the peer which sent that particular invalid signature.
 		return ErrIgnore
-	}
-	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
-	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot) {
-		return ErrIgnore
-	}
-
-	// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
-	// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
-	subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.SyncCommitteeMessage.ValidatorIndex)
-	if err != nil {
-		return err
-	}
-	seenSyncCommitteeMessageIdentifier := seenSyncCommitteeMessage{
-		subnet:         *subnet,
-		slot:           msg.SyncCommitteeMessage.Slot,
-		validatorIndex: msg.SyncCommitteeMessage.ValidatorIndex,
-	}
-
-	if !slices.Contains(subnets, *subnet) {
-		return fmt.Errorf("validator is not into any subnet %d", *subnet)
-	}
-	// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
-	if _, ok := s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier]; ok {
-		return ErrIgnore
-	}
-	// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
-	signature, signingRoot, pubKey, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
-	if !s.test && err != nil {
-		return err
-	}
-	aggregateVerificationData := &AggregateVerificationData{
-		Signatures: [][]byte{signature},
-		SignRoots:  [][]byte{signingRoot},
-		Pks:        [][]byte{pubKey},
-		GossipData: msg.GossipData,
-		F: func() {
-			s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
-			s.cleanupOldSyncCommitteeMessages() // cleanup old messages
-			// Aggregate the message
-			s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
-		},
-	}
-
-	if msg.ImmediateVerification {
-		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
-	}
-
-	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchSignatureVerifier.AsyncVerifySyncCommitteeMessage(aggregateVerificationData)
-
-	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
-	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return ErrIgnore
+	})
 }
 
 // cleanupOldSyncCommitteeMessages removes old sync committee messages from the cache

@@ -425,13 +425,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return res
 		}
 
-		discovery := func() enode.Iterator {
-			d, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-			if err != nil {
-				panic(err)
-			}
-			return d
-		}
+		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)
 		if err != nil {
@@ -469,7 +463,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
-			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol, logger)
+			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger)
 			backend.sentryServers = append(backend.sentryServers, server)
 			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
 		}
@@ -717,6 +711,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				config.StateStream,
 				/*stateStream=*/ false,
 				/*alwaysGenerateChangesets=*/ false,
+				config.ChaosMonkey,
 				dirs,
 				blockReader,
 				backend.sentriesClient.Hd,
@@ -769,6 +764,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					config.StateStream,
 					/*stateStream=*/ false,
 					/*alwaysGenerateChangesets=*/ false,
+					config.ChaosMonkey,
 					dirs,
 					blockReader,
 					backend.sentriesClient.Hd,

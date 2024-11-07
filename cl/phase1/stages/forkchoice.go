@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
@@ -29,11 +31,24 @@ import (
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
 func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
-	// Get the current head of the fork choice
-	headRoot, headSlot, err = cfg.forkChoice.GetHead(cfg.syncedData.HeadState())
-	if err != nil {
-		err = fmt.Errorf("failed to get head: %w", err)
-		return
+	if err = cfg.syncedData.ViewHeadState(func(prevHeadState *state.CachingBeaconState) error {
+		// Get the current head of the fork choice
+		headRoot, headSlot, err = cfg.forkChoice.GetHead(prevHeadState)
+		if err != nil {
+			return fmt.Errorf("failed to get head: %w", err)
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, synced_data.ErrNotSynced) {
+			// Get the current head of the fork choice
+			headRoot, headSlot, err = cfg.forkChoice.GetHead(nil)
+			if err != nil {
+				return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
+			}
+		} else {
+			return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
+		}
+
 	}
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
@@ -308,34 +323,36 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	if err := cfg.syncedData.OnHeadState(headState); err != nil {
 		return fmt.Errorf("failed to set head state: %w", err)
 	}
-	headState = cfg.syncedData.HeadState() // headState is a copy of the head state here.
 
-	// Produce and cache attestation data for validator node (this is not an expensive operation so we can do it for all nodes)
-	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
-		logger.Warn("failed to produce and cache attestation data", "err", err)
-	}
+	return cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// Produce and cache attestation data for validator node (this is not an expensive operation so we can do it for all nodes)
+		if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
+			logger.Warn("failed to produce and cache attestation data", "err", err)
+		}
 
-	// Run indexing routines for the database
-	if err := runIndexingRoutines(ctx, tx, cfg, headState); err != nil {
-		return fmt.Errorf("failed to run indexing routines: %w", err)
-	}
+		// Run indexing routines for the database
+		if err := runIndexingRoutines(ctx, tx, cfg, headState); err != nil {
+			return fmt.Errorf("failed to run indexing routines: %w", err)
+		}
 
-	// Dump the head state on disk for ease of chain reorgs
-	if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
-		return fmt.Errorf("failed to dump beacon state on disk: %w", err)
-	}
+		// Dump the head state on disk for ease of chain reorgs
+		if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
+			return fmt.Errorf("failed to dump beacon state on disk: %w", err)
+		}
 
-	// Save the head state on disk for eventual node restarts without checkpoint sync
-	if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
-		return fmt.Errorf("failed to save head state on disk: %w", err)
-	}
-	// Lastly, emit the head event
-	emitHeadEvent(cfg, headSlot, headRoot, headState)
-	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
+		// Save the head state on disk for eventual node restarts without checkpoint sync
+		if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
+			return fmt.Errorf("failed to save head state on disk: %w", err)
+		}
+		// Lastly, emit the head event
+		emitHeadEvent(cfg, headSlot, headRoot, headState)
+		emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
 
-	// Shuffle validator set for the next epoch
-	preCacheNextShuffledValidatorSet(ctx, logger, cfg, headState)
-	return nil
+		// Shuffle validator set for the next epoch
+		preCacheNextShuffledValidatorSet(ctx, logger, cfg, headState)
+		return nil
+	})
+
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,

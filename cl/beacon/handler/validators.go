@@ -318,12 +318,12 @@ func (a *ApiHandler) writeValidatorsResponse(
 	}
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
-		s := a.syncedData.HeadState()
-		if s == nil {
+		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+			responseValidators(w, filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
+			return nil
+		}); err != nil {
 			http.Error(w, errors.New("node is not synced").Error(), http.StatusServiceUnavailable)
-			return
 		}
-		responseValidators(w, filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
 		return
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -455,14 +455,22 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 	}
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
-		s := a.syncedData.HeadState()
-		if s == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("node is not synced"))
+		var (
+			resp *beaconhttp.BeaconResponse
+			err  error
+		)
+		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+			if s.ValidatorLength() <= int(validatorIndex) {
+				resp = newBeaconResponse([]int{}).WithFinalized(false)
+				return nil
+			}
+			resp, err = responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
+			return nil // return err later
+		}); err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced"))
 		}
-		if s.ValidatorLength() <= int(validatorIndex) {
-			return newBeaconResponse([]int{}).WithFinalized(false), nil
-		}
-		return responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
+
+		return resp, err
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
@@ -576,12 +584,12 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
-		s := a.syncedData.HeadState()
-		if s == nil {
+		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+			responseValidatorsBalances(w, filterIndicies, s.Balances(), false, isOptimistic)
+			return nil
+		}); err != nil {
 			http.Error(w, errors.New("node is not synced").Error(), http.StatusServiceUnavailable)
-			return
 		}
-		responseValidatorsBalances(w, filterIndicies, s.Balances(), false, isOptimistic)
 		return
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
