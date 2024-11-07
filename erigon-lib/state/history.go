@@ -1504,7 +1504,11 @@ func (hi *StateAsOfIterF) HasNext() bool {
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
-	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
+	res := (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
+	if !res {
+		log.Warn("[dbg] StateAsOfIterF.HasNext3")
+	}
+	return res
 }
 
 func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
@@ -1674,7 +1678,11 @@ func (hi *StateAsOfIterDB) HasNext() bool {
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
-	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
+	res := (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
+	if !res {
+		log.Warn("[dbg] StateAsOfIterDB.HasNext4")
+	}
+	return res
 }
 
 func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
