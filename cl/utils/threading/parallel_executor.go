@@ -1,7 +1,11 @@
 package threading
 
 import (
+	"fmt"
 	"sync"
+	"time"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
 )
 
 type ParallelExecutor struct {
@@ -17,6 +21,18 @@ func NewParallelExecutor() *ParallelExecutor {
 // close work channel and finish
 func (wp *ParallelExecutor) Execute() error {
 	var errOut error
+	if dbg.CaplinSyncedDataMangerDeadlockDetection {
+		st := dbg.Stack()
+		ch := make(chan struct{})
+		go func() {
+			select {
+			case <-ch:
+			case <-time.After(100 * time.Second):
+				fmt.Println("Deadlock detected - ParallelExecutor", st)
+			}
+		}()
+		defer close(ch)
+	}
 	for _, job := range wp.jobs {
 		wp.wg.Add(1)
 		go func(job func() error) {
