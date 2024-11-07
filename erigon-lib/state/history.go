@@ -1471,7 +1471,6 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 		reader := hi.hc.statelessIdxReader(historyItem.i)
 		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
 		if !ok {
-			fmt.Printf("[dbg] StateAsOfIterF advanceInFiles Lookup2 not found. %s, %x\n", top.g.FileName(), hi.nextKey)
 			continue
 		}
 		g := hi.hc.statelessGetter(historyItem.i)
