@@ -226,7 +226,7 @@ jobs:
 
   run-kurtosis-assertoor:
     needs: build-release
-    if: ${{ inputs.with_assertor == true }}
+    if: ${{ inputs.with_assertor }}
     # TODO: change the branch to main before merging
     uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@feat/assertor-release-workflow
     with:

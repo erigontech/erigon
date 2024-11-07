@@ -67,7 +67,7 @@ jobs:
         run: sudo apt update && sudo apt install build-essential
 
       - name: download kurtosis config
-        if: ${{ inputs.enable_pectra_tests == false }}
+        if: ${{ !inputs.enable_pectra_tests }}
         env:
           BUILD_VERSION: ${{ inputs.docker_build_tag }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
@@ -76,7 +76,7 @@ jobs:
           sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}#g' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
       - name: download kurtosis config - with pectra
-        if: ${{ inputs.enable_pectra_tests == true }}
+        if: ${{ inputs.enable_pectra_tests }}
         env:
           BUILD_VERSION: ${{ inputs.docker_build_tag }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
