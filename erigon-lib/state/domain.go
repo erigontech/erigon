@@ -2394,13 +2394,12 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 }
 
 func (hi *DomainLatestIterFile) HasNext() bool {
-	log.Warn("[dbg] StateAsOfIterF.HasNext2")
 	if hi.limit == 0 { // limit reached
-		log.Warn("[dbg] StateAsOfIterF.HasNext1")
+		log.Warn("[dbg] DomainLatestIterFile.HasNext1")
 		return false
 	}
 	if hi.nextKey == nil { // EndOfTable
-		log.Warn("[dbg] StateAsOfIterF.HasNext2")
+		log.Warn("[dbg] DomainLatestIterFile.HasNext2")
 		return false
 	}
 	if hi.to == nil { // s.nextK == nil check is above
