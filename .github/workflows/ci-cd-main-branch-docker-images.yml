@@ -60,6 +60,7 @@ jobs:
           cd erigon
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+          echo "formatted_ref=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9\.]/-/g')" >> "$GITHUB_OUTPUT"
           cd ..
 
       - name: Login to Docker Hub
@@ -98,7 +99,7 @@ jobs:
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ref branch
         env:
-          BUILD_VERSION: "${{ github.ref_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION: "${{ steps.getCommitId.outputs.formatted_ref }}-${{ steps.getCommitId.outputs.short_commit_id }}"
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
@@ -113,7 +114,7 @@ jobs:
           --build-arg CI_CD_REF_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
           --build-arg CI_CD_REF_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
-          --tag ${{ env.DOCKER_URL }}:${{ github.ref_name }}-latest \
+          --tag ${{ env.DOCKER_URL }}:${{ steps.getCommitId.outputs.formatted_ref }}-latest \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
           --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/${{ github.ref_name }}/Dockerfile" \
@@ -131,14 +132,14 @@ jobs:
       - name: export and print docker build tag, cleanup old docker images
         id: built_tag_export
         env:
-          BUILD_VERSION: "${{ github.ref_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION: "${{ steps.getCommitId.outputs.formatted_ref }}-${{ steps.getCommitId.outputs.short_commit_id }}"
         run: |
           echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           echo The following docker images have been published:
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ github.ref_name }}-${{ env.BUILD_VERSION }}"
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ github.ref_name }}-latest"
+          echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ env.BUILD_VERSION }}"
+          echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ steps.getCommitId.outputs.formatted_ref }}-latest"
           echo
-          echo "Cleanup old docker images matching pattern tag ~= ${{ github.ref_name }}-XXXXXXX"
+          echo "Cleanup old docker images matching pattern tag ~= ${{ steps.getCommitId.outputs.formatted_ref }}-XXXXXXX"
           curl_cmd="curl -s -H \"Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}\" "
           dockerhub_url='https://hub.docker.com/v2/namespaces/erigontech/repositories/erigon'
           my_list () {
@@ -146,15 +147,15 @@ jobs:
             next_page="$dockerhub_url/tags?page=1&page_size=100"
             while [ "$next_page" != "null" ]
               do
-              # Print tags and push dates for tags matching "${{ github.ref_name }}-":
-              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep '${{ github.ref_name }}-'
+              # Print tags and push dates for tags matching "${{ steps.getCommitId.outputs.formatted_ref }}-":
+              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep '${{ steps.getCommitId.outputs.formatted_ref }}-'
               next_page=`$curl_cmd $next_page | jq '.next' | sed -e 's/^\"//' -e 's/\"$//'`
             done
             }
 
             my_list | tail -n+${{ env.KEEP_IMAGES }} | while read line; do
               echo -n "Removing docker image/published - $line "
-              current_image=$(echo $line | sed -e 's/^\(${{ github.ref_name }}-.\{7\}\) .*/\1/')
+              current_image=$(echo $line | sed -e 's/^\(${{ steps.getCommitId.outputs.formatted_ref }}-.\{7\}\) .*/\1/')
               output_code=$(curl --write-out %{http_code} --output curl-output.log \
                     -s -X DELETE -H "Accept: application/json" \
                     -H "Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}" \
