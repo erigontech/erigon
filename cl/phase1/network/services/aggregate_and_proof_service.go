@@ -373,23 +373,24 @@ func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
 func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 	ticker := time.NewTicker(attestationJobsIntervalTick)
 	defer ticker.Stop()
+	keysToDel := make([][32]byte, 0)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
-
+		keysToDel = keysToDel[:0]
 		a.aggregatesScheduledForLaterExecution.Range(func(key, value any) bool {
 			if a.syncedDataManager.Syncing() {
 				// Discard the job if we can't get the head state
-				a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
+				keysToDel = append(keysToDel, key.([32]byte))
 				return false
 			}
 			job := value.(*aggregateJob)
 			// check if it has expired
 			if time.Since(job.creationTime) > attestationJobExpiry {
-				a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
+				keysToDel = append(keysToDel, key.([32]byte))
 				return true
 			}
 			aggregateData := job.aggregate.SignedAggregateAndProof.Message.Aggregate.Data
@@ -401,8 +402,11 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 				return true
 			}
 
-			a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
+			keysToDel = append(keysToDel, key.([32]byte))
 			return true
 		})
+		for _, key := range keysToDel {
+			a.aggregatesScheduledForLaterExecution.Delete(key)
+		}
 	}
 }
