@@ -1954,26 +1954,15 @@ func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey 
 	if !asc {
 		panic("implement me")
 	}
-	//histStateIt, err := tx.aggTx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//lastestStateIt, err := tx.aggTx.DomainRangeLatest(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, limit)
-	//if err != nil {
-	//	return nil, err
-	//}
-	fmt.Printf("[dbg] DomainRange 1: %s, %x, %x\n", dt.d.name, fromKey, toKey)
 	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, asc, limit, tx)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("[dbg] DomainRange 2: %s\n", dt.d.name)
-	//lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
-	return stream.UnionKV(histStateIt, stream.EmptyKV, limit), nil
+	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
+	if err != nil {
+		return nil, err
+	}
+	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
 func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (stream.KV, error) {
