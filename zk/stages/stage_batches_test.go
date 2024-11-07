@@ -79,7 +79,6 @@ func TestUnwindBatches(t *testing.T) {
 	err = SpawnStageBatches(s, u, ctx, tx, cfg)
 	require.NoError(t, err)
 	tx.Commit()
-
 	tx2 := memdb.BeginRw(t, db1)
 
 	// unwind to zero and check if there is any data in the tables

@@ -46,6 +46,7 @@ wait_for_l1_batch() {
         fi
 
         if [ "$batch_type" = "virtual" ]; then
+
             current_batch=$(cast logs --rpc-url "$(kurtosis port print cdk-v1 el-1-geth-lighthouse rpc)" --address 0x1Fe038B54aeBf558638CA51C91bC8cCa06609e91 --from-block 0 --json | jq -r '.[] | select(.topics[0] == "0x3e54d0825ed78523037d00a81759237eb436ce774bd546993ee67a1b67b6e766") | .topics[1]' | tail -n 1 | sed 's/^0x//')
             current_batch=$((16#$current_batch))
         elif [ "$batch_type" = "verified" ]; then
@@ -67,6 +68,33 @@ wait_for_l1_batch() {
             return 0
         fi
         sleep 10
+    done
+}
+
+
+wait_for_l2_block_number() {
+    local block_number=$1
+    local node_url=$2
+    local latest_block=0
+    local tries=0
+
+    #while latest_block lower than block_number
+    #if more than 5 attempts - throw error
+    while [ "$latest_block" -lt "$block_number" ]; do
+        latest_block=$(cast block latest --rpc-url "$node_url" | grep "number" | awk '{print $2}')
+        if [[ $? -ne 0 ]]; then
+            echo "Error: Failed to get latest block number" >&2
+            return 1
+        fi
+
+        if [ "$tries" -ge 5 ]; then
+            echo "Error: Failed to get block number $block_number" >&2
+            return 1
+        fi
+        tries=$((tries + 1))
+
+        echo "Current block number on $node_url: $latest_block, needed: $block_number. Waiting to try again."
+        sleep 60
     done
 }
 
@@ -139,8 +167,17 @@ echo "Calculating comparison block number"
 comparison_block=$((latest_block - 10))
 echo "Block number to compare (10 blocks behind): $comparison_block"
 
+echo "Waiting some time for the syncer to catch up"
+sleep 30
+
 echo "Getting block hash from sequencer"
 sequencer_hash=$(cast block $comparison_block --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-sequencer-001 rpc)" | grep "hash" | awk '{print $2}')
+
+# wait for block to be available on sync node
+if ! wait_for_l2_block_number $comparison_block "$(kurtosis port print cdk-v1 cdk-erigon-node-001 rpc)"; then
+    echo "Failed to wait for batch verification"
+    exit 1
+fi
 
 echo "Getting block hash from node"
 node_hash=$(cast block $comparison_block --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-node-001 rpc)" | grep "hash" | awk '{print $2}')

@@ -624,6 +624,10 @@ func newDataStreamServerIterator(stream *datastreamer.StreamServer, start uint64
 	}
 }
 
+func (it *dataStreamServerIterator) GetEntryNumberLimit() uint64 {
+	return it.header + 1
+}
+
 func (it *dataStreamServerIterator) NextFileEntry() (entry *types.FileEntry, err error) {
 	if it.curEntryNum > it.header {
 		return nil, nil
@@ -669,7 +673,7 @@ func ReadBatches(iterator client.FileEntryIterator, start uint64, end uint64) ([
 
 LOOP_ENTRIES:
 	for {
-		parsedProto, err := client.ReadParsedProto(iterator)
+		parsedProto, _, err := client.ReadParsedProto(iterator)
 		if err != nil {
 			return nil, err
 		}

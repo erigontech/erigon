@@ -1,8 +1,6 @@
 package client
 
 import (
-	"errors"
-	"fmt"
 	"io"
 	"net"
 	"testing"
@@ -27,10 +25,10 @@ func Test_WriteFullUint64ToConn(t *testing.T) {
 			expectedError:  nil,
 		},
 		{
-			name:           "happy path",
+			name:           "nil connection",
 			input:          10,
 			shouldOpenConn: false,
-			expectedError:  errors.New("error nil connection"),
+			expectedError:  ErrNilConnection,
 		},
 	}
 
@@ -48,8 +46,9 @@ func Test_WriteFullUint64ToConn(t *testing.T) {
 				err = writeFullUint64ToConn(client, testCase.input)
 			} else {
 				err = writeFullUint64ToConn(nil, testCase.input)
+				require.ErrorIs(t, err, ErrSocket)
 			}
-			require.Equal(t, testCase.expectedError, err)
+			require.ErrorIs(t, err, testCase.expectedError)
 		})
 	}
 }
@@ -70,10 +69,10 @@ func Test_WriteFullUint32ToConn(t *testing.T) {
 			expectedError:  nil,
 		},
 		{
-			name:           "happy path",
+			name:           "nil connection",
 			input:          10,
 			shouldOpenConn: false,
-			expectedError:  errors.New("error nil connection"),
+			expectedError:  ErrNilConnection,
 		},
 	}
 
@@ -91,8 +90,53 @@ func Test_WriteFullUint32ToConn(t *testing.T) {
 				err = writeFullUint32ToConn(client, testCase.input)
 			} else {
 				err = writeFullUint32ToConn(nil, testCase.input)
+				require.ErrorIs(t, err, ErrSocket)
 			}
-			require.Equal(t, testCase.expectedError, err)
+			require.ErrorIs(t, err, testCase.expectedError)
+		})
+	}
+}
+
+func Test_WriteBytesToConn(t *testing.T) {
+	type testCase struct {
+		name           string
+		input          []byte
+		shouldOpenConn bool
+		expectedError  error
+	}
+
+	testCases := []testCase{
+		{
+			name:           "happy path",
+			input:          []byte{1, 2, 3, 4, 5},
+			shouldOpenConn: true,
+			expectedError:  nil,
+		},
+		{
+			name:           "nil connection",
+			input:          []byte{1, 2, 3, 4, 5},
+			shouldOpenConn: false,
+			expectedError:  ErrNilConnection,
+		},
+	}
+
+	for _, testCase := range testCases {
+		server, client := net.Pipe()
+		defer server.Close()
+		t.Run(testCase.name, func(t *testing.T) {
+			go func() {
+				buffer := make([]byte, len(testCase.input))
+				io.ReadFull(server, buffer)
+			}()
+
+			var err error
+			if testCase.shouldOpenConn {
+				err = writeBytesToConn(client, testCase.input)
+			} else {
+				err = writeBytesToConn(nil, testCase.input)
+				require.ErrorIs(t, err, ErrSocket)
+			}
+			require.ErrorIs(t, err, testCase.expectedError)
 		})
 	}
 }
@@ -122,7 +166,7 @@ func Test_ReadBuffer(t *testing.T) {
 			name:           "test error",
 			input:          6,
 			expectedResult: []byte{},
-			expectedError:  fmt.Errorf("reading from server: %v", io.ErrUnexpectedEOF),
+			expectedError:  io.ErrUnexpectedEOF,
 		},
 	}
 
@@ -136,36 +180,11 @@ func Test_ReadBuffer(t *testing.T) {
 
 		t.Run(testCase.name, func(t *testing.T) {
 			result, err := readBuffer(client, testCase.input)
-			require.Equal(t, testCase.expectedError, err)
+			require.ErrorIs(t, err, testCase.expectedError)
+			if testCase.expectedError != nil {
+				require.ErrorIs(t, err, ErrSocket)
+			}
 			assert.DeepEqual(t, testCase.expectedResult, result)
-		})
-	}
-}
-
-func Test_ParseIoReadError(t *testing.T) {
-	type testCase struct {
-		name          string
-		input         error
-		expectedError error
-	}
-
-	testCases := []testCase{
-		{
-			name:          "io error",
-			input:         io.EOF,
-			expectedError: errors.New("server close connection"),
-		},
-		{
-			name:          "test error",
-			input:         errors.New("test error"),
-			expectedError: errors.New("reading from server: test error"),
-		},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			result := parseIoReadError(testCase.input)
-			require.Equal(t, testCase.expectedError, result)
 		})
 	}
 }

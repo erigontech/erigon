@@ -105,6 +105,12 @@ jobs:
           sed -i '/zkevm.sequencer-batch-seal-time:/d' templates/cdk-erigon/config.yml
           sed -i '/zkevm.sequencer-non-empty-batch-seal-time:/d' templates/cdk-erigon/config.yml
           sed -i '/sentry.drop-useless-peers:/d' templates/cdk-erigon/config.yml
+          sed -i '/zkevm.l2-datastreamer-timeout:/d' templates/cdk-erigon/config.yml
+      - name: Configure Kurtosis CDK
+        working-directory: ./kurtosis-cdk
+        run: |
+          /usr/local/bin/yq -i '.args.data_availability_mode = "${{ matrix.da-mode }}"' params.yml
+          /usr/local/bin/yq -i '.args.cdk_erigon_node_image = "cdk-erigon:local"' params.yml
 
       - name: Deploy Kurtosis CDK package
         working-directory: ./kurtosis-cdk
@@ -224,6 +230,8 @@ jobs:
           sed -i '/sentry.drop-useless-peers:/d' templates/cdk-erigon/config.yml
           sed -i '/zkevm\.pool-manager-url/d' ./templates/cdk-erigon/config.yml
           sed -i '$a\zkevm.disable-virtual-counters: true' ./templates/cdk-erigon/config.yml
+          sed -i '/zkevm.l2-datastreamer-timeout:/d' templates/cdk-erigon/config.yml
+
 
       - name: Configure Kurtosis CDK
         working-directory: ./kurtosis-cdk
