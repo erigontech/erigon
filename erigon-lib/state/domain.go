@@ -2408,6 +2408,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
+	order.Must(order.Asc, hi.kBackup, hi.nextKey)
 	return hi.kBackup, hi.vBackup, nil
 }
 

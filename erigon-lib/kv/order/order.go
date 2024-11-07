@@ -16,6 +16,13 @@
 
 package order
 
+import (
+	"bytes"
+	"fmt"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+)
+
 type By bool
 
 const (
@@ -28,4 +35,22 @@ func FromBool(v bool) By {
 		return Asc
 	}
 	return Desc
+}
+
+func Must(asc By, k1, k2 []byte) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	if k1 == nil || k2 == nil {
+		return
+	}
+	if asc {
+		if bytes.Compare(k1, k2) <= 0 {
+			panic(fmt.Sprintf("epect: %x <= %x", k1, k2))
+		}
+	} else {
+		if bytes.Compare(k1, k2) >= 0 {
+			panic(fmt.Sprintf("epect: %x >= %x", k1, k2))
+		}
+	}
 }
