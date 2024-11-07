@@ -1,14 +1,13 @@
-name: CI-CD build and deploy docker images based on the last commit in the main branch
-run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the main branch"
+name: CI-CD build docker image based on the last commit in the ref branch and test it with kurtosis/assertor tool (Version >= 2.61 < 3.0)
+run-name: "Commit id ${{ github.sha }}: CI-CD build docker image based on the commit id in the ref branch"
 
 env:
   APPLICATION: "erigon"
-  BUILDER_IMAGE: "golang:1.23.1-alpine3.20"
-  TARGET_BASE_IMAGE: "alpine:3.20.3"
+  BUILDER_IMAGE: "golang:1.22-bookworm"
   APP_REPO: "erigontech/erigon"
-  CHECKOUT_REF: "main"
-  DOCKERHUB_REPOSITORY: "erigontech/erigon"
-  LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
+  PACKAGE: "github.com/erigontech/erigon"
+  TARGET_BASE_IMAGE: "debian:12.7-slim"
+  LABEL_DESCRIPTION: "[docker image built on a last commit id from the ref branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
   KEEP_IMAGES: 100
 
 on:
@@ -41,7 +40,7 @@ jobs:
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 1
-          ref: ${{ env.CHECKOUT_REF }}
+          ref: ${{ github.ref_name }}
           path: 'erigon'
 
       - name: Setup go env and cache
@@ -58,6 +57,7 @@ jobs:
           cd erigon
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+          echo "week_of_the_year=$(/bin/date -u "+%Y-%W")" >> $GITHUB_OUTPUT
           cd ..
 
       - name: Set up QEMU
@@ -66,45 +66,78 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
-      - name: Build arm64
-        run: |
-          docker run --platform linux/arm64 \
-          --rm -v $(pwd)/erigon:/erigon:ro \
-          -v $(pwd)/build-arm64:/erigon-build \
-          -v ${HOME}/.cache/go-build/arm64:/root/.cache/go-build \
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
-          -w /erigon --entrypoint /bin/sh \
-          ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+      - name: Setup GO build and pkg cache for one week only
+        id: cache
+        uses: actions/cache@v4
+        with:
+          key: cache-year-week-${{ steps.getCommitId.outputs.week_of_the_year }}-go.mod-hash:${{ hashFiles('erigon/go.mod') }}
+          path: |
+            ~/go/pkg
+            ~/.cache
 
-      - name: Build amd64
-        run: |
-          docker run --platform linux/amd64 \
-          --rm -v $(pwd)/erigon:/erigon:ro \
-          -v $(pwd)/build-amd64:/erigon-build \
-          -v ${HOME}/.cache/go-build/amd64:/root/.cache/go-build \
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod \
-          -w /erigon --entrypoint /bin/sh \
-          ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
+      - name: Build for linux/arm64
+        run: >
+          docker run --platform linux/arm64
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-arm64:/erigon-build
+          -v ${HOME}/.cache:/root/.cache
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
 
-      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ref branch
+      - name: Build for linux/amd64/v2
+        run: >
+          docker run --platform linux/amd64/v2
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-amd64v2:/erigon-build
+          -v ${HOME}/.cache:/root/.cache
+          -v ${HOME}/go/pkg/mod:/go/pkg/mod
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
+          find / -name libsilkworm_capi.so -exec install {} /erigon-build \; "
+
+      - name: Create archives and checksums
+        env:
+          RELEASE_VERSION: "local-${{ steps.getCommitId.outputs.short_commit_id }}"
+        run: |
+          cd ${GITHUB_WORKSPACE}
+          mkdir $GITHUB_WORKSPACE/release
+          for dir in build-*; do
+            cd $dir
+            echo Current directory is $(pwd) . Checksum file and archive will be created for this directory
+            sha256sum * > checksums.txt
+            tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,').tar.gz \
+              --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,')/," .
+            cd -
+          done
+          cd $GITHUB_WORKSPACE/release
+          sha256sum * > ${APPLICATION}_${RELEASE_VERSION}_checksums.txt
+          echo Content of release directory:
+          find . -type f -ls
+          
+      - name: Build multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ref branch
         env:
           BUILD_VERSION: "local-${{ steps.getCommitId.outputs.short_commit_id }}"
           DOCKERFILE_PATH: Dockerfile.release
         run: |
-          cp -vr build-amd64 erigon/
-          cp -vr build-arm64 erigon/
-          cd erigon
-          docker buildx build \
-          --file ${{ env.DOCKERFILE_PATH }} \
-          --target ci-cd-main-branch \
-          --attest type=provenance,mode=max \
-          --sbom=true \
-          --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
-          --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
-          --tag ${{ env.BUILD_VERSION }} \
-          --platform linux/amd64,linux/arm64 .
+            cd ${GITHUB_WORKSPACE}/release
+            echo "Current directory is $(pwd) ."
+            docker buildx build \
+            --file ${{ github.workspace }}/erigon/${{ env.DOCKERFILE_PATH }} \
+            --build-arg VERSION=${{ env.BUILD_VERSION }} \
+            --build-arg APPLICATION=${{ env.APPLICATION }} \
+            --target release \
+            --attest type=provenance,mode=max \
+            --sbom=true \
+            --platform linux/amd64,linux/amd64/v2,linux/arm64 .
 
       - name: test assertor
         uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@feat/assertor-testing
