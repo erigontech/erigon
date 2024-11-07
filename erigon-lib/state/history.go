@@ -1377,7 +1377,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		return nil, err
 	}
 
-	return stream.UnionKV(hi.Trace("hi"), dbit.Trace("dbit"), limit), nil
+	return stream.UnionKV(hi, dbit, limit), nil
 }
 
 // StateAsOfIter - returns state range at given time in history

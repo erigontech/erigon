@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -31,8 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/turbo/trie"
@@ -141,8 +138,6 @@ func NewDumper(db kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) 
 
 var TooMuchIterations = errors.New("[rpc] dumper: too much iterations protection triggered")
 
-const DumperIterationsHardLimit = 10_000_000
-
 func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress libcommon.Address, maxResults int) ([]byte, error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = libcommon.Hash{}
@@ -156,7 +151,6 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 	c.OnRoot(emptyHash) // We do not calculate the root
 
-	fmt.Printf("[dbg] DumpToCollector limits: %t, %t, %d\n", excludeCode, excludeStorage, maxResults)
 	ttx := d.db.(kv.TemporalTx)
 	txNum, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
 	if err != nil {
@@ -167,17 +161,12 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		return nil, err
 	}
 
-	var hardLimit = DumperIterationsHardLimit
-
-	t := time.Now()
 	var nextKey []byte
 	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("[dbg] after DomainRange: %s\n", time.Since(t))
 	defer it.Close()
-	it = stream.TraceDuo(it, log.New(), "dumper")
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -185,14 +174,11 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		}
 		if maxResults > 0 && numberOfResults >= maxResults {
 			nextKey = append(nextKey[:0], k...)
-			fmt.Printf("[dbg] dumper iter acc. break: nextKey %x, k %x\n", nextKey, k)
 			break
 		}
 		if len(v) == 0 {
-			fmt.Printf("[dbg] empty val???: k %x\n", k)
 			continue
 		}
-		fmt.Printf("[dbg] dumper iter acc: %x\n", k)
 
 		if e := accounts.DeserialiseV3(&acc, v); e != nil {
 			return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
@@ -221,13 +207,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		addrList = append(addrList, libcommon.BytesToAddress(k))
 
 		numberOfResults++
-
-		//if hardLimit--; hardLimit < 0 {
-		//	return nil, TooMuchIterations
-		//}
 	}
 	it.Close()
-	fmt.Printf("[dbg] loop1 is over\n")
 
 	for i, addr := range addrList {
 		account := accountList[i]
@@ -249,14 +230,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					continue // Skip deleted entries
 				}
 				loc := k[20:]
-				fmt.Printf("[dbg] dumper iter storage: %x, %x\n", k[:20], k[20:])
 				account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
 				h, _ := libcommon.HashData(loc)
 				t.Update(h.Bytes(), libcommon.Copy(vs))
-
-				if hardLimit--; hardLimit < 0 {
-					return nil, TooMuchIterations
-				}
 			}
 			r.Close()
 
