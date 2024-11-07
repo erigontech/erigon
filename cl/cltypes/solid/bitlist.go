@@ -128,6 +128,17 @@ func (u *BitList) Set(index int, v byte) {
 	u.u[index] = v
 }
 
+func (u *BitList) SetOnBit(bitIndex int) {
+	// expand the bitlist if necessary
+	if bitIndex >= u.Bits() {
+		for i := u.Bits(); i < bitIndex+1; i += 8 {
+			u.Append(0)
+		}
+	}
+	// set the bit
+	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
+}
+
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.
 func (u *BitList) Length() int {
 	return u.l
