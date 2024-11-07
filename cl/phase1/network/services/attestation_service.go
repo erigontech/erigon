@@ -65,8 +65,9 @@ type attestationService struct {
 
 // AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
 type AttestationWithGossipData struct {
-	Attestation *solid.Attestation
-	GossipData  *sentinel.GossipData
+	Attestation       *solid.Attestation
+	SingleAttestation *solid.SingleAttestation // New in Electra
+	GossipData        *sentinel.GossipData
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
 }
@@ -112,7 +113,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	)
 
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := att.Attestation.SingleCommitteeIndexFromBits()
+		// [REJECT] attestation.data.index == 0
+		if att.Attestation.Data.CommitteeIndex != 0 {
+			return errors.New("committee index must be 0")
+		}
+
+		index, err := att.Attestation.GetCommitteeIndexFromBits()
 		if err != nil {
 			return err
 		}
