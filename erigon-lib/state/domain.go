@@ -2406,7 +2406,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
-	order.Assert(order.Asc, hi.kBackup, hi.nextKey)
+	order.Asc.Assert(hi.kBackup, hi.nextKey)
 	// TODO: remove `common.Copy`. it protecting from some existing bug.
 	return common.Copy(hi.kBackup), hi.vBackup, nil
 }
