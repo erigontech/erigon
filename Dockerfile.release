@@ -1,6 +1,6 @@
 ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
-    CI_CD_MAIN_BUILDER_IMAGE="golang:1.22-bookworm" \
-    CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3.20.1" \
+    CI_CD_REF_BUILDER_IMAGE="golang:1.22-bookworm" \
+    CI_CD_REF_TARGET_BASE_IMAGE="alpine:3.20.1" \
     EXPOSED_PORTS="8545 \
        8551 \
        8546 \
@@ -58,8 +58,8 @@ ENTRYPOINT [ "/usr/local/bin/erigon" ]
 ### End of Release Dockerfile
 
 
-### CI-CD : main branch docker image publishing for each new commit id
-FROM ${CI_CD_MAIN_BUILDER_IMAGE} AS ci-cd-main-branch-builder
+### CI-CD : ref branch docker image publishing for each new commit id
+FROM ${CI_CD_REF_BUILDER_IMAGE} AS ci-cd-ref-branch-builder
 
 COPY /build-amd64 /build-amd64/
 COPY /build-arm64 /build-arm64/
@@ -69,13 +69,13 @@ RUN echo "DEBUG: content of build-amd64" && ls -l /build-amd64 && \
     echo "DEBUG: content of build-arm64" && ls -l /build-arm64
 
 
-FROM ${CI_CD_MAIN_TARGET_BASE_IMAGE} AS ci-cd-main-branch
+FROM ${CI_CD_REF_TARGET_BASE_IMAGE} AS ci-cd-ref-branch
 ARG USER=erigon \
     GROUP=erigon \
     TARGETARCH \
     EXPOSED_PORTS
 
-RUN --mount=type=bind,from=ci-cd-main-branch-builder,source=/build-${TARGETARCH},target=/tmp/erigon \
+RUN --mount=type=bind,from=ci-cd-ref-branch-builder,source=/build-${TARGETARCH},target=/tmp/erigon \
     apk add --no-cache ca-certificates tzdata libstdc++ && \
     addgroup ${GROUP} && \
     adduser -D -h /home/${USER} -G ${GROUP} ${USER} && \
@@ -90,4 +90,4 @@ EXPOSE ${EXPOSED_PORTS}
 
 ENTRYPOINT [ "/usr/local/bin/erigon" ]
 
-### End of CI-CD : main branch docker image publishing for each new commit id
+### End of CI-CD : ref branch docker image publishing for each new commit id

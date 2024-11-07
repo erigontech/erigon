@@ -1,20 +1,20 @@
-name: CI-CD build and deploy docker images based on the last commit in the main branch
-run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the main branch"
+name: CI-CD build and deploy docker images based on the last commit in the ref branch
+run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the ref branch"
 
 env:
   APPLICATION: "erigon"
   BUILDER_IMAGE: "golang:1.23.1-alpine3.20"
   TARGET_BASE_IMAGE: "alpine:3.20.3"
   APP_REPO: "erigontech/erigon"
-  CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
-  LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
+  LABEL_DESCRIPTION: "[docker image built on a last commit id from the ref branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
   KEEP_IMAGES: 100
 
 on:
   push:
     branches:
       - 'main'
+      - 'release/2.61'
     paths-ignore:
       - '.github/**'
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 1
-          ref: ${{ env.CHECKOUT_REF }}
+          ref: ${{ github.ref_name }}
           path: 'erigon'
 
       - name: Setup go env and cache
@@ -96,9 +96,9 @@ jobs:
           ${{ env.BUILDER_IMAGE }} \
           -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
 
-      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
+      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ref branch
         env:
-          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION: "${{ github.ref_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
@@ -107,18 +107,18 @@ jobs:
           cd erigon
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
-          --target ci-cd-main-branch \
+          --target ci-cd-ref-branch \
           --attest type=provenance,mode=max \
           --sbom=true \
-          --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
-          --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
+          --build-arg CI_CD_REF_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
+          --build-arg CI_CD_REF_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
-          --tag ${{ env.DOCKER_URL }}:main-latest \
+          --tag ${{ env.DOCKER_URL }}:${{ github.ref_name }}-latest \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
-          --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
-          --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
+          --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/${{ github.ref_name }}/Dockerfile" \
+          --label org.opencontainers.image.documentation="https://github.com/erigontech/erigon/blob/${{ github.ref_name }}/Dockerfile" \
+          --label org.opencontainers.image.source="https://github.com/erigontech/erigon/blob/${{ github.ref_name }}/Dockerfile" \
           --label org.opencontainers.image.version=${{ steps.getCommitId.outputs.id }} \
           --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.id }} \
           --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short_commit_id }} \
@@ -131,14 +131,14 @@ jobs:
       - name: export and print docker build tag, cleanup old docker images
         id: built_tag_export
         env:
-          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION: "${{ github.ref_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
         run: |
           echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           echo The following docker images have been published:
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ env.BUILD_VERSION }}"
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-latest"
+          echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ github.ref_name }}-${{ env.BUILD_VERSION }}"
+          echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ github.ref_name }}-latest"
           echo
-          echo "Cleanup old docker images matching pattern tag ~= main-XXXXXXX"
+          echo "Cleanup old docker images matching pattern tag ~= ${{ github.ref_name }}-XXXXXXX"
           curl_cmd="curl -s -H \"Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}\" "
           dockerhub_url='https://hub.docker.com/v2/namespaces/erigontech/repositories/erigon'
           my_list () {
@@ -146,15 +146,15 @@ jobs:
             next_page="$dockerhub_url/tags?page=1&page_size=100"
             while [ "$next_page" != "null" ]
               do
-              # Print tags and push dates for tags matching "main-":
-              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep 'main-'
+              # Print tags and push dates for tags matching "${{ github.ref_name }}-":
+              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep '${{ github.ref_name }}-'
               next_page=`$curl_cmd $next_page | jq '.next' | sed -e 's/^\"//' -e 's/\"$//'`
             done
             }
 
             my_list | tail -n+${{ env.KEEP_IMAGES }} | while read line; do
               echo -n "Removing docker image/published - $line "
-              current_image=$(echo $line | sed -e 's/^\(main-.\{7\}\) .*/\1/')
+              current_image=$(echo $line | sed -e 's/^\(${{ github.ref_name }}-.\{7\}\) .*/\1/')
               output_code=$(curl --write-out %{http_code} --output curl-output.log \
                     -s -X DELETE -H "Accept: application/json" \
                     -H "Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}" \
