@@ -1523,6 +1523,7 @@ func TestDomainRange(t *testing.T) {
 		order.Asc.AssertList(keys)
 		require.Equal(3, len(keys))
 		require.Equal(3, len(vals))
+		fmt.Printf("k1: %x\n", keys)
 	}
 
 	{
@@ -1533,6 +1534,7 @@ func TestDomainRange(t *testing.T) {
 		order.Asc.AssertList(keys)
 		require.Equal(5, len(keys))
 		require.Equal(5, len(vals))
+		fmt.Printf("k2: %x\n", keys)
 	}
 
 	{
@@ -1543,6 +1545,7 @@ func TestDomainRange(t *testing.T) {
 		order.Asc.AssertList(keys)
 		require.Equal(5, len(keys))
 		require.Equal(5, len(vals))
+		fmt.Printf("k3: %x\n", keys)
 	}
 }
 
