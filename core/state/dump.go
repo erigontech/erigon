@@ -226,6 +226,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		//}
 	}
 	it.Close()
+	fmt.Printf("[dbg] loop1 is over\n")
 
 	for i, addr := range addrList {
 		account := accountList[i]
