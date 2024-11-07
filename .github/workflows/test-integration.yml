@@ -24,7 +24,6 @@ jobs:
         os:
           - ubuntu-22.04
           - macos-14
-          - ubuntu-latest-erigontests-large
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -38,7 +37,7 @@ jobs:
         run: sudo apt update && sudo apt install build-essential
 
       - name: test-integration
-        run: GOGC=50 make test-integration
+        run: make test-integration
 
   tests-windows:
     strategy:
