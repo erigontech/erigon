@@ -590,6 +590,10 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			sigHashLen += uint(chainIDLen) // For chainId
 			sigHashLen += 2                // For two extra zeros
 		}
+	} else {
+		if ctx.Signature.V.GtUint64(1) {
+			return 0, fmt.Errorf("%w: v is too big: %s", ErrParseTxn, &ctx.Signature.V)
+		}
 	}
 
 	// For legacy transactions, hash the full payload
