@@ -29,6 +29,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - uses: actions/checkout@v4
       - name: test new runner
         run: |
           set +x
