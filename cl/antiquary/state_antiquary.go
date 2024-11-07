@@ -490,6 +490,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
 		}
+		if s.currentState.BeaconConfig().ConfigName == "gnosis" {
+			return nil
+		}
 		blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
 		from := s.stateSn.BlocksAvailable() + 1
 		if from+blocksPerStatefulFile+safetyMargin > s.currentState.Slot() {
