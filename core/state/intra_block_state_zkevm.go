@@ -58,6 +58,10 @@ func (sdb *IntraBlockState) GetTxCount() (uint64, error) {
 }
 
 func (sdb *IntraBlockState) PostExecuteStateSet(chainConfig *chain.Config, blockNum uint64, blockInfoRoot *libcommon.Hash) {
+	if chainConfig.IsNormalcy(blockNum) {
+		return
+	}
+
 	//ETROG
 	if chainConfig.IsForkID7Etrog(blockNum) {
 		sdb.scalableSetBlockInfoRoot(blockInfoRoot)
@@ -70,18 +74,20 @@ func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, blockN
 		sdb.CreateAccount(ADDRESS_SCALABLE_L2, true)
 	}
 
-	//save block number
-	sdb.scalableSetBlockNum(blockNumber)
+	if !chainConfig.IsNormalcy(blockNumber) {
+		//save block number
+		sdb.scalableSetBlockNum(blockNumber)
 
-	//ETROG
-	if chainConfig.IsForkID7Etrog(blockNumber) {
-		currentTimestamp := sdb.ScalableGetTimestamp()
-		if blockTimestamp > currentTimestamp {
-			sdb.ScalableSetTimestamp(blockTimestamp)
+		//ETROG
+		if chainConfig.IsForkID7Etrog(blockNumber) {
+			currentTimestamp := sdb.ScalableGetTimestamp()
+			if blockTimestamp > currentTimestamp {
+				sdb.ScalableSetTimestamp(blockTimestamp)
+			}
+
+			//save prev block hash
+			sdb.scalableSetBlockHash(blockNumber-1, stateRoot)
 		}
-
-		//save prev block hash
-		sdb.scalableSetBlockHash(blockNumber-1, stateRoot)
 	}
 }
 
@@ -99,18 +105,22 @@ func (sdb *IntraBlockState) SyncerPreExecuteStateSet(
 	}
 
 	//save block number
-	sdb.scalableSetBlockNum(blockNumber)
+	if !chainConfig.IsNormalcy(blockNumber) {
+		sdb.scalableSetBlockNum(blockNumber)
+	}
 	emptyHash := libcommon.Hash{}
 
 	//ETROG
 	if chainConfig.IsForkID7Etrog(blockNumber) {
-		currentTimestamp := sdb.ScalableGetTimestamp()
-		if blockTimestamp > currentTimestamp {
-			sdb.ScalableSetTimestamp(blockTimestamp)
-		}
+		if !chainConfig.IsNormalcy(blockNumber) {
+			currentTimestamp := sdb.ScalableGetTimestamp()
+			if blockTimestamp > currentTimestamp {
+				sdb.ScalableSetTimestamp(blockTimestamp)
+			}
 
-		//save prev block hash
-		sdb.scalableSetBlockHash(blockNumber-1, prevBlockHash)
+			//save prev block hash
+			sdb.scalableSetBlockHash(blockNumber-1, prevBlockHash)
+		}
 
 		//save ger with l1blockhash - but only in the case that the l1 info tree index hasn't been
 		// re-used.  If it has been re-used we never write this to the contract storage
