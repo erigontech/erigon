@@ -1376,10 +1376,6 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		return nil, err
 	}
 
-	keys, _, _ := stream.ToArrayKV(hi)
-	fmt.Printf("[dbg] keys: %x\n", keys)
-	keys2, _, _ := stream.ToArrayKV(dbit)
-	fmt.Printf("[dbg] keys2: %x\n", keys2)
 	return stream.UnionKV(hi.Trace(""), dbit.Trace(""), limit), nil
 }
 
