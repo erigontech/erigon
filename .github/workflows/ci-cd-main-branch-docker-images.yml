@@ -139,8 +139,8 @@ jobs:
             --sbom=true \
             --platform linux/amd64,linux/amd64/v2,linux/arm64 .
 
-      - name: test assertor
-        uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@feat/assertor-testing
+      - name: test-assertor
+        uses: ./test-kurtosis-assertoor.yml
         with:
           checkout_ref: ${{ github.sha }}
           os: ${{ needs.define_matrix.outputs.os }}
