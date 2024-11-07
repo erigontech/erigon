@@ -323,6 +323,9 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 			}
 		}
 	} else {
+		if !sig.V.LtUint64(1 << 8) {
+			return 0, 0, fmt.Errorf("v is loo large: %s", &sig.V)
+		}
 		yParity = byte(sig.V.Uint64())
 	}
 
@@ -511,6 +514,10 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			p2, err = rlp.U256(payload, p2, &sig.ChainID)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization chainId: %s", ErrParseTxn, err) //nolint
+			}
+			if !sig.ChainID.IsUint64() {
+				// https://github.com/ethereum/EIPs/pull/8929
+				return 0, fmt.Errorf("%w: authorization chainId is too big: %s", ErrParseTxn, &sig.ChainID)
 			}
 			p2, err = rlp.StringOfLen(payload, p2, 20) // address
 			if err != nil {

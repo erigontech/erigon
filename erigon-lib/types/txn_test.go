@@ -405,13 +405,5 @@ func TestSetCodeTxParsingWithLargeAuthorizationValues(t *testing.T) {
 	assert.Equal(t, SetCodeTxType, txType)
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx, nil, false /* hasEnvelope */, false, nil)
-	require.NoError(t, err)
-	assert.Equal(t, SetCodeTxType, tx.Type)
-	require.Equal(t, 1, len(tx.Authorizations))
-
-	maxUint256 := new(uint256.Int).SetAllOne()
-	assert.True(t, tx.Authorizations[0].ChainID.Eq(maxUint256))
-	assert.True(t, tx.Authorizations[0].V.Eq(maxUint256))
-	assert.True(t, tx.Authorizations[0].R.Eq(maxUint256))
-	assert.True(t, tx.Authorizations[0].S.Eq(maxUint256))
+	assert.ErrorContains(t, err, "chainId is too big")
 }
