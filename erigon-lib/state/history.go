@@ -1377,7 +1377,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		return nil, err
 	}
 
-	return stream.UnionKV(hi, dbit, limit), nil
+	return stream.UnionKV(hi.Trace("hi"), dbit.Trace("dbit"), limit), nil
 }
 
 // StateAsOfIter - returns state range at given time in history
@@ -1422,7 +1422,6 @@ func (hi *StateAsOfIterF) init(files visibleFiles) error {
 				offset = 0
 			}
 		}
-		fmt.Printf("[dbg] add file: %s\n", item.src.decompressor.FileName())
 		g.Reset(offset)
 		if g.HasNext() {
 			key, offset := g.Next(nil)
