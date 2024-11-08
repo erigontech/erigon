@@ -972,8 +972,8 @@ func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, st
 	return v, step, nil
 }
 
-// DomainGetAsOfFile returns value from domain with respect to limit ofMaxTxnum
-func (sd *SharedDomains) domainGetAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
+// GetAsOfFile returns value from domain with respect to limit ofMaxTxnum
+func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
 	}
@@ -981,7 +981,7 @@ func (sd *SharedDomains) domainGetAsOfFile(domain kv.Domain, k, k2 []byte, ofMax
 		k = append(k, k2...)
 	}
 
-	v, ok, err := sd.aggTx.DomainGetAsOfFile(domain, k, ofMaxTxnum)
+	v, ok, err := sd.aggTx.GetAsOfFile(domain, k, ofMaxTxnum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
 	}
@@ -1185,7 +1185,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 			return nil, fmt.Errorf("GetAccount failed: %w", err)
 		}
 	} else {
-		encAccount, _, err = sdc.sharedDomains.domainGetAsOfFile(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		encAccount, _, err = sdc.sharedDomains.getAsOfFile(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
 			return nil, fmt.Errorf("GetAccount failed: %w", err)
 		}
@@ -1216,7 +1216,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 	if sdc.limitReadAsOfTxNum == 0 {
 		code, _, err = sdc.sharedDomains.DomainGet(kv.CodeDomain, plainKey, nil)
 	} else {
-		code, _, err = sdc.sharedDomains.domainGetAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		code, _, err = sdc.sharedDomains.getAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
@@ -1244,7 +1244,7 @@ func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitme
 	if sdc.limitReadAsOfTxNum == 0 {
 		enc, _, err = sdc.sharedDomains.DomainGet(kv.StorageDomain, plainKey, nil)
 	} else {
-		enc, _, err = sdc.sharedDomains.domainGetAsOfFile(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		enc, _, err = sdc.sharedDomains.getAsOfFile(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 	}
 	if err != nil {
 		return nil, err

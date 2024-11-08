@@ -218,7 +218,7 @@ func (tx *Tx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok
 	if key2 != nil {
 		key = append(common.Copy(key), key2...)
 	}
-	return tx.filesTx.DomainGetAsOf(tx.MdbxTx, name, key, ts)
+	return tx.filesTx.GetAsOf(tx.MdbxTx, name, key, ts)
 }
 
 func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {

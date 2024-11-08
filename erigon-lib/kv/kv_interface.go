@@ -511,7 +511,7 @@ type TemporalTx interface {
 	Tx
 	TemporalGetter
 
-	// DomainGetAsOf - state as of given `ts`
+	// GetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
 	// Means if you want re-execute `txNum` on historical state - do `GetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.

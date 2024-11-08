@@ -717,7 +717,7 @@ func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step
 	//return m.db.(kv.TemporalTx).DomainGet(name, k, k2)
 }
 
-func (m *MemoryMutation) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
+func (m *MemoryMutation) GetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	panic("not supported")
 	//return m.db.(kv.TemporalTx).GetAsOf(name, k, k2, ts)
 }
