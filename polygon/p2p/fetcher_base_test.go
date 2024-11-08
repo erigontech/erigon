@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	erigonlibtypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/core/types"
@@ -891,7 +891,7 @@ func (ft *fetcherTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 			}
 
 			return &sentryproto.SentPeers{
-				Peers: []*erigonlibtypes.H512{req.PeerId},
+				Peers: []*typesproto.H512{req.PeerId},
 			}, nil
 		}).
 		AnyTimes()

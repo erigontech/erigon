@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
@@ -498,7 +498,7 @@ func TestSendBlock(t *testing.T) {
 	}
 
 	r.ReceiveWg.Add(1)
-	for _, err = range r.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: s.PeerId}) {
+	for _, err = range r.Send(&sentryproto.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: s.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}
