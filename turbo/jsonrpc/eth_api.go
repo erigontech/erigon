@@ -140,8 +140,8 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
-	useBridge    bool
-	bridgeReader bridgeReader
+	useBridgeReader bool
+	bridgeReader    bridgeReader
 
 	evmCallTimeout      time.Duration
 	dirs                datadir.Dirs
@@ -175,7 +175,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		receiptsGenerator:   receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
 		borReceiptGenerator: receipts.NewBorGenerator(receiptsCacheLimit, blockReader, engine),
 		dirs:                dirs,
-		useBridge:           !reflect.ValueOf(bridgeReader).IsNil(),
+		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(),
 		bridgeReader:        bridgeReader,
 	}
 }
@@ -305,7 +305,7 @@ func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumbe
 
 func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {
 	var stateSyncEvents []*types.Message
-	if api.useBridge {
+	if api.useBridgeReader {
 		events, err := api.bridgeReader.Events(ctx, blockNum)
 		if err != nil {
 			return nil, err
@@ -398,7 +398,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
-	if base.useBridge {
+	if base.useBridgeReader {
 		logger.Info("starting rpc with polygon bridge")
 	}
 

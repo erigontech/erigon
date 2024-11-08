@@ -61,7 +61,7 @@ func NewBorAPI(base *BaseAPI, db kv.RoDB, spanProducersReader spanProducersReade
 	return &BorImpl{
 		BaseAPI:                base,
 		db:                     db,
-		useSpanProducersReader: !reflect.ValueOf(spanProducersReader).IsNil(),
+		useSpanProducersReader: spanProducersReader != nil && !reflect.ValueOf(spanProducersReader).IsNil(),
 		spanProducersReader:    spanProducersReader,
 	}
 }

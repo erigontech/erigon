@@ -385,9 +385,9 @@ func New(
 		execCtx:         context.Background(),
 		logger:          logger,
 		closeCh:         make(chan struct{}),
-		useBridgeReader: !reflect.ValueOf(bridgeReader).IsNil(),
+		useBridgeReader: bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(),
 		bridgeReader:    bridgeReader,
-		useSpanReader:   !reflect.ValueOf(spanReader).IsNil(),
+		useSpanReader:   spanReader != nil && !reflect.ValueOf(spanReader).IsNil(),
 		spanReader:      spanReader,
 	}
 
