@@ -8,13 +8,14 @@ import (
 
 	"time"
 
+	"strconv"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	utils2 "github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/urfave/cli/v2"
-	"strconv"
 )
 
 var DeprecatedFlags = map[string]string{
@@ -69,6 +70,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	if err != nil {
 		panic(fmt.Sprintf("could not parse l2 datastreamer timeout value %s", l2DataStreamTimeoutVal))
 	}
+
+	l2ShortCircuitToVerifiedBatchVal := ctx.Bool(utils.L2ShortCircuitToVerifiedBatchFlag.Name)
 
 	sequencerBlockSealTimeVal := ctx.String(utils.SequencerBlockSealTime.Name)
 	sequencerBlockSealTime, err := time.ParseDuration(sequencerBlockSealTimeVal)
@@ -133,6 +136,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L2RpcUrl:                               ctx.String(utils.L2RpcUrlFlag.Name),
 		L2DataStreamerUrl:                      ctx.String(utils.L2DataStreamerUrlFlag.Name),
 		L2DataStreamerTimeout:                  l2DataStreamTimeout,
+		L2ShortCircuitToVerifiedBatch:          l2ShortCircuitToVerifiedBatchVal,
 		L1SyncStartBlock:                       ctx.Uint64(utils.L1SyncStartBlock.Name),
 		L1SyncStopBatch:                        ctx.Uint64(utils.L1SyncStopBatch.Name),
 		L1ChainId:                              ctx.Uint64(utils.L1ChainIdFlag.Name),

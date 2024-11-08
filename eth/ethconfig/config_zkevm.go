@@ -12,6 +12,7 @@ type Zk struct {
 	L2RpcUrl                               string
 	L2DataStreamerUrl                      string
 	L2DataStreamerTimeout                  time.Duration
+	L2ShortCircuitToVerifiedBatch          bool
 	L1SyncStartBlock                       uint64
 	L1SyncStopBatch                        uint64
 	L1ChainId                              uint64
