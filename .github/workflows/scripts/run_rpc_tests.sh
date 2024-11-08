@@ -10,7 +10,7 @@ disabled_tests=(
     erigon_getHeaderByHash,erigon_getHeaderByNumber,eth_feeHistory
     # total difficulty field was removed, then added back
     eth_getBlockByHash,eth_getBlockByNumber
-    # Erigon bugs
+    # Erigon bugs: https://github.com/erigontech/erigon/pull/12609
     debug_accountRange,debug_storageRangeAt
     # need update rpc-test - because Erigon is correct (@AskAlexSharov will do after https://github.com/erigontech/erigon/pull/12634)
     debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber
