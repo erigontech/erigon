@@ -35,6 +35,8 @@ disabled_tests=(
     debug_traceBlockByNumber/test_10.tar
     debug_traceBlockByNumber/test_11.tar
     debug_traceBlockByNumber/test_12.tar
+    # modified expected in case of empty rsp
+    debug_storageRangeAt/test_11.json
     # remove this line after https://github.com/erigontech/rpc-tests/pull/281
     parity_getBlockReceipts
     parity_listStorageKeys/test_12.json
