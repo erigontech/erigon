@@ -20,7 +20,7 @@ func TestExecutionSpec(t *testing.T) {
 
 	bt := new(testMatcher)
 
-	dir := filepath.Join(".", "execution-spec-tests")
+	dir := filepath.Join(".", "execution-spec-tests", "prague", "eip6110_deposits")
 	checkStateRoot := true
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *BlockTest) {

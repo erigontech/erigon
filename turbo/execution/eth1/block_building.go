@@ -204,9 +204,10 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		requests := make([][]byte, len(types.KnownRequestTypes))
 		if len(blockWithReceipts.Requests) == len(types.KnownRequestTypes) {
 			for i, r := range blockWithReceipts.Requests {
-				requests[i] = r.RequestData
+				copy(requests[i], r.RequestData)
 			}
 		} else {
+			e.logger.Error("Requests len SHOULD BE","equal to", len(types.KnownRequestTypes), "got", len(blockWithReceipts.Requests))
 			for i := 0; i < len(types.KnownRequestTypes); i++ {
 				requests[i] = make([]byte, 0)
 			}

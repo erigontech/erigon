@@ -462,6 +462,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	var executionRequests []hexutility.Bytes
 	if version >= clparams.ElectraVersion {
 		executionRequests = make([]hexutility.Bytes, len(types.KnownRequestTypes))
+		if len(data.Requests.Requests) != 3 {
+			s.logger.Warn("Error in getPayload - data.Requests.Requests len not 3")
+		}
 		for i := 0; i < len(types.KnownRequestTypes); i++ {
 			if len(data.Requests.Requests) < i+1 || data.Requests.Requests[i] == nil {
 				executionRequests[i] = make(hexutility.Bytes, 0)
