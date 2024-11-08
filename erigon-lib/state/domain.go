@@ -758,40 +758,6 @@ func (dt *DomainRoTx) DebugEFKey(k []byte) error {
 	return nil
 }
 
-func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
-	d.History.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil {
-				return false
-			}
-			datsz += uint64(item.decompressor.Size())
-			idxsz += uint64(item.index.Size())
-			idxsz += uint64(item.bindex.Size())
-			files += 3
-		}
-		return true
-	})
-
-	d.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil {
-				return false
-			}
-			datsz += uint64(item.decompressor.Size())
-			idxsz += uint64(item.index.Size())
-			idxsz += uint64(item.bindex.Size())
-			files += 3
-		}
-		return true
-	})
-
-	fcnt, fsz, isz := d.History.InvertedIndex.collectFilesStat()
-	datsz += fsz
-	files += fcnt
-	idxsz += isz
-	return
-}
-
 func (d *Domain) BeginFilesRo() *DomainRoTx {
 	for i := 0; i < len(d._visible.files); i++ {
 		if !d._visible.files[i].src.frozen {

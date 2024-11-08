@@ -1234,25 +1234,6 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	ii.dirtyFiles.Set(fi)
 }
 
-func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint64) {
-	if ii.dirtyFiles == nil {
-		return 0, 0, 0
-	}
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.index == nil {
-				return false
-			}
-			filesSize += uint64(item.decompressor.Size())
-			idxSize += uint64(item.index.Size())
-			idxSize += uint64(item.bindex.Size())
-			filesCount += 3
-		}
-		return true
-	})
-	return filesCount, filesSize, idxSize
-}
-
 func (ii *InvertedIndex) stepsRangeInDBAsStr(tx kv.Tx) string {
 	a1, a2 := ii.stepsRangeInDB(tx)
 	return fmt.Sprintf("%s: %.1f", ii.filenameBase, a2-a1)
