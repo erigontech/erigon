@@ -864,10 +864,6 @@ const (
 )
 
 const (
-	ReceiptHistory History = "ReceiptHistory"
-)
-
-const (
 	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
