@@ -89,18 +89,18 @@ jobs:
           make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
 
-      - name: Build for linux/amd64/v2
+      - name: Build for linux/amd64
         run: >
-          docker run --platform linux/amd64/v2
+          docker run --platform linux/amd64
           --rm
           -v $(pwd)/erigon:/erigon:ro
-          -v ${GITHUB_WORKSPACE}/build-amd64v2:/erigon-build
+          -v ${GITHUB_WORKSPACE}/build-amd64:/erigon-build
           -v ${HOME}/.cache:/root/.cache
           -v ${HOME}/go/pkg/mod:/go/pkg/mod
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
-          make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb 
+          make GOARCH=amd64 GOAMD64=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb 
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
           find / -name libsilkworm_capi.so -exec install {} /erigon-build \; "
 
@@ -112,8 +112,8 @@ jobs:
           mkdir $GITHUB_WORKSPACE/release
           for dir in build-*; do
             cd $dir
-            echo Current directory is $(pwd) . Checksum file and archive will be created for this directory
-            sha256sum * > checksums.txt
+            echo Current directory is $(pwd). Checksum file and archive will be created for this directory
+            # sha256sum * > checksums.txt
             tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,').tar.gz \
               --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,')/," .
             cd -
@@ -132,12 +132,13 @@ jobs:
             echo "Current directory is $(pwd) ."
             docker buildx build \
             --file ${{ github.workspace }}/erigon/${{ env.DOCKERFILE_PATH }} \
+            --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
             --build-arg VERSION=${{ env.BUILD_VERSION }} \
             --build-arg APPLICATION=${{ env.APPLICATION }} \
             --target release \
             --attest type=provenance,mode=max \
             --sbom=true \
-            --platform linux/amd64,linux/amd64/v2,linux/arm64 .
+            --platform linux/amd64,linux/arm64 .
 
       - name: test-assertor
         uses: ./test-kurtosis-assertoor.yml
