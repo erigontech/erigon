@@ -650,16 +650,16 @@ func (tx *tx) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc 
 		return reply.Keys, reply.Values, reply.NextPageToken, nil
 	}), nil
 }
-func (tx *tx) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.HistorySeek(tx.ctx, &remote.HistorySeekReq{TxId: tx.id, Table: string(name), K: k, Ts: ts})
+func (tx *tx) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	reply, err := tx.db.remoteKV.HistorySeek(tx.ctx, &remote.HistorySeekReq{TxId: tx.id, Table: name.String(), K: k, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
 	return reply.V, reply.Ok, nil
 }
-func (tx *tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
+func (tx *tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
 	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
-		reply, err := tx.db.remoteKV.HistoryRange(tx.ctx, &remote.HistoryRangeReq{TxId: tx.id, Table: string(name), FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})
+		reply, err := tx.db.remoteKV.HistoryRange(tx.ctx, &remote.HistoryRangeReq{TxId: tx.id, Table: name.String(), FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})
 		if err != nil {
 			return nil, nil, "", err
 		}

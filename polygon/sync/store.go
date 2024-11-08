@@ -50,7 +50,17 @@ type bridgeStore interface {
 	ReplayInitialBlock(ctx context.Context, block *types.Block) error
 }
 
-type executionClientStore struct {
+func NewStore(logger log.Logger, executionStore executionStore, bridgeStore bridgeStore) *ExecutionClientStore {
+	return &ExecutionClientStore{
+		logger:          logger,
+		executionStore:  executionStore,
+		bridgeStore:     bridgeStore,
+		queue:           make(chan []*types.Block),
+		tasksDoneSignal: make(chan bool, 1),
+	}
+}
+
+type ExecutionClientStore struct {
 	logger         log.Logger
 	executionStore executionStore
 	bridgeStore    bridgeStore
@@ -63,18 +73,7 @@ type executionClientStore struct {
 	lastQueuedBlock uint64
 }
 
-func NewStore(logger log.Logger, executionStore executionStore, bridgeStore bridgeStore) Store {
-	return &executionClientStore{
-		logger:          logger,
-		executionStore:  executionStore,
-		bridgeStore:     bridgeStore,
-		queue:           make(chan []*types.Block),
-		tasksDoneSignal: make(chan bool, 1),
-	}
-}
-
-func (s *executionClientStore) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-
+func (s *ExecutionClientStore) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -100,7 +99,7 @@ func (s *executionClientStore) InsertBlocks(ctx context.Context, blocks []*types
 	}
 }
 
-func (s *executionClientStore) Flush(ctx context.Context) error {
+func (s *ExecutionClientStore) Flush(ctx context.Context) error {
 	for s.tasksCount.Load() > 0 {
 		select {
 		case _, ok := <-s.tasksDoneSignal:
@@ -115,7 +114,7 @@ func (s *executionClientStore) Flush(ctx context.Context) error {
 	return nil
 }
 
-func (s *executionClientStore) Run(ctx context.Context) error {
+func (s *ExecutionClientStore) Run(ctx context.Context) error {
 	s.logger.Debug(syncLogPrefix("running execution client store component"))
 
 	for {
@@ -137,7 +136,7 @@ func (s *executionClientStore) Run(ctx context.Context) error {
 	}
 }
 
-func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types.Block) error {
+func (s *ExecutionClientStore) insertBlocks(ctx context.Context, blocks []*types.Block) error {
 	defer s.tasksCount.Add(-1)
 	insertStartTime := time.Now()
 
@@ -190,7 +189,7 @@ func (s *executionClientStore) insertBlocks(ctx context.Context, blocks []*types
 // a conscious design decision.
 //
 // The bridge store is in control of determining whether and which block need replaying.
-func (s *executionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Context) error {
+func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Context) error {
 	initialBlockNum, replayNeeded, err := s.bridgeStore.InitialBlockReplayNeeded(ctx)
 	if err != nil {
 		return err

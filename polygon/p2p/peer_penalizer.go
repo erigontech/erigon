@@ -22,21 +22,17 @@ import (
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 )
 
-type PeerPenalizer interface {
-	Penalize(ctx context.Context, peerId *PeerId) error
-}
-
-func NewPeerPenalizer(sentryClient sentry.SentryClient) PeerPenalizer {
-	return &peerPenalizer{
+func NewPeerPenalizer(sentryClient sentry.SentryClient) *PeerPenalizer {
+	return &PeerPenalizer{
 		sentryClient: sentryClient,
 	}
 }
 
-type peerPenalizer struct {
+type PeerPenalizer struct {
 	sentryClient sentry.SentryClient
 }
 
-func (p *peerPenalizer) Penalize(ctx context.Context, peerId *PeerId) error {
+func (p PeerPenalizer) Penalize(ctx context.Context, peerId *PeerId) error {
 	_, err := p.sentryClient.PenalizePeer(ctx, &sentry.PenalizePeerRequest{
 		PeerId:  peerId.H512(),
 		Penalty: sentry.PenaltyKind_Kick,

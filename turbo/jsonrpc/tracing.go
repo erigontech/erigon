@@ -22,9 +22,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -120,7 +121,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 
 		var ok bool
-		if api.bridgeReader != nil {
+		if api.useBridgeReader {
 			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		} else {
 			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
@@ -263,7 +264,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		if api.bridgeReader != nil {
+		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)

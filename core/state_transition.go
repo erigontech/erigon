@@ -358,7 +358,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			data.Reset()
 
 			// 1. chainId check
-			if auth.ChainID != nil && !auth.ChainID.IsZero() && auth.ChainID.CmpBig(st.evm.ChainRules().ChainID) != 0 {
+			if auth.ChainID != 0 && (!rules.ChainID.IsUint64() || rules.ChainID.Uint64() != auth.ChainID) {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
 				continue
 			}

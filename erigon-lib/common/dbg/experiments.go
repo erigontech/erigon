@@ -68,7 +68,7 @@ var (
 
 	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
 
-	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", true)
+	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

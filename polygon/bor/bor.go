@@ -25,6 +25,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -322,11 +323,13 @@ type Bor struct {
 
 	execCtx context.Context // context of caller execution stage
 
-	spanner        Spanner
-	stateReceiver  StateReceiver
-	HeimdallClient heimdall.HeimdallClient
-	spanReader     spanReader
-	bridgeReader   bridgeReader
+	spanner         Spanner
+	stateReceiver   StateReceiver
+	HeimdallClient  heimdall.HeimdallClient
+	useSpanReader   bool
+	spanReader      spanReader
+	useBridgeReader bool
+	bridgeReader    bridgeReader
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -370,20 +373,22 @@ func New(
 	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
 
 	c := &Bor{
-		chainConfig:    chainConfig,
-		config:         borConfig,
-		DB:             db,
-		blockReader:    blockReader,
-		Recents:        recents,
-		Signatures:     signatures,
-		spanner:        spanner,
-		stateReceiver:  genesisContracts,
-		HeimdallClient: heimdallClient,
-		execCtx:        context.Background(),
-		logger:         logger,
-		closeCh:        make(chan struct{}),
-		bridgeReader:   bridgeReader,
-		spanReader:     spanReader,
+		chainConfig:     chainConfig,
+		config:          borConfig,
+		DB:              db,
+		blockReader:     blockReader,
+		Recents:         recents,
+		Signatures:      signatures,
+		spanner:         spanner,
+		stateReceiver:   genesisContracts,
+		HeimdallClient:  heimdallClient,
+		execCtx:         context.Background(),
+		logger:          logger,
+		closeCh:         make(chan struct{}),
+		useBridgeReader: bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
+		bridgeReader:    bridgeReader,
+		useSpanReader:   spanReader != nil && !reflect.ValueOf(spanReader).IsNil(), // needed for interface nil caveat
+		spanReader:      spanReader,
 	}
 
 	c.authorizedSigner.Store(&signer{
@@ -847,7 +852,7 @@ func (c *Bor) VerifyUncles(_ consensus.ChainReader, _ *types.Header, uncles []*t
 // in the header satisfies the consensus protocol requirements.
 func (c *Bor) VerifySeal(chain ChainHeaderReader, header *types.Header) error {
 	var validatorSet *valset.ValidatorSet
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		v, err := c.spanReader.Producers(context.Background(), header.Number.Uint64())
 		if err != nil {
 			return err
@@ -914,7 +919,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	number := header.Number.Uint64()
 	// Assemble the validator snapshot to check which votes make sense
 	var validatorSet *valset.ValidatorSet
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		v, err := c.spanReader.Producers(context.Background(), header.Number.Uint64())
 		if err != nil {
 			return err
@@ -1185,7 +1190,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types.B
 	signer, signFn := currentSigner.signer, currentSigner.signFn
 
 	var successionNumber int
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		validatorSet, err := c.spanReader.Producers(context.Background(), number)
 		if err != nil {
 			return err
@@ -1274,7 +1279,7 @@ func (c *Bor) IsValidator(header *types.Header) (bool, error) {
 
 	currentSigner := c.authorizedSigner.Load()
 
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		validatorSet, err := c.spanReader.Producers(context.Background(), number)
 		if err != nil {
 			return false, err
@@ -1306,7 +1311,7 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 
 	var validatorSet *valset.ValidatorSet
 	var err error
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		validatorSet, err = c.spanReader.Producers(context.Background(), number)
 		if err != nil {
 			return false, err
@@ -1330,7 +1335,7 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ libcommon.Hash, _ uint64) *big.Int {
 	signer := c.authorizedSigner.Load().signer
 
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		validatorSet, err := c.spanReader.Producers(context.Background(), parentNumber+1)
 		if err != nil {
 			return nil
@@ -1452,7 +1457,7 @@ func (c *Bor) fetchAndCommitSpan(
 		}
 
 		heimdallSpan = s
-	} else if c.spanReader != nil {
+	} else if c.useSpanReader {
 		span, ok, err := c.spanReader.Span(context.Background(), newSpanID)
 		if err != nil {
 			return err
@@ -1563,7 +1568,7 @@ func (c *Bor) CommitStates(
 ) error {
 	blockNum := header.Number.Uint64()
 
-	if c.bridgeReader != nil {
+	if c.useBridgeReader {
 		events, err := c.bridgeReader.Events(c.execCtx, blockNum)
 		if err != nil {
 			return err
@@ -1627,7 +1632,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 
 	// Retrieve the snapshot needed to verify this header and cache it
 	var validatorSet *valset.ValidatorSet
-	if c.spanReader != nil {
+	if c.useSpanReader {
 		v, err := c.spanReader.Producers(context.Background(), headerNumber)
 		if err != nil {
 			return nil, err
