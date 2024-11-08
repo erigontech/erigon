@@ -495,11 +495,11 @@ func (m *TracedDuo[K, V]) HasNext() bool {
 }
 func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v, err = m.it.Next()
-	switch any(k).(type) {
+	switch typedK := any(k).(type) {
 	case []byte:
-		log.Warn(m.prefix, "next", fmt.Sprintf("%x", k))
+		log.Warn(m.prefix, "next", fmt.Sprintf("%x", typedK))
 	default:
-		log.Warn(m.prefix, "next", k)
+		log.Warn(m.prefix, "next", typedK)
 	}
 	return k, v, err
 }
