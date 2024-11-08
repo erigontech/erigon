@@ -68,15 +68,17 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress libcommon.Address, start 
 		result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
 	}
 
-	if r.HasNext() {
+	for r.HasNext() { // not `if` because need skip empty vals
 		k, v, err := r.Next()
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
-		if len(v) > 0 {
-			key := libcommon.BytesToHash(k[20:])
-			result.NextKey = &key
+		if len(v) == 0 {
+			continue
 		}
+		key := libcommon.BytesToHash(k[20:])
+		result.NextKey = &key
+		break
 	}
 	return result, nil
 }
