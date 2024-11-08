@@ -2413,7 +2413,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	order.Asc.Assert(hi.kBackup, hi.nextKey)
-	// TODO: remove `common.Copy`. it protecting from some existing bug.
+	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
 	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
