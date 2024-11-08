@@ -233,7 +233,7 @@ func (f *FetcherBase) fetchHeadersWithRetry(
 	return fetchWithRetry(config, func() (FetcherResponse[[]*types.Header], error) {
 		response, err := f.fetchHeaders(ctx, request, peerId, config.responseTimeout)
 		if err != nil {
-			f.logger.Debug("[p2p.FetcherBase] fetching headers failure", "attempt", attempt, "peerId", peerId, "err", err)
+			f.logger.Debug("[p2p.fetcher] fetching headers failure", "attempt", attempt, "peerId", peerId, "err", err)
 			attempt++
 		}
 		return response, err
@@ -339,7 +339,7 @@ func (f *FetcherBase) fetchBodiesWithRetry(
 	return fetchWithRetry(config, func() (*FetcherResponse[[]*types.Body], error) {
 		response, err := f.fetchBodies(ctx, headers, peerId, config.responseTimeout)
 		if err != nil {
-			f.logger.Debug("[p2p.FetcherBase] fetching bodies failure", "attempt", attempt, "peerId", peerId, "err", err)
+			f.logger.Debug("[p2p.fetcher] fetching bodies failure", "attempt", attempt, "peerId", peerId, "err", err)
 			attempt++
 		}
 		return response, err

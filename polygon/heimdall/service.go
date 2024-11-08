@@ -56,9 +56,9 @@ type service struct {
 	logger                    log.Logger
 	store                     Store
 	reader                    *Reader
-	checkpointScraper         *scraper[*Checkpoint]
-	milestoneScraper          *scraper[*Milestone]
-	spanScraper               *scraper[*Span]
+	checkpointScraper         *Scraper[*Checkpoint]
+	milestoneScraper          *Scraper[*Milestone]
+	spanScraper               *Scraper[*Span]
 	spanBlockProducersTracker *spanBlockProducersTracker
 	ready                     ready
 }
@@ -79,11 +79,11 @@ var TransientErrors = []error{
 }
 
 func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store, logger log.Logger) *service {
-	checkpointFetcher := newCheckpointFetcher(client, logger)
-	milestoneFetcher := newMilestoneFetcher(client, logger)
-	spanFetcher := newSpanFetcher(client, logger)
+	checkpointFetcher := NewCheckpointFetcher(client, logger)
+	milestoneFetcher := NewMilestoneFetcher(client, logger)
+	spanFetcher := NewSpanFetcher(client, logger)
 
-	checkpointScraper := newScraper(
+	checkpointScraper := NewScraper(
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
@@ -97,7 +97,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store,
 	// latest milestone.
 	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
 	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, TransientErrors...)
-	milestoneScraper := newScraper(
+	milestoneScraper := NewScraper(
 		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
@@ -105,7 +105,7 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store,
 		logger,
 	)
 
-	spanScraper := newScraper(
+	spanScraper := NewScraper(
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
@@ -124,8 +124,8 @@ func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store,
 	}
 }
 
-func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Checkpoint] {
-	return newEntityFetcher(
+func NewCheckpointFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Checkpoint] {
+	return NewEntityFetcher(
 		"CheckpointFetcher",
 		func(ctx context.Context) (int64, error) {
 			return 1, nil
@@ -139,8 +139,8 @@ func newCheckpointFetcher(client HeimdallClient, logger log.Logger) entityFetche
 	)
 }
 
-func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Milestone] {
-	return newEntityFetcher(
+func NewMilestoneFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Milestone] {
+	return NewEntityFetcher(
 		"MilestoneFetcher",
 		client.FetchFirstMilestoneNum,
 		client.FetchMilestoneCount,
@@ -152,7 +152,7 @@ func newMilestoneFetcher(client HeimdallClient, logger log.Logger) entityFetcher
 	)
 }
 
-func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Span] {
+func NewSpanFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Span] {
 	fetchLastEntityId := func(ctx context.Context) (int64, error) {
 		span, err := client.FetchLatestSpan(ctx)
 		if err != nil {
@@ -165,7 +165,7 @@ func newSpanFetcher(client HeimdallClient, logger log.Logger) entityFetcher[*Spa
 		return client.FetchSpan(ctx, uint64(id))
 	}
 
-	return newEntityFetcher(
+	return NewEntityFetcher(
 		"SpanFetcher",
 		func(ctx context.Context) (int64, error) {
 			return 0, nil
@@ -330,43 +330,32 @@ func (s *service) Run(ctx context.Context) error {
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
-		err := s.checkpointScraper.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("checkpoint scraper failed: %w", err)
+		if err := s.checkpointScraper.Run(ctx); err != nil {
+			return fmt.Errorf("checkpoint scraper failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 	eg.Go(func() error {
-		err := s.milestoneScraper.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("milestone scraper failed: %w", err)
+		if err := s.milestoneScraper.Run(ctx); err != nil {
+			return fmt.Errorf("milestone scraper failed: %w", err)
 		}
 
-		return err
-
+		return nil
 	})
 	eg.Go(func() error {
-		err := s.spanScraper.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("span scraper failed: %w", err)
+		if err := s.spanScraper.Run(ctx); err != nil {
+			return fmt.Errorf("span scraper failed: %w", err)
 		}
 
-		return err
-
+		return nil
 	})
 	eg.Go(func() error {
-		err := s.spanBlockProducersTracker.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("span producer tracker failed: %w", err)
+		if err := s.spanBlockProducersTracker.Run(ctx); err != nil {
+			return fmt.Errorf("span producer tracker failed: %w", err)
 		}
 
-		return err
-
+		return nil
 	})
 	return eg.Wait()
 }
