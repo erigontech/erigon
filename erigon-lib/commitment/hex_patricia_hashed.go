@@ -87,6 +87,8 @@ type HexPatriciaHashed struct {
 
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 	hadToLoadL    map[uint64]skipStat
+	mounted       bool
+	mountedNib    int // < 16
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
@@ -1517,11 +1519,62 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
+func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
+	fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
+	// Keep folding until the currentKey is the prefix of the key we modify
+	for hph.needFolding(hashedKey) {
+		if err := hph.fold(); err != nil {
+			return fmt.Errorf("fold: %w", err)
+		}
+	}
+	// Now unfold until we step on an empty cell
+	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+		if err := hph.unfold(hashedKey, unfolding); err != nil {
+			return fmt.Errorf("unfold: %w", err)
+		}
+	}
+
+	if stateUpdate == nil {
+		// Update the cell
+		if len(plainKey) == hph.accountKeyLen {
+			stateUpdate, err = hph.ctx.Account(plainKey)
+			if err != nil {
+				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+			}
+		} else {
+			stateUpdate, err = hph.ctx.Storage(plainKey)
+			if err != nil {
+				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+			}
+		}
+	}
+	hph.updateCell(plainKey, hashedKey, stateUpdate)
+
+	mxTrieProcessedKeys.Inc()
+	return nil
+}
+
+func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, error) {
+	hph.trace = true
+	if hph.activeRows == 0 {
+		return hph.root, nil
+	}
+	for hph.activeRows > 0 {
+		if err := hph.fold(); err != nil {
+			return cell{}, fmt.Errorf("final fold: %w", err)
+		}
+	}
+	_ = nib
+	return hph.grid[0][hph.mountedNib], nil
+}
+func (hph *HexPatriciaHashed) flush(ctx context.Context) error {
+	return hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
+}
+
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
-		m      runtime.MemStats
-		ki     uint64
-		update *Update
+		m  runtime.MemStats
+		ki uint64
 
 		updatesCount = updates.Size()
 		start        = time.Now()
@@ -1540,47 +1593,13 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		default:
 		}
-
 		if hph.trace {
 			fmt.Printf("\n%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
-		// Keep folding until the currentKey is the prefix of the key we modify
-		for hph.needFolding(hashedKey) {
-			if err := hph.fold(); err != nil {
-				return fmt.Errorf("fold: %w", err)
-			}
-		}
-		// Now unfold until we step on an empty cell
-		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
-			if err := hph.unfold(hashedKey, unfolding); err != nil {
-				return fmt.Errorf("unfold: %w", err)
-			}
+		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
+			return fmt.Errorf("followAndUpdate: %w", err)
 		}
 
-		if stateUpdate == nil {
-			// Update the cell
-			if len(plainKey) == hph.accountKeyLen {
-				update, err = hph.ctx.Account(plainKey)
-				if err != nil {
-					return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
-				}
-			} else {
-				update, err = hph.ctx.Storage(plainKey)
-				if err != nil {
-					return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
-				}
-			}
-		} else {
-			if update == nil {
-				update = stateUpdate
-			} else {
-				update.Reset()
-				update.Merge(stateUpdate)
-			}
-		}
-		hph.updateCell(plainKey, hashedKey, update)
-
-		mxTrieProcessedKeys.Inc()
 		ki++
 		return nil
 	})
@@ -2170,4 +2189,124 @@ func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
 		nibblized[i*2+1] = b & 0xf
 	}
 	return nibblized
+}
+
+type ParallelPatriciaHashed struct {
+	root   *HexPatriciaHashed
+	mounts [16]*HexPatriciaHashed
+	ctx    PatriciaContext
+	//ch [16]chan
+}
+
+func NewParallelPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext, tmpdir string) (*ParallelPatriciaHashed, error) {
+	p := &ParallelPatriciaHashed{root: root}
+	zero := []byte{0}
+
+	// Now unfold until we step on an empty cell
+	for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
+		if err := p.root.unfold(zero, unfolding); err != nil {
+			return nil, fmt.Errorf("unfold: %w", err)
+		}
+	}
+
+	for i := range p.mounts {
+		hph := NewHexPatriciaHashed(length.Addr, ctx, tmpdir)
+		hph.mountedNib = i
+		//fmt.Printf("mount %x\n", hph.mountedNib)
+
+		//nib := []byte{byte(i)}
+		for unfolding := hph.needUnfolding(zero); unfolding > 0; unfolding = hph.needUnfolding(zero) {
+			if err := hph.unfold(zero, unfolding); err != nil {
+				return nil, fmt.Errorf("unfold: %w", err)
+			}
+		}
+		p.mounts[i] = hph
+	}
+	return p, nil
+}
+
+func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
+	//rootHash, err = p.root.Process(ctx, updates, logPrefix)
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	var prevByte byte
+	var prevset bool
+
+	foldAndFlush := func(prevByte, curByte byte) error {
+		c, err := p.mounts[prevByte].foldMounted(int(prevByte))
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("set root branch n=%0x %s\n", prevByte, c.FullString())
+		p.root.grid[0][prevByte] = c
+		if err = p.mounts[prevByte].branchEncoder.Load(p.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+
+		p.root.touchMap[0] |= uint16(1) << prevByte
+		p.root.afterMap[0] |= uint16(1) << prevByte
+
+		prevByte = curByte
+		return nil
+	}
+
+	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+		err = p.mounts[hashedKey[0]].followAndUpdate(hashedKey, plainKey, stateUpdate)
+		if err != nil {
+			return err
+		}
+		if !prevset {
+			prevByte = hashedKey[0]
+			prevset = true
+		}
+		if prevByte != hashedKey[0] {
+			if err := foldAndFlush(prevByte, hashedKey[0]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := foldAndFlush(prevByte, 0); err != nil {
+		return nil, err
+	}
+
+	c, err := p.mounts[prevByte].foldMounted(int(prevByte))
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("set root branch n=%0x %s\n", prevByte, c.FullString())
+	p.root.grid[0][prevByte] = c
+	if err = p.mounts[prevByte].branchEncoder.Load(p.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return nil, err
+	}
+
+	if p.root.activeRows == 0 {
+		p.root.activeRows = 1
+	}
+
+	p.root.trace = true
+	for p.root.activeRows > 0 {
+		if err = p.root.fold(); err != nil {
+			return nil, err
+		}
+	}
+	rootHash, err = p.root.RootHash()
+	if err != nil {
+		return nil, err
+	}
+
+	err = p.root.branchEncoder.Load(p.ctx, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return nil, fmt.Errorf("branch update failed: %w", err)
+	}
+
+	return rootHash, nil
 }

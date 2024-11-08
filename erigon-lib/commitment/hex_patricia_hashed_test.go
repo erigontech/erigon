@@ -162,11 +162,14 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		Build()
 
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne, msOne.TempDir())
-	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, msTwo.TempDir())
+	trieTwoR := NewHexPatriciaHashed(length.Addr, msTwo, msTwo.TempDir())
+	trieTwo, err := NewParallelPatriciaHashed(trieTwoR, msTwo, msTwo.TempDir())
+	require.NoError(t, err)
 
 	//trieOne.SetTrace(true)
 	//trieTwo.SetTrace(true)
 
+	trieOne.trace = true
 	var rSeq, rBatch []byte
 	{
 		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
@@ -189,7 +192,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		err := msTwo.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.hashAndNibblizeKey, plainKeys, updates)
+		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwoR.hashAndNibblizeKey, plainKeys, updates)
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
 		rh, err := trieTwo.Process(ctx, updsTwo, "")
@@ -200,7 +203,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 		rBatch = common.Copy(rh)
 	}
-	require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
+	require.EqualValues(t, rSeq, rBatch, "sequential and batch root should match")
 
 	plainKeys, updates = NewUpdateBuilder().
 		Balance("71562b71999873db5b286df957af199ec94617f7", 2345234560099).
@@ -231,7 +234,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		err := msTwo.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.hashAndNibblizeKey, plainKeys, updates)
+		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwoR.hashAndNibblizeKey, plainKeys, updates)
 
 		rh, err := trieTwo.Process(ctx, updsTwo, "")
 		require.NoError(t, err)
