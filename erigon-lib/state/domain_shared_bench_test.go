@@ -103,7 +103,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	for ik := 0; ik < t.N; ik++ {
 		for i := 0; i < len(keys); i++ {
 			ts := uint64(rnd.IntN(int(maxTx)))
-			v, ok, err := ac2.HistorySeek(kv.AccountsHistory, keys[i], ts, rwTx)
+			v, ok, err := ac2.HistorySeek(kv.AccountsDomain, keys[i], ts, rwTx)
 
 			require.True(t, ok)
 			require.NotNil(t, v)

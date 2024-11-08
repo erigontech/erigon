@@ -218,10 +218,10 @@ func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []by
 	if key2 != nil {
 		key = append(common.Copy(key), key2...)
 	}
-	return tx.filesTx.DomainGetAsOf(tx.MdbxTx, name, key, ts)
+	return tx.filesTx.GetAsOf(tx.MdbxTx, name, key, ts)
 }
 
-func (tx *Tx) HistorySeek(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return tx.filesTx.HistorySeek(name, key, ts, tx.MdbxTx)
 }
 
@@ -234,7 +234,7 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	return timestamps, nil
 }
 
-func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.filesTx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
