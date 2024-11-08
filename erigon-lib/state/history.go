@@ -1344,29 +1344,19 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	return val[8:], true, nil
 }
-func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to []byte, roTx kv.Tx, limit int) (stream.KV, error) {
+
+func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	if !asc {
+		panic("implement me")
+	}
 	hi := &StateAsOfIterF{
-		from: from, to: to, limit: limit,
+		from: from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 
 		hc:         ht,
 		startTxNum: startTxNum,
-
-		ctx: ctx,
+		ctx:        ctx, logger: ht.h.logger,
 	}
-	for _, item := range ht.iit.files {
-		if item.endTxNum <= startTxNum {
-			continue
-		}
-		// TODO: seek(from)
-		g := seg.NewReader(item.src.decompressor.MakeGetter(), ht.h.compression)
-		g.Reset(0)
-		if g.HasNext() {
-			key, offset := g.Next(nil)
-			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
-		}
-	}
-	binary.BigEndian.PutUint64(hi.startTxKey[:], startTxNum)
-	if err := hi.advanceInFiles(); err != nil {
+	if err := hi.init(ht.iit.files); err != nil {
 		hi.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
@@ -1375,17 +1365,18 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		largeValues: ht.h.historyLargeValues,
 		roTx:        roTx,
 		valsTable:   ht.h.historyValsTable,
-		from:        from, to: to, limit: limit,
+		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 
 		startTxNum: startTxNum,
 
-		ctx: ctx,
+		ctx: ctx, logger: ht.h.logger,
 	}
 	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
 	if err := dbit.advance(); err != nil {
 		dbit.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
+
 	return stream.UnionKV(hi, dbit, limit), nil
 }
 
@@ -1394,9 +1385,9 @@ type StateAsOfIterF struct {
 	hc    *HistoryRoTx
 	limit int
 
-	from, to []byte
-	nextVal  []byte
-	nextKey  []byte
+	from, toPrefix []byte
+	nextVal        []byte
+	nextKey        []byte
 
 	h          ReconHeap
 	startTxNum uint64
@@ -1404,11 +1395,45 @@ type StateAsOfIterF struct {
 	txnKey     [8]byte
 
 	k, v, kBackup, vBackup []byte
+	orderAscend            order.By
 
-	ctx context.Context
+	logger log.Logger
+	ctx    context.Context
 }
 
 func (hi *StateAsOfIterF) Close() {
+}
+
+func (hi *StateAsOfIterF) init(files visibleFiles) error {
+	for i, item := range files {
+		if item.endTxNum <= hi.startTxNum {
+			continue
+		}
+		// TODO: seek(from)
+		g := seg.NewReader(item.src.decompressor.MakeGetter(), hi.hc.h.compression)
+
+		idx := hi.hc.iit.statelessIdxReader(i)
+		var offset uint64
+		if len(hi.from) > 0 {
+			n := item.src.decompressor.Count() / 2
+			var ok bool
+			offset, ok = g.BinarySearch(hi.from, n, idx.OrdinalLookup)
+			if !ok {
+				offset = 0
+			}
+		}
+		g.Reset(offset)
+		if g.HasNext() {
+			key, offset := g.Next(nil)
+			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+		}
+	}
+	binary.BigEndian.PutUint64(hi.startTxKey[:], hi.startTxNum)
+	return hi.advanceInFiles()
+}
+
+func (hi *StateAsOfIterF) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
+	return stream.TraceDuo(hi, hi.logger, "[dbg] StateAsOfIterF.Next "+prefix)
 }
 
 func (hi *StateAsOfIterF) advanceInFiles() error {
@@ -1427,7 +1452,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 			//} else {
 			//	top.key, _ = top.g.NextUncompressed()
 			//}
-			if hi.to == nil || bytes.Compare(top.key, hi.to) < 0 {
+			if hi.toPrefix == nil || bytes.Compare(top.key, hi.toPrefix) < 0 {
 				heap.Push(&hi.h, top)
 			}
 		}
@@ -1465,7 +1490,20 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 }
 
 func (hi *StateAsOfIterF) HasNext() bool {
-	return hi.limit != 0 && hi.nextKey != nil
+	if hi.limit == 0 { // limit reached
+		return false
+	}
+	if hi.nextKey == nil { // EndOfTable
+		return false
+	}
+	if hi.toPrefix == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
@@ -1483,7 +1521,9 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
-	return hi.kBackup, hi.vBackup, nil
+	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
+	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
+	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
 // StateAsOfIterDB - returns state range at given time in history
@@ -1494,8 +1534,9 @@ type StateAsOfIterDB struct {
 	valsCDup    kv.CursorDupSort
 	valsTable   string
 
-	from, to []byte
-	limit    int
+	from, toPrefix []byte
+	orderAscend    order.By
+	limit          int
 
 	nextKey, nextVal []byte
 
@@ -1505,13 +1546,18 @@ type StateAsOfIterDB struct {
 	k, v, kBackup, vBackup []byte
 	err                    error
 
-	ctx context.Context
+	logger log.Logger
+	ctx    context.Context
 }
 
 func (hi *StateAsOfIterDB) Close() {
 	if hi.valsC != nil {
 		hi.valsC.Close()
 	}
+}
+
+func (hi *StateAsOfIterDB) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
+	return stream.TraceDuo(hi, hi.logger, "[dbg] StateAsOfIterDB.Next "+prefix)
 }
 
 func (hi *StateAsOfIterDB) advance() (err error) {
@@ -1555,7 +1601,7 @@ func (hi *StateAsOfIterDB) advanceLargeVals() error {
 		if err != nil {
 			return err
 		}
-		if hi.to != nil && bytes.Compare(k[:len(k)-8], hi.to) >= 0 {
+		if hi.toPrefix != nil && bytes.Compare(k[:len(k)-8], hi.toPrefix) >= 0 {
 			break
 		}
 		if !bytes.Equal(seek[:len(k)-8], k[:len(k)-8]) {
@@ -1589,7 +1635,7 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 		if err != nil {
 			return err
 		}
-		if hi.to != nil && bytes.Compare(k, hi.to) >= 0 {
+		if hi.toPrefix != nil && bytes.Compare(k, hi.toPrefix) >= 0 {
 			break
 		}
 		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
@@ -1611,7 +1657,20 @@ func (hi *StateAsOfIterDB) HasNext() bool {
 	if hi.err != nil {
 		return true
 	}
-	return hi.limit != 0 && hi.nextKey != nil
+	if hi.limit == 0 { // limit reached
+		return false
+	}
+	if hi.nextKey == nil { // EndOfTable
+		return false
+	}
+	if hi.toPrefix == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
@@ -1632,7 +1691,9 @@ func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
-	return hi.kBackup, hi.vBackup, nil
+	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
+	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
+	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
 func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
@@ -1858,9 +1919,6 @@ func (hi *HistoryChangesIterFiles) HasNext() bool {
 		return false
 	}
 	return true
-	//if hi.toPrefix == nil { // s.nextK == nil check is above
-	//	return true
-	//}
 }
 
 func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
@@ -1875,6 +1933,7 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
+	fmt.Printf("[dbg] hist.Next: %x\n", hi.kBackup)
 	return hi.kBackup, hi.vBackup, nil
 }
 
@@ -2045,6 +2104,7 @@ func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, uint64, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, 0, err
 	}
+	order.Asc.Assert(hi.k, hi.nextKey)
 	return hi.k, hi.v, hi.step, nil
 }
 

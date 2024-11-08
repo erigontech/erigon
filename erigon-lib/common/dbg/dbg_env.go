@@ -19,6 +19,7 @@ package dbg
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -29,7 +30,7 @@ import (
 func EnvString(envVarName string, defaultVal string) string {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
-		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
+		WarnOnErigonPrefix(envVarName)
 		log.Info("[env]", envVarName, v)
 		return v
 	}
@@ -44,12 +45,12 @@ func EnvString(envVarName string, defaultVal string) string {
 func EnvBool(envVarName string, defaultVal bool) bool {
 	v, _ := os.LookupEnv(envVarName)
 	if v == "true" {
-		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
+		WarnOnErigonPrefix(envVarName)
 		log.Info("[env]", envVarName, true)
 		return true
 	}
 	if v == "false" {
-		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
+		WarnOnErigonPrefix(envVarName)
 		log.Info("[env]", envVarName, false)
 		return false
 	}
@@ -68,7 +69,7 @@ func EnvBool(envVarName string, defaultVal bool) bool {
 func EnvInt(envVarName string, defaultVal int) int {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
-		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
+		WarnOnErigonPrefix(envVarName)
 		i, err := strconv.Atoi(v)
 		if err != nil {
 			panic(err)
@@ -91,7 +92,7 @@ func EnvInt(envVarName string, defaultVal int) int {
 func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteSize {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
-		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
+		WarnOnErigonPrefix(envVarName)
 		val, err := datasize.ParseString(v)
 		if err != nil {
 			panic(err)
@@ -115,7 +116,7 @@ func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteS
 func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
-		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
+		WarnOnErigonPrefix(envVarName)
 		log.Info("[env]", envVarName, v)
 		val, err := time.ParseDuration(v)
 		if err != nil {
@@ -133,4 +134,10 @@ func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
 		return val
 	}
 	return defaultVal
+}
+
+func WarnOnErigonPrefix(envVarName string) {
+	if !strings.HasPrefix(envVarName, "ERIGON_") {
+		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
+	}
 }
