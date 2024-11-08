@@ -17,9 +17,11 @@
 package state
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	btree2 "github.com/tidwall/btree"
@@ -185,7 +187,21 @@ func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext strin
 		res = append(res, newFile)
 	}
 	return res
+}
 
+func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
+	rangeString := strings.Split(fileName, ".")[1]
+	rangeNums := strings.Split(rangeString, "-")
+	// convert the range to uint64
+	from, err = strconv.ParseUint(rangeNums[0], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+	}
+	to, err = strconv.ParseUint(rangeNums[1], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
+	}
+	return from, to, nil
 }
 
 func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string, logger log.Logger) {

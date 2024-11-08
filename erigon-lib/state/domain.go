@@ -25,10 +25,7 @@ import (
 	"math"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/metrics"
@@ -102,7 +99,6 @@ type Domain struct {
 	compression seg.FileCompression
 
 	valsTable string // key -> inverted_step + values (Dupsort)
-	stats     DomainStats
 	indexList idxList
 }
 
@@ -144,7 +140,6 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 		compression: cfg.compress,
 
 		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		stats:      DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
 		indexList:                   withBTree | withExistence,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
@@ -251,14 +246,6 @@ func (d *Domain) openFolder() error {
 		return err
 	}
 	return nil
-}
-
-func (d *Domain) GetAndResetStats() DomainStats {
-	r := d.stats
-	r.DataSize, r.IndexSize, r.FilesCount = d.collectFilesStats()
-
-	d.stats = DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
-	return r
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
@@ -2186,49 +2173,4 @@ func (sf SelectedStaticFiles) Close() {
 			}
 		}
 	}
-}
-
-type DomainStats struct {
-	MergesCount          uint64
-	LastCollationTook    time.Duration
-	LastPruneTook        time.Duration
-	LastPruneHistTook    time.Duration
-	LastFileBuildingTook time.Duration
-	LastCollationSize    uint64
-	LastPruneSize        uint64
-
-	FilesQueries *atomic.Uint64
-	TotalQueries *atomic.Uint64
-	EfSearchTime time.Duration
-	DataSize     uint64
-	IndexSize    uint64
-	FilesCount   uint64
-}
-
-func (ds *DomainStats) Accumulate(other DomainStats) {
-	if other.FilesQueries != nil {
-		ds.FilesQueries.Add(other.FilesQueries.Load())
-	}
-	if other.TotalQueries != nil {
-		ds.TotalQueries.Add(other.TotalQueries.Load())
-	}
-	ds.EfSearchTime += other.EfSearchTime
-	ds.IndexSize += other.IndexSize
-	ds.DataSize += other.DataSize
-	ds.FilesCount += other.FilesCount
-}
-
-func ParseStepsFromFileName(fileName string) (from, to uint64, err error) {
-	rangeString := strings.Split(fileName, ".")[1]
-	rangeNums := strings.Split(rangeString, "-")
-	// convert the range to uint64
-	from, err = strconv.ParseUint(rangeNums[0], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
-	}
-	to, err = strconv.ParseUint(rangeNums[1], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to parse to %s: %w", rangeNums[1], err)
-	}
-	return from, to, nil
 }
