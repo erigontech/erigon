@@ -164,3 +164,36 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 	a.Signature = temp.Signature
 	return nil
 }
+
+// class SingleAttestation(Container):
+//
+//	committee_index: CommitteeIndex
+//	attester_index: ValidatorIndex
+//	data: AttestationData
+//	signature: BLSSignature
+type SingleAttestation struct {
+	CommitteeIndex uint64
+	AttesterIndex  uint64
+	Data           *AttestationData
+	Signature      libcommon.Bytes96
+}
+
+func (s *SingleAttestation) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, s.CommitteeIndex, s.AttesterIndex, s.Data, s.Signature[:])
+}
+
+func (s *SingleAttestation) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
+}
+
+func (s *SingleAttestation) EncodingSizeSSZ() (size int) {
+	return 8 + 8 + AttestationDataSize + length.Bytes96
+}
+
+func (s *SingleAttestation) HashSSZ() (o [32]byte, err error) {
+	return merkle_tree.HashTreeRoot(s.CommitteeIndex, s.AttesterIndex, s.Data, s.Signature[:])
+}
+
+func (s *SingleAttestation) Clone() clonable.Clonable {
+	return &SingleAttestation{}
+}
