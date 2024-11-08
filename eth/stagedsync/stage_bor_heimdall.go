@@ -62,7 +62,7 @@ type BorHeimdallCfg struct {
 	miningState     *MiningState
 	chainConfig     *chain.Config
 	borConfig       *borcfg.BorConfig
-	heimdallClient  heimdall.HeimdallClient
+	heimdallClient  heimdall.Client
 	heimdallStore   heimdall.Store
 	bridgeStore     bridge.Store
 	blockReader     services.FullBlockReader
@@ -79,7 +79,7 @@ func StageBorHeimdallCfg(
 	snapDb kv.RwDB,
 	miningState MiningState,
 	chainConfig chain.Config,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	bridgeStore bridge.Store,
 	blockReader services.FullBlockReader,
@@ -651,7 +651,7 @@ func initValidatorSets(
 	tx kv.RwTx,
 	blockReader services.FullBlockReader,
 	config *borcfg.BorConfig,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,

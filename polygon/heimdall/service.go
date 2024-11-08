@@ -35,7 +35,7 @@ import (
 type ServiceConfig struct {
 	Store     Store
 	BorConfig *borcfg.BorConfig
-	Client    HeimdallClient
+	Client    Client
 	Logger    log.Logger
 }
 
@@ -100,7 +100,7 @@ func NewService(config ServiceConfig) *Service {
 	}
 }
 
-func NewCheckpointFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Checkpoint] {
+func NewCheckpointFetcher(client Client, logger log.Logger) *EntityFetcher[*Checkpoint] {
 	return NewEntityFetcher(
 		"CheckpointFetcher",
 		func(ctx context.Context) (int64, error) {
@@ -115,7 +115,7 @@ func NewCheckpointFetcher(client HeimdallClient, logger log.Logger) *EntityFetch
 	)
 }
 
-func NewMilestoneFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Milestone] {
+func NewMilestoneFetcher(client Client, logger log.Logger) *EntityFetcher[*Milestone] {
 	return NewEntityFetcher(
 		"MilestoneFetcher",
 		client.FetchFirstMilestoneNum,
@@ -128,7 +128,7 @@ func NewMilestoneFetcher(client HeimdallClient, logger log.Logger) *EntityFetche
 	)
 }
 
-func NewSpanFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Span] {
+func NewSpanFetcher(client Client, logger log.Logger) *EntityFetcher[*Span] {
 	fetchLastEntityId := func(ctx context.Context) (int64, error) {
 		span, err := client.FetchLatestSpan(ctx)
 		if err != nil {

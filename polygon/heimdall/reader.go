@@ -121,11 +121,11 @@ func (r *RemoteReader) EnsureVersionCompatibility() bool {
 		return false
 	}
 	if !gointerfaces.EnsureVersion(r.version, versionReply) {
-		r.logger.Error("incompatible interface versions", "client", r.version.String(),
+		r.logger.Error("incompatible interface versions", "handler", r.version.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 		return false
 	}
-	r.logger.Info("interfaces compatible", "client", r.version.String(),
+	r.logger.Info("interfaces compatible", "handler", r.version.String(),
 		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 	return true
 }

@@ -54,7 +54,7 @@ func NewPolygonSyncStageCfg(
 	logger log.Logger,
 	chainConfig *chain.Config,
 	db kv.RwDB,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	bridgeStore bridge.Store,
 	sentry sentryproto.SentryClient,
