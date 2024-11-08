@@ -239,7 +239,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
 			}
 
-			dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file not found",
+			dt.d.logger.Debug("[agg] lookupVisibleFileByItsRange: file not found",
 				"stepFrom", rng.from/dt.d.aggregationStep, "stepTo", rng.to/dt.d.aggregationStep,
 				"_visible", visibleFiles, "visibleFilesCount", len(dt.files))
 
@@ -256,7 +256,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
 			}
 
-			dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file not found",
+			dt.d.logger.Debug("[agg] lookupVisibleFileByItsRange: file not found",
 				"stepFrom", rng.from/dt.d.aggregationStep, "stepTo", rng.to/dt.d.aggregationStep,
 				"_visible", visibleFiles, "visibleFilesCount", len(dt.files))
 			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)

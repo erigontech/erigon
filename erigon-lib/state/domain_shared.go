@@ -492,7 +492,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	}
 	accountItem := acc.lookupVisibleFileByItsRange(fStartTxNum, fEndTxNum)
 	if accountItem == nil {
-		sd.logger.Warn(fmt.Sprintf("visible account file of steps %d-%d not found", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
+		sd.logger.Debug(fmt.Sprintf("visible account file of steps %d-%d not found", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
 		accountItem = acc.lookupDirtyFileByItsRange(fStartTxNum, fEndTxNum)
 		if accountItem == nil {
 			sd.logger.Crit(fmt.Sprintf("dirty account file of steps %d-%d not found", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
