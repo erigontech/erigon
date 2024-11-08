@@ -166,6 +166,7 @@ func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.H
 }
 
 func (r *RemoteReader) Close() {
+	// no-op as there is no attached store
 }
 
 func (r *RemoteReader) EnsureVersionCompatibility() bool {

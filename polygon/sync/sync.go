@@ -123,7 +123,7 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finali
 	return nil
 }
 
-func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalChainBuilder, ms EventNewMilestone) error {
+func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalChainBuilder, event EventNewMilestone) error {
 	// the milestone doesn't correspond to the tip of the chain
 	// unwind to the previous verified milestone
 	// and download the blocks of the new milestone
@@ -132,10 +132,10 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 	s.logger.Debug(
 		syncLogPrefix("local chain tip does not match the milestone, unwinding to the previous verified root"),
 		"rootNum", rootNum,
-		"milestoneId", ms.Id,
-		"milestoneStart", ms.StartBlock(),
-		"milestoneEnd", ms.EndBlock(),
-		"milestoneRootHash", ms.RootHash(),
+		"milestoneId", event.Id,
+		"milestoneStart", event.StartBlock(),
+		"milestoneEnd", event.EndBlock(),
+		"milestoneRootHash", event.RootHash(),
 	)
 
 	if err := s.bridgeSync.Unwind(ctx, rootNum); err != nil {
@@ -150,7 +150,7 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 		err = errors.New("unexpected empty headers from p2p since new milestone")
 		return fmt.Errorf(
 			"%w: rootNum=%d, milestoneId=%d, milestoneStart=%d, milestoneEnd=%d, milestoneRootHash=%s",
-			err, rootNum, ms.Id, ms.StartBlock(), ms.EndBlock(), ms.RootHash(),
+			err, rootNum, event.Id, event.StartBlock(), event.EndBlock(), event.RootHash(),
 		)
 	}
 
@@ -367,8 +367,8 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	return nil
 }
 
-func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, e EventNewBlockHashes, ccb *CanonicalChainBuilder) error {
-	for _, hashOrNum := range e.NewBlockHashes {
+func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, event EventNewBlockHashes, ccb *CanonicalChainBuilder) error {
+	for _, hashOrNum := range event.NewBlockHashes {
 		if (hashOrNum.Number <= ccb.Root().Number.Uint64()) || ccb.ContainsHash(hashOrNum.Hash) {
 			continue
 		}
@@ -379,7 +379,7 @@ func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, e EventNewBlockHash
 			s.logger.Warn(syncLogPrefix("bad block hash received from peer"),
 				"blockHash", hashOrNum.Hash,
 				"blockNum", hashOrNum.Number,
-				"peerId", e.PeerId,
+				"peerId", event.PeerId,
 			)
 			return nil
 		}
@@ -391,13 +391,13 @@ func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, e EventNewBlockHash
 		)
 
 		fetchOpts := []p2p.FetcherOption{p2p.WithMaxRetries(0), p2p.WithResponseTimeout(time.Second)}
-		newBlocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, hashOrNum.Hash, 1, e.PeerId, fetchOpts...)
+		newBlocks, err := s.p2pService.FetchBlocksBackwardsByHash(ctx, hashOrNum.Hash, 1, event.PeerId, fetchOpts...)
 		if err != nil {
 			if s.ignoreFetchBlocksErrOnTipEvent(err) {
 				s.logger.Debug(
 					syncLogPrefix("applyNewBlockHashesOnTip: failed to fetch complete blocks, ignoring event"),
 					"err", err,
-					"peerId", e.PeerId,
+					"peerId", event.PeerId,
 					"lastBlockNum", hashOrNum.Number,
 				)
 
@@ -409,7 +409,7 @@ func (s *Sync) applyNewBlockHashesOnTip(ctx context.Context, e EventNewBlockHash
 
 		newBlockEvent := EventNewBlock{
 			NewBlock: newBlocks.Data[0],
-			PeerId:   e.PeerId,
+			PeerId:   event.PeerId,
 			Source:   EventSourceP2PNewBlockHashes,
 		}
 
