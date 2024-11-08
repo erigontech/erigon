@@ -26,11 +26,11 @@ var defaultBorConfig = borcfg.BorConfig{
 	StateSyncConfirmationDelay: map[string]uint64{"0": 1},
 }
 
-func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockHeimdallClient, *Bridge) {
+func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockHeimdallClient, *Service) {
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlDebug)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	b := NewBridge(Config{
+	b := NewService(ServiceConfig{
 		Store:        NewMdbxStore(t.TempDir(), logger, false, 1),
 		Logger:       logger,
 		BorConfig:    &borConfig,
@@ -66,7 +66,7 @@ func getBlocks(t *testing.T, numBlocks int) []*types.Block {
 	return blocks
 }
 
-func TestBridge(t *testing.T) {
+func TestService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -124,7 +124,7 @@ func TestBridge(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(bridge Service) {
+	go func(bridge *Service) {
 		defer wg.Done()
 
 		err := bridge.Run(ctx)
@@ -194,7 +194,7 @@ func TestBridge(t *testing.T) {
 	wg.Wait()
 }
 
-func TestBridge_Unwind(t *testing.T) {
+func TestService_Unwind(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -244,7 +244,7 @@ func TestBridge_Unwind(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(bridge Service) {
+	go func(bridge *Service) {
 		defer wg.Done()
 
 		err := bridge.Run(ctx)
@@ -298,7 +298,7 @@ func TestBridge_Unwind(t *testing.T) {
 	wg.Wait()
 }
 
-func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorConfig, wg *sync.WaitGroup) *Bridge {
+func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorConfig, wg *sync.WaitGroup) *Service {
 	heimdallClient, b := setup(t, borConfig)
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
@@ -343,7 +343,7 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
 	wg.Add(1)
 
-	go func(bridge Service) {
+	go func(bridge *Service) {
 		defer wg.Done()
 
 		err := bridge.Run(ctx)
@@ -378,7 +378,7 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 	return b
 }
 
-func TestBridge_ProcessNewBlocksWithOverride(t *testing.T) {
+func TestService_ProcessNewBlocksWithOverride(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -403,7 +403,7 @@ func TestBridge_ProcessNewBlocksWithOverride(t *testing.T) {
 	wg.Wait()
 }
 
-func TestBridge_ProcessNewBlocksWithZeroOverride(t *testing.T) {
+func TestService_ProcessNewBlocksWithZeroOverride(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 

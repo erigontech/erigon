@@ -41,7 +41,7 @@ func NewService(
 	statusDataProvider *sentry.StatusDataProvider,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
-	bridgeService bridge.Service,
+	bridgeService *bridge.Service,
 	heimdallService heimdall.Service,
 ) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -92,7 +92,7 @@ type Service struct {
 	store           Store
 	events          *TipEvents
 	heimdallService heimdall.Service
-	bridgeService   bridge.Service
+	bridgeService   *bridge.Service
 }
 
 func (s *Service) Run(parentCtx context.Context) error {

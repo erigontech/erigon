@@ -217,7 +217,7 @@ type Ethereum struct {
 
 	polygonSyncService  *polygonsync.Service
 	polygonDownloadSync *stagedsync.Sync
-	polygonBridge       bridge.PolygonBridge
+	polygonBridge       *bridge.Service
 	heimdallService     heimdall.Service
 	stopNode            func() error
 }
@@ -531,7 +531,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	var heimdallClient heimdall.HeimdallClient
-	var polygonBridge bridge.Service
+	var polygonBridge *bridge.Service
 	var heimdallService heimdall.Service
 	var bridgeRPC *bridge.BackendServer
 	var heimdallRPC *heimdall.BackendServer
@@ -544,18 +544,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.PolygonSync {
 			borConfig := consensusConfig.(*borcfg.BorConfig)
 
-			polygonBridge = bridge.NewBridge(bridge.Config{
+			polygonBridge = bridge.NewService(bridge.ServiceConfig{
 				Store:        bridgeStore,
 				Logger:       logger,
 				BorConfig:    borConfig,
 				EventFetcher: heimdallClient,
 			})
 
-			heimdallService = heimdall.AssembleService(heimdall.ServiceConfig{
-				Store:       heimdallStore,
-				BorConfig:   borConfig,
-				HeimdallURL: config.HeimdallURL,
-				Logger:      logger,
+			heimdallService = heimdall.NewService(heimdall.ServiceConfig{
+				Store:     heimdallStore,
+				BorConfig: borConfig,
+				Client:    heimdallClient,
+				Logger:    logger,
 			})
 
 			bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)

@@ -149,7 +149,6 @@ func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.H
 	return reply.BlockNumber, reply.Present, nil
 }
 
-// Close implements bridge.ReaderService. It's a noop as there is no attached store.
 func (r *RemoteReader) Close() {
 }
 

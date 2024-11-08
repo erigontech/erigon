@@ -163,7 +163,12 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupSpans()
 	suite.setupCheckpoints()
 	suite.setupMilestones()
-	suite.service = newService(borConfig, suite.client, store, logger)
+	suite.service = newService(ServiceConfig{
+		Store:     store,
+		BorConfig: borConfig,
+		Client:    suite.client,
+		Logger:    logger,
+	})
 
 	err := suite.service.store.Prepare(suite.ctx)
 	require.NoError(suite.T(), err)

@@ -98,8 +98,13 @@ func NewPolygonSyncStageCfg(
 		txActionStream: txActionStream,
 	}
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-	heimdallService := heimdall.NewService(borConfig, heimdallClient, stageHeimdallStore, logger)
-	bridgeService := bridge.NewBridge(bridge.Config{
+	heimdallService := heimdall.NewService(heimdall.ServiceConfig{
+		Store:     stageHeimdallStore,
+		BorConfig: borConfig,
+		Client:    heimdallClient,
+		Logger:    logger,
+	})
+	bridgeService := bridge.NewService(bridge.ServiceConfig{
 		Store:        stageBridgeStore,
 		Logger:       logger,
 		BorConfig:    borConfig,
@@ -153,7 +158,7 @@ func NewPolygonSyncStageCfg(
 		KeepSpanBlockProducerSelections: true,
 		KeepCheckpoints:                 true,
 		KeepMilestones:                  true,
-		// below are handled via the Bridge.Unwind logic in Astrid
+		// below are handled via the Service.Unwind logic in Astrid
 		KeepEventNums:            true,
 		KeepEventProcessedBlocks: true,
 		Astrid:                   true,
@@ -285,7 +290,7 @@ type polygonSyncStageService struct {
 	executionEngine *polygonSyncStageExecutionEngine
 	heimdall        heimdall.Service
 	heimdallStore   heimdall.Store
-	bridge          bridge.Service
+	bridge          *bridge.Service
 	bridgeStore     bridge.Store
 	txActionStream  <-chan polygonSyncStageTxAction
 	stopNode        func() error

@@ -33,10 +33,10 @@ import (
 )
 
 type ServiceConfig struct {
-	Store       Store
-	BorConfig   *borcfg.BorConfig
-	HeimdallURL string
-	Logger      log.Logger
+	Store     Store
+	BorConfig *borcfg.BorConfig
+	Client    HeimdallClient
+	Logger    log.Logger
 }
 
 type Service interface {
@@ -63,22 +63,15 @@ type service struct {
 	ready                     ready
 }
 
-func AssembleService(config ServiceConfig) Service {
-	client := NewHeimdallClient(config.HeimdallURL, config.Logger)
-	return NewService(config.BorConfig, client, config.Store, config.Logger)
+func NewService(config ServiceConfig) Service {
+	return newService(config)
 }
 
-func NewService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store, logger log.Logger) Service {
-	return newService(borConfig, client, store, logger)
-}
-
-var TransientErrors = []error{
-	ErrBadGateway,
-	ErrServiceUnavailable,
-	context.DeadlineExceeded,
-}
-
-func newService(borConfig *borcfg.BorConfig, client HeimdallClient, store Store, logger log.Logger) *service {
+func newService(config ServiceConfig) *service {
+	logger := config.Logger
+	borConfig := config.BorConfig
+	store := config.Store
+	client := config.Client
 	checkpointFetcher := NewCheckpointFetcher(client, logger)
 	milestoneFetcher := NewMilestoneFetcher(client, logger)
 	spanFetcher := NewSpanFetcher(client, logger)
