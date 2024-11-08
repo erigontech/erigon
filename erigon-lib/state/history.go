@@ -25,8 +25,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"sync"
 	"time"
 
@@ -170,46 +168,17 @@ func (h *History) openFolder() error {
 	return h.openList(idxFiles, histFiles)
 }
 
-// scanDirtyFiles
-// returns `uselessFiles` where file "is useless" means: it's subset of frozen file. such files can be safely deleted. subset of non-frozen file may be useful
-func (h *History) scanDirtyFiles(fNames []string) (garbageFiles []*filesItem) {
-	re := regexp.MustCompile("^v([0-9]+)-" + h.filenameBase + ".([0-9]+)-([0-9]+).v$")
-	var err error
-	for _, name := range fNames {
-		subs := re.FindStringSubmatch(name)
-		if len(subs) != 4 {
-			if len(subs) != 0 {
-				h.logger.Warn("[snapshots] file ignored by inverted index scan, more than 3 submatches", "name", name, "submatches", len(subs))
-			}
-			continue
-		}
-		var startStep, endStep uint64
-		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
-			h.logger.Warn("[snapshots] file ignored by inverted index scan, parsing startTxNum", "error", err, "name", name)
-			continue
-		}
-		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
-			h.logger.Warn("[snapshots] file ignored by inverted index scan, parsing endTxNum", "error", err, "name", name)
-			continue
-		}
-		if startStep > endStep {
-			h.logger.Warn("[snapshots] file ignored by inverted index scan, startTxNum > endTxNum", "name", name)
-			continue
-		}
-
-		startTxNum, endTxNum := startStep*h.aggregationStep, endStep*h.aggregationStep
-		var newFile = newFilesItem(startTxNum, endTxNum, h.aggregationStep)
-
+func (h *History) scanDirtyFiles(fileNames []string) {
+	for _, dirtyFile := range scanDirtyFiles(fileNames, h.aggregationStep, h.filenameBase, "v", h.logger) {
+		startStep, endStep := dirtyFile.startTxNum/h.aggregationStep, dirtyFile.endTxNum/h.aggregationStep
 		if h.integrityCheck != nil && !h.integrityCheck(startStep, endStep) {
+			h.logger.Debug("[agg] skip garbage file", "name", dirtyFile.decompressor.FileName())
 			continue
 		}
-
-		if _, has := h.dirtyFiles.Get(newFile); has {
-			continue
+		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
+			h.dirtyFiles.Set(dirtyFile)
 		}
-		h.dirtyFiles.Set(newFile)
 	}
-	return garbageFiles
 }
 
 func (h *History) openDirtyFiles() error {

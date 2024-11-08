@@ -18,6 +18,8 @@ package state
 
 import (
 	"os"
+	"regexp"
+	"strconv"
 	"sync/atomic"
 
 	btree2 "github.com/tidwall/btree"
@@ -159,6 +161,47 @@ func (i *filesItem) closeFilesAndRemove() {
 		}
 		i.existence = nil
 	}
+}
+
+func scanDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext string, logger log.Logger) (res []*filesItem) {
+	re := regexp.MustCompile("^v([0-9]+)-" + filenameBase + ".([0-9]+)-([0-9]+)." + ext + "$")
+	var err error
+
+	for _, name := range fileNames {
+		subs := re.FindStringSubmatch(name)
+		if len(subs) != 4 {
+			if len(subs) != 0 {
+				logger.Warn("File ignored by domain scan, more than 4 submatches", "name", name, "submatches", len(subs))
+			}
+			continue
+		}
+		var startStep, endStep uint64
+		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+			logger.Warn("File ignored by domain scan, parsing startTxNum", "error", err, "name", name)
+			continue
+		}
+		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
+			logger.Warn("File ignored by domain scan, parsing endTxNum", "error", err, "name", name)
+			continue
+		}
+		if startStep > endStep {
+			logger.Warn("File ignored by domain scan, startTxNum > endTxNum", "name", name)
+			continue
+		}
+
+		// Semantic: [startTxNum, endTxNum)
+		// Example:
+		//   stepSize = 4
+		//   0-1.kv: [0, 8)
+		//   0-2.kv: [0, 16)
+		//   1-2.kv: [8, 16)
+		startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
+
+		var newFile = newFilesItem(startTxNum, endTxNum, stepSize)
+		res = append(res, newFile)
+	}
+	return res
+
 }
 
 func deleteMergeFile(dirtyFiles *btree2.BTreeG[*filesItem], outs []*filesItem, filenameBase string, logger log.Logger) {

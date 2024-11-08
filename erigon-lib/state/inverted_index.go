@@ -28,8 +28,6 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -186,46 +184,17 @@ func (ii *InvertedIndex) openFolder() error {
 	return ii.openList(idxFiles)
 }
 
-func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
-	re := regexp.MustCompile("^v([0-9]+)-" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
-	var err error
-	for _, name := range fileNames {
-		subs := re.FindStringSubmatch(name)
-		if len(subs) != 4 {
-			if len(subs) != 0 {
-				ii.logger.Warn("File ignored by inverted index scan, more than 3 submatches", "name", name, "submatches", len(subs))
-			}
-			continue
-		}
-		var startStep, endStep uint64
-		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
-			ii.logger.Warn("File ignored by inverted index scan, parsing startTxNum", "error", err, "name", name)
-			continue
-		}
-		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
-			ii.logger.Warn("File ignored by inverted index scan, parsing endTxNum", "error", err, "name", name)
-			continue
-		}
-		if startStep > endStep {
-			ii.logger.Warn("File ignored by inverted index scan, startTxNum > endTxNum", "name", name)
-			continue
-		}
-
-		startTxNum, endTxNum := startStep*ii.aggregationStep, endStep*ii.aggregationStep
-		var newFile = newFilesItem(startTxNum, endTxNum, ii.aggregationStep)
-
+func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
+	for _, dirtyFile := range scanDirtyFiles(fileNames, ii.aggregationStep, ii.filenameBase, "ef", ii.logger) {
+		startStep, endStep := dirtyFile.startTxNum/ii.aggregationStep, dirtyFile.endTxNum/ii.aggregationStep
 		if ii.integrityCheck != nil && !ii.integrityCheck(startStep, endStep) {
-			ii.logger.Debug("[agg] skip garbage file", "name", name)
+			ii.logger.Debug("[agg] skip garbage file", "name", dirtyFile.decompressor.FileName())
 			continue
 		}
-
-		if _, has := ii.dirtyFiles.Get(newFile); has {
-			continue
+		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {
+			ii.dirtyFiles.Set(dirtyFile)
 		}
-
-		ii.dirtyFiles.Set(newFile)
 	}
-	return garbageFiles
 }
 
 type idxList int
