@@ -172,7 +172,7 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 	for _, dirtyFile := range scanDirtyFiles(fileNames, h.aggregationStep, h.filenameBase, "v", h.logger) {
 		startStep, endStep := dirtyFile.startTxNum/h.aggregationStep, dirtyFile.endTxNum/h.aggregationStep
 		if h.integrityCheck != nil && !h.integrityCheck(startStep, endStep) {
-			h.logger.Debug("[agg] skip garbage file", "name", dirtyFile.decompressor.FileName())
+			h.logger.Debug("[agg] skip garbage file", "name", h.filenameBase, "startStep", startStep, "endStep", endStep)
 			continue
 		}
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {

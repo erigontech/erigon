@@ -188,7 +188,7 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	for _, dirtyFile := range scanDirtyFiles(fileNames, ii.aggregationStep, ii.filenameBase, "ef", ii.logger) {
 		startStep, endStep := dirtyFile.startTxNum/ii.aggregationStep, dirtyFile.endTxNum/ii.aggregationStep
 		if ii.integrityCheck != nil && !ii.integrityCheck(startStep, endStep) {
-			ii.logger.Debug("[agg] skip garbage file", "name", dirtyFile.decompressor.FileName())
+			ii.logger.Debug("[agg] skip garbage file", "name", ii.filenameBase, "startStep", startStep, "endStep", endStep)
 			continue
 		}
 		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {

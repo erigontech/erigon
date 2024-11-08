@@ -25,7 +25,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
@@ -46,7 +45,6 @@ type filesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
 	bindex               *BtIndex
-	bm                   *bitmapdb.FixedSizeBitmaps
 	existence            *ExistenceFilter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
@@ -94,10 +92,6 @@ func (i *filesItem) closeFiles() {
 		i.bindex.Close()
 		i.bindex = nil
 	}
-	if i.bm != nil {
-		i.bm.Close()
-		i.bm = nil
-	}
 	if i.existence != nil {
 		i.existence.Close()
 		i.existence = nil
@@ -140,16 +134,6 @@ func (i *filesItem) closeFilesAndRemove() {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
 		i.bindex = nil
-	}
-	if i.bm != nil {
-		i.bm.Close()
-		if err := os.Remove(i.bm.FilePath()); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
-		}
-		if err := os.Remove(i.bm.FilePath() + ".torrent"); err != nil {
-			log.Trace("remove after close", "err", err, "file", i.bm.FileName())
-		}
-		i.bm = nil
 	}
 	if i.existence != nil {
 		i.existence.Close()
