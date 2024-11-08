@@ -26,7 +26,7 @@ import "syscall"
 // Raise tries to maximize the file descriptor allowance of this process
 // to the maximum hard-limit allowed by the OS.
 // Returns the size it was set to (may differ from the desired 'max')
-func Raise(max uint64) (uint64, error) {
+func Raise(_max uint64) (uint64, error) {
 	// Get the current limit
 	var limit syscall.Rlimit
 	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
@@ -34,8 +34,8 @@ func Raise(max uint64) (uint64, error) {
 	}
 	// Try to update the limit to the max allowance
 	limit.Cur = limit.Max
-	if limit.Cur > max {
-		limit.Cur = max
+	if limit.Cur > _max {
+		limit.Cur = _max
 	}
 	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
 		return 0, err

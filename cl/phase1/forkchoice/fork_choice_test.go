@@ -67,7 +67,7 @@ func TestForkChoiceBasic(t *testing.T) {
 		Root:  libcommon.HexToHash("0x564d76d91f66c1fb2977484a6184efda2e1c26dd01992e048353230e10f83201"),
 		Epoch: 0,
 	}
-	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
+	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0)
 	// Decode test blocks
 	block0x3a, block0xc2, block0xd4 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion),
 		cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion),
@@ -147,7 +147,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	// Initialize forkchoice store
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEventEmitter()
-	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
+	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0)
 	store, err := forkchoice.NewForkChoiceStore(nil, anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
 		Beacon: true,
 	}, emitters), emitters, sd, nil, nil, false)

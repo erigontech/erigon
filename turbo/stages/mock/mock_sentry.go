@@ -612,6 +612,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	if err = mock.InsertChain(c); err != nil {
 		tb.Fatal(err)
 	}
+
 	return mock
 }
 

@@ -45,7 +45,6 @@ func NewWithLabel(tmpDir string, label kv.Label) kv.RwDB {
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	tb.Helper()
 	tmpDir := tb.TempDir()
-	tb.Helper()
 	db := New(tmpDir, label)
 	tb.Cleanup(db.Close)
 	return db

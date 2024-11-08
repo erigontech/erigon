@@ -78,15 +78,15 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true, false, false, nil)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, nil, reader, logger, true, true, false, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// historical states reader below
-	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState)
+	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState, nil)
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
 
 	if useRealSyncDataMgr {
-		syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
+		syncedData = synced_data.NewSyncedDataManager(&bcfg, true, 0)
 	} else {
 		syncedData = sync_mock_services.NewMockSyncedData(ctrl)
 	}
@@ -130,8 +130,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		opPool.AttestationsPool.Insert(msg.SignedAggregateAndProof.Message.Aggregate.Signature, msg.SignedAggregateAndProof.Message.Aggregate)
 		return nil
 	}).AnyTimes()
-	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExit) error {
-		opPool.VoluntaryExitsPool.Insert(msg.VoluntaryExit.ValidatorIndex, msg)
+	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExitWithGossipData) error {
+		opPool.VoluntaryExitsPool.Insert(msg.SignedVoluntaryExit.VoluntaryExit.ValidatorIndex, msg.SignedVoluntaryExit)
 		return nil
 	}).AnyTimes()
 	blsToExecutionChangeService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedBLSToExecutionChangeWithGossipData) error {
@@ -176,6 +176,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		proposerSlashingService,
 		nil,
 		mockValidatorMonitor,
+		nil,
 		false,
 	) // TODO: add tests
 	h.Init()
