@@ -30,6 +30,7 @@ import (
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -142,7 +143,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	if err := g.routeAndProcess(ctx, data); err != nil {
 		return err
 	}
-	if errors.Is(err, services.ErrIgnore) {
+	if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
 		return nil
 	}
 	if err != nil {
@@ -203,8 +204,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
-		obj := &cltypes.SignedVoluntaryExit{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := &cltypes.SignedVoluntaryExitWithGossipData{
+			GossipData:          copyOfSentinelData(data),
+			SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
+		}
+		if err := obj.SignedVoluntaryExit.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.voluntaryExitService.ProcessMessage(ctx, data.SubnetId, obj)
@@ -310,7 +314,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 	goWorker(syncCommitteesCh, 4)
 	goWorker(operationsCh, 1)
 	goWorker(blocksCh, 1)
-	goWorker(blobsCh, 1)
+	goWorker(blobsCh, 6)
 
 	sendOrDrop := func(ch chan<- *sentinel.GossipData, data *sentinel.GossipData) {
 		// Skip processing the received data if the node is not ready to process operations.

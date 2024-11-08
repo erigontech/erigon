@@ -33,7 +33,7 @@ import (
 
 func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock) {
 	cfg := &clparams.MainnetBeaconConfig
-	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true, 0)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
 	s := NewSyncCommitteeMessagesService(cfg, ethClock, syncedDataManager, syncContributionPool, true)

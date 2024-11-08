@@ -377,6 +377,8 @@ func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
 
 	s.subManager.subscriptions.Range(func(key, value any) bool {
 		sub := value.(*GossipSubscription)
+		sub.lock.Lock()
+		defer sub.lock.Unlock()
 		if sub.sub == nil {
 			return true
 		}

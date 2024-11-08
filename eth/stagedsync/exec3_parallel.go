@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
+
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -16,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/shards"
 	"golang.org/x/sync/errgroup"
@@ -64,7 +68,14 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type executor interface {
 	execute(ctx context.Context, tasks []*state.TxTask) (bool, error)
+	status(ctx context.Context, commitThreshold uint64) error
 	wait() error
+	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header)
+
+	//these are reset by commit - so need to be read from the executor once its processing
+	tx() kv.RwTx
+	readState() *state.StateV3
+	domains() *state2.SharedDomains
 }
 
 type parallelExecutor struct {
@@ -97,6 +108,32 @@ type parallelExecutor struct {
 	logEvery                 *time.Ticker
 	slowDownLimit            *time.Ticker
 	progress                 *Progress
+}
+
+func (pe *parallelExecutor) tx() kv.RwTx {
+	return pe.applyTx
+}
+
+func (pe *parallelExecutor) readState() *state.StateV3 {
+	return pe.rs
+}
+
+func (pe *parallelExecutor) domains() *state2.SharedDomains {
+	return pe.doms
+}
+
+func (pe *parallelExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header) {
+	var err error
+	if err = pe.chainDb.View(ctx, func(tx kv.Tx) error {
+		h, err = pe.cfg.blockReader.Header(ctx, tx, hash, number)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	return h
 }
 
 func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, blockComplete *atomic.Bool, errCh chan error) {
@@ -299,7 +336,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 			defer tx.Rollback()
 			pe.doms.SetTx(tx)
 
-			applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+			applyCtx, cancelApplyCtx = context.WithCancel(ctx) //nolint:fatcontext
 			defer cancelApplyCtx()
 			pe.applyLoopWg.Add(1)
 			go pe.applyLoop(applyCtx, maxTxNum, &blockComplete, pe.rwLoopErrCh)
@@ -340,6 +377,13 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			pe.applyWorker.RunTxTask(txTask, pe.isMining)
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
+			}
+			if pe.cfg.chaosMonkey {
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, txTask.Error)
+				if chaosErr != nil {
+					log.Warn("Monkey in a consensus")
+					return outputTxNum, conflicts, triggers, processedBlockNum, false, chaosErr
+				}
 			}
 			// TODO: post-validation of gasUsed and blobGasUsed
 			i++

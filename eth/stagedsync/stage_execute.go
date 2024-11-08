@@ -91,6 +91,8 @@ type ExecuteBlockCfg struct {
 	blockProduction   bool
 	keepAllChangesets bool
 
+	chaosMonkey bool
+
 	applyWorker, applyWorkerMining *exec3.Worker
 }
 
@@ -105,6 +107,7 @@ func StageExecuteBlocksCfg(
 	stateStream bool,
 	badBlockHalt bool,
 	keepAllChangesets bool,
+	chaosMonkey bool,
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -137,6 +140,7 @@ func StageExecuteBlocksCfg(
 		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
 		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
 		keepAllChangesets: keepAllChangesets,
+		chaosMonkey:       chaosMonkey,
 	}
 }
 
@@ -148,7 +152,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		workersCount = 1
 	}
 
-	prevStageProgress, err := senderStageProgress(txc.Tx, cfg.db)
+	prevStageProgress, err := stageProgress(txc.Tx, cfg.db, stages.Senders)
 	if err != nil {
 		return err
 	}
@@ -226,15 +230,15 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	return nil
 }
 
-func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err error) {
+func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgress uint64, err error) {
 	if tx != nil {
-		prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+		prevStageProgress, err = stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return prevStageProgress, err
 		}
 	} else {
 		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+			prevStageProgress, err = stages.GetStageProgress(tx, stage)
 			if err != nil {
 				return err
 			}
@@ -244,6 +248,10 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 		}
 	}
 	return prevStageProgress, nil
+}
+
+func BorHeimdallStageProgress(tx kv.Tx, cfg BorHeimdallCfg) (prevStageProgress uint64, err error) {
+	return stageProgress(tx, cfg.db, stages.BorHeimdall)
 }
 
 // ================ Erigon3 End ================

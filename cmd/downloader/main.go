@@ -312,11 +312,14 @@ var createTorrent = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<relative_file_path> ",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
+		if err := checkChainName(cmd.Context(), dirs, chain); err != nil {
+			return err
+		}
 		createdAmount, err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFS(dirs.Snap), chain, nil, all)
 		if err != nil {
 			return err
 		}
-		log.Info("created .torent files", "amount", createdAmount)
+		log.Info("created .torrent files", "amount", createdAmount)
 		return nil
 	},
 }
@@ -566,7 +569,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		if err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
-		log.Info("created .torent files", "amount", createdAmount)
+		log.Info("created .torrent files", "amount", createdAmount)
 	}
 
 	res := map[string]string{}
@@ -686,7 +689,11 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	defer db.Close()
 
 	if cc := tool.ChainConfigFromDB(db); cc != nil {
-		if params.ChainConfigByChainName(chainName).ChainID.Uint64() != cc.ChainID.Uint64() {
+		chainConfig := params.ChainConfigByChainName(chainName)
+		if chainConfig == nil {
+			return fmt.Errorf("unknown chain: %s", chainName)
+		}
+		if chainConfig.ChainID.Uint64() != cc.ChainID.Uint64() {
 			return fmt.Errorf("datadir already was configured with --chain=%s. can't change to '%s'", cc.ChainName, chainName)
 		}
 	}

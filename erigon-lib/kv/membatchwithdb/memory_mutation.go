@@ -242,9 +242,9 @@ func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k
 func (m *MemoryMutation) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return m.Range(table, prefix, nil)
+		return m.Range(table, prefix, nil, order.Asc, kv.Unlim)
 	}
-	return m.Range(table, prefix, nextPrefix)
+	return m.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
 }
 func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	panic("please implement me")
@@ -255,31 +255,13 @@ func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte,
 func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	panic("please implement me")
 }
-func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	return m.RangeAscend(table, fromPrefix, toPrefix, -1)
-}
-func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
+func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: true, limit: int64(limit)}
 	var err error
-	if s.iterDb, err = m.db.RangeAscend(table, fromPrefix, toPrefix, limit); err != nil {
+	if s.iterDb, err = m.db.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
 		return s, err
 	}
-	if s.iterMem, err = m.memTx.RangeAscend(table, fromPrefix, toPrefix, limit); err != nil {
-		return s, err
-	}
-	if _, err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
-		return nil, err
-	}
-	return s, nil
-}
-func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	s := &rangeIter{orderAscend: false, limit: int64(limit)}
-	var err error
-	if s.iterDb, err = m.db.RangeDescend(table, fromPrefix, toPrefix, limit); err != nil {
-		return s, err
-	}
-	if s.iterMem, err = m.memTx.RangeDescend(table, fromPrefix, toPrefix, limit); err != nil {
+	if s.iterMem, err = m.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
 		return s, err
 	}
 	if _, err := s.init(); err != nil {
@@ -735,7 +717,7 @@ func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step
 	//return m.db.(kv.TemporalTx).DomainGet(name, k, k2)
 }
 
-func (m *MemoryMutation) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
+func (m *MemoryMutation) GetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	panic("not supported")
 	//return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
 }
