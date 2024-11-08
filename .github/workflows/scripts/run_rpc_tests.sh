@@ -6,7 +6,7 @@ set +e # Disable exit on error
 disabled_tests=(
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
-    # remove these lines after https://github.com/erigontech/rpc-tests/pull/284 and https://github.com/erigontech/erigon/pull/12655 
+    # remove these lines after https://github.com/erigontech/rpc-tests/pull/284 and https://github.com/erigontech/erigon/pull/12655
     eth_feeHistory/test_12.json
     eth_feeHistory/test_13.json
     eth_feeHistory/test_15.json
@@ -19,7 +19,7 @@ disabled_tests=(
     # remove this line after https://github.com/erigontech/rpc-tests/pull/282
     eth_getBlockByHash/test_10.json
     eth_getBlockByNumber/test_12.json
-    # Erigon bugs
+    # Erigon bugs: https://github.com/erigontech/erigon/pull/12609
     debug_accountRange,debug_storageRangeAt
     # need update rpc-test - because Erigon is correct (@AskAlexSharov will do after https://github.com/erigontech/erigon/pull/12634)
     # remove this line after https://github.com/erigontech/rpc-tests/pull/273

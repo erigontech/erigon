@@ -1950,34 +1950,31 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 	return v, endTxNum / dt.d.aggregationStep, foundInFile, nil
 }
 
+// DomainRange - if key doesn't exists in history - then look in latest state
 func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	if !asc {
 		panic("implement me")
 	}
-	//histStateIt, err := tx.aggTx.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx.MdbxTx)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//lastestStateIt, err := tx.aggTx.DomainRangeLatest(tx.MdbxTx, kv.AccountDomain, fromKey, toKey, limit)
-	//if err != nil {
-	//	return nil, err
-	//}
-	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, tx, limit)
+	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, asc, kv.Unlim, tx)
 	if err != nil {
 		return nil, err
 	}
-	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, limit)
+	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
 	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
-func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (stream.KV, error) {
-	s := &DomainLatestIterFile{from: fromKey, to: toKey, limit: limit, dc: dt,
-		roTx:      roTx,
-		valsTable: dt.d.valsTable,
-		h:         &CursorHeap{},
+func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+	s := &DomainLatestIterFile{
+		from: fromKey, to: toKey, limit: limit,
+		orderAscend: order.Asc,
+		aggStep:     dt.d.aggregationStep,
+		roTx:        roTx,
+		valsTable:   dt.d.valsTable,
+		logger:      dt.d.logger,
+		h:           &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
@@ -2222,24 +2219,27 @@ func (sr *SegStreamReader) Next() (k, v []byte, err error) {
 }
 
 type DomainLatestIterFile struct {
-	dc *DomainRoTx
-
+	aggStep   uint64
 	roTx      kv.Tx
 	valsTable string
 
-	limit int
-
-	from, to []byte
-	nextVal  []byte
-	nextKey  []byte
+	limit       int
+	largeVals   bool
+	from, to    []byte
+	orderAscend order.By
 
 	h *CursorHeap
 
+	nextKey, nextVal       []byte
 	k, v, kBackup, vBackup []byte
-	largeVals              bool
+
+	logger log.Logger
 }
 
 func (hi *DomainLatestIterFile) Close() {
+}
+func (hi *DomainLatestIterFile) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
+	return stream.TraceDuo(hi, hi.logger, "[dbg] DomainLatestIterFile.Next "+prefix)
 }
 func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	// Implementation:
@@ -2349,7 +2349,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						k = k[:len(k)-8]
 						ci1.key = common.Copy(k)
 						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+						endTxNum := step * hi.aggStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 						ci1.endTxNum = endTxNum
 
 						ci1.val = common.Copy(v)
@@ -2367,7 +2367,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 						v := stepBytesWithValue[8:]
 						ci1.key = common.Copy(k)
 						step := ^binary.BigEndian.Uint64(stepBytes)
-						endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+						endTxNum := step * hi.aggStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 						ci1.endTxNum = endTxNum
 
 						ci1.val = common.Copy(v)
@@ -2387,7 +2387,20 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 }
 
 func (hi *DomainLatestIterFile) HasNext() bool {
-	return hi.limit != 0 && hi.nextKey != nil
+	if hi.limit == 0 { // limit reached
+		return false
+	}
+	if hi.nextKey == nil { // EndOfTable
+		return false
+	}
+	if hi.to == nil { // s.nextK == nil check is above
+		return true
+	}
+
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
+	cmp := bytes.Compare(hi.nextKey, hi.to)
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
@@ -2399,7 +2412,9 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	if err := hi.advanceInFiles(); err != nil {
 		return nil, nil, err
 	}
-	return hi.kBackup, hi.vBackup, nil
+	order.Asc.Assert(hi.kBackup, hi.nextKey)
+	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
+	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
 func (d *Domain) stepsRangeInDBAsStr(tx kv.Tx) string {

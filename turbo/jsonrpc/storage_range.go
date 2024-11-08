@@ -39,13 +39,13 @@ type StorageEntry struct {
 	Value libcommon.Hash  `json:"value"`
 }
 
-func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
+func storageRangeAt(ttx kv.TemporalTx, contractAddress libcommon.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
 	fromKey := append(libcommon.Copy(contractAddress.Bytes()), start...)
 	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
 
-	r, err := ttx.DomainRange(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, maxResult+1)
+	r, err := ttx.DomainRange(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -68,15 +68,17 @@ func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, star
 		result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
 	}
 
-	if r.HasNext() {
+	for r.HasNext() { // not `if` because need skip empty vals
 		k, v, err := r.Next()
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
-		if len(v) > 0 {
-			key := libcommon.BytesToHash(k[20:])
-			result.NextKey = &key
+		if len(v) == 0 {
+			continue
 		}
+		key := libcommon.BytesToHash(k[20:])
+		result.NextKey = &key
+		break
 	}
 	return result, nil
 }
