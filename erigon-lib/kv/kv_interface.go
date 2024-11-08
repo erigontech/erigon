@@ -515,9 +515,10 @@ type TemporalTx interface {
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
 	// Means if you want re-execute `txNum` on historical state - do `GetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
-	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
+	GetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
+	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
-	// HistorySeek - like `DomainGetAsOf` but without latest state - only for `History`
+	// HistorySeek - like `GetAsOf` but without latest state - only for `History`
 	// `ok == true && v != nil && len(v) == 0` means key-creation even
 	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 
@@ -529,11 +530,10 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
-	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
-	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
 }
 
 type TemporalRwTx interface {

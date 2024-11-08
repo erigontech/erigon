@@ -2090,7 +2090,7 @@ var file_remote_kv_proto_depIdxs = []int32{
 	15, // 15: remote.KV.HistorySeek:input_type -> remote.HistorySeekReq
 	17, // 16: remote.KV.IndexRange:input_type -> remote.IndexRangeReq
 	19, // 17: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
-	20, // 18: remote.KV.DomainRange:input_type -> remote.DomainRangeReq
+	20, // 18: remote.KV.RangeAsOf:input_type -> remote.DomainRangeReq
 	27, // 19: remote.KV.Version:output_type -> types.VersionReply
 	4,  // 20: remote.KV.Tx:output_type -> remote.Pair
 	7,  // 21: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
@@ -2100,7 +2100,7 @@ var file_remote_kv_proto_depIdxs = []int32{
 	16, // 25: remote.KV.HistorySeek:output_type -> remote.HistorySeekReply
 	18, // 26: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
 	21, // 27: remote.KV.HistoryRange:output_type -> remote.Pairs
-	21, // 28: remote.KV.DomainRange:output_type -> remote.Pairs
+	21, // 28: remote.KV.RangeAsOf:output_type -> remote.Pairs
 	19, // [19:29] is the sub-list for method output_type
 	9,  // [9:19] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name

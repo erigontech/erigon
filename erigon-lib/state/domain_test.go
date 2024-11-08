@@ -2034,7 +2034,7 @@ func TestDomain_Unwind(t *testing.T) {
 			compareIterators(t, et, ut)
 		})
 
-		t.Run("DomainRange"+suf, func(t *testing.T) {
+		t.Run("RangeAsOf"+suf, func(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
