@@ -1374,7 +1374,6 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
-	var dbIt stream.U64
 	if ht.h.historyLargeValues {
 		from := make([]byte, len(key)+8)
 		copy(from, key)
@@ -1393,36 +1392,35 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 		if err != nil {
 			return nil, err
 		}
-		dbIt = stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+		return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
 			if len(k) < 8 {
 				return 0, fmt.Errorf("unexpected large key length %d", len(k))
 			}
 			return binary.BigEndian.Uint64(k[len(k)-8:]), nil
-		})
-	} else {
-		var from, to []byte
-		if startTxNum >= 0 {
-			from = make([]byte, 8)
-			binary.BigEndian.PutUint64(from, uint64(startTxNum))
-		}
-		if endTxNum >= 0 {
-			to = make([]byte, 8)
-			binary.BigEndian.PutUint64(to, uint64(endTxNum))
-		}
-		it, err := roTx.RangeDupSort(ht.h.historyValsTable, key, from, to, asc, limit)
-		if err != nil {
-			return nil, err
-		}
-		dbIt = stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
-			if len(v) < 8 {
-				return 0, fmt.Errorf("unexpected small value length %d", len(v))
-			}
-			return binary.BigEndian.Uint64(v), nil
-		})
+		}), nil
 	}
 
-	return dbIt, nil
+	var from, to []byte
+	if startTxNum >= 0 {
+		from = make([]byte, 8)
+		binary.BigEndian.PutUint64(from, uint64(startTxNum))
+	}
+	if endTxNum >= 0 {
+		to = make([]byte, 8)
+		binary.BigEndian.PutUint64(to, uint64(endTxNum))
+	}
+	it, err := roTx.RangeDupSort(ht.h.historyValsTable, key, from, to, asc, limit)
+	if err != nil {
+		return nil, err
+	}
+	return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+		if len(v) < 8 {
+			return 0, fmt.Errorf("unexpected small value length %d", len(v))
+		}
+		return binary.BigEndian.Uint64(v), nil
+	}), nil
 }
+
 func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	frozenIt, err := ht.iit.iterateRangeOnFiles(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
