@@ -645,69 +645,6 @@ func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
 	return nil
 }
 
-type CursorType uint8
-
-const (
-	FILE_CURSOR CursorType = iota
-	DB_CURSOR
-	RAM_CURSOR
-)
-
-// CursorItem is the item in the priority queue used to do merge interation
-// over storage of a given account
-type CursorItem struct {
-	cDup    kv.CursorDupSort
-	cNonDup kv.Cursor
-
-	iter         btree2.MapIter[string, dataWithPrevStep]
-	dg           *seg.Reader
-	dg2          *seg.Reader
-	btCursor     *Cursor
-	key          []byte
-	val          []byte
-	step         uint64
-	startTxNum   uint64
-	endTxNum     uint64
-	latestOffset uint64     // offset of the latest value in the file
-	t            CursorType // Whether this item represents state file or DB record, or tree
-	reverse      bool
-}
-
-type CursorHeap []*CursorItem
-
-func (ch CursorHeap) Len() int {
-	return len(ch)
-}
-
-func (ch CursorHeap) Less(i, j int) bool {
-	cmp := bytes.Compare(ch[i].key, ch[j].key)
-	if cmp == 0 {
-		// when keys match, the items with later blocks are preferred
-		if ch[i].reverse {
-			return ch[i].endTxNum > ch[j].endTxNum
-		}
-		return ch[i].endTxNum < ch[j].endTxNum
-	}
-	return cmp < 0
-}
-
-func (ch *CursorHeap) Swap(i, j int) {
-	(*ch)[i], (*ch)[j] = (*ch)[j], (*ch)[i]
-}
-
-func (ch *CursorHeap) Push(x interface{}) {
-	*ch = append(*ch, x.(*CursorItem))
-}
-
-func (ch *CursorHeap) Pop() interface{} {
-	old := *ch
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = nil
-	*ch = old[0 : n-1]
-	return x
-}
-
 // DomainRoTx allows accesing the same domain from multiple go-routines
 type DomainRoTx struct {
 	files   visibleFiles
