@@ -20,12 +20,15 @@ disabled_tests=(
     eth_getBlockByHash/test_10.json
     eth_getBlockByNumber/test_12.json
     # Erigon bugs: https://github.com/erigontech/erigon/pull/12609
-    debug_accountRange,debug_storageRangeAt
+    debug_accountRange
+    debug_storageRangeAt
     # need update rpc-test - because Erigon is correct (@AskAlexSharov will do after https://github.com/erigontech/erigon/pull/12634)
     # remove this line after https://github.com/erigontech/rpc-tests/pull/273
-    debug_getModifiedAccountsByHash,debug_getModifiedAccountsByNumber
+    debug_getModifiedAccountsByHash
+    debug_getModifiedAccountsByNumber
     # Erigon bug https://github.com/erigontech/erigon/issues/12603
-    erigon_getLatestLogs,erigon_getLogsByHash/test_04.json
+    erigon_getLatestLogs
+    erigon_getLogsByHash/test_04.json
     # Erigon bug https://github.com/erigontech/erigon/issues/12637
     debug_traceBlockByNumber/test_05.tar
     debug_traceBlockByNumber/test_08.tar
@@ -36,7 +39,7 @@ disabled_tests=(
     # remove this line after https://github.com/erigontech/rpc-tests/pull/281
     parity_getBlockReceipts
     parity_listStorageKeys/test_12.json
-    # to investigate
+    # created task https://github.com/erigontech/erigon/issues/12668
     debug_traceCallMany/test_02.tar
     debug_traceCallMany/test_04.tar
     debug_traceCallMany/test_05.tar
@@ -44,6 +47,7 @@ disabled_tests=(
     debug_traceCallMany/test_07.tar
     debug_traceCallMany/test_09.json
     debug_traceCallMany/test_10.tar
+    # to investigate
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
