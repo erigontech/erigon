@@ -258,6 +258,16 @@ func (api *ZkEvmAPIImpl) VirtualBatchNumber(ctx context.Context) (hexutil.Uint64
 	}
 
 	if latestSequencedBatch == nil {
+		forkId, err := hermezDb.GetForkId(0)
+		if err != nil {
+			return hexutil.Uint64(0), err
+		}
+
+		// injected batch post etrog must be both virtual and verified
+		if forkId >= uint64(chain.ForkID7Etrog) {
+			return hexutil.Uint64(1), nil
+		}
+
 		return hexutil.Uint64(0), nil
 	}
 
