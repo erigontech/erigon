@@ -513,7 +513,7 @@ type TemporalTx interface {
 
 	// DomainGetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
-	// Means if you want re-execute `txNum` on historical state - do `GetAsOf(key, txNum)` to read state
+	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
 	GetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
 	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
