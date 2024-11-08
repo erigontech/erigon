@@ -624,7 +624,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 // todo IdxRange operates over ii.indexTable . Passing `nil` as a key will not return all keys
 func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
-	frozenIt, err := iit.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
+	frozenIt, err := iit.iterateRangeOnFiles(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -672,7 +672,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 // IdxRange is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
 // [startTxNum; endNumTx)
-func (iit *InvertedIndexRoTx) iterateRangeFrozen(key []byte, startTxNum, endTxNum int, asc order.By, limit int) (*FrozenInvertedIdxIter, error) {
+func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxNum int, asc order.By, limit int) (*InvertedIdxStreamFiles, error) {
 	if asc && (startTxNum >= 0 && endTxNum >= 0) && startTxNum > endTxNum {
 		return nil, fmt.Errorf("startTxNum=%d epected to be lower than endTxNum=%d", startTxNum, endTxNum)
 	}
@@ -680,7 +680,7 @@ func (iit *InvertedIndexRoTx) iterateRangeFrozen(key []byte, startTxNum, endTxNu
 		return nil, fmt.Errorf("startTxNum=%d epected to be bigger than endTxNum=%d", startTxNum, endTxNum)
 	}
 
-	it := &FrozenInvertedIdxIter{
+	it := &InvertedIdxStreamFiles{
 		key:         key,
 		startTxNum:  startTxNum,
 		endTxNum:    endTxNum,
@@ -982,11 +982,11 @@ func (iit *InvertedIndexRoTx) DebugEFAllValuesAreInRange(ctx context.Context, fa
 	return nil
 }
 
-// FrozenInvertedIdxIter allows iteration over range of txn numbers
+// InvertedIdxStreamFiles allows iteration over range of txn numbers
 // Iteration is not implmented via callback function, because there is often
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)
-// FrozenInvertedIdxIter must be closed after use to prevent leaking of resources like cursor
-type FrozenInvertedIdxIter struct {
+// InvertedIdxStreamFiles must be closed after use to prevent leaking of resources like cursor
+type InvertedIdxStreamFiles struct {
 	key                  []byte
 	startTxNum, endTxNum int
 	limit                int
@@ -1003,19 +1003,19 @@ type FrozenInvertedIdxIter struct {
 	ef *eliasfano32.EliasFano
 }
 
-func (it *FrozenInvertedIdxIter) Close() {
+func (it *InvertedIdxStreamFiles) Close() {
 	for _, item := range it.stack {
 		item.reader.Close()
 	}
 }
 
-func (it *FrozenInvertedIdxIter) advance() {
+func (it *InvertedIdxStreamFiles) advance() {
 	if it.hasNext {
 		it.advanceInFiles()
 	}
 }
 
-func (it *FrozenInvertedIdxIter) HasNext() bool {
+func (it *InvertedIdxStreamFiles) HasNext() bool {
 	if it.err != nil { // always true, then .Next() call will return this error
 		return true
 	}
@@ -1025,16 +1025,16 @@ func (it *FrozenInvertedIdxIter) HasNext() bool {
 	return it.hasNext
 }
 
-func (it *FrozenInvertedIdxIter) Next() (uint64, error) { return it.next(), nil }
+func (it *InvertedIdxStreamFiles) Next() (uint64, error) { return it.next(), nil }
 
-func (it *FrozenInvertedIdxIter) next() uint64 {
+func (it *InvertedIdxStreamFiles) next() uint64 {
 	it.limit--
 	n := it.nextN
 	it.advance()
 	return n
 }
 
-func (it *FrozenInvertedIdxIter) advanceInFiles() {
+func (it *InvertedIdxStreamFiles) advanceInFiles() {
 	for {
 		for it.efIt == nil {
 			if len(it.stack) == 0 {

@@ -1373,7 +1373,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	return stream.MergeKVS(itOnDB, itOnFiles, limit), nil
 }
 
-func (ht *HistoryRoTx) idxRangeRecent(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
+func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	var dbIt stream.U64
 	if ht.h.historyLargeValues {
 		from := make([]byte, len(key)+8)
@@ -1424,11 +1424,11 @@ func (ht *HistoryRoTx) idxRangeRecent(key []byte, startTxNum, endTxNum int, asc 
 	return dbIt, nil
 }
 func (ht *HistoryRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
-	frozenIt, err := ht.iit.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
+	frozenIt, err := ht.iit.iterateRangeOnFiles(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
 		return nil, err
 	}
-	recentIt, err := ht.idxRangeRecent(key, startTxNum, endTxNum, asc, limit, roTx)
+	recentIt, err := ht.idxRangeOnDB(key, startTxNum, endTxNum, asc, limit, roTx)
 	if err != nil {
 		return nil, err
 	}
