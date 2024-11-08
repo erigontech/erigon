@@ -561,7 +561,11 @@ func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (r
 		if !ok {
 			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
-		reply.V, reply.Ok, err = ttx.HistorySeek(kv.History(req.Table), req.K, req.Ts)
+		domain, err := kv.String2Domain(req.Table)
+		if err != nil {
+			return err
+		}
+		reply.V, reply.Ok, err = ttx.HistorySeek(domain, req.K, req.Ts)
 		if err != nil {
 			return err
 		}
@@ -629,7 +633,11 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 		if !ok {
 			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 		}
-		it, err := ttx.HistoryRange(kv.History(req.Table), fromTs, int(req.ToTs), order.By(req.OrderAscend), limit)
+		domain, err := kv.String2Domain(req.Table)
+		if err != nil {
+			return err
+		}
+		it, err := ttx.HistoryRange(domain, fromTs, int(req.ToTs), order.By(req.OrderAscend), limit)
 		if err != nil {
 			return err
 		}
