@@ -1791,11 +1791,7 @@ func (dt *DomainRoTx) Close() {
 	if dt.files == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	if dt.valsC != nil {
-		dt.valsC.Close()
-		dt.vcParentPtr.Store(0)
-		dt.valsC = nil
-	}
+	dt.closeValsCursor()
 	files := dt.files
 	dt.files = nil
 	for i := range files {
@@ -1865,6 +1861,13 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 
 var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
 
+func (dt *DomainRoTx) closeValsCursor() {
+	if dt.valsC != nil {
+		dt.valsC.Close()
+		dt.vcParentPtr.Store(0)
+		dt.valsC = nil
+	}
+}
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
 	if dt.valsC != nil {

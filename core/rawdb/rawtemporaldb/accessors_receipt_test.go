@@ -20,10 +20,11 @@ func TestAppendReceipt(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	doms, err := state.NewSharedDomains(tx, log.New())
+	ttx := tx.(kv.TemporalTx)
+	doms, err := state.NewSharedDomains(ttx, log.New())
 	require.NoError(err)
 	defer doms.Close()
-	doms.SetTx(tx)
+	doms.SetTx(ttx)
 
 	doms.SetTxNum(0) // block1
 	err = AppendReceipt(doms, &types.Receipt{CumulativeGasUsed: 10, FirstLogIndexWithinBlock: 0}, 0)
@@ -48,7 +49,6 @@ func TestAppendReceipt(t *testing.T) {
 	err = doms.Flush(context.Background(), tx)
 	require.NoError(err)
 
-	ttx := tx.(kv.TemporalTx)
 	v, ok, err := ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 0)
 	require.NoError(err)
 	require.True(ok)

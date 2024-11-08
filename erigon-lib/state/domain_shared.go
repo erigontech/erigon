@@ -915,13 +915,14 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		_, f, l, _ := runtime.Caller(1)
 		fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
 	}
-	for _, w := range sd.domainWriters {
+	for di, w := range sd.domainWriters {
 		if w == nil {
 			continue
 		}
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
+		sd.aggTx.d[di].closeValsCursor()
 	}
 	for _, w := range sd.iiWriters {
 		if w == nil {
