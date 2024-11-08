@@ -45,7 +45,7 @@ func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, star
 	fromKey := append(libcommon.Copy(contractAddress.Bytes()), start...)
 	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
 
-	r, err := ttx.DomainRange(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, maxResult+1)
+	r, err := ttx.DomainRange(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
