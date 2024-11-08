@@ -156,6 +156,14 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, txNumsReade
 func CreateHistoryStateReader(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64, txnIndex int, chainName string) (state.StateReader, error) {
 	r := state.NewHistoryReaderV3()
 	r.SetTx(tx)
+	if txnIndex == -1 {
+		maxTxNum, err := txNumsReader.Max(tx, blockNumber)
+		if err != nil {
+			return nil, err
+		}
+		r.SetTxNum(uint64(maxTxNum) + 1)
+		return r, nil
+	}
 	//r.SetTrace(true)
 	minTxNum, err := txNumsReader.Min(tx, blockNumber)
 	if err != nil {
