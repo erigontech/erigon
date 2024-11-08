@@ -99,7 +99,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	return storageRangeAtV3(tx.(kv.TemporalTx), contractAddress, keyStart, minTxNum+txIndex, maxResult)
+	return storageRangeAt(tx.(kv.TemporalTx), contractAddress, keyStart, minTxNum+txIndex, maxResult)
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb

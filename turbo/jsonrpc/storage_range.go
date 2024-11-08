@@ -39,7 +39,7 @@ type StorageEntry struct {
 	Value libcommon.Hash  `json:"value"`
 }
 
-func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
+func storageRangeAt(ttx kv.TemporalTx, contractAddress libcommon.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
 	fromKey := append(libcommon.Copy(contractAddress.Bytes()), start...)
