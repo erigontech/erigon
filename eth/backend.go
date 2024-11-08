@@ -218,7 +218,7 @@ type Ethereum struct {
 	polygonSyncService  *polygonsync.Service
 	polygonDownloadSync *stagedsync.Sync
 	polygonBridge       *bridge.Service
-	heimdallService     heimdall.Service
+	heimdallService     *heimdall.Service
 	stopNode            func() error
 }
 
@@ -532,7 +532,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var heimdallClient heimdall.HeimdallClient
 	var polygonBridge *bridge.Service
-	var heimdallService heimdall.Service
+	var heimdallService *heimdall.Service
 	var bridgeRPC *bridge.BackendServer
 	var heimdallRPC *heimdall.BackendServer
 

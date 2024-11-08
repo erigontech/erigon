@@ -42,7 +42,7 @@ func NewService(
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
 	bridgeService *bridge.Service,
-	heimdallService heimdall.Service,
+	heimdallService *heimdall.Service,
 ) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
@@ -91,7 +91,7 @@ type Service struct {
 	p2pService      *p2p.Service
 	store           Store
 	events          *TipEvents
-	heimdallService heimdall.Service
+	heimdallService *heimdall.Service
 	bridgeService   *bridge.Service
 }
 

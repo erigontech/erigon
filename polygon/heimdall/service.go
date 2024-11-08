@@ -39,20 +39,7 @@ type ServiceConfig struct {
 	Logger    log.Logger
 }
 
-type Service interface {
-	Span(ctx context.Context, id uint64) (*Span, bool, error)
-	CheckpointsFromBlock(ctx context.Context, startBlock uint64) ([]*Checkpoint, error)
-	MilestonesFromBlock(ctx context.Context, startBlock uint64) ([]*Milestone, error)
-	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
-	RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc
-	Run(ctx context.Context) error
-	SynchronizeCheckpoints(ctx context.Context) (latest *Checkpoint, err error)
-	SynchronizeMilestones(ctx context.Context) (latest *Milestone, err error)
-	SynchronizeSpans(ctx context.Context, blockNum uint64) error
-	Ready(ctx context.Context) <-chan error
-}
-
-type service struct {
+type Service struct {
 	logger                    log.Logger
 	store                     Store
 	reader                    *Reader
@@ -63,11 +50,7 @@ type service struct {
 	ready                     ready
 }
 
-func NewService(config ServiceConfig) Service {
-	return newService(config)
-}
-
-func newService(config ServiceConfig) *service {
+func NewService(config ServiceConfig) *Service {
 	logger := config.Logger
 	borConfig := config.BorConfig
 	store := config.Store
@@ -106,7 +89,7 @@ func newService(config ServiceConfig) *service {
 		logger,
 	)
 
-	return &service{
+	return &Service{
 		logger:                    logger,
 		store:                     store,
 		reader:                    NewReader(borConfig, store, logger),
@@ -172,21 +155,21 @@ func NewSpanFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Sp
 	)
 }
 
-func (s *service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
+func (s *Service) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return s.reader.Span(ctx, id)
 }
 
-func (s *service) SynchronizeCheckpoints(ctx context.Context) (*Checkpoint, error) {
+func (s *Service) SynchronizeCheckpoints(ctx context.Context) (*Checkpoint, error) {
 	s.logger.Info(heimdallLogPrefix("synchronizing checkpoints..."))
 	return s.checkpointScraper.Synchronize(ctx)
 }
 
-func (s *service) SynchronizeMilestones(ctx context.Context) (*Milestone, error) {
+func (s *Service) SynchronizeMilestones(ctx context.Context) (*Milestone, error) {
 	s.logger.Info(heimdallLogPrefix("synchronizing milestones..."))
 	return s.milestoneScraper.Synchronize(ctx)
 }
 
-func (s *service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
+func (s *Service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 	s.logger.Debug(heimdallLogPrefix("synchronizing spans..."), "blockNum", blockNum)
 
 	lastSpan, ok, err := s.store.Spans().LastEntity(ctx)
@@ -212,7 +195,7 @@ func (s *service) SynchronizeSpans(ctx context.Context, blockNum uint64) error {
 	return nil
 }
 
-func (s *service) synchronizeSpans(ctx context.Context) error {
+func (s *Service) synchronizeSpans(ctx context.Context) error {
 	if _, err := s.spanScraper.Synchronize(ctx); err != nil {
 		return err
 	}
@@ -224,19 +207,19 @@ func (s *service) synchronizeSpans(ctx context.Context) error {
 	return nil
 }
 
-func (s *service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) ([]*Checkpoint, error) {
+func (s *Service) CheckpointsFromBlock(ctx context.Context, startBlock uint64) ([]*Checkpoint, error) {
 	return s.reader.CheckpointsFromBlock(ctx, startBlock)
 }
 
-func (s *service) MilestonesFromBlock(ctx context.Context, startBlock uint64) ([]*Milestone, error) {
+func (s *Service) MilestonesFromBlock(ctx context.Context, startBlock uint64) ([]*Milestone, error) {
 	return s.reader.MilestonesFromBlock(ctx, startBlock)
 }
 
-func (s *service) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
+func (s *Service) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
 	return s.reader.Producers(ctx, blockNum)
 }
 
-func (s *service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+func (s *Service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
 	options := NewObserverOptions(opts...)
 	return s.milestoneScraper.RegisterObserver(func(entities []*Milestone) {
 		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
@@ -245,7 +228,7 @@ func (s *service) RegisterMilestoneObserver(callback func(*Milestone), opts ...O
 	})
 }
 
-func (s *service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+func (s *Service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
 	options := NewObserverOptions(opts...)
 	return s.spanScraper.RegisterObserver(func(entities []*Span) {
 		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
@@ -287,7 +270,7 @@ func (r *ready) set() {
 	close(r.on)
 }
 
-func (s *service) Ready(ctx context.Context) <-chan error {
+func (s *Service) Ready(ctx context.Context) <-chan error {
 	errc := make(chan error)
 
 	go func() {
@@ -304,7 +287,7 @@ func (s *service) Ready(ctx context.Context) <-chan error {
 	return errc
 }
 
-func (s *service) Run(ctx context.Context) error {
+func (s *Service) Run(ctx context.Context) error {
 	defer s.store.Close()
 
 	if err := s.store.Prepare(ctx); err != nil {
@@ -353,7 +336,7 @@ func (s *service) Run(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (s *service) replayUntrackedSpans(ctx context.Context) error {
+func (s *Service) replayUntrackedSpans(ctx context.Context) error {
 	lastSpanId, ok, err := s.store.Spans().LastEntityId(ctx)
 	if err != nil {
 		return err

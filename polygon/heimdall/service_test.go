@@ -137,7 +137,7 @@ type ServiceTestSuite struct {
 	cancel                       context.CancelFunc
 	eg                           errgroup.Group
 	client                       *MockHeimdallClient
-	service                      *service
+	service                      *Service
 	observedMilestones           []*Milestone
 	observedSpans                []*Span
 	spansTestDataDir             string
@@ -163,7 +163,7 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.setupSpans()
 	suite.setupCheckpoints()
 	suite.setupMilestones()
-	suite.service = newService(ServiceConfig{
+	suite.service = NewService(ServiceConfig{
 		Store:     store,
 		BorConfig: borConfig,
 		Client:    suite.client,
