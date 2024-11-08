@@ -18,7 +18,6 @@ package stream
 
 import (
 	"bytes"
-	"fmt"
 )
 
 // often used shortcuts
@@ -136,7 +135,6 @@ func (m *UnionKVIter) HasNext() bool {
 	if m.err != nil {
 		return true
 	}
-	fmt.Printf("[dbg] Union limit=%d, %t, %t\n", m.limit, m.xHasNext, m.yHasNext)
 	return (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
 }
 func (m *UnionKVIter) advanceX() {
