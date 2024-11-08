@@ -469,7 +469,7 @@ func (m *Traced[T]) HasNext() bool {
 }
 func (m *Traced[T]) Next() (k T, err error) {
 	k, err = m.it.Next()
-	log.Warn(m.prefix, "next", fmt.Sprintf("%x", k))
+	log.Warn(m.prefix, "next", k)
 	return k, err
 }
 func (m *Traced[T]) Close() {
@@ -495,7 +495,12 @@ func (m *TracedDuo[K, V]) HasNext() bool {
 }
 func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v, err = m.it.Next()
-	log.Warn(m.prefix, "next", fmt.Sprintf("%x", k))
+	switch any(k).(type) {
+	case []byte:
+		log.Warn(m.prefix, "next", fmt.Sprintf("%x", k))
+	default:
+		log.Warn(m.prefix, "next", k)
+	}
 	return k, v, err
 }
 func (m *TracedDuo[K, V]) Close() {
