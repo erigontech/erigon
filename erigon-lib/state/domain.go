@@ -2388,11 +2388,9 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 
 func (hi *DomainLatestIterFile) HasNext() bool {
 	if hi.limit == 0 { // limit reached
-		log.Warn("[dbg] DomainLatestIterFile.HasNext1")
 		return false
 	}
 	if hi.nextKey == nil { // EndOfTable
-		log.Warn("[dbg] DomainLatestIterFile.HasNext2")
 		return false
 	}
 	if hi.to == nil { // s.nextK == nil check is above
@@ -2402,11 +2400,7 @@ func (hi *DomainLatestIterFile) HasNext() bool {
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.to)
-	res := (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
-	if !res {
-		log.Warn("[dbg] DomainLatestIterFile.HasNext3")
-	}
-	return res
+	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
 func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
