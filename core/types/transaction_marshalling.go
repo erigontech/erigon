@@ -70,39 +70,47 @@ type txJSON struct {
 }
 
 type JsonAuthorization struct {
-	ChainID *hexutil.Big      `json:"chainId"`
+	ChainID hexutil.Uint64    `json:"chainId"`
 	Address libcommon.Address `json:"address"`
-	Nonce   uint64            `json:"nonce"`
-	V       hexutil.Big       `json:"v"`
+	Nonce   hexutil.Uint64    `json:"nonce"`
+	V       hexutil.Uint64    `json:"v"`
 	R       hexutil.Big       `json:"r"`
 	S       hexutil.Big       `json:"s"`
 }
 
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
-	chainId := hexutil.Big(*authorization.ChainID.ToBig())
-	a.ChainID = &chainId
+	a.ChainID = (hexutil.Uint64)(authorization.ChainID)
 	a.Address = authorization.Address
-	a.Nonce = authorization.Nonce
+	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
 
-	a.V = hexutil.Big(*authorization.V.ToBig())
+	a.V = (hexutil.Uint64)(authorization.YParity)
 	a.R = hexutil.Big(*authorization.R.ToBig())
 	a.S = hexutil.Big(*authorization.S.ToBig())
 	return a
 }
 
-func (a JsonAuthorization) ToAuthorization() Authorization {
-	v, _ := uint256.FromBig((*big.Int)(&a.V))
-	r, _ := uint256.FromBig((*big.Int)(&a.R))
-	s, _ := uint256.FromBig((*big.Int)(&a.S))
-	chainId, _ := uint256.FromBig((*big.Int)(a.ChainID))
-	return Authorization{
-		ChainID: chainId,
+func (a JsonAuthorization) ToAuthorization() (Authorization, error) {
+	auth := Authorization{
+		ChainID: a.ChainID.Uint64(),
 		Address: a.Address,
-		Nonce:   a.Nonce,
-		V:       *v,
-		R:       *r,
-		S:       *s,
+		Nonce:   a.Nonce.Uint64(),
 	}
+	yParity := a.V.Uint64()
+	if yParity >= 1<<8 {
+		return auth, errors.New("y parity in authorization does not fit in 8 bits")
+	}
+	auth.YParity = uint8(yParity)
+	r, overflow := uint256.FromBig((*big.Int)(&a.R))
+	if overflow {
+		return auth, errors.New("r in authorization does not fit in 256 bits")
+	}
+	auth.R = *r
+	s, overflow := uint256.FromBig((*big.Int)(&a.S))
+	if overflow {
+		return auth, errors.New("s in authorization does not fit in 256 bits")
+	}
+	auth.S = *s
+	return auth, nil
 }
 
 func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
@@ -493,7 +501,11 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 	}
 	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
 	for i, auth := range *dec.Authorizations {
-		tx.Authorizations[i] = auth.ToAuthorization()
+		var err error
+		tx.Authorizations[i], err = auth.ToAuthorization()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
