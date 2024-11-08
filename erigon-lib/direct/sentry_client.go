@@ -89,7 +89,7 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	c.Lock()
 	defer c.Unlock()
 	switch reply.Protocol {
-	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68, reply.Protocol:
+	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68:
 		c.protocol = reply.Protocol
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
