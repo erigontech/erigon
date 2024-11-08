@@ -111,6 +111,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		targetEpoch    uint64
 		signature      [96]byte
 		data           *solid.AttestationData
+		attestation    *solid.Attestation
+		attHashKey     [32]byte
 	)
 	if att.Attestation != nil {
 		slot = att.Attestation.Data.Slot
@@ -120,7 +122,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	attEpoch := s.ethClock.GetEpochAtSlot(slot)
 	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
 
-	var key [32]byte
 	var err error
 	if clVersion >= clparams.ElectraVersion {
 		root = att.SingleAttestation.Data.BeaconBlockRoot
@@ -129,15 +130,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		targetEpoch = att.SingleAttestation.Data.Target.Epoch
 		signature = att.SingleAttestation.Signature
 		data = att.SingleAttestation.Data
-		key, err = att.SingleAttestation.HashSSZ()
+		attHashKey, err = att.SingleAttestation.HashSSZ()
 		if err != nil {
 			return err
 		}
-		// [REJECT] attestation.data.index == 0
-		if att.SingleAttestation.Data.CommitteeIndex != 0 {
-			return errors.New("committee index must be 0")
-		}
-
+		attestation = att.SingleAttestation.ToAttestation(memberIndexInCommittee)
 	} else {
 		root = att.Attestation.Data.BeaconBlockRoot
 		slot = att.Attestation.Data.Slot
@@ -145,10 +142,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		targetEpoch = att.Attestation.Data.Target.Epoch
 		signature = att.Attestation.Signature
 		data = att.Attestation.Data
-		key, err = att.Attestation.HashSSZ()
+		attHashKey, err = att.Attestation.HashSSZ()
 		if err != nil {
 			return err
 		}
+		attestation = att.Attestation
 	}
 
 	// Commented because we have a check in validatorAttestationSeen that does the same thing.
@@ -188,7 +186,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if subnet == nil || subnetId != *subnet {
 			return errors.New("wrong subnet")
 		}
-
 		beaconCommittee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 		if err != nil {
 			return err
@@ -293,18 +290,16 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
-			if s.committeeSubscribe.NeedToAggregate(att.Attestation) {
-				err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
-				if errors.Is(err, aggregation.ErrIsSuperset) {
-					return
-				}
+			err = s.committeeSubscribe.AggregateAttestation(attestation)
+			if errors.Is(err, aggregation.ErrIsSuperset) {
+				return
 			}
 
 			if err != nil {
 				log.Warn("could not check aggregate attestation", "err", err)
 				return
 			}
-			s.emitters.Operation().SendAttestation(att.Attestation)
+			s.emitters.Operation().SendAttestation(attestation)
 		},
 	}
 

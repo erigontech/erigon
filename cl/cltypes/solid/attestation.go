@@ -197,3 +197,15 @@ func (s *SingleAttestation) HashSSZ() (o [32]byte, err error) {
 func (s *SingleAttestation) Clone() clonable.Clonable {
 	return &SingleAttestation{}
 }
+
+func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestation {
+	committeeBits := NewBitVector(maxCommitteesPerSlot)
+	aggregationBits := NewBitList(0, aggregationBitsSizeElectra)
+	aggregationBits.SetOnBit(maxValidatorsPerCommittee*int(s.CommitteeIndex) + memberIndexInCommittee)
+	return &Attestation{
+		AggregationBits: aggregationBits,
+		Data:            s.Data,
+		Signature:       s.Signature,
+		CommitteeBits:   committeeBits,
+	}
+}

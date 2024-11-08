@@ -129,6 +129,9 @@ func (u *BitList) Set(index int, v byte) {
 }
 
 func (u *BitList) SetOnBit(bitIndex int) {
+	if bitIndex >= u.c {
+		return
+	}
 	// remove the last on bit if nessary
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
@@ -160,6 +163,7 @@ func (u *BitList) SetOnBit(bitIndex int) {
 			break
 		}
 	}
+	u.l = len(u.u)
 }
 
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.
