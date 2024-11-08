@@ -24,7 +24,6 @@ import (
 	"os"
 
 	"github.com/golang/snappy"
-	"github.com/klauspost/compress/zstd"
 	"github.com/spf13/afero"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -94,12 +93,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	}
 	defer cacheFile.Close()
 
-	reader := decompressPool.Get().(*zstd.Decoder)
-	defer decompressPool.Put(reader)
-
-	reader.Reset(cacheFile)
-
-	if err := bs.DecodeCaches(reader); err != nil {
+	if err := bs.DecodeCaches(cacheFile); err != nil {
 		return nil, err
 	}
 
@@ -162,19 +156,13 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 	}
 	defer cacheFile.Close()
 
-	writer := compressorPool.Get().(*zstd.Encoder)
-	defer compressorPool.Put(writer)
-
-	writer.Reset(cacheFile)
-	defer writer.Close()
-
-	if err := bs.EncodeCaches(writer); err != nil {
+	if err := bs.EncodeCaches(cacheFile); err != nil {
 		return err
 	}
-	if err = writer.Close(); err != nil {
+
+	if err = cacheFile.Sync(); err != nil {
 		return
 	}
-	err = cacheFile.Sync()
 
 	return
 }

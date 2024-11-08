@@ -484,6 +484,67 @@ func BuildIndex(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, l
 	}
 }
 
+func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.RecSplitArgs, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
+		}
+	}()
+
+	d, err := seg.NewDecompressor(info.Path)
+	if err != nil {
+		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
+	}
+	defer d.Close()
+
+	if p != nil {
+		fname := info.Name()
+		p.Name.Store(&fname)
+		p.Total.Store(uint64(d.Count()))
+	}
+	cfg.KeyCount = d.Count()
+	cfg.IndexFile = filepath.Join(info.Dir(), strings.ReplaceAll(info.name, ".seg", ".idx"))
+	rs, err := recsplit.NewRecSplit(cfg, logger)
+	if err != nil {
+		return err
+	}
+	rs.LogLvl(lvl)
+
+	defer d.EnableReadAhead().DisableReadAhead()
+
+	for {
+		g := d.MakeGetter()
+		var i, offset, nextPos uint64
+		word := make([]byte, 0, 4096)
+
+		for g.HasNext() {
+			word, nextPos = g.Next(word[:0])
+			if err := walker(rs, i, offset, word); err != nil {
+				return err
+			}
+			i++
+			offset = nextPos
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+
+		if err = rs.Build(ctx); err != nil {
+			if errors.Is(err, recsplit.ErrCollision) {
+				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+				rs.ResetNextSalt()
+				continue
+			}
+			return err
+		}
+
+		return nil
+	}
+}
+
 func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, indexBuilder IndexBuilder, firstKey FirstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
