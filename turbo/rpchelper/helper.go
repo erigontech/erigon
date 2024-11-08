@@ -161,7 +161,7 @@ func CreateHistoryStateReader(tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, block
 		if err != nil {
 			return nil, err
 		}
-		r.SetTxNum(uint64(maxTxNum) + 1)
+		r.SetTxNum(maxTxNum + 1)
 		return r, nil
 	}
 	//r.SetTrace(true)
