@@ -33,6 +33,8 @@ const (
 var (
 	// ErrFileEntryNotFound denotes error that is returned when the certain file entry is not found in the datastream
 	ErrFileEntryNotFound = errors.New("file entry not found")
+
+	minimumCheckTimeout = 500 * time.Millisecond
 )
 
 type StreamClient struct {
@@ -530,8 +532,15 @@ LOOP:
 			break LOOP
 		}
 
-		if c.checkTimeout > 0 {
-			c.conn.SetReadDeadline(time.Now().Add(c.checkTimeout))
+		var timeout time.Time
+		if c.checkTimeout < minimumCheckTimeout {
+			timeout = time.Now().Add(minimumCheckTimeout)
+		} else {
+			timeout = time.Now().Add(c.checkTimeout)
+		}
+
+		if err = c.conn.SetReadDeadline(timeout); err != nil {
+			return err
 		}
 
 		if readNewProto {
@@ -908,11 +917,14 @@ func (c *StreamClient) writeToConn(data interface{}) error {
 }
 
 func (c *StreamClient) resetWriteTimeout() error {
-	if c.checkTimeout == 0 {
-		return nil
+	var timeout time.Time
+	if c.checkTimeout < minimumCheckTimeout {
+		timeout = time.Now().Add(minimumCheckTimeout)
+	} else {
+		timeout = time.Now().Add(c.checkTimeout)
 	}
 
-	if err := c.conn.SetWriteDeadline(time.Now().Add(c.checkTimeout)); err != nil {
+	if err := c.conn.SetWriteDeadline(timeout); err != nil {
 		return fmt.Errorf("%w: conn.SetWriteDeadline: %v", ErrSocket, err)
 	}
 
@@ -920,11 +932,14 @@ func (c *StreamClient) resetWriteTimeout() error {
 }
 
 func (c *StreamClient) resetReadTimeout() error {
-	if c.checkTimeout == 0 {
-		return nil
+	var timeout time.Time
+	if c.checkTimeout < minimumCheckTimeout {
+		timeout = time.Now().Add(minimumCheckTimeout)
+	} else {
+		timeout = time.Now().Add(c.checkTimeout)
 	}
 
-	if err := c.conn.SetReadDeadline(time.Now().Add(c.checkTimeout)); err != nil {
+	if err := c.conn.SetReadDeadline(timeout); err != nil {
 		return fmt.Errorf("%w: conn.SetReadDeadline: %v", ErrSocket, err)
 	}
 
