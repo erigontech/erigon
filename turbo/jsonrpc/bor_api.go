@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -50,16 +51,18 @@ type spanProducersReader interface {
 // BorImpl is implementation of the BorAPI interface
 type BorImpl struct {
 	*BaseAPI
-	db                  kv.RoDB // the chain db
-	spanProducersReader spanProducersReader
+	db                     kv.RoDB // the chain db
+	useSpanProducersReader bool
+	spanProducersReader    spanProducersReader
 }
 
 // NewBorAPI returns BorImpl instance
 func NewBorAPI(base *BaseAPI, db kv.RoDB, spanProducersReader spanProducersReader) *BorImpl {
 	return &BorImpl{
-		BaseAPI:             base,
-		db:                  db,
-		spanProducersReader: spanProducersReader,
+		BaseAPI:                base,
+		db:                     db,
+		useSpanProducersReader: !reflect.ValueOf(spanProducersReader).IsNil(),
+		spanProducersReader:    spanProducersReader,
 	}
 }
 
