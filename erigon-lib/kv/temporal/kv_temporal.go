@@ -195,7 +195,7 @@ func (tx *Tx) Commit() error {
 	return mdbxTx.Commit()
 }
 
-func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.filesTx.DomainRange(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
@@ -214,7 +214,7 @@ func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, er
 	}
 	return v, step, nil
 }
-func (tx *Tx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	if key2 != nil {
 		key = append(common.Copy(key), key2...)
 	}

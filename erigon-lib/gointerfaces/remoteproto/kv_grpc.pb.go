@@ -30,7 +30,7 @@ const (
 	KV_HistorySeek_FullMethodName  = "/remote.KV/HistorySeek"
 	KV_IndexRange_FullMethodName   = "/remote.KV/IndexRange"
 	KV_HistoryRange_FullMethodName = "/remote.KV/HistoryRange"
-	KV_DomainRange_FullMethodName  = "/remote.KV/RangeAsOf"
+	KV_DomainRange_FullMethodName  = "/remote.KV/DomainRange"
 )
 
 // KVClient is the client API for KV service.
@@ -279,7 +279,7 @@ func (UnimplementedKVServer) HistoryRange(context.Context, *HistoryRangeReq) (*P
 	return nil, status.Errorf(codes.Unimplemented, "method HistoryRange not implemented")
 }
 func (UnimplementedKVServer) DomainRange(context.Context, *DomainRangeReq) (*Pairs, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RangeAsOf not implemented")
+	return nil, status.Errorf(codes.Unimplemented, "method DomainRange not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 
@@ -521,7 +521,7 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KV_HistoryRange_Handler,
 		},
 		{
-			MethodName: "RangeAsOf",
+			MethodName: "DomainRange",
 			Handler:    _KV_DomainRange_Handler,
 		},
 	},

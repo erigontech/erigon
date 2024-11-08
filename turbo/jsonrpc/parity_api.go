@@ -87,7 +87,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		from = append(from, *offset...)
 	}
 	to, _ := kv.NextSubtree(account[:])
-	r, err := tx.(kv.TemporalTx).RangeAsOf(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
+	r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
 	if err != nil {
 		return nil, err
 	}
