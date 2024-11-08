@@ -864,11 +864,7 @@ const (
 )
 
 const (
-	AccountsHistory   History = "AccountsHistory"
-	StorageHistory    History = "StorageHistory"
-	CodeHistory       History = "CodeHistory"
-	CommitmentHistory History = "CommitmentHistory"
-	ReceiptHistory    History = "ReceiptHistory"
+	ReceiptHistory History = "ReceiptHistory"
 )
 
 const (
