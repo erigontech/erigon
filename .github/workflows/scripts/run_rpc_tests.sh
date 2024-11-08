@@ -19,9 +19,8 @@ disabled_tests=(
     # remove this line after https://github.com/erigontech/rpc-tests/pull/282
     eth_getBlockByHash/test_10.json
     eth_getBlockByNumber/test_12.json
-    # Erigon bugs: https://github.com/erigontech/erigon/pull/12609
+    # Erigon bugs
     debug_accountRange
-    debug_storageRangeAt
     # need update rpc-test - because Erigon is correct (@AskAlexSharov will do after https://github.com/erigontech/erigon/pull/12634)
     # remove this line after https://github.com/erigontech/rpc-tests/pull/273
     debug_getModifiedAccountsByHash
@@ -51,7 +50,6 @@ disabled_tests=(
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
-    erigon_getBalanceChangesInBlock
     trace_replayBlockTransactions/test_29.tar
     # do these perhaps require Erigon up?
     admin_nodeInfo/test_01.json
