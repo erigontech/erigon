@@ -74,7 +74,7 @@ func (u *Updater) WarmUp(tx kv.RwTx) (err error) {
 
 	u.progress = progress
 
-	latestUpdate, _, err := hermezDb.GetLatestL1InfoTreeUpdate()
+	latestUpdate, err := hermezDb.GetLatestL1InfoTreeUpdate()
 	if err != nil {
 		return err
 	}

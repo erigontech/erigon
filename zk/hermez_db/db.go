@@ -1255,32 +1255,32 @@ func (db *HermezDbReader) GetL1InfoTreeUpdate(idx uint64) (*types.L1InfoTreeUpda
 	return update, nil
 }
 
-func (db *HermezDbReader) GetLatestL1InfoTreeUpdate() (*types.L1InfoTreeUpdate, bool, error) {
+func (db *HermezDbReader) GetLatestL1InfoTreeUpdate() (*types.L1InfoTreeUpdate, error) {
 	cursor, err := db.tx.Cursor(L1_INFO_TREE_UPDATES)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	defer cursor.Close()
 
 	count, err := cursor.Count()
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if count == 0 {
-		return nil, false, nil
+		return nil, nil
 	}
 
 	_, v, err := cursor.Last()
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if len(v) == 0 {
-		return nil, false, nil
+		return nil, nil
 	}
 
 	result := &types.L1InfoTreeUpdate{}
 	result.Unmarshall(v)
-	return result, true, nil
+	return result, nil
 }
 
 func (db *HermezDb) WriteBlockL1InfoTreeIndex(blockNumber uint64, l1Index uint64) error {
