@@ -2645,14 +2645,21 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	var l4 []string
+	var l4, l5 []string
 	if all {
 		l4, err = seedableStateFilesBySubDir(dirs.Snap, "accessor", all)
 		if err != nil {
 			return nil, err
 		}
 	}
-	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
+	// check if dirs.SnapCaplin exists
+	if _, err := os.Stat(dirs.SnapCaplin); !os.IsNotExist(err) {
+		l5, err = seedableSegmentFiles(dirs.SnapCaplin, chainName, all)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
 	return files, nil
 }
 

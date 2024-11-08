@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -433,12 +432,11 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 
 func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	var (
-		hash               common.Hash
-		replayTransactions types.Transactions
-		evm                *vm.EVM
-		blockCtx           evmtypes.BlockContext
-		txCtx              evmtypes.TxContext
-		overrideBlockHash  map[uint64]common.Hash
+		hash              common.Hash
+		evm               *vm.EVM
+		blockCtx          evmtypes.BlockContext
+		txCtx             evmtypes.TxContext
+		overrideBlockHash map[uint64]common.Hash
 	)
 
 	if config == nil {
@@ -504,13 +502,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		transactionIndex = *simulateContext.TransactionIndex
 	}
 
-	if transactionIndex == -1 {
-		transactionIndex = len(block.Transactions())
-	}
-
-	replayTransactions = block.Transactions()[:transactionIndex]
-
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), transactionIndex, api.filters, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -539,30 +531,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: false})
-	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	rules := chainConfig.Rules(blockNum, blockCtx.Time)
-
-	// Setup the gas pool (also for unmetered requests)
-	// and apply the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
-	for idx, txn := range replayTransactions {
-		ibs.SetTxContext(idx)
-		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		txCtx = core.NewEVMTxContext(msg)
-		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
-		// Execute the transaction message
-		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
-
-	}
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
