@@ -158,7 +158,7 @@ func NewPolygonSyncStageCfg(
 		KeepSpanBlockProducerSelections: true,
 		KeepCheckpoints:                 true,
 		KeepMilestones:                  true,
-		// below are handled via the Service.Unwind logic in Astrid
+		// below are handled via the Bridge Unwind logic in Astrid
 		KeepEventNums:            true,
 		KeepEventProcessedBlocks: true,
 		Astrid:                   true,
