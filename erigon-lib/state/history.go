@@ -1522,8 +1522,7 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
-	// TODO: remove `common.Copy`. it protecting from some existing bug.
-	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
+	return hi.kBackup, hi.vBackup, nil
 }
 
 // StateAsOfIterDB - returns state range at given time in history
