@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -84,48 +85,119 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 		Topics:    l1ContractTopics,
 	}
 
-	filteredLogs := []types.Log{
-		types.Log{
-			BlockNumber: latestBlockNumber.Uint64(),
-			Address:     l1ContractAddresses[0],
-			Topics:      []common.Hash{contracts.InitialSequenceBatchesTopic},
-		},
-
-		types.Log{
-			BlockNumber: latestBlockNumber.Uint64(),
-			Address:     l1ContractAddresses[0],
-			Topics:      []common.Hash{contracts.InitialSequenceBatchesTopic},
-		},
-
-		types.Log{
-			BlockNumber: latestBlockNumber.Uint64(),
-			Address:     l1ContractAddresses[0],
-			Topics:      []common.Hash{contracts.AddNewRollupTypeTopic},
-		},
-
-		types.Log{
-			BlockNumber: latestBlockNumber.Uint64(),
-			Address:     l1ContractAddresses[0],
-			Topics:      []common.Hash{contracts.AddNewRollupTypeTopicBanana},
-		},
-
-		types.Log{
-			BlockNumber: latestBlockNumber.Uint64(),
-			Address:     l1ContractAddresses[0],
-			Topics:      []common.Hash{contracts.CreateNewRollupTopic},
-		},
-
-		types.Log{
-			BlockNumber: latestBlockNumber.Uint64(),
-			Address:     l1ContractAddresses[0],
-			Topics:      []common.Hash{contracts.UpdateRollupTopic},
-		},
+	type testCase struct {
+		name   string
+		getLog func(hDB *hermez_db.HermezDb) (types.Log, error)
+		assert func(t *testing.T, hDB *hermez_db.HermezDb)
 	}
+
+	const forkIdBytesStartPosition = 64
+	const forkIdBytesEndPosition = 96
+	const rollupDataSize = 100
+
+	testCases := []testCase{
+		{
+			name: "AddNewRollupType",
+			getLog: func(hDB *hermez_db.HermezDb) (types.Log, error) {
+				rollupType := uint64(1)
+				rollupTypeHash := common.BytesToHash(big.NewInt(0).SetUint64(rollupType).Bytes())
+				rollupData := make([]byte, rollupDataSize)
+				rollupForkId := uint64(111)
+				rollupForkIdHash := common.BytesToHash(big.NewInt(0).SetUint64(rollupForkId).Bytes())
+				copy(rollupData[forkIdBytesStartPosition:forkIdBytesEndPosition], rollupForkIdHash.Bytes())
+				return types.Log{
+					BlockNumber: latestBlockNumber.Uint64(),
+					Address:     l1ContractAddresses[0],
+					Topics:      []common.Hash{contracts.AddNewRollupTypeTopic, rollupTypeHash},
+					Data:        rollupData,
+				}, nil
+			},
+			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
+				forkID, err := hDB.GetForkFromRollupType(uint64(1))
+				require.NoError(t, err)
+
+				assert.Equal(t, forkID, uint64(111))
+			},
+		},
+		{
+			name: "AddNewRollupTypeTopicBanana",
+			getLog: func(hDB *hermez_db.HermezDb) (types.Log, error) {
+				rollupType := uint64(2)
+				rollupTypeHash := common.BytesToHash(big.NewInt(0).SetUint64(rollupType).Bytes())
+				rollupData := make([]byte, rollupDataSize)
+				rollupForkId := uint64(222)
+				rollupForkIdHash := common.BytesToHash(big.NewInt(0).SetUint64(rollupForkId).Bytes())
+				copy(rollupData[forkIdBytesStartPosition:forkIdBytesEndPosition], rollupForkIdHash.Bytes())
+				return types.Log{
+					BlockNumber: latestBlockNumber.Uint64(),
+					Address:     l1ContractAddresses[0],
+					Topics:      []common.Hash{contracts.AddNewRollupTypeTopicBanana, rollupTypeHash},
+					Data:        rollupData,
+				}, nil
+			},
+			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
+				forkID, err := hDB.GetForkFromRollupType(uint64(2))
+				require.NoError(t, err)
+
+				assert.Equal(t, forkID, uint64(222))
+			},
+		},
+		{
+			name: "CreateNewRollupTopic",
+			getLog: func(hDB *hermez_db.HermezDb) (types.Log, error) {
+				rollupID := uint64(99999)
+				rollupIDHash := common.BytesToHash(big.NewInt(0).SetUint64(rollupID).Bytes())
+				rollupType := uint64(33)
+				rollupForkID := uint64(333)
+				if funcErr := hDB.WriteRollupType(rollupType, rollupForkID); funcErr != nil {
+					return types.Log{}, funcErr
+				}
+				newRollupDataCreation := common.BytesToHash(big.NewInt(0).SetUint64(rollupType).Bytes()).Bytes()
+
+				return types.Log{
+					BlockNumber: latestBlockNumber.Uint64(),
+					Address:     l1ContractAddresses[0],
+					Topics:      []common.Hash{contracts.CreateNewRollupTopic, rollupIDHash},
+					Data:        newRollupDataCreation,
+				}, nil
+			},
+			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
+				forks, batches, err := hDB.GetAllForkHistory()
+				for i := 0; i < len(forks); i++ {
+					if forks[i] == uint64(333) {
+						assert.Equal(t, batches[i], uint64(0))
+						break
+					}
+				}
+				require.NoError(t, err)
+			},
+		},
+		// types.Log{
+		// 	BlockNumber: latestBlockNumber.Uint64(),
+		// 	Address:     l1ContractAddresses[0],
+		// 	Topics:      []common.Hash{contracts.InitialSequenceBatchesTopic},
+		// },
+
+		// types.Log{
+		// 	BlockNumber: latestBlockNumber.Uint64(),
+		// 	Address:     l1ContractAddresses[0],
+		// 	Topics:      []common.Hash{contracts.UpdateRollupTopic},
+		// },
+	}
+
+	filteredLogs := []types.Log{}
+	for _, tc := range testCases {
+		ll, err := tc.getLog(hDB)
+		require.NoError(t, err)
+		filteredLogs = append(filteredLogs, ll)
+	}
+
 	EthermanMock.EXPECT().FilterLogs(gomock.Any(), filterQuery).Return(filteredLogs, nil).AnyTimes()
 
 	l1Syncer := syncer.NewL1Syncer(ctx, []syncer.IEtherman{EthermanMock}, l1ContractAddresses, l1ContractTopics, 10, 0, "latest")
 	// 	updater := l1infotree.NewUpdater(&ethconfig.Zk{}, l1Syncer)
 	zkCfg := &ethconfig.Zk{
+		L1RollupId:                  uint64(99999),
 		L1FirstBlock:                l1FirstBlock.Uint64(),
 		L1FinalizedBlockRequirement: uint64(21),
 	}
@@ -135,59 +207,8 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 	err = SpawnL1SequencerSyncStage(s, u, tx, cfg, ctx, log.New())
 	require.NoError(t, err)
 
-	// 	// assert
-	// 	// check tree
-	// 	tree, err := l1infotree.InitialiseL1InfoTree(hDB)
-	// 	require.NoError(t, err)
-
-	// 	combined := append(mainnetExitRoot.Bytes(), rollupExitRoot.Bytes()...)
-	// 	gerBytes := keccak256.Hash(combined)
-	// 	ger := common.BytesToHash(gerBytes)
-	// 	leafBytes := l1infotree.HashLeafData(ger, latestBlockParentHash, latestBlockTime)
-
-	// 	assert.True(t, tree.LeafExists(leafBytes))
-
-	// 	// check WriteL1InfoTreeLeaf
-	// 	leaves, err := hDB.GetAllL1InfoTreeLeaves()
-	// 	require.NoError(t, err)
-
-	// 	leafHash := common.BytesToHash(leafBytes[:])
-	// 	assert.Len(t, leaves, 1)
-	// 	assert.Equal(t, leafHash.String(), leaves[0].String())
-
-	// 	// check WriteL1InfoTreeUpdate
-	// 	l1InfoTreeUpdate, err := hDB.GetL1InfoTreeUpdate(0)
-	// 	require.NoError(t, err)
-
-	// 	assert.Equal(t, uint64(0), l1InfoTreeUpdate.Index)
-	// 	assert.Equal(t, ger, l1InfoTreeUpdate.GER)
-	// 	assert.Equal(t, mainnetExitRoot, l1InfoTreeUpdate.MainnetExitRoot)
-	// 	assert.Equal(t, rollupExitRoot, l1InfoTreeUpdate.RollupExitRoot)
-	// 	assert.Equal(t, latestBlockNumber.Uint64(), l1InfoTreeUpdate.BlockNumber)
-	// 	assert.Equal(t, latestBlockTime, l1InfoTreeUpdate.Timestamp)
-	// 	assert.Equal(t, latestBlockParentHash, l1InfoTreeUpdate.ParentHash)
-
-	// 	//check  WriteL1InfoTreeUpdateToGer
-	// 	l1InfoTreeUpdateToGer, err := hDB.GetL1InfoTreeUpdateByGer(ger)
-	// 	require.NoError(t, err)
-
-	// 	assert.Equal(t, uint64(0), l1InfoTreeUpdateToGer.Index)
-	// 	assert.Equal(t, ger, l1InfoTreeUpdateToGer.GER)
-	// 	assert.Equal(t, mainnetExitRoot, l1InfoTreeUpdateToGer.MainnetExitRoot)
-	// 	assert.Equal(t, rollupExitRoot, l1InfoTreeUpdateToGer.RollupExitRoot)
-	// 	assert.Equal(t, latestBlockNumber.Uint64(), l1InfoTreeUpdateToGer.BlockNumber)
-	// 	assert.Equal(t, latestBlockTime, l1InfoTreeUpdateToGer.Timestamp)
-	// 	assert.Equal(t, latestBlockParentHash, l1InfoTreeUpdateToGer.ParentHash)
-
-	// 	// check WriteL1InfoTreeRoot
-	// 	root, _, _ := tree.GetCurrentRootCountAndSiblings()
-	// 	index, found, err := hDB.GetL1InfoTreeIndexByRoot(root)
-	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, uint64(0), index)
-	// 	assert.True(t, found)
-
-	// // check SaveStageProgress
-	// progress, err := stages.GetStageProgress(tx, stages.L1InfoTree)
-	// require.NoError(t, err)
-	// assert.Equal(t, latestBlockNumber.Uint64()+1, progress)
+	// assert
+	for _, tc := range testCases {
+		tc.assert(t, hDB)
+	}
 }
