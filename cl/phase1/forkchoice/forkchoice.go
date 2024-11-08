@@ -394,16 +394,6 @@ func (f *ForkChoiceStore) GetSyncCommittees(period uint64) (*solid.SyncCommittee
 	return f.forkGraph.GetSyncCommittees(period)
 }
 
-func (f *ForkChoiceStore) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	headState, cn := f.syncedDataManager.HeadState()
-	defer cn()
-	if headState == nil {
-		return nil, nil
-	}
-
-	return headState.GetBeaconCommitee(slot, committeeIndex)
-}
-
 func (f *ForkChoiceStore) BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {
 	return f.forkGraph.GetBlockRewards(root)
 }

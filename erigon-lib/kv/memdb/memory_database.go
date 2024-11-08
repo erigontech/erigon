@@ -51,7 +51,6 @@ func NewSentryDB(tmpDir string) kv.RwDB {
 func NewTestDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
 	tmpDir := tb.TempDir()
-	tb.Helper()
 	db := New(tmpDir)
 	tb.Cleanup(db.Close)
 	return db
