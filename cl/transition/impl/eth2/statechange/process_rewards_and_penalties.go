@@ -34,7 +34,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 	flagsTotalBalances := make([]uint64, len(weights))
 
 	numWorkers := runtime.NumCPU()
-	wp := threading.CreateWorkerPool(numWorkers)
+	wp := threading.NewParallelExecutor()
 	flagsTotalBalancesShards := make([][]uint64, len(weights))
 	shardSize := s.ValidatorLength() / numWorkers
 
@@ -70,7 +70,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 		}
 	}
 
-	wp.WaitAndClose()
+	wp.Execute()
 
 	for i := range weights {
 		for j := 0; j < numWorkers; j++ {
