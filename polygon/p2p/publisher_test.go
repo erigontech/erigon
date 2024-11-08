@@ -212,7 +212,7 @@ type publisherTest struct {
 	ctx                  context.Context
 	ctxCancel            context.CancelFunc
 	t                    *testing.T
-	peerTracker          PeerTracker
+	peerTracker          *PeerTracker
 	peerProvider         *MockpeerProvider
 	peerEventRegistrar   *MockpeerEventRegistrar
 	peerEventStream      chan *sentryproto.PeerEvent
@@ -221,7 +221,7 @@ type publisherTest struct {
 	sentryClient         *direct.MockSentryClient
 	capturedSendsPtr     *[]*sentryproto.SendMessageByIdRequest
 	capturedSendsMu      *sync.Mutex
-	publisher            Publisher
+	publisher            *Publisher
 }
 
 func (pt publisherTest) mockPeerProvider(peerReply *sentryproto.PeersReply) {

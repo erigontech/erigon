@@ -45,6 +45,12 @@ var (
 	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
 	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
+
+	TransientErrors = []error{
+		ErrBadGateway,
+		ErrServiceUnavailable,
+		context.DeadlineExceeded,
+	}
 )
 
 const (

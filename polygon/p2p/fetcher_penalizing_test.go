@@ -509,7 +509,8 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrNon
 
 func newPenalizingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *penalizingFetcherTest {
 	fetcherTest := newFetcherTest(t, requestIdGenerator)
-	penalizingFetcher := newPenalizingFetcher(fetcherTest.logger, fetcherTest.fetcher, NewPeerPenalizer(fetcherTest.sentryClient))
+	peerPenalizer := NewPeerPenalizer(fetcherTest.sentryClient)
+	penalizingFetcher := NewPenalizingFetcher(fetcherTest.logger, fetcherTest.fetcher, peerPenalizer)
 	return &penalizingFetcherTest{
 		fetcherTest:       fetcherTest,
 		penalizingFetcher: penalizingFetcher,
@@ -518,5 +519,5 @@ func newPenalizingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerato
 
 type penalizingFetcherTest struct {
 	*fetcherTest
-	penalizingFetcher *penalizingFetcher
+	penalizingFetcher *PenalizingFetcher
 }
