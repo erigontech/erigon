@@ -132,6 +132,9 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	if err := stateSn.OpenFolder(); err != nil {
 		return false, err
 	}
+	if stateSn.BlocksAvailable() == 0 {
+		return false, nil
+	}
 	blocksAvaiable := stateSn.BlocksAvailable()
 	stateSnRoTx := stateSn.View()
 	defer stateSnRoTx.Close()
