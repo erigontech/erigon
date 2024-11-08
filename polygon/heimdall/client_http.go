@@ -80,22 +80,41 @@ type HttpRequest struct {
 	start   time.Time
 }
 
-func NewHttpClient(urlString string, logger log.Logger) *HttpClient {
-	httpClient := &http.Client{
-		Timeout: apiHeimdallTimeout,
+type HttpClientOption func(*HttpClient)
+
+func WithHttpRequestHandler(handler httpRequestHandler) HttpClientOption {
+	return func(client *HttpClient) {
+		client.handler = handler
 	}
-	return newHttpClient(urlString, httpClient, retryBackOff, maxRetries, logger)
 }
 
-func newHttpClient(urlString string, handler httpRequestHandler, retryBackOff time.Duration, maxRetries int, logger log.Logger) *HttpClient {
-	return &HttpClient{
+func WithHttpRetryBackOff(retryBackOff time.Duration) HttpClientOption {
+	return func(client *HttpClient) {
+		client.retryBackOff = retryBackOff
+	}
+}
+
+func WithHttpMaxRetries(maxRetries int) HttpClientOption {
+	return func(client *HttpClient) {
+		client.maxRetries = maxRetries
+	}
+}
+
+func NewHttpClient(urlString string, logger log.Logger, opts ...HttpClientOption) *HttpClient {
+	c := &HttpClient{
 		urlString:    urlString,
 		logger:       logger,
-		handler:      handler,
+		handler:      &http.Client{Timeout: apiHeimdallTimeout},
 		retryBackOff: retryBackOff,
 		maxRetries:   maxRetries,
 		closeCh:      make(chan struct{}),
 	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c
 }
 
 const (

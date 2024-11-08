@@ -53,7 +53,13 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 		}, nil).
 		Times(5)
 	logger := testlog.Logger(t, log.LvlDebug)
-	heimdallClient := newHttpClient("https://dummyheimdal.com", requestHandler, 100*time.Millisecond, 5, logger)
+	heimdallClient := NewHttpClient(
+		"https://dummyheimdal.com",
+		logger,
+		WithHttpRequestHandler(requestHandler),
+		WithHttpRetryBackOff(100*time.Millisecond),
+		WithHttpMaxRetries(5),
+	)
 
 	spanRes, err := heimdallClient.FetchSpan(ctx, 1534)
 	require.Nil(t, spanRes)
@@ -72,7 +78,13 @@ func TestHeimdallClientStateSyncEventsReturnsErrNoResponseWhenHttp200WithEmptyBo
 		}, nil).
 		Times(2)
 	logger := testlog.Logger(t, log.LvlDebug)
-	heimdallClient := newHttpClient("https://dummyheimdal.com", requestHandler, time.Millisecond, 2, logger)
+	heimdallClient := NewHttpClient(
+		"https://dummyheimdal.com",
+		logger,
+		WithHttpRequestHandler(requestHandler),
+		WithHttpRetryBackOff(time.Millisecond),
+		WithHttpMaxRetries(2),
+	)
 
 	spanRes, err := heimdallClient.FetchStateSyncEvents(ctx, 100, time.Now(), 0)
 	require.Nil(t, spanRes)
