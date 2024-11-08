@@ -98,7 +98,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
 	idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 		txnID := uint64(i) + prevTxnID
-		v, ok, err := ttx.HistorySeek(kv.AccountsD, addr[:], txnID)
+		v, ok, err := ttx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 			panic(err)
