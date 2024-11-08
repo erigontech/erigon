@@ -49,27 +49,27 @@ func TestAppendReceipt(t *testing.T) {
 	require.NoError(err)
 
 	ttx := tx.(kv.TemporalTx)
-	v, ok, err := ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 0)
+	v, ok, err := ttx.HistorySeek(kv.ReceiptDomain, FirstLogIndexKey, 0)
 	require.NoError(err)
 	require.True(ok)
 	require.Empty(v)
 
-	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 1)
+	v, ok, err = ttx.HistorySeek(kv.ReceiptDomain, FirstLogIndexKey, 1)
 	require.NoError(err)
 	require.True(ok)
 	require.Equal(uint64(0), uvarint(v))
 
-	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 2)
+	v, ok, err = ttx.HistorySeek(kv.ReceiptDomain, FirstLogIndexKey, 2)
 	require.NoError(err)
 	require.True(ok)
 	require.Equal(uint64(1), uvarint(v))
 
-	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 3)
+	v, ok, err = ttx.HistorySeek(kv.ReceiptDomain, FirstLogIndexKey, 3)
 	require.NoError(err)
 	require.True(ok)
 	require.Equal(uint64(1), uvarint(v))
 
-	v, ok, err = ttx.HistorySeek(kv.ReceiptHistory, FirstLogIndexKey, 4)
+	v, ok, err = ttx.HistorySeek(kv.ReceiptDomain, FirstLogIndexKey, 4)
 	require.NoError(err)
 	require.True(ok)
 	require.Equal(uint64(0), uvarint(v))

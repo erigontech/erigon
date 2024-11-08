@@ -26,14 +26,15 @@ import (
 	"github.com/Giulio2002/bls"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -73,7 +74,7 @@ func NewBlobSidecarService(
 		ethClock:          ethClock,
 		emitters:          emitters,
 	}
-	go b.loop(ctx)
+	// go b.loop(ctx)
 	return b
 }
 
@@ -159,26 +160,31 @@ func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaco
 	currentVersion := b.beaconCfg.GetCurrentStateVersion(parentHeader.Slot / b.beaconCfg.SlotsPerEpoch)
 	forkVersion := b.beaconCfg.GetForkVersionByVersion(currentVersion)
 
+	var (
+		domain []byte
+		pk     common.Bytes48
+		err    error
+	)
 	// Load head state
-	headState, cn := b.syncedDataManager.HeadState()
-	defer cn()
-	if headState == nil {
-		return ErrIgnore
-	}
-	domain, err := fork.ComputeDomain(b.beaconCfg.DomainBeaconProposer[:], utils.Uint32ToBytes4(forkVersion), headState.GenesisValidatorsRoot())
-	if err != nil {
+	if err := b.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		domain, err = fork.ComputeDomain(b.beaconCfg.DomainBeaconProposer[:], utils.Uint32ToBytes4(forkVersion), headState.GenesisValidatorsRoot())
+		if err != nil {
+			return err
+		}
+
+		pk, err = headState.ValidatorPublicKey(int(header.Header.ProposerIndex))
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
+
 	sigRoot, err := fork.ComputeSigningRoot(header.Header, domain)
 	if err != nil {
 		return err
 	}
-
-	pk, err := headState.ValidatorPublicKey(int(header.Header.ProposerIndex))
-	if err != nil {
-		return err
-	}
-	cn()
 
 	if ok, err = bls.Verify(header.Signature[:], sigRoot[:], pk[:]); err != nil {
 		return err
@@ -201,43 +207,43 @@ func (b *blobSidecarService) scheduleBlobSidecarForLaterExecution(blobSidecar *c
 	b.blobSidecarsScheduledForLaterExecution.Store(blobSidecarHash, blobSidecarJob)
 }
 
-// loop is the main loop of the block service
-func (b *blobSidecarService) loop(ctx context.Context) {
-	ticker := time.NewTicker(blobJobsIntervalTick)
-	defer ticker.Stop()
-	if b.test {
-		return
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
+// // loop is the main loop of the block service
+// func (b *blobSidecarService) loop(ctx context.Context) {
+// 	ticker := time.NewTicker(blobJobsIntervalTick)
+// 	defer ticker.Stop()
+// 	if b.test {
+// 		return
+// 	}
+// 	for {
+// 		select {
+// 		case <-ctx.Done():
+// 			return
+// 		case <-ticker.C:
+// 		}
 
-		b.blobSidecarsScheduledForLaterExecution.Range(func(key, value any) bool {
-			job := value.(*blobSidecarJob)
-			// check if it has expired
-			if time.Since(job.creationTime) > blobJobExpiry {
-				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			blockRoot, err := job.blobSidecar.SignedBlockHeader.Header.HashSSZ()
-			if err != nil {
-				log.Debug("blob sidecar verification failed", "err", err)
-				return true
-			}
-			if _, has := b.forkchoiceStore.GetHeader(blockRoot); has {
-				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			if err := b.verifyAndStoreBlobSidecar(job.blobSidecar); err != nil {
-				log.Trace("blob sidecar verification failed", "err", err,
-					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
-				return true
-			}
-			b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-			return true
-		})
-	}
-}
+// 		b.blobSidecarsScheduledForLaterExecution.Range(func(key, value any) bool {
+// 			job := value.(*blobSidecarJob)
+// 			// check if it has expired
+// 			if time.Since(job.creationTime) > blobJobExpiry {
+// 				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
+// 				return true
+// 			}
+// 			blockRoot, err := job.blobSidecar.SignedBlockHeader.Header.HashSSZ()
+// 			if err != nil {
+// 				log.Debug("blob sidecar verification failed", "err", err)
+// 				return true
+// 			}
+// 			if _, has := b.forkchoiceStore.GetHeader(blockRoot); has {
+// 				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
+// 				return true
+// 			}
+// 			if err := b.verifyAndStoreBlobSidecar(job.blobSidecar); err != nil {
+// 				log.Trace("blob sidecar verification failed", "err", err,
+// 					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
+// 				return true
+// 			}
+// 			b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
+// 			return true
+// 		})
+// 	}
+// }

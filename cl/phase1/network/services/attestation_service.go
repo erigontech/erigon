@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
@@ -127,26 +129,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	s.attestationProcessed.Add(key, struct{}{})
 
-	beaconCommittee, err := s.forkchoiceStore.GetBeaconCommitee(slot, committeeIndex)
-	if err != nil {
-		return err
-	}
-	headState, cn := s.syncedDataManager.HeadStateReader()
-	defer cn()
-
-	if headState == nil {
-		return ErrIgnore
-	}
-	// [REJECT] The committee index is within the expected range
-	committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
-	if committeeIndex >= committeeCount {
-		return fmt.Errorf("committee index out of range, %d >= %d", committeeIndex, committeeCount)
-	}
-	// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
-	subnetId := computeSubnetForAttestation(committeeCount, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch, s.netCfg.AttestationSubnetCount)
-	if subnet == nil || subnetId != *subnet {
-		return errors.New("wrong subnet")
-	}
 	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
 	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
 	currentSlot := s.ethClock.GetCurrentSlot()
@@ -158,59 +140,85 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return errors.New("epoch mismatch")
 	}
 
-	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
-	bits := att.Attestation.AggregationBits.Bytes()
-	expectedAggregationBitsLength := len(beaconCommittee)
-	actualAggregationBitsLength := utils.GetBitlistLength(bits)
-	if actualAggregationBitsLength != expectedAggregationBitsLength {
-		return fmt.Errorf("aggregation bits count mismatch: %d != %d", actualAggregationBitsLength, expectedAggregationBitsLength)
-	}
+	var (
+		domain    []byte
+		pubKey    common.Bytes48
+		signature common.Bytes96
+	)
+	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// [REJECT] The committee index is within the expected range
+		committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
+		if committeeIndex >= committeeCount {
+			return fmt.Errorf("committee index out of range, %d >= %d", committeeIndex, committeeCount)
+		}
+		// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
+		subnetId := computeSubnetForAttestation(committeeCount, slot, committeeIndex, s.beaconCfg.SlotsPerEpoch, s.netCfg.AttestationSubnetCount)
+		if subnet == nil || subnetId != *subnet {
+			return errors.New("wrong subnet")
+		}
 
-	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
-	setBits := 0
-	onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
-	for i := 0; i < len(bits); i++ {
-		for j := 0; j < 8; j++ {
-			if bits[i]&(1<<uint(j)) != 0 {
-				if i*8+j >= len(beaconCommittee) {
-					continue
+		beaconCommittee, err := headState.GetBeaconCommitee(slot, committeeIndex)
+		if err != nil {
+			return err
+		}
+
+		// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
+		bits := att.Attestation.AggregationBits.Bytes()
+		expectedAggregationBitsLength := len(beaconCommittee)
+		actualAggregationBitsLength := utils.GetBitlistLength(bits)
+		if actualAggregationBitsLength != expectedAggregationBitsLength {
+			return fmt.Errorf("aggregation bits count mismatch: %d != %d", actualAggregationBitsLength, expectedAggregationBitsLength)
+		}
+
+		//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
+		setBits := 0
+		onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
+		for i := 0; i < len(bits); i++ {
+			for j := 0; j < 8; j++ {
+				if bits[i]&(1<<uint(j)) != 0 {
+					if i*8+j >= len(beaconCommittee) {
+						continue
+					}
+					setBits++
+					onBitIndex = i*8 + j
 				}
-				setBits++
-				onBitIndex = i*8 + j
 			}
 		}
-	}
 
-	if setBits == 0 {
-		return ErrIgnore // Ignore if it is just an empty bitlist
-	}
-	if setBits != 1 {
-		return errors.New("attestation does not have exactly one participating validator")
-	}
-	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
-	if err != nil {
+		if setBits == 0 {
+			return ErrIgnore // Ignore if it is just an empty bitlist
+		}
+		if setBits != 1 {
+			return errors.New("attestation does not have exactly one participating validator")
+		}
+		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
+		if err != nil {
+			return err
+		}
+		if onBitIndex >= len(beaconCommittee) {
+			return errors.New("on bit index out of committee range")
+		}
+		// mark the validator as seen
+		vIndex := beaconCommittee[onBitIndex]
+		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
+		if ok && epochLastTime == targetEpoch {
+			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+		}
+		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
+
+		// [REJECT] The signature of attestation is valid.
+		signature = att.Attestation.Signature
+		pubKey, err = headState.ValidatorPublicKey(int(beaconCommittee[onBitIndex]))
+		if err != nil {
+			return fmt.Errorf("unable to get public key: %v", err)
+		}
+		domain, err = headState.GetDomain(s.beaconCfg.DomainBeaconAttester, targetEpoch)
+		if err != nil {
+			return fmt.Errorf("unable to get the domain: %v", err)
+		}
+		return nil
+	}); err != nil {
 		return err
-	}
-	if onBitIndex >= len(beaconCommittee) {
-		return errors.New("on bit index out of committee range")
-	}
-	// mark the validator as seen
-	vIndex := beaconCommittee[onBitIndex]
-	epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
-	if ok && epochLastTime == targetEpoch {
-		return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
-	}
-	s.validatorAttestationSeen.Add(vIndex, targetEpoch)
-
-	// [REJECT] The signature of attestation is valid.
-	signature := att.Attestation.Signature
-	pubKey, err := headState.ValidatorPublicKey(int(beaconCommittee[onBitIndex]))
-	if err != nil {
-		return fmt.Errorf("unable to get public key: %v", err)
-	}
-	domain, err := headState.GetDomain(s.beaconCfg.DomainBeaconAttester, targetEpoch)
-	if err != nil {
-		return fmt.Errorf("unable to get the domain: %v", err)
 	}
 	signingRoot, err := computeSigningRoot(att.Attestation.Data, domain)
 	if err != nil {
