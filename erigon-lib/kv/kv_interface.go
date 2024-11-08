@@ -518,10 +518,6 @@ type TemporalTx interface {
 	GetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
 	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
-	// HistorySeek - like `GetAsOf` but without latest state - only for `History`
-	// `ok == true && v != nil && len(v) == 0` means key-creation even
-	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
-
 	// IndexRange - return iterator over range of inverted index for given key `k`
 	// Asc semantic:  [from, to) AND from > to
 	// Desc semantic: [from, to) AND from < to
@@ -530,6 +526,10 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
+
+	// HistorySeek - like `GetAsOf` but without latest state - only for `History`
+	// `ok == true && v != nil && len(v) == 0` means key-creation even
+	HistorySeek(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
