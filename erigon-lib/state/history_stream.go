@@ -441,7 +441,6 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
-	fmt.Printf("[dbg] hist.Next: %x\n", hi.kBackup)
 	return hi.kBackup, hi.vBackup, nil
 }
 
