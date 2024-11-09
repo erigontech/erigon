@@ -1214,8 +1214,7 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 			}
 		}()
 
-		if allDependenciesActivated &&
-			!(state == Recovering || state == Active) {
+		if allDependenciesActivated {
 			c.onDependenciesActive(c.Context(), func(context.Context, *component, error) {})
 		}
 
@@ -1226,6 +1225,9 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 }
 
 func (c *component) onDependenciesActive(ctx context.Context, onActivity onActivity) {
+	// this cal get called multiple times as dependencies
+	// complete - mke ure that it only activates the
+	// provider actions once
 	c.Lock()
 	activated := c.state == Recovering || c.state == Active
 	if !activated {
