@@ -200,10 +200,8 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 			return err
 		}
 	}
-	if e.hook != nil {
-		if err := e.hook.BeforeRun(tx, true); err != nil {
-			return err
-		}
+	if err := e.hook.BeforeRun(tx, true); err != nil {
+		return err
 	}
 	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
@@ -224,13 +222,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	defer e.semaphore.Release(1)
 
-	// Update the last new block seen.
-	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
-	if err := e.db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteLastNewBlockSeen(tx, req.Number)
-	}); err != nil {
-		return nil, err
-	}
+	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 
