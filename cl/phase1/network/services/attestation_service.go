@@ -111,7 +111,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		targetEpoch    uint64
 		signature      [96]byte
 		data           *solid.AttestationData
-		attestation    *solid.Attestation
 		attHashKey     [32]byte
 	)
 	if att.Attestation != nil {
@@ -134,7 +133,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if err != nil {
 			return err
 		}
-		attestation = att.SingleAttestation.ToAttestation(memberIndexInCommittee)
 	} else {
 		// deneb and before case
 		root = att.Attestation.Data.BeaconBlockRoot
@@ -147,7 +145,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if err != nil {
 			return err
 		}
-		attestation = att.Attestation
 	}
 
 	// Commented because we have a check in validatorAttestationSeen that does the same thing.
@@ -173,8 +170,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	var (
-		domain []byte
-		pubKey common.Bytes48
+		domain      []byte
+		pubKey      common.Bytes48
+		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
 	)
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [REJECT] The committee index is within the expected range
@@ -225,6 +223,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 				return errors.New("on bit index out of committee range")
 			}
 			vIndex = beaconCommittee[onBitIndex]
+			attestation = att.Attestation
 		} else {
 			// electra and after
 			// [REJECT] attestation.data.index == 0
@@ -232,10 +231,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 				return errors.New("committee index must be 0")
 			}
 			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
-			if !contains(att.SingleAttestation.AttesterIndex, beaconCommittee) {
+			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
+			if memIndexInCommittee < 0 {
 				return errors.New("attester is not a member of the committee")
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
+			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee)
 		}
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 		// mark the validator as seen
@@ -364,11 +365,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 // 	}
 // }
 
-func contains[T comparable](target T, slices []T) bool {
-	for _, s := range slices {
+func contains[T comparable](target T, slices []T) int {
+	for i, s := range slices {
 		if s == target {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
