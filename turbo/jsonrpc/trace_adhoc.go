@@ -778,7 +778,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		if api.bridgeReader != nil {
+		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
@@ -1289,6 +1289,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, stateReader
 			sd = &StateDiff{sdMap: sdMap}
 		}
 
+		ibs.Reset()
 		var finalizeTxStateWriter state.StateWriter
 		if sd != nil {
 			finalizeTxStateWriter = sd

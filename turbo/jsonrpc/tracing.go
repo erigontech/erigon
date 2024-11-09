@@ -25,9 +25,10 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 
@@ -113,12 +114,14 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	stream.WriteArrayStart()
 
 	txns := block.Transactions()
+
 	var borStateSyncTxn types.Transaction
+
 	if *config.BorTraceEnabled {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
 
 		var ok bool
-		if api.bridgeReader != nil {
+		if api.useBridgeReader {
 			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		} else {
 			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
@@ -133,6 +136,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 	}
 
+	var usedGas uint64
 	for idx, txn := range txns {
 		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
@@ -179,7 +183,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				return err
 			}
 
-			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
+			var _usedGas uint64
+			_usedGas, err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 				ctx,
 				chainConfig,
 				config,
@@ -192,8 +197,11 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				api.evmCallTimeout,
 				stateSyncEvents,
 			)
+			usedGas += _usedGas
 		} else {
-			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+			var _usedGas uint64
+			_usedGas, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+			usedGas += _usedGas
 		}
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
@@ -212,6 +220,12 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 		if err := stream.Flush(); err != nil {
 			return err
+		}
+	}
+
+	if dbg.AssertEnabled {
+		if block.GasUsed() != usedGas {
+			panic(fmt.Errorf("assert: block.GasUsed() %d != usedGas %d. blockNum=%d", block.GasUsed(), usedGas, blockNumber))
 		}
 	}
 
@@ -250,7 +264,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		if api.bridgeReader != nil {
+		if api.useBridgeReader {
 			blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, hash)
 		} else {
 			blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)
@@ -321,7 +335,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			return err
 		}
 
-		return polygontracer.TraceBorStateSyncTxnDebugAPI(
+		_, err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 			ctx,
 			chainConfig,
 			config,
@@ -334,6 +348,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			api.evmCallTimeout,
 			stateSyncEvents,
 		)
+		return err
 	}
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, txnIndex)
@@ -343,7 +358,8 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 
 	// Trace the transaction and return
-	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	_, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	return err
 }
 
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
@@ -411,17 +427,17 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	txCtx := core.NewEVMTxContext(msg)
 	// Trace the transaction and return
-	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	_, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+	return err
 }
 
 func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream *jsoniter.Stream) error {
 	var (
-		hash               common.Hash
-		replayTransactions types.Transactions
-		evm                *vm.EVM
-		blockCtx           evmtypes.BlockContext
-		txCtx              evmtypes.TxContext
-		overrideBlockHash  map[uint64]common.Hash
+		hash              common.Hash
+		evm               *vm.EVM
+		blockCtx          evmtypes.BlockContext
+		txCtx             evmtypes.TxContext
+		overrideBlockHash map[uint64]common.Hash
 	)
 
 	if config == nil {
@@ -487,19 +503,13 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		transactionIndex = *simulateContext.TransactionIndex
 	}
 
-	if transactionIndex == -1 {
-		transactionIndex = len(block.Transactions())
-	}
-
-	replayTransactions = block.Transactions()[:transactionIndex]
-
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), transactionIndex, api.filters, api.stateCache, chainConfig.ChainName)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 
-	st := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	header := block.Header()
 
@@ -521,35 +531,12 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
 	// Get a new instance of the EVM
-	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
-	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
+	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: false})
 	rules := chainConfig.Rules(blockNum, blockCtx.Time)
-
-	// Setup the gas pool (also for unmetered requests)
-	// and apply the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
-	for idx, txn := range replayTransactions {
-		st.SetTxContext(idx)
-		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		txCtx = core.NewEVMTxContext(msg)
-		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
-		// Execute the transaction message
-		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		_ = st.FinalizeTx(rules, state.NewNoopWriter())
-
-	}
 
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		err = config.StateOverrides.Override(evm.IntraBlockState().(*state.IntraBlockState))
+		err = config.StateOverrides.Override(ibs)
 		if err != nil {
 			stream.WriteNil()
 			return err
@@ -561,6 +548,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		stream.WriteArrayStart()
 		// first change blockContext
 		blockHeaderOverride(&blockCtx, bundle.BlockOverride, overrideBlockHash)
+		ibs.Reset()
 		for txnIndex, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
@@ -572,9 +560,8 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 				return err
 			}
 			txCtx = core.NewEVMTxContext(msg)
-			ibs := evm.IntraBlockState().(*state.IntraBlockState)
 			ibs.SetTxContext(txnIndex)
-			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
+			_, err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 			if err != nil {
 				stream.WriteArrayEnd()
 				stream.WriteArrayEnd()

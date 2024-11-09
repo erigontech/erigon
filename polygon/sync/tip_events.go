@@ -115,29 +115,25 @@ type heimdallObserverRegistrar interface {
 	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) polygoncommon.UnregisterFunc
 }
 
-type TipEvents struct {
-	logger                    log.Logger
-	events                    *TipEventsCompositeChannel
-	p2pObserverRegistrar      p2pObserverRegistrar
-	heimdallObserverRegistrar heimdallObserverRegistrar
-	blockEventsSpamGuard      blockEventsSpamGuard
-}
-
-func NewTipEvents(
-	logger log.Logger,
-	p2pObserverRegistrar p2pObserverRegistrar,
-	heimdallObserverRegistrar heimdallObserverRegistrar,
-) *TipEvents {
+func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg heimdallObserverRegistrar) *TipEvents {
 	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlTrace, EventTopicHeimdall.String()))
 	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlTrace, EventTopicP2P.String()))
 	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
 	return &TipEvents{
 		logger:                    logger,
 		events:                    compositeEventsChannel,
-		p2pObserverRegistrar:      p2pObserverRegistrar,
-		heimdallObserverRegistrar: heimdallObserverRegistrar,
+		p2pObserverRegistrar:      p2pReg,
+		heimdallObserverRegistrar: heimdallReg,
 		blockEventsSpamGuard:      newBlockEventsSpamGuard(logger),
 	}
+}
+
+type TipEvents struct {
+	logger                    log.Logger
+	events                    *TipEventsCompositeChannel
+	p2pObserverRegistrar      p2pObserverRegistrar
+	heimdallObserverRegistrar heimdallObserverRegistrar
+	blockEventsSpamGuard      blockEventsSpamGuard
 }
 
 func (te *TipEvents) Events() <-chan Event {

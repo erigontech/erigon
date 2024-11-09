@@ -17,7 +17,6 @@ require (
 	github.com/Giulio2002/bls v0.0.0-20241103004224-ebd1ec68db0d
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring v1.9.4
-	github.com/alecthomas/atomic v0.1.0-alpha2
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/sync v0.5.1
 	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8
@@ -42,7 +41,7 @@ require (
 	github.com/go-test/deep v1.1.1
 	github.com/goccy/go-json v0.9.11
 	github.com/gofrs/flock v0.12.1
-	github.com/golang-jwt/jwt/v4 v4.5.0
+	github.com/golang-jwt/jwt/v4 v4.5.1
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb
 	github.com/google/btree v1.1.3
 	github.com/google/cel-go v0.18.2
@@ -107,6 +106,7 @@ require (
 )
 
 require (
+	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/elastic/go-freelru v0.13.0 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect

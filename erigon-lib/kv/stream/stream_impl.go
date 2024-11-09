@@ -33,6 +33,11 @@ var (
 	EmptyKVS = &EmptyTrio[[]byte, []byte, uint64]{}
 )
 
+var (
+	TracedU64 = &Traced[uint64]{}
+	TracedKV  = &TracedDuo[[]byte, []byte]{}
+)
+
 func FilterU64(it U64, filter func(k uint64) bool) *Filtered[uint64] {
 	return Filter[uint64](it, filter)
 }
@@ -127,7 +132,10 @@ func UnionKV(x, y KV, limit int) KV {
 	return m
 }
 func (m *UnionKVIter) HasNext() bool {
-	return m.err != nil || (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
+	if m.err != nil {
+		return true
+	}
+	return (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
 }
 func (m *UnionKVIter) advanceX() {
 	if m.err != nil {

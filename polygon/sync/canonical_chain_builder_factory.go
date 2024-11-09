@@ -27,7 +27,7 @@ import (
 
 const InMemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
-type CanonicalChainBuilderFactory func(root *types.Header) CanonicalChainBuilder
+type CanonicalChainBuilderFactory func(root *types.Header) *CanonicalChainBuilder
 
 func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,
@@ -57,7 +57,7 @@ func NewCanonicalChainBuilderFactory(
 		headerTimeValidator: headerTimeValidator,
 	}
 
-	return func(root *types.Header) CanonicalChainBuilder {
+	return func(root *types.Header) *CanonicalChainBuilder {
 		return NewCanonicalChainBuilder(root, difficultyCalculator, headerValidator)
 	}
 }

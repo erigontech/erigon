@@ -203,18 +203,20 @@ du -hsc /erigon/snapshots/*
 
 ### Erigon3 changes from Erigon2
 
-- Initial sync does download LatestState and it's history - no re-exec from 0 anymore.
-- ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
-- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
-  transaction-granularity, instead of block-granularity.
-- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
-  above).
-- Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
-- `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. To prevent it's grow: recommend `--batchSize <= 1G`
-- can symlink/mount latest state to fast drive and history to cheap drive
-- `--internalcl` is enabled by default. to disable use `--externalcl`
-- `--prune` flags changed: default `--prune.mode=archive`, FullNode: `--prune.mode=full`, MinimalNode (EIP-4444):
-  `--prune.mode=minimal`.
+- **Initial sync doesn't re-exec from 0:** downloading 99% LatestState and History
+- **Per-Transaction granularity of history** (Erigon2 had per-block). Means:
+    - Can execute 1 historical transaction - without executing it's block
+    - If account X change V1->V2->V1 within 1 block (different transactions): `debug_getModifiedAccountsByNumber` return
+      it
+    - Erigon3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper)
+- **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
+- **Store most of data in immutable files (segments/snapshots):**
+    - can symlink/mount latest state to fast drive and history to cheap drive
+    - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+- **`--prune` flags changed**: see `--prune.mode` (default: `archive`, full: `full`, EIP-4444: `minimal`)
+- **Other changes:**
+    - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
+    - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
 
 ### Logging
 

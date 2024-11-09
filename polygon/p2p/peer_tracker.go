@@ -30,24 +30,13 @@ import (
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-type PeerTracker interface {
-	Run(ctx context.Context) error
-	ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId
-	BlockNumPresent(peerId *PeerId, blockNum uint64)
-	BlockNumMissing(peerId *PeerId, blockNum uint64)
-	ListPeersMayMissBlockHash(blockHash common.Hash) []*PeerId
-	BlockHashPresent(peerId *PeerId, blockHash common.Hash)
-	PeerConnected(peerId *PeerId)
-	PeerDisconnected(peerId *PeerId)
-}
-
 func NewPeerTracker(
 	logger log.Logger,
 	peerProvider peerProvider,
 	peerEventRegistrar peerEventRegistrar,
 	opts ...PeerTrackerOption,
-) PeerTracker {
-	pt := &peerTracker{
+) *PeerTracker {
+	pt := &PeerTracker{
 		logger:                  logger,
 		peerProvider:            peerProvider,
 		peerEventRegistrar:      peerEventRegistrar,
@@ -63,7 +52,7 @@ func NewPeerTracker(
 	return pt
 }
 
-type peerTracker struct {
+type PeerTracker struct {
 	logger                  log.Logger
 	peerProvider            peerProvider
 	peerEventRegistrar      peerEventRegistrar
@@ -73,7 +62,7 @@ type peerTracker struct {
 	peerShuffle             PeerShuffle
 }
 
-func (pt *peerTracker) Run(ctx context.Context) error {
+func (pt *PeerTracker) Run(ctx context.Context) error {
 	pt.logger.Debug(peerTrackerLogPrefix("running peer tracker component"))
 
 	var peerEventUnreg polygoncommon.UnregisterFunc
@@ -121,7 +110,7 @@ func (pt *peerTracker) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
+func (pt *PeerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
@@ -137,19 +126,19 @@ func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
 	return peerIds
 }
 
-func (pt *peerTracker) BlockNumPresent(peerId *PeerId, blockNum uint64) {
+func (pt *PeerTracker) BlockNumPresent(peerId *PeerId, blockNum uint64) {
 	pt.updatePeerSyncProgress(peerId, func(psp *peerSyncProgress) {
 		psp.blockNumPresent(blockNum)
 	})
 }
 
-func (pt *peerTracker) BlockNumMissing(peerId *PeerId, blockNum uint64) {
+func (pt *PeerTracker) BlockNumMissing(peerId *PeerId, blockNum uint64) {
 	pt.updatePeerSyncProgress(peerId, func(psp *peerSyncProgress) {
 		psp.blockNumMissing(blockNum)
 	})
 }
 
-func (pt *peerTracker) ListPeersMayMissBlockHash(blockHash common.Hash) []*PeerId {
+func (pt *PeerTracker) ListPeersMayMissBlockHash(blockHash common.Hash) []*PeerId {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
@@ -165,7 +154,7 @@ func (pt *peerTracker) ListPeersMayMissBlockHash(blockHash common.Hash) []*PeerI
 	return peerIds
 }
 
-func (pt *peerTracker) BlockHashPresent(peerId *PeerId, blockHash common.Hash) {
+func (pt *PeerTracker) BlockHashPresent(peerId *PeerId, blockHash common.Hash) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
@@ -177,7 +166,7 @@ func (pt *peerTracker) BlockHashPresent(peerId *PeerId, blockHash common.Hash) {
 	announcesLru.Add(blockHash, struct{}{})
 }
 
-func (pt *peerTracker) PeerDisconnected(peerId *PeerId) {
+func (pt *PeerTracker) PeerDisconnected(peerId *PeerId) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
@@ -186,14 +175,14 @@ func (pt *peerTracker) PeerDisconnected(peerId *PeerId) {
 	delete(pt.peerKnownBlockAnnounces, *peerId)
 }
 
-func (pt *peerTracker) PeerConnected(peerId *PeerId) {
+func (pt *PeerTracker) PeerConnected(peerId *PeerId) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
 	pt.peerConnected(peerId)
 }
 
-func (pt *peerTracker) peerConnected(peerId *PeerId) {
+func (pt *PeerTracker) peerConnected(peerId *PeerId) {
 	pt.logger.Debug(peerTrackerLogPrefix("peer connected"), "peerId", peerId.String())
 
 	peerIdVal := *peerId
@@ -213,7 +202,7 @@ func (pt *peerTracker) peerConnected(peerId *PeerId) {
 	}
 }
 
-func (pt *peerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *peerSyncProgress)) {
+func (pt *PeerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *peerSyncProgress)) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
@@ -225,7 +214,7 @@ func (pt *peerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *p
 	update(peerSyncProgress)
 }
 
-func newPeerEventObserver(pt PeerTracker) polygoncommon.Observer[*sentryproto.PeerEvent] {
+func newPeerEventObserver(pt *PeerTracker) polygoncommon.Observer[*sentryproto.PeerEvent] {
 	return func(message *sentryproto.PeerEvent) {
 		peerId := PeerIdFromH512(message.PeerId)
 		switch message.EventId {
@@ -237,7 +226,7 @@ func newPeerEventObserver(pt PeerTracker) polygoncommon.Observer[*sentryproto.Pe
 	}
 }
 
-func newBlockHashAnnouncesObserver(pt PeerTracker) polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]] {
+func newBlockHashAnnouncesObserver(pt *PeerTracker) polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]] {
 	return func(message *DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		for _, hashOrNum := range *message.Decoded {
 			pt.BlockHashPresent(message.PeerId, hashOrNum.Hash)
@@ -245,7 +234,7 @@ func newBlockHashAnnouncesObserver(pt PeerTracker) polygoncommon.Observer[*Decod
 	}
 }
 
-func newBlockAnnouncesObserver(pt PeerTracker) polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]] {
+func newBlockAnnouncesObserver(pt *PeerTracker) polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]] {
 	return func(message *DecodedInboundMessage[*eth.NewBlockPacket]) {
 		pt.BlockHashPresent(message.PeerId, message.Decoded.Block.Hash())
 	}

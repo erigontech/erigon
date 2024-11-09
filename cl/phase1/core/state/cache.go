@@ -227,7 +227,7 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 
 	numWorkers := runtime.NumCPU()
 	activeBalanceShards := make([]uint64, numWorkers)
-	wp := threading.CreateWorkerPool(numWorkers)
+	wp := threading.NewParallelExecutor()
 	shardSize := b.ValidatorSet().Length() / numWorkers
 
 	for i := 0; i < numWorkers; i++ {
@@ -247,7 +247,7 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 			return nil
 		})
 	}
-	wp.WaitAndClose()
+	wp.Execute()
 
 	for _, shard := range activeBalanceShards {
 		*b.totalActiveBalanceCache += shard

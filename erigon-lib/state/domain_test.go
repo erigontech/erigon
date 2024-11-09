@@ -24,7 +24,8 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
-	"math/rand"
+	randOld "math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sort"
@@ -50,6 +51,20 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types"
 )
+
+type rndGen struct {
+	*rand.Rand
+	oldGen *randOld.Rand
+}
+
+func newRnd(seed uint64) *rndGen {
+	return &rndGen{
+		Rand:   rand.New(rand.NewChaCha8([32]byte{byte(seed)})),
+		oldGen: randOld.New(randOld.NewSource(int64(seed))),
+	}
+}
+func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
+func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
 
 func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
@@ -1262,10 +1277,7 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 	tb.Helper()
 
 	doms := make(map[string]map[string][]upd)
-	seed := 31
-	//seed := time.Now().Unix()
-	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
-	r := rand.New(rand.NewSource(0))
+	r := newRnd(31)
 
 	accs := make(map[string][]upd)
 	stor := make(map[string][]upd)
@@ -1293,11 +1305,7 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 	tb.Helper()
 
 	data := make(map[string][]upd)
-	//seed := time.Now().Unix()
-	seed := 31
-	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
-
-	r := rand.New(rand.NewSource(0))
+	r := newRnd(31)
 	if keyLimit == 1 {
 		key1 := generateRandomKey(r, keySize1)
 		data[key1] = generateUpdates(r, totalTx, keyTxsLimit)
@@ -1313,24 +1321,23 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 	return data
 }
 
-func generateRandomKey(r *rand.Rand, size uint64) string {
+func generateRandomKey(r *rndGen, size uint64) string {
 	return string(generateRandomKeyBytes(r, size))
 }
 
-func generateRandomKeyBytes(r *rand.Rand, size uint64) []byte {
+func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
-
 	return key
 }
 
-func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
-		jitter := r.Intn(10e7)
+		jitter := r.IntN(10e7)
 		value := types.EncodeAccountBytesV3(i, uint256.NewInt(i*10e4+uint64(jitter)), nil, 0)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
@@ -1341,7 +1348,7 @@ func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize uint64) []upd {
+func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 	//maxStorageSize := 24 * (1 << 10) // limit on contract code
@@ -1349,7 +1356,7 @@ func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize u
 	for i := uint64(0); i < keyTxsLimit; i++ {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 
-		value := make([]byte, r.Intn(int(maxSize)))
+		value := make([]byte, r.IntN(int(maxSize)))
 		r.Read(value)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
@@ -1360,7 +1367,7 @@ func generateArbitraryValueUpdates(r *rand.Rand, totalTx, keyTxsLimit, maxSize u
 	return updates
 }
 
-func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 	updates := make([]upd, 0)
 	usedTxNums := make(map[uint64]bool)
 
@@ -1377,10 +1384,10 @@ func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
 	return updates
 }
 
-func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
-	txNum := uint64(r.Intn(int(maxTxNum)))
+func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
+	txNum := uint64(r.IntN(int(maxTxNum)))
 	for usedTxNums[txNum] {
-		txNum = uint64(r.Intn(int(maxTxNum)))
+		txNum = uint64(r.IntN(int(maxTxNum)))
 	}
 
 	return txNum
@@ -1395,8 +1402,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1456,15 +1463,106 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	}
 }
 
+func TestDomainRange(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	require, ctx := require.New(t), context.Background()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = false
+	d.History.compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
+	d.filenameBase = kv.FileAccountDomain
+
+	dc := d.BeginFilesRo()
+	defer d.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	keySize1 := uint64(2)
+	keySize2 := uint64(2)
+	totalTx := uint64(300)
+	keyTxsLimit := uint64(2)
+	keyLimit := uint64(10)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.SetTxNum(updates[i].txNum)
+			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			require.NoError(err)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	writer.SetTxNum(totalTx)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(err)
+
+	// aggregate
+	collateAndMerge(t, db, tx, d, totalTx)
+	require.NoError(tx.Commit())
+
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	dc.Close()
+
+	dc = d.BeginFilesRo()
+	defer dc.Close()
+
+	{
+		it, err := dc.ht.WalkAsOf(ctx, 190, nil, nil, order.Asc, -1, tx)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(3, len(keys))
+		require.Equal(3, len(vals))
+	}
+
+	{
+		it, err := dc.DomainRangeLatest(tx, nil, nil, -1)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(5, len(keys))
+		require.Equal(5, len(vals))
+	}
+
+	{
+		it, err := dc.DomainRange(ctx, tx, []byte(""), nil, 190, order.Asc, -1)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(5, len(keys))
+		require.Equal(5, len(vals))
+	}
+
+	{
+		it, err := dc.DomainRange(ctx, tx, []byte(""), nil, 190, order.Asc, 4)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(4, len(keys))
+		require.Equal(4, len(vals))
+	}
+}
+
 func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	t.Parallel()
 
-	aggStep := uint64(25)
+	aggStep, ctx := uint64(25), context.Background()
 	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
-	defer db.Close()
-	defer d.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -1975,10 +2073,10 @@ func TestDomain_Unwind(t *testing.T) {
 			uc := d.BeginFilesRo()
 			defer uc.Close()
 
-			et, err := ectx.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, etx, -1)
+			et, err := ectx.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, etx)
 			require.NoError(t, err)
 
-			ut, err := uc.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, utx, -1)
+			ut, err := uc.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, utx)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
