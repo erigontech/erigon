@@ -20,6 +20,7 @@ import (
 type MockhttpRequestHandler struct {
 	ctrl     *gomock.Controller
 	recorder *MockhttpRequestHandlerMockRecorder
+	isgomock struct{}
 }
 
 // MockhttpRequestHandlerMockRecorder is the mock recorder for MockhttpRequestHandler.

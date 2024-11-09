@@ -21,6 +21,7 @@ import (
 type MockEntityStore[TEntity Entity] struct {
 	ctrl     *gomock.Controller
 	recorder *MockEntityStoreMockRecorder[TEntity]
+	isgomock struct{}
 }
 
 // MockEntityStoreMockRecorder is the mock recorder for MockEntityStore.

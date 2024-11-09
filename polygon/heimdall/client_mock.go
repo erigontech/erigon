@@ -21,6 +21,7 @@ import (
 type MockClient struct {
 	ctrl     *gomock.Controller
 	recorder *MockClientMockRecorder
+	isgomock struct{}
 }
 
 // MockClientMockRecorder is the mock recorder for MockClient.
@@ -77,18 +78,18 @@ func (c *MockClientCloseCall) DoAndReturn(f func()) *MockClientCloseCall {
 }
 
 // FetchCheckpoint mocks base method.
-func (m *MockClient) FetchCheckpoint(arg0 context.Context, arg1 int64) (*Checkpoint, error) {
+func (m *MockClient) FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchCheckpoint", arg0, arg1)
+	ret := m.ctrl.Call(m, "FetchCheckpoint", ctx, number)
 	ret0, _ := ret[0].(*Checkpoint)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchCheckpoint indicates an expected call of FetchCheckpoint.
-func (mr *MockClientMockRecorder) FetchCheckpoint(arg0, arg1 any) *MockClientFetchCheckpointCall {
+func (mr *MockClientMockRecorder) FetchCheckpoint(ctx, number any) *MockClientFetchCheckpointCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpoint", reflect.TypeOf((*MockClient)(nil).FetchCheckpoint), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpoint", reflect.TypeOf((*MockClient)(nil).FetchCheckpoint), ctx, number)
 	return &MockClientFetchCheckpointCall{Call: call}
 }
 
@@ -116,18 +117,18 @@ func (c *MockClientFetchCheckpointCall) DoAndReturn(f func(context.Context, int6
 }
 
 // FetchCheckpointCount mocks base method.
-func (m *MockClient) FetchCheckpointCount(arg0 context.Context) (int64, error) {
+func (m *MockClient) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchCheckpointCount", arg0)
+	ret := m.ctrl.Call(m, "FetchCheckpointCount", ctx)
 	ret0, _ := ret[0].(int64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchCheckpointCount indicates an expected call of FetchCheckpointCount.
-func (mr *MockClientMockRecorder) FetchCheckpointCount(arg0 any) *MockClientFetchCheckpointCountCall {
+func (mr *MockClientMockRecorder) FetchCheckpointCount(ctx any) *MockClientFetchCheckpointCountCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpointCount", reflect.TypeOf((*MockClient)(nil).FetchCheckpointCount), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpointCount", reflect.TypeOf((*MockClient)(nil).FetchCheckpointCount), ctx)
 	return &MockClientFetchCheckpointCountCall{Call: call}
 }
 
@@ -155,18 +156,18 @@ func (c *MockClientFetchCheckpointCountCall) DoAndReturn(f func(context.Context)
 }
 
 // FetchCheckpoints mocks base method.
-func (m *MockClient) FetchCheckpoints(arg0 context.Context, arg1, arg2 uint64) ([]*Checkpoint, error) {
+func (m *MockClient) FetchCheckpoints(ctx context.Context, page, limit uint64) ([]*Checkpoint, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchCheckpoints", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "FetchCheckpoints", ctx, page, limit)
 	ret0, _ := ret[0].([]*Checkpoint)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchCheckpoints indicates an expected call of FetchCheckpoints.
-func (mr *MockClientMockRecorder) FetchCheckpoints(arg0, arg1, arg2 any) *MockClientFetchCheckpointsCall {
+func (mr *MockClientMockRecorder) FetchCheckpoints(ctx, page, limit any) *MockClientFetchCheckpointsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpoints", reflect.TypeOf((*MockClient)(nil).FetchCheckpoints), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpoints", reflect.TypeOf((*MockClient)(nil).FetchCheckpoints), ctx, page, limit)
 	return &MockClientFetchCheckpointsCall{Call: call}
 }
 
@@ -194,18 +195,18 @@ func (c *MockClientFetchCheckpointsCall) DoAndReturn(f func(context.Context, uin
 }
 
 // FetchFirstMilestoneNum mocks base method.
-func (m *MockClient) FetchFirstMilestoneNum(arg0 context.Context) (int64, error) {
+func (m *MockClient) FetchFirstMilestoneNum(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchFirstMilestoneNum", arg0)
+	ret := m.ctrl.Call(m, "FetchFirstMilestoneNum", ctx)
 	ret0, _ := ret[0].(int64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchFirstMilestoneNum indicates an expected call of FetchFirstMilestoneNum.
-func (mr *MockClientMockRecorder) FetchFirstMilestoneNum(arg0 any) *MockClientFetchFirstMilestoneNumCall {
+func (mr *MockClientMockRecorder) FetchFirstMilestoneNum(ctx any) *MockClientFetchFirstMilestoneNumCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchFirstMilestoneNum", reflect.TypeOf((*MockClient)(nil).FetchFirstMilestoneNum), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchFirstMilestoneNum", reflect.TypeOf((*MockClient)(nil).FetchFirstMilestoneNum), ctx)
 	return &MockClientFetchFirstMilestoneNumCall{Call: call}
 }
 
@@ -233,18 +234,18 @@ func (c *MockClientFetchFirstMilestoneNumCall) DoAndReturn(f func(context.Contex
 }
 
 // FetchLastNoAckMilestone mocks base method.
-func (m *MockClient) FetchLastNoAckMilestone(arg0 context.Context) (string, error) {
+func (m *MockClient) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchLastNoAckMilestone", arg0)
+	ret := m.ctrl.Call(m, "FetchLastNoAckMilestone", ctx)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchLastNoAckMilestone indicates an expected call of FetchLastNoAckMilestone.
-func (mr *MockClientMockRecorder) FetchLastNoAckMilestone(arg0 any) *MockClientFetchLastNoAckMilestoneCall {
+func (mr *MockClientMockRecorder) FetchLastNoAckMilestone(ctx any) *MockClientFetchLastNoAckMilestoneCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLastNoAckMilestone", reflect.TypeOf((*MockClient)(nil).FetchLastNoAckMilestone), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLastNoAckMilestone", reflect.TypeOf((*MockClient)(nil).FetchLastNoAckMilestone), ctx)
 	return &MockClientFetchLastNoAckMilestoneCall{Call: call}
 }
 
@@ -272,18 +273,18 @@ func (c *MockClientFetchLastNoAckMilestoneCall) DoAndReturn(f func(context.Conte
 }
 
 // FetchLatestSpan mocks base method.
-func (m *MockClient) FetchLatestSpan(arg0 context.Context) (*Span, error) {
+func (m *MockClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchLatestSpan", arg0)
+	ret := m.ctrl.Call(m, "FetchLatestSpan", ctx)
 	ret0, _ := ret[0].(*Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchLatestSpan indicates an expected call of FetchLatestSpan.
-func (mr *MockClientMockRecorder) FetchLatestSpan(arg0 any) *MockClientFetchLatestSpanCall {
+func (mr *MockClientMockRecorder) FetchLatestSpan(ctx any) *MockClientFetchLatestSpanCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLatestSpan", reflect.TypeOf((*MockClient)(nil).FetchLatestSpan), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLatestSpan", reflect.TypeOf((*MockClient)(nil).FetchLatestSpan), ctx)
 	return &MockClientFetchLatestSpanCall{Call: call}
 }
 
@@ -311,18 +312,18 @@ func (c *MockClientFetchLatestSpanCall) DoAndReturn(f func(context.Context) (*Sp
 }
 
 // FetchMilestone mocks base method.
-func (m *MockClient) FetchMilestone(arg0 context.Context, arg1 int64) (*Milestone, error) {
+func (m *MockClient) FetchMilestone(ctx context.Context, number int64) (*Milestone, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchMilestone", arg0, arg1)
+	ret := m.ctrl.Call(m, "FetchMilestone", ctx, number)
 	ret0, _ := ret[0].(*Milestone)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchMilestone indicates an expected call of FetchMilestone.
-func (mr *MockClientMockRecorder) FetchMilestone(arg0, arg1 any) *MockClientFetchMilestoneCall {
+func (mr *MockClientMockRecorder) FetchMilestone(ctx, number any) *MockClientFetchMilestoneCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestone", reflect.TypeOf((*MockClient)(nil).FetchMilestone), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestone", reflect.TypeOf((*MockClient)(nil).FetchMilestone), ctx, number)
 	return &MockClientFetchMilestoneCall{Call: call}
 }
 
@@ -350,18 +351,18 @@ func (c *MockClientFetchMilestoneCall) DoAndReturn(f func(context.Context, int64
 }
 
 // FetchMilestoneCount mocks base method.
-func (m *MockClient) FetchMilestoneCount(arg0 context.Context) (int64, error) {
+func (m *MockClient) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchMilestoneCount", arg0)
+	ret := m.ctrl.Call(m, "FetchMilestoneCount", ctx)
 	ret0, _ := ret[0].(int64)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchMilestoneCount indicates an expected call of FetchMilestoneCount.
-func (mr *MockClientMockRecorder) FetchMilestoneCount(arg0 any) *MockClientFetchMilestoneCountCall {
+func (mr *MockClientMockRecorder) FetchMilestoneCount(ctx any) *MockClientFetchMilestoneCountCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestoneCount", reflect.TypeOf((*MockClient)(nil).FetchMilestoneCount), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestoneCount", reflect.TypeOf((*MockClient)(nil).FetchMilestoneCount), ctx)
 	return &MockClientFetchMilestoneCountCall{Call: call}
 }
 
@@ -389,17 +390,17 @@ func (c *MockClientFetchMilestoneCountCall) DoAndReturn(f func(context.Context) 
 }
 
 // FetchMilestoneID mocks base method.
-func (m *MockClient) FetchMilestoneID(arg0 context.Context, arg1 string) error {
+func (m *MockClient) FetchMilestoneID(ctx context.Context, milestoneID string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchMilestoneID", arg0, arg1)
+	ret := m.ctrl.Call(m, "FetchMilestoneID", ctx, milestoneID)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // FetchMilestoneID indicates an expected call of FetchMilestoneID.
-func (mr *MockClientMockRecorder) FetchMilestoneID(arg0, arg1 any) *MockClientFetchMilestoneIDCall {
+func (mr *MockClientMockRecorder) FetchMilestoneID(ctx, milestoneID any) *MockClientFetchMilestoneIDCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestoneID", reflect.TypeOf((*MockClient)(nil).FetchMilestoneID), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestoneID", reflect.TypeOf((*MockClient)(nil).FetchMilestoneID), ctx, milestoneID)
 	return &MockClientFetchMilestoneIDCall{Call: call}
 }
 
@@ -427,17 +428,17 @@ func (c *MockClientFetchMilestoneIDCall) DoAndReturn(f func(context.Context, str
 }
 
 // FetchNoAckMilestone mocks base method.
-func (m *MockClient) FetchNoAckMilestone(arg0 context.Context, arg1 string) error {
+func (m *MockClient) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchNoAckMilestone", arg0, arg1)
+	ret := m.ctrl.Call(m, "FetchNoAckMilestone", ctx, milestoneID)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // FetchNoAckMilestone indicates an expected call of FetchNoAckMilestone.
-func (mr *MockClientMockRecorder) FetchNoAckMilestone(arg0, arg1 any) *MockClientFetchNoAckMilestoneCall {
+func (mr *MockClientMockRecorder) FetchNoAckMilestone(ctx, milestoneID any) *MockClientFetchNoAckMilestoneCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchNoAckMilestone", reflect.TypeOf((*MockClient)(nil).FetchNoAckMilestone), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchNoAckMilestone", reflect.TypeOf((*MockClient)(nil).FetchNoAckMilestone), ctx, milestoneID)
 	return &MockClientFetchNoAckMilestoneCall{Call: call}
 }
 
@@ -465,18 +466,18 @@ func (c *MockClientFetchNoAckMilestoneCall) DoAndReturn(f func(context.Context, 
 }
 
 // FetchSpan mocks base method.
-func (m *MockClient) FetchSpan(arg0 context.Context, arg1 uint64) (*Span, error) {
+func (m *MockClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchSpan", arg0, arg1)
+	ret := m.ctrl.Call(m, "FetchSpan", ctx, spanID)
 	ret0, _ := ret[0].(*Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchSpan indicates an expected call of FetchSpan.
-func (mr *MockClientMockRecorder) FetchSpan(arg0, arg1 any) *MockClientFetchSpanCall {
+func (mr *MockClientMockRecorder) FetchSpan(ctx, spanID any) *MockClientFetchSpanCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpan", reflect.TypeOf((*MockClient)(nil).FetchSpan), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpan", reflect.TypeOf((*MockClient)(nil).FetchSpan), ctx, spanID)
 	return &MockClientFetchSpanCall{Call: call}
 }
 
@@ -504,18 +505,18 @@ func (c *MockClientFetchSpanCall) DoAndReturn(f func(context.Context, uint64) (*
 }
 
 // FetchSpans mocks base method.
-func (m *MockClient) FetchSpans(arg0 context.Context, arg1, arg2 uint64) ([]*Span, error) {
+func (m *MockClient) FetchSpans(ctx context.Context, page, limit uint64) ([]*Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchSpans", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "FetchSpans", ctx, page, limit)
 	ret0, _ := ret[0].([]*Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchSpans indicates an expected call of FetchSpans.
-func (mr *MockClientMockRecorder) FetchSpans(arg0, arg1, arg2 any) *MockClientFetchSpansCall {
+func (mr *MockClientMockRecorder) FetchSpans(ctx, page, limit any) *MockClientFetchSpansCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpans", reflect.TypeOf((*MockClient)(nil).FetchSpans), arg0, arg1, arg2)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpans", reflect.TypeOf((*MockClient)(nil).FetchSpans), ctx, page, limit)
 	return &MockClientFetchSpansCall{Call: call}
 }
 
@@ -543,18 +544,18 @@ func (c *MockClientFetchSpansCall) DoAndReturn(f func(context.Context, uint64, u
 }
 
 // FetchStateSyncEvent mocks base method.
-func (m *MockClient) FetchStateSyncEvent(arg0 context.Context, arg1 uint64) (*EventRecordWithTime, error) {
+func (m *MockClient) FetchStateSyncEvent(ctx context.Context, id uint64) (*EventRecordWithTime, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchStateSyncEvent", arg0, arg1)
+	ret := m.ctrl.Call(m, "FetchStateSyncEvent", ctx, id)
 	ret0, _ := ret[0].(*EventRecordWithTime)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchStateSyncEvent indicates an expected call of FetchStateSyncEvent.
-func (mr *MockClientMockRecorder) FetchStateSyncEvent(arg0, arg1 any) *MockClientFetchStateSyncEventCall {
+func (mr *MockClientMockRecorder) FetchStateSyncEvent(ctx, id any) *MockClientFetchStateSyncEventCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchStateSyncEvent", reflect.TypeOf((*MockClient)(nil).FetchStateSyncEvent), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchStateSyncEvent", reflect.TypeOf((*MockClient)(nil).FetchStateSyncEvent), ctx, id)
 	return &MockClientFetchStateSyncEventCall{Call: call}
 }
 
@@ -582,18 +583,18 @@ func (c *MockClientFetchStateSyncEventCall) DoAndReturn(f func(context.Context, 
 }
 
 // FetchStateSyncEvents mocks base method.
-func (m *MockClient) FetchStateSyncEvents(arg0 context.Context, arg1 uint64, arg2 time.Time, arg3 int) ([]*EventRecordWithTime, error) {
+func (m *MockClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchStateSyncEvents", arg0, arg1, arg2, arg3)
+	ret := m.ctrl.Call(m, "FetchStateSyncEvents", ctx, fromId, to, limit)
 	ret0, _ := ret[0].([]*EventRecordWithTime)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchStateSyncEvents indicates an expected call of FetchStateSyncEvents.
-func (mr *MockClientMockRecorder) FetchStateSyncEvents(arg0, arg1, arg2, arg3 any) *MockClientFetchStateSyncEventsCall {
+func (mr *MockClientMockRecorder) FetchStateSyncEvents(ctx, fromId, to, limit any) *MockClientFetchStateSyncEventsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchStateSyncEvents", reflect.TypeOf((*MockClient)(nil).FetchStateSyncEvents), arg0, arg1, arg2, arg3)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchStateSyncEvents", reflect.TypeOf((*MockClient)(nil).FetchStateSyncEvents), ctx, fromId, to, limit)
 	return &MockClientFetchStateSyncEventsCall{Call: call}
 }
 
