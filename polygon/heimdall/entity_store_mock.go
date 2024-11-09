@@ -456,7 +456,7 @@ func (c *MockEntityStoreDeleteToBlockNumCall[TEntity]) Return(arg0 int, arg1 err
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockEntityStoreDeleteToBlockNumCall[TEntity]) Do(f func(context.Context, uint64, int) (int,error)) *MockEntityStoreDeleteToBlockNumCall[TEntity] {
+func (c *MockEntityStoreDeleteToBlockNumCall[TEntity]) Do(f func(context.Context, uint64, int) (int, error)) *MockEntityStoreDeleteToBlockNumCall[TEntity] {
 	c.Call = c.Call.Do(f)
 	return c
 }
@@ -495,7 +495,7 @@ func (c *MockEntityStoreDeleteFromBlockNumCall[TEntity]) Return(arg0 int, arg1 e
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockEntityStoreDeleteFromBlockNumCall[TEntity]) Do(f func(context.Context, uint64) (int,error)) *MockEntityStoreDeleteFromBlockNumCall[TEntity] {
+func (c *MockEntityStoreDeleteFromBlockNumCall[TEntity]) Do(f func(context.Context, uint64) (int, error)) *MockEntityStoreDeleteFromBlockNumCall[TEntity] {
 	c.Call = c.Call.Do(f)
 	return c
 }

@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -54,7 +56,7 @@ type EthBackendServer struct {
 
 	ctx                   context.Context
 	eth                   EthBackend
-	events                *shards.Events
+	notifications         *shards.Notifications
 	db                    kv.RoDB
 	blockReader           services.FullBlockReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
@@ -72,21 +74,21 @@ type EthBackend interface {
 	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
 	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore,
 ) *EthBackendServer {
 	s := &EthBackendServer{
 		ctx:                   ctx,
 		eth:                   eth,
-		events:                events,
+		notifications:         notifications,
 		db:                    db,
 		blockReader:           blockReader,
-		logsFilter:            NewLogsFilterAggregator(events),
+		logsFilter:            NewLogsFilterAggregator(notifications.Events),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 	}
 
-	ch, clean := s.events.AddLogsSubscription()
+	ch, clean := s.notifications.Events.AddLogsSubscription()
 	go func() {
 		var err error
 		defer clean()
@@ -115,6 +117,58 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
 	return EthBackendAPIVersion, nil
+}
+
+func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remote.SyncingReply, error) {
+	highestBlock := s.notifications.LastNewBlockSeen.Load()
+	frozenBlocks := s.blockReader.FrozenBlocks()
+
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+
+	if highestBlock < frozenBlocks {
+		highestBlock = frozenBlocks
+	}
+
+	reply := &remote.SyncingReply{
+		CurrentBlock:     currentBlock,
+		FrozenBlocks:     frozenBlocks,
+		LastNewBlockSeen: math.MaxUint64,
+	}
+
+	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
+	if highestBlock == 0 {
+		reply.Syncing = true
+		return reply, nil
+	}
+	reorgRange := 8
+
+	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
+	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
+		reply.Syncing = false
+		return reply, nil
+	}
+
+	reply.LastNewBlockSeen = highestBlock
+	reply.Stages = make([]*remote.SyncingReply_StageProgress, len(stages.AllStages))
+	for i, stage := range stages.AllStages {
+		progress, err := stages.GetStageProgress(tx, stage)
+		if err != nil {
+			return nil, err
+		}
+		reply.Stages[i].StageName = string(stage)
+		reply.Stages[i].BlockNumber = progress
+	}
+
+	return reply, nil
 }
 
 func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
@@ -170,9 +224,9 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) (err error) {
 	s.logger.Debug("Establishing event subscription channel with the RPC daemon ...")
-	ch, clean := s.events.AddHeaderSubscription()
+	ch, clean := s.notifications.Events.AddHeaderSubscription()
 	defer clean()
-	newSnCh, newSnClean := s.events.AddNewSnapshotSubscription()
+	newSnCh, newSnClean := s.notifications.Events.AddNewSnapshotSubscription()
 	defer newSnClean()
 	s.logger.Info("new subscription to newHeaders established")
 	defer func() {
