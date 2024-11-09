@@ -199,7 +199,7 @@ Loop:
 
 const (
 	injectedBatchLogTransactionStartByte = 128
-	injectedBatchLastGerStartByte        = 31
+	injectedBatchLastGerStartByte        = 32
 	injectedBatchLastGerEndByte          = 64
 	injectedBatchSequencerStartByte      = 76
 	injectedBatchSequencerEndByte        = 96

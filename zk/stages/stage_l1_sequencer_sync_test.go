@@ -91,11 +91,54 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 		assert func(t *testing.T, hDB *hermez_db.HermezDb)
 	}
 
-	const forkIdBytesStartPosition = 64
-	const forkIdBytesEndPosition = 96
-	const rollupDataSize = 100
+	const (
+		forkIdBytesStartPosition = 64
+		forkIdBytesEndPosition   = 96
+		rollupDataSize           = 100
+
+		injectedBatchLogTransactionStartByte = 128
+		injectedBatchLastGerStartByte        = 32
+		injectedBatchLastGerEndByte          = 64
+		injectedBatchSequencerStartByte      = 76
+		injectedBatchSequencerEndByte        = 96
+	)
 
 	testCases := []testCase{
+		{
+			name: "InitialSequenceBatchesTopic",
+			getLog: func(hDB *hermez_db.HermezDb) (types.Log, error) {
+				ger := common.HexToHash("0x111111111")
+				sequencer := common.HexToAddress("0x222222222")
+				batchL2Data := common.HexToHash("0x333333333")
+
+				initialSequenceBatchesData := make([]byte, 200)
+				copy(initialSequenceBatchesData[injectedBatchLastGerStartByte:injectedBatchLastGerEndByte], ger.Bytes())
+				copy(initialSequenceBatchesData[injectedBatchSequencerStartByte:injectedBatchSequencerEndByte], sequencer.Bytes())
+				copy(initialSequenceBatchesData[injectedBatchLogTransactionStartByte:], batchL2Data.Bytes())
+				return types.Log{
+					BlockNumber: latestBlockNumber.Uint64(),
+					Address:     l1ContractAddresses[0],
+					Topics:      []common.Hash{contracts.InitialSequenceBatchesTopic},
+					Data:        initialSequenceBatchesData,
+				}, nil
+			},
+			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
+				ger := common.HexToHash("0x111111111")
+				sequencer := common.HexToAddress("0x222222222")
+				batchL2Data := common.HexToHash("0x333333333")
+
+				l1InjectedBatch, err := hDB.GetL1InjectedBatch(0)
+				require.NoError(t, err)
+
+				assert.Equal(t, l1InjectedBatch.L1BlockNumber, latestBlock.NumberU64())
+				assert.Equal(t, l1InjectedBatch.Timestamp, latestBlock.Time())
+				assert.Equal(t, l1InjectedBatch.L1BlockHash, latestBlock.Hash())
+				assert.Equal(t, l1InjectedBatch.L1ParentHash, latestBlock.ParentHash())
+				assert.Equal(t, l1InjectedBatch.LastGlobalExitRoot.String(), ger.String())
+				assert.Equal(t, l1InjectedBatch.Sequencer.String(), sequencer.String())
+				assert.ElementsMatch(t, l1InjectedBatch.Transaction, batchL2Data.Bytes())
+			},
+		},
 		{
 			name: "AddNewRollupType",
 			getLog: func(hDB *hermez_db.HermezDb) (types.Log, error) {
@@ -172,17 +215,40 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 				require.NoError(t, err)
 			},
 		},
-		// types.Log{
-		// 	BlockNumber: latestBlockNumber.Uint64(),
-		// 	Address:     l1ContractAddresses[0],
-		// 	Topics:      []common.Hash{contracts.InitialSequenceBatchesTopic},
-		// },
+		{
+			name: "UpdateRollupTopic",
+			getLog: func(hDB *hermez_db.HermezDb) (types.Log, error) {
+				rollupID := uint64(99999)
+				rollupIDHash := common.BytesToHash(big.NewInt(0).SetUint64(rollupID).Bytes())
+				rollupType := uint64(44)
+				rollupTypeHash := common.BytesToHash(big.NewInt(0).SetUint64(rollupType).Bytes())
+				rollupForkID := uint64(444)
+				if funcErr := hDB.WriteRollupType(rollupType, rollupForkID); funcErr != nil {
+					return types.Log{}, funcErr
+				}
+				latestVerified := uint64(4444)
+				latestVerifiedHash := common.BytesToHash(big.NewInt(0).SetUint64(latestVerified).Bytes())
+				updateRollupData := rollupTypeHash.Bytes()
+				updateRollupData = append(updateRollupData, latestVerifiedHash.Bytes()...)
 
-		// types.Log{
-		// 	BlockNumber: latestBlockNumber.Uint64(),
-		// 	Address:     l1ContractAddresses[0],
-		// 	Topics:      []common.Hash{contracts.UpdateRollupTopic},
-		// },
+				return types.Log{
+					BlockNumber: latestBlockNumber.Uint64(),
+					Address:     l1ContractAddresses[0],
+					Topics:      []common.Hash{contracts.UpdateRollupTopic, rollupIDHash},
+					Data:        updateRollupData,
+				}, nil
+			},
+			assert: func(t *testing.T, hDB *hermez_db.HermezDb) {
+				forks, batches, err := hDB.GetAllForkHistory()
+				for i := 0; i < len(forks); i++ {
+					if forks[i] == uint64(444) {
+						assert.Equal(t, batches[i], uint64(4444))
+						break
+					}
+				}
+				require.NoError(t, err)
+			},
+		},
 	}
 
 	filteredLogs := []types.Log{}
@@ -211,4 +277,14 @@ func TestSpawnL1SequencerSyncStage(t *testing.T) {
 	for _, tc := range testCases {
 		tc.assert(t, hDB)
 	}
+}
+
+func TestUnwindL1SequencerSyncStage(t *testing.T) {
+	err := UnwindL1SequencerSyncStage(nil, nil, L1SequencerSyncCfg{}, context.Background())
+	assert.Nil(t, err)
+}
+
+func TestPruneL1SequencerSyncStage(t *testing.T) {
+	err := PruneL1SequencerSyncStage(nil, nil, L1SequencerSyncCfg{}, context.Background())
+	assert.Nil(t, err)
 }
