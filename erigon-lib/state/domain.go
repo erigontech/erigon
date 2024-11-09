@@ -47,9 +47,9 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-var sortableBuffersPool = sync.Pool{
+var sortableBuffersPoolForPruning = sync.Pool{
 	New: func() interface{} {
-		return etl.NewSortableBuffer(etl.BufferOptimalSize)
+		return etl.NewSortableBuffer(etl.BufferOptimalSize / 8)
 	},
 }
 
@@ -1949,9 +1949,9 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 	var valsCursor kv.RwCursor
 
-	sortableBuffer := sortableBuffersPool.Get().(etl.Buffer)
+	sortableBuffer := sortableBuffersPoolForPruning.Get().(etl.Buffer)
 	sortableBuffer.Reset()
-	defer sortableBuffersPool.Put(sortableBuffer)
+	defer sortableBuffersPoolForPruning.Put(sortableBuffer)
 
 	ancientDomainValsCollector := etl.NewCollector(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, sortableBuffer, dt.d.logger).LogLvl(log.LvlTrace)
 	defer ancientDomainValsCollector.Close()

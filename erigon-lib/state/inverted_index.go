@@ -837,9 +837,9 @@ func (iit *InvertedIndexRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	}
 	defer idxDelCursor.Close()
 
-	sortableBuffer := sortableBuffersPool.Get().(etl.Buffer)
+	sortableBuffer := sortableBuffersPoolForPruning.Get().(etl.Buffer)
 	sortableBuffer.Reset()
-	defer sortableBuffersPool.Put(sortableBuffer)
+	defer sortableBuffersPoolForPruning.Put(sortableBuffer)
 
 	collector := etl.NewCollector(ii.filenameBase+".prune.ii", ii.dirs.Tmp, sortableBuffer, ii.logger)
 	defer collector.Close()
