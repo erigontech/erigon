@@ -145,7 +145,7 @@ func TestComponentLifecycle(t *testing.T) {
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, d)
-	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+	require.Equal(t, "root:d", d.Id().String())
 
 	c1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
 		component.WithId("c1"),
@@ -153,7 +153,7 @@ func TestComponentLifecycle(t *testing.T) {
 		component.WithDependencies(d))
 	require.Nil(t, err)
 	require.NotNil(t, c1)
-	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+	require.Equal(t, "root:c1", c1.Id().String())
 
 	err = c1.Activate(context.Background())
 	require.Nil(t, err)
@@ -162,6 +162,7 @@ func TestComponentLifecycle(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
 	require.Equal(t, component.Active, d.State())
+	require.Equal(t, component.Deactivated, c.State())
 
 	err = c1.Deactivate(context.Background())
 	require.Nil(t, err)
@@ -170,4 +171,61 @@ func TestComponentLifecycle(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, component.Deactivated, state)
 	require.Equal(t, component.Deactivated, d.State())
+	require.Equal(t, component.Deactivated, c.State())
+
+	d1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d1"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d1)
+	require.Equal(t, "root:d1", d1.Id().String())
+
+	d2, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d2"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d2)
+	require.Equal(t, "root:d2", d2.Id().String())
+
+	d3, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d3"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d3)
+	require.Equal(t, "root:d3", d3.Id().String())
+
+	c2, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("c2"),
+		component.WithProvider(mockProvider(ctrl, 1)),
+		component.WithDependencies(d1, d2, d3))
+
+	require.Nil(t, err)
+	require.NotNil(t, c1)
+	require.Equal(t, "root:c2", c2.Id().String())
+
+	err = c2.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c2.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Active, d1.State())
+	require.Equal(t, component.Active, d2.State())
+	require.Equal(t, component.Active, d3.State())
+	require.Equal(t, component.Deactivated, d.State())
+	require.Equal(t, component.Deactivated, c1.State())
+	require.Equal(t, component.Deactivated, c.State())
+
+	err = c2.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c2.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Deactivated, d1.State())
+	require.Equal(t, component.Deactivated, d2.State())
+	require.Equal(t, component.Deactivated, d3.State())
+	require.Equal(t, component.Deactivated, d.State())
+	require.Equal(t, component.Deactivated, c1.State())
+	require.Equal(t, component.Deactivated, c.State())
 }

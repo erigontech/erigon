@@ -1163,16 +1163,19 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 		return
 	}
 
-	//fmt.Printf("%s Received Component State Changed [%v->%v] from: %s:%p\n",
-	//	c.Id(), event.Previous(), event.Current(), sourceComponent.Id(), sourceComponent)
-
 	if sourceComponent != c {
+		//fmt.Printf("%s Received Component State Changed [%v->%v] from: %s:%p\n",
+		//	c.Id(), event.Previous(), event.Current(), sourceComponent.Id(), sourceComponent)
+
 		var allDependenciesActivated bool
 		var allDependenciesDeactivated bool
+		var state State
 
 		func() {
 			c.RLock()
 			defer c.RUnlock()
+			state = c.state
+
 			if c.dependencies.Contains(sourceComponent) {
 				//	fmt.Printf("%s Received Component State Changed [%v->%v] from: %v\n",
 				//		component.Name(), event.Previous(), event.Current(), event.Source())
@@ -1182,7 +1185,7 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 						fmt.Printf("%p dep: %p: %v\n", component, dependent, dependent)
 					}*/
 
-					if c.State().IsActivated() && c.State() != Active {
+					if state.IsActivated() && state != Active {
 						allDependenciesActivated = true
 						for _, dependent := range c.dependencies {
 							if dependent.State() != Active {
@@ -1198,7 +1201,7 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 						fmt.Printf("%p dep: %p: %v\n", component, dependent, dependent)
 					}*/
 
-					if c.State() != Deactivated {
+					if state != Deactivated {
 						allDependenciesDeactivated = true
 						for _, dependent := range c.dependencies {
 							if dependent.State() != Deactivated {
@@ -1211,20 +1214,32 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 			}
 		}()
 
-		if allDependenciesActivated {
+		if allDependenciesActivated &&
+			!(state == Recovering || state == Active) {
 			c.onDependenciesActive(c.Context(), func(context.Context, *component, error) {})
 		}
 
-		if allDependenciesDeactivated {
+		if allDependenciesDeactivated && state != Deactivated {
 			c.onDependenciesDeactivated(c.Context())
 		}
 	}
 }
 
 func (c *component) onDependenciesActive(ctx context.Context, onActivity onActivity) {
+	c.Lock()
+	activated := c.state == Recovering || c.state == Active
+	if !activated {
+		c.setState(Recovering, true)
+	}
+	c.Unlock()
+
+	if activated {
+		return
+	}
+
 	//fmt.Printf("onDependenciesActive: %s\n", c)
+
 	if recoverable, ok := c.provider.(Recoverable); ok {
-		c.setState(Recovering, false)
 		err := recoverable.Recover(ctx)
 
 		if err != nil {
