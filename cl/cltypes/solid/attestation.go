@@ -198,6 +198,10 @@ func (s *SingleAttestation) Clone() clonable.Clonable {
 	return &SingleAttestation{}
 }
 
+func (s *SingleAttestation) Static() bool {
+	return true
+}
+
 func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestation {
 	committeeBits := NewBitVector(maxCommitteesPerSlot)
 	aggregationBits := NewBitList(0, aggregationBitsSizeElectra)

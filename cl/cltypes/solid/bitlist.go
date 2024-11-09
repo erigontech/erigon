@@ -128,11 +128,7 @@ func (u *BitList) Set(index int, v byte) {
 	u.u[index] = v
 }
 
-func (u *BitList) SetOnBit(bitIndex int) {
-	if bitIndex >= u.c {
-		return
-	}
-	// remove the last on bit if nessary
+func (u *BitList) removeMsb() {
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
 			// find last bit, make a mask and clear it
@@ -140,15 +136,9 @@ func (u *BitList) SetOnBit(bitIndex int) {
 			break
 		}
 	}
-	// expand the bitlist if necessary
-	for len(u.u)*8 <= bitIndex {
-		u.u = append(u.u, 0)
-	}
+}
 
-	// set the bit
-	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
-
-	// set last bit
+func (u *BitList) addMsb() {
 	for i := len(u.u) - 1; i >= 0; i-- {
 		if u.u[i] != 0 {
 			msb := bits.Len8(u.u[i])
@@ -163,6 +153,22 @@ func (u *BitList) SetOnBit(bitIndex int) {
 			break
 		}
 	}
+}
+
+func (u *BitList) SetOnBit(bitIndex int) {
+	if bitIndex >= u.c {
+		return
+	}
+	// remove the last on bit if necessary
+	u.removeMsb()
+	// expand the bitlist if necessary
+	for len(u.u)*8 <= bitIndex {
+		u.u = append(u.u, 0)
+	}
+	// set the bit
+	u.u[bitIndex/8] |= 1 << uint(bitIndex%8)
+	// set last bit
+	u.addMsb()
 	u.l = len(u.u)
 }
 

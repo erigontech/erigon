@@ -136,6 +136,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		}
 		attestation = att.SingleAttestation.ToAttestation(memberIndexInCommittee)
 	} else {
+		// deneb and before case
 		root = att.Attestation.Data.BeaconBlockRoot
 		slot = att.Attestation.Data.Slot
 		committeeIndex = att.Attestation.Data.CommitteeIndex
