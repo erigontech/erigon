@@ -71,17 +71,12 @@ func (arr *byteBasedUint64Slice) Clear() {
 
 // CopyTo copies the slice to a target slice.
 func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
-	target.Clear()
-	// TODO: implement CopyTo for MPT
 	target.c = arr.c
 	target.l = arr.l
 	if len(target.u) < len(arr.u) {
 		target.u = make([]byte, len(arr.u))
 	}
 	if arr.MerkleTree != nil {
-		if target.MerkleTree == nil {
-			target.MerkleTree = &merkle_tree.MerkleTree{}
-		}
 		arr.MerkleTree.CopyInto(target.MerkleTree)
 	}
 
