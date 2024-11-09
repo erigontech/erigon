@@ -273,7 +273,11 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
+	l5, err := dir2.ListFiles(dirs.SnapCaplin, ".torrent")
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
 	return files, nil
 }
 
