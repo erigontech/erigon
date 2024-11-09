@@ -189,7 +189,7 @@ func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator)
 	sentryClient := fetcherTest.sentryClient
 	messageListener := fetcherTest.messageListener
 	peerTracker := NewPeerTracker(logger, sentryClient, messageListener, WithPreservingPeerShuffle)
-	trackingFetcher := newTrackingFetcher(fetcherTest.fetcher, peerTracker)
+	trackingFetcher := NewTrackingFetcher(fetcherTest.fetcher, peerTracker)
 	return &trackingFetcherTest{
 		fetcherTest:     fetcherTest,
 		trackingFetcher: trackingFetcher,
@@ -199,8 +199,8 @@ func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator)
 
 type trackingFetcherTest struct {
 	*fetcherTest
-	trackingFetcher        *trackingFetcher
-	peerTracker            PeerTracker
+	trackingFetcher        *TrackingFetcher
+	peerTracker            *PeerTracker
 	peerTrackerInitialised atomic.Bool
 }
 

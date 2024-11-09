@@ -35,7 +35,7 @@ type EventChannel[TEvent any] struct {
 	queueCond  *sync.Cond
 }
 
-func NewEventChannel[TEvent any](capacity uint, opts ...eventChannelOption) *EventChannel[TEvent] {
+func NewEventChannel[TEvent any](capacity uint, opts ...EventChannelOption) *EventChannel[TEvent] {
 	if capacity == 0 {
 		panic("NewEventChannel: capacity must be > 0")
 	}
@@ -147,9 +147,9 @@ type eventChannelOptions struct {
 	loggerId  string
 }
 
-type eventChannelOption func(opts *eventChannelOptions)
+type EventChannelOption func(opts *eventChannelOptions)
 
-func WithEventChannelLogging(logger log.Logger, lvl log.Lvl, id string) eventChannelOption {
+func WithEventChannelLogging(logger log.Logger, lvl log.Lvl, id string) EventChannelOption {
 	return func(opts *eventChannelOptions) {
 		opts.logger = logger
 		opts.loggerLvl = lvl

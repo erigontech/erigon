@@ -51,6 +51,10 @@ func (s *EthBackendClientDirect) Version(ctx context.Context, in *emptypb.Empty,
 	return s.server.Version(ctx, in)
 }
 
+func (s *EthBackendClientDirect) Syncing(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.SyncingReply, error) {
+	return s.server.Syncing(ctx, in)
+}
+
 func (s *EthBackendClientDirect) ProtocolVersion(ctx context.Context, in *remote.ProtocolVersionRequest, opts ...grpc.CallOption) (*remote.ProtocolVersionReply, error) {
 	return s.server.ProtocolVersion(ctx, in)
 }
