@@ -38,6 +38,12 @@ func (state State) IsActive() bool {
 	return state == Active
 }
 
+func (state State) IsInitialized() bool {
+	return !(state == Unknown || state == Instantiated ||
+		state == Configured || state == Deactivated ||
+		state == Failed)
+}
+
 func (state State) IsActivated() bool {
 	return !(state == Unknown || state == Instantiated ||
 		state == Configured || state == Initialised ||

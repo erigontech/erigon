@@ -2,6 +2,7 @@ package component
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,8 @@ import (
 	"github.com/erigontech/erigon-lib/app"
 	"github.com/erigontech/erigon-lib/app/event"
 	"github.com/erigontech/erigon-lib/app/util"
+	pkg_errors "github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
 type relation interface {
@@ -18,7 +21,7 @@ type relation interface {
 	Name() string
 
 	State() State
-	AwaitState(state State) (State, error)
+	AwaitState(ctx context.Context, state State) (State, error)
 
 	Context() context.Context
 
@@ -33,14 +36,30 @@ type relation interface {
 	HasDependent(component relation) bool
 
 	Domain() ComponentDomain
+
+	isConfigurable() bool
+	isInitializable() bool
+}
+
+type ActivityHandler[P any] interface {
+	OnActivity(ctx context.Context, c Component[P], state State, err error)
+}
+
+type ActivityHandlerFunc[P any] func(ctx context.Context, c Component[P], state State, err error)
+
+func (f ActivityHandlerFunc[P]) OnActivity(ctx context.Context, c Component[P], state State, err error) {
+	f(ctx, c, state, err)
 }
 
 type Component[P any] interface {
 	relation
-	//Config() config.Config
+
+	Configure(ctx context.Context, options ...app.Option) error
+	Initialize(ctx context.Context, options ...app.Option) error
+	Activate(ctx context.Context, handler ...ActivityHandler[P]) error
+	Deactivate(ctx context.Context, handler ...ActivityHandler[P]) error
 
 	Provider() *P
-	Detach() error
 }
 
 func MakeResultChannels() (chan *component, chan error) {
@@ -78,6 +97,22 @@ func (t typedComponent[P]) unwrap() *component {
 
 func (c typedComponent[P]) Provider() *P {
 	return c.provider.(*P)
+}
+
+func (c typedComponent[P]) Activate(ctx context.Context, handler ...ActivityHandler[P]) error {
+	return c.activate(ctx, func(ctx context.Context, _ *component, err error) {
+		if len(handler) > 0 {
+			handler[0].OnActivity(ctx, c, c.state, err)
+		}
+	})
+}
+
+func (c typedComponent[P]) Deactivate(ctx context.Context, handler ...ActivityHandler[P]) error {
+	return c.deactivate(ctx, func(ctx context.Context, _ *component, err error) {
+		if len(handler) > 0 {
+			handler[0].OnActivity(ctx, c, c.state, err)
+		}
+	})
 }
 
 func AwaitComponent[T any](cres chan *component, cerr chan error) (result Component[T], err error) {
@@ -454,64 +489,76 @@ func NewComponent[P any](context context.Context, options ...app.Option) (Compon
 	return typedComponent[P]{c}, nil
 }
 
-func (component *component) String() string {
-	if provider, ok := component.provider.(interface{ String() string }); ok {
+func (c *component) isConfigurable() bool {
+	_, ok := c.provider.(Configurable)
+	return ok
+}
+
+func (c *component) isInitializable() bool {
+	_, ok := c.provider.(Initializable)
+	return ok
+}
+
+func (c *component) String() string {
+	if provider, ok := c.provider.(interface{ String() string }); ok {
 		return provider.String()
 	}
 
-	return fmt.Sprintf("%T [id=%s, name=%s, dependents=%s, state=%s]",
-		component.provider,
-		component.Id(),
-		component.Name(),
-		component.dependents,
-		component.State())
+	return fmt.Sprintf("%p:%T [id=%s, name=%s, dependents=%s, state=%s]",
+		c,
+		c.provider,
+		c.Id(),
+		c.Name(),
+		c.dependents,
+		c.State())
 }
 
-func (component *component) Context() context.Context {
-	if component.context != nil {
-		return component.context
+func (c *component) Context() context.Context {
+	if c.context != nil {
+		return c.context
 	}
 
 	return context.Background()
 }
 
-func (component *component) setContext(processorContext context.Context) {
-	component.context = processorContext
+func (c *component) setContext(processorContext context.Context) {
+	c.context = processorContext
 }
 
-func (component *component) State() State {
-	component.RLock()
-	state := component.state
-	component.RUnlock()
+func (c *component) State() State {
+	c.RLock()
+	state := c.state
+	c.RUnlock()
 	return state
 }
 
-func (component *component) Domain() ComponentDomain {
-	return component.componentDomain
+func (c *component) Domain() ComponentDomain {
+	return c.componentDomain
 }
 
-func (component *component) setState(state State) {
-	component.Lock()
-	if state != component.state {
-		previousState := component.state
-		component.state = state
-		component.Unlock()
+func (c *component) setState(state State, locked bool) {
+	if !locked {
+		c.Lock()
+		defer c.Unlock()
+	}
+
+	if state != c.state {
+		previousState := c.state
+		c.state = state
 
 		if log.DebugEnabled() {
-			log.Debug("", "provider", app.LogInstance(component.provider), "state", state.String())
+			log.Debug("", "provider", app.LogInstance(c.provider), "state", state.String())
 		}
-		component.ServiceBus().Post(newComponentStateChanged(component, state, previousState))
-	} else {
-		component.Unlock()
+		c.ServiceBus().Post(newComponentStateChanged(c, state, previousState))
 	}
 }
 
-func (component *component) AwaitState(state State) (State, error) {
+func (c *component) AwaitState(ctx context.Context, state State) (State, error) {
 	statechan := make(chan State, 1)
-	component.RLock()
+	c.RLock()
 
-	if state == component.state {
-		component.RUnlock()
+	if state == c.state {
+		c.RUnlock()
 		return state, nil
 	}
 
@@ -524,21 +571,21 @@ func (component *component) AwaitState(state State) (State, error) {
 			return
 		}
 
-		if sourceComponent == component && event.Current() == state {
+		if sourceComponent == c && event.Current() == state {
 			//fmt.Printf("%p Await Received Component State Changed [%v->%v]\n",
-			//	component.component(), event.Previous(), event.Current())
-			_ = component.ServiceBus().Unregister(component, subscriber)
+			//	c, event.Previous(), event.Current())
+			_ = c.ServiceBus().Unregister(c, subscriber)
 			statechan <- state
 		}
 	}
 
-	err := component.ServiceBus().Register(component, subscriber)
+	err := c.ServiceBus().Register(c, subscriber)
 
 	if err != nil {
 		return Unknown, err
 	}
 
-	component.RUnlock()
+	c.RUnlock()
 	//fmt.Printf("%T:%p (%v) Await: %v\n", component, component, component.State(), state)
 	result, ok := <-statechan
 
@@ -588,124 +635,408 @@ func (component *component) Name() string {
 	return component.id.String()
 }
 
-func (component *component) InstanceId() string {
-	return app.LogInstance(component)
+func (c *component) InstanceId() string {
+	return app.LogInstance(c)
 }
 
-func (c *component) activate(activationContext context.Context) (chan *component, chan error) {
-	cResOut := make(chan *component, 1)
-	cErrOut := make(chan error, 1)
+// lock to ensure that only one component collects and activates
+// at a time - to avoid multiple activations of subsidiary components
+var activationMutex = sync.Mutex{}
 
-	if activatable, ok := c.provider.(interface {
-		Activate(ctx context.Context) (chan *component, chan error)
-	}); ok {
-		_, err := AwaitComponent[any](activatable.Activate(activationContext))
+func (c *component) Configure(ctx context.Context, options ...app.Option) error {
+	return c.configure(ctx, false, func(context.Context, *component, error) {}, options...)
+}
+
+func (c *component) configure(ctx context.Context, activationLocked bool, onActivity onActivity, options ...app.Option) error {
+	if !activationLocked {
+		activationMutex.Lock()
+		defer activationMutex.Unlock()
+	}
+
+	err := func() error {
+		c.RLock()
+		defer c.RUnlock()
+
+		var errs []error
+
+		for _, dependency := range c.dependencies {
+			if !dependency.State().IsConfigured() {
+				if dependency.State() == Instantiated ||
+					dependency.State() == Unknown {
+					if dependency.isConfigurable() {
+						err := func() (err error) {
+							defer func() {
+								if r := recover(); r != nil {
+									var ok bool
+									if err, ok = r.(error); ok {
+										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked with error: %s", dependency, err))
+									} else {
+										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked: %v", dependency, r))
+									}
+								}
+							}()
+
+							return asComponent(dependency).configure(ctx, true, func(context.Context, *component, error) {}, options...)
+						}()
+
+						if err != nil {
+							errs = append(errs, err)
+							continue
+						}
+					}
+				}
+			}
+		}
+
+		if len(errs) > 0 {
+			return errors.Join(append(
+				[]error{fmt.Errorf("depenccy configure failed for: %s", c.id)}, errs...)...)
+		}
+
+		return nil
+	}()
+
+	if err != nil {
+		return err
+	}
+
+	if !c.State().IsConfigured() {
+		if err := c.configureProvider(ctx, onActivity, options...); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *component) configureProvider(ctx context.Context, onActivity onActivity, options ...app.Option) error {
+	c.Lock()
+	defer c.Unlock()
+
+	if configurable, ok := c.provider.(Configurable); ok {
+		if err := configurable.Configure(ctx, append(c.options, options...)...); err != nil {
+			return err
+		}
+	}
+
+	if c.state == Instantiated || c.state == Unknown {
+		c.setState(Configured, true)
+		onActivity(ctx, c, nil)
+	}
+
+	return nil
+}
+
+func (c *component) Initialize(ctx context.Context, options ...app.Option) error {
+	return c.initialize(ctx, false, func(context.Context, *component, error) {}, options...)
+}
+
+func (c *component) initialize(ctx context.Context, activationLocked bool, onActivity onActivity, options ...app.Option) error {
+	if !activationLocked {
+		activationMutex.Lock()
+		defer activationMutex.Unlock()
+	}
+
+	err := func() error {
+		c.RLock()
+		defer c.RUnlock()
+
+		var errs []error
+
+		for _, dependency := range c.dependencies {
+			if !dependency.State().IsInitialized() {
+				if dependency.State() == Instantiated ||
+					dependency.State() == Configured ||
+					dependency.State() == Unknown {
+					if dependency.isInitializable() {
+						err := func() (err error) {
+							defer func() {
+								if r := recover(); r != nil {
+									var ok bool
+									if err, ok = r.(error); ok {
+										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked with error: %s", dependency, err))
+									} else {
+										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked: %v", dependency, r))
+									}
+								}
+							}()
+
+							return asComponent(dependency).initialize(ctx, true, func(context.Context, *component, error) {}, options...)
+						}()
+
+						if err != nil {
+							errs = append(errs, err)
+							continue
+						}
+					}
+				}
+			}
+		}
+
+		if len(errs) > 0 {
+			return errors.Join(append(
+				[]error{fmt.Errorf("dependency initialize failed for: %s", c.id)}, errs...)...)
+		}
+
+		return nil
+	}()
+
+	if err != nil {
+		return err
+	}
+
+	if !c.State().IsInitialized() {
+		if err := c.initializeProvider(ctx, onActivity, options...); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *component) initializeProvider(ctx context.Context, onActivity onActivity, options ...app.Option) error {
+	c.Lock()
+	defer c.Unlock()
+
+	if configurable, ok := c.provider.(Initializable); ok {
+		if err := configurable.Initialize(ctx, append(c.options, options...)...); err != nil {
+			return err
+		}
+	}
+
+	if c.state == Configured || c.state == Instantiated || c.state == Unknown {
+		c.setState(Initialised, true)
+		onActivity(ctx, c, nil)
+	}
+
+	return nil
+}
+
+type onActivity func(ctx context.Context, c *component, err error)
+
+func (c *component) activate(ctx context.Context, onActivity onActivity) error {
+	activationList := make([]*component, 0, len(c.dependencies))
+
+	err := func() error {
+		activationMutex.Lock()
+		defer activationMutex.Unlock()
+
+		if err := c.configure(ctx, true, onActivity); err != nil {
+			return err
+		}
+
+		if err := c.initialize(ctx, true, onActivity); err != nil {
+			return err
+		}
+
+		c.RLock()
+		defer c.RUnlock()
+
+		for _, dependency := range c.dependencies {
+			if !dependency.State().IsActivated() {
+				activationList = append(activationList, asComponent(dependency))
+			}
+		}
+
+		return nil
+	}()
+
+	if err != nil {
+		return err
+	}
+
+	if c.State().IsActivated() {
+		if len(activationList) == 0 {
+			return nil
+		} else {
+			go c.activateDependencies(ctx, activationList, onActivity)
+		}
+	} else {
+		c.setState(Activating, false)
+		onActivity(ctx, c, err)
+		go c.activateDependencies(ctx, activationList, onActivity)
+	}
+
+	return nil
+}
+
+func (c *component) activateDependencies(ctx context.Context, activationList []*component, onActivity onActivity) {
+	if len(activationList) == 0 {
+		if log.TraceEnabled() {
+			log.Trace("Activated", "component", app.LogInstance(c))
+		}
+		c.onDependenciesActive(ctx, onActivity)
+	} else {
+		wg, activationCtx := errgroup.WithContext(ctx)
+
+		for _, dependency := range activationList {
+			dependency := dependency
+
+			wg.Go(func() (err error) {
+				defer func() {
+					if r := recover(); r != nil {
+						if rerr, ok := r.(error); ok {
+							err = pkg_errors.WithStack(fmt.Errorf("%T Panicked with error: %w", dependency, rerr))
+						} else {
+							pkg_errors.WithStack(fmt.Errorf("%T Panicked: %v", dependency, r))
+						}
+					}
+				}()
+
+				if log.TraceEnabled() {
+					log.Trace("Activating",
+						"component", app.LogInstance(c),
+						"dependency", app.LogInstance(dependency))
+				}
+
+				cerr := make(chan error, 1)
+				dependency.activate(activationCtx, func(ctx context.Context, _ *component, err error) {
+					if errors.Is(err, context.Canceled) {
+						err = nil
+					}
+					cerr <- err
+				})
+				return <-cerr
+			})
+		}
+
+		err := wg.Wait()
+		if log.TraceEnabled() {
+			log.Trace("Activated dependencies",
+				"domain", app.LogInstance(c))
+		}
+		if err != nil {
+			onActivity(ctx, c, fmt.Errorf("component activate failed: %w", err))
+		} else {
+			allDependenciesActivated := true
+			c.RLock()
+			for _, dependent := range c.dependencies {
+				if dependent.State() != Active {
+					allDependenciesActivated = false
+					break
+				}
+			}
+			c.RUnlock()
+
+			if allDependenciesActivated {
+				c.onDependenciesActive(ctx, onActivity)
+			}
+		}
+	}
+}
+
+func (c *component) activateProvider(ctx context.Context, onActivity onActivity) {
+	if activatable, ok := c.provider.(Activatable); ok {
+		err := activatable.Activate(ctx)
 
 		if err != nil {
-			cErrOut <- err
-			close(cResOut)
-			close(cErrOut)
-			return cResOut, cErrOut
+			c.setState(Failed, false)
+			onActivity(ctx, c, err)
+			return
 		}
 	}
 
-	allActive := true
+	c.setState(Active, false)
+	onActivity(ctx, c, nil)
+}
 
-	c.RLock()
-
-	for _, dependent := range c.dependencies {
-		if dependent.State() != Active {
-			allActive = false
-			break
-		}
-	}
-
-	c.RUnlock()
-
-	if allActive {
-		if err := c.onDependenciesActive(activationContext); err != nil {
-			cErrOut <- err
-			close(cResOut)
-			close(cErrOut)
-			return cResOut, cErrOut
-		}
+func (c *component) deactivate(ctx context.Context, onActivity onActivity) error {
+	if c.state.IsDeactivated() {
+		onActivity(ctx, c, nil)
+		return nil
 	}
 
 	go func() {
-		if _, err := c.AwaitState(Active); err != nil {
-			cErrOut <- err
-		} else {
-			cResOut <- c
+		if err := c.deactivateProvider(ctx, onActivity); err == nil {
+			c.deactivateDependencies(ctx, onActivity)
 		}
-
-		close(cResOut)
-		close(cErrOut)
 	}()
 
-	return cResOut, cErrOut
+	return nil
 }
 
-func (c *component) deactivate(deactivationContext context.Context) (chan *component, chan error) {
+func (c *component) deactivateDependencies(ctx context.Context, onActivity onActivity) {
+	/*fmt.Printf("%s Deactivate Deps\n", manager.Name())
+	for _, dep := range manager.dependents {
+		fmt.Printf("  %v:%v:%p\n", manager.Name(), dep.Name(), dep)
+	}*/
 
-	cResOut, cErrOut := MakeResultChannels()
+	deactivationList := make([]*component, len(c.dependencies))
 
+	c.RLock()
+	for i, component := range c.dependencies {
+		deactivationList[i] = asComponent(component)
+	}
+	c.RUnlock()
+
+	if len(deactivationList) == 0 {
+		c.onDependenciesDeactivated(ctx)
+		onActivity(ctx, c, nil)
+	} else {
+		wg, deactivationCtx := errgroup.WithContext(ctx)
+
+		for _, dependency := range deactivationList {
+			dependency := dependency
+
+			wg.Go(func() (err error) {
+				defer func() {
+					if r := recover(); r != nil {
+						if rerr, ok := r.(error); ok {
+							err = pkg_errors.WithStack(fmt.Errorf("%T Panicked with error: %w", dependency, rerr))
+						} else {
+							err = pkg_errors.WithStack(fmt.Errorf("%T Panicked: %v", dependency, r))
+						}
+					}
+				}()
+
+				if dependency.State().IsDeactivated() {
+					return nil
+				}
+
+				cerr := make(chan error, 1)
+				dependency.deactivate(deactivationCtx, func(ctx context.Context, _ *component, err error) {
+					if errors.Is(err, context.Canceled) {
+						err = nil
+					}
+					cerr <- err
+				})
+				return <-cerr
+			})
+		}
+
+		err := wg.Wait()
+
+		if err != nil {
+			onActivity(ctx, c, fmt.Errorf("deactivate dependencys failed: %w", err))
+		} else {
+			_, err := c.AwaitState(ctx, Deactivated)
+			onActivity(ctx, c, err)
+		}
+	}
+}
+
+func (c *component) deactivateProvider(ctx context.Context, onActivity onActivity) error {
 	c.RLock()
 	isActive := !(c.State().IsDeactivated())
 	c.RUnlock()
 
 	if isActive {
+		c.setState(Deactivating, false)
+		onActivity(ctx, c, nil)
+
 		//fmt.Printf("%T:%p Deactivating: %v\n", component, component, component.State())
 
-		// component domains manage their own deactivation state
-		if _, ok := c.provider.(*componentDomain); !ok {
-			c.setState(Deactivating)
-		}
-
 		if deactivatable, ok := c.provider.(Deactivatable); ok {
-			err := deactivatable.Deactivate(deactivationContext)
+			err := deactivatable.Deactivate(ctx)
 
 			if err != nil {
-				cErrOut <- err
-				close(cResOut)
-				close(cErrOut)
-				return cResOut, cErrOut
-			}
-		}
-
-		allDeactivated := true
-
-		c.RLock()
-		for _, dependent := range c.dependencies {
-			if dependent.State() == Active {
-				allDeactivated = false
-				break
-			}
-		}
-		defer c.RUnlock()
-
-		if allDeactivated {
-			//fmt.Printf("1. ")
-			if err := c.onDependenciesDeactivated(deactivationContext); err != nil {
-				cErrOut <- err
-				close(cResOut)
-				close(cErrOut)
-				return cResOut, cErrOut
+				c.setState(Failed, false)
+				onActivity(ctx, c, err)
+				return err
 			}
 		}
 	}
-
-	go func() {
-		if _, err := c.AwaitState(Deactivated); err != nil {
-			cErrOut <- err
-		} else {
-			//fmt.Printf("%T:%p Deactivated: %v\n", component, component, component.State())
-			cResOut <- c
-		}
-		close(cResOut)
-		close(cErrOut)
-	}()
-
-	return cResOut, cErrOut
+	return nil
 }
 
 func (c *component) Post(args ...interface{}) {
@@ -812,21 +1143,6 @@ func (c *component) removeDependent(dependent *component, dependentLocked bool) 
 	return nil
 }
 
-func (c *component) Detach() error {
-	var errors []error
-	for _, dependent := range c.Dependents() {
-		if err := c.removeDependent(asComponent(dependent), false); err != nil {
-			errors = append(errors, err)
-		}
-	}
-
-	if len(errors) > 0 {
-		return fmt.Errorf("%d parents failed to detach", len(errors))
-	}
-
-	return c.setDomain(nil, false)
-}
-
 func (component *component) registerSubscriptions() error {
 	if !component.hasDomain() {
 		return nil
@@ -839,9 +1155,7 @@ func (component *component) registerSubscriptions() error {
 	return fmt.Errorf("expected domain (%T) to have non nil service bus", component.Domain())
 }
 
-func (component *component) onComponentStateChanged(event *ComponentStateChanged) {
-	//fmt.Printf("%s Received Component State Changed [%v->%v] from: %p\n",
-	//	component.Name(), event.Previous(), event.Current(), event.Source())
+func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 
 	sourceComponent, isComponent := event.Source().(relation)
 
@@ -849,95 +1163,87 @@ func (component *component) onComponentStateChanged(event *ComponentStateChanged
 		return
 	}
 
-	if sourceComponent != component {
-		component.RLock()
-		defer component.RUnlock()
-		if component.dependencies.Contains(sourceComponent) {
-			//	fmt.Printf("%s Received Component State Changed [%v->%v] from: %v\n",
-			//		component.Name(), event.Previous(), event.Current(), event.Source())
+	//fmt.Printf("%s Received Component State Changed [%v->%v] from: %s:%p\n",
+	//	c.Id(), event.Previous(), event.Current(), sourceComponent.Id(), sourceComponent)
 
-			if event.Current() == Active {
-				/*for _, dependent := range component.dependents {
-					fmt.Printf("%p dep: %p: %v\n", component, dependent, dependent)
-				}*/
+	if sourceComponent != c {
+		var allDependenciesActivated bool
+		var allDependenciesDeactivated bool
 
-				if !component.State().IsActivated() {
-					allActive := true
-					for _, dependent := range component.dependencies {
-						if dependent.State() != Active {
-							allActive = false
-							break
+		func() {
+			c.RLock()
+			defer c.RUnlock()
+			if c.dependencies.Contains(sourceComponent) {
+				//	fmt.Printf("%s Received Component State Changed [%v->%v] from: %v\n",
+				//		component.Name(), event.Previous(), event.Current(), event.Source())
+
+				if event.Current() == Active {
+					/*for _, dependent := range component.dependents {
+						fmt.Printf("%p dep: %p: %v\n", component, dependent, dependent)
+					}*/
+
+					if c.State().IsActivated() && c.State() != Active {
+						allDependenciesActivated = true
+						for _, dependent := range c.dependencies {
+							if dependent.State() != Active {
+								allDependenciesActivated = false
+								break
+							}
 						}
 					}
+				}
 
-					if !allActive {
-						return
-					}
+				if event.Current() == Deactivated {
+					/*for _, dependent := range component.dependents {
+						fmt.Printf("%p dep: %p: %v\n", component, dependent, dependent)
+					}*/
 
-					//fmt.Printf("2. ")
-
-					if err := component.onDependenciesActive(component.Context()); err != nil {
-						log.Debug("Event handler for : onDependencyComponentsActive failed",
-							log.Caller(),
-							"component", app.LogInstance(component.provider),
-							"err", err)
+					if c.State() != Deactivated {
+						allDependenciesDeactivated = true
+						for _, dependent := range c.dependencies {
+							if dependent.State() != Deactivated {
+								allDependenciesDeactivated = false
+								break
+							}
+						}
 					}
 				}
 			}
+		}()
 
-			if event.Current() == Deactivated {
-				/*for _, dependent := range component.dependents {
-					fmt.Printf("%p dep: %p: %v\n", component, dependent, dependent)
-				}*/
+		if allDependenciesActivated {
+			c.onDependenciesActive(c.Context(), func(context.Context, *component, error) {})
+		}
 
-				if component.State() != Deactivated {
-					allDeactivated := true
-					for _, dependent := range component.dependencies {
-						if dependent.State() != Deactivated {
-							allDeactivated = false
-							break
-						}
-					}
-
-					if !allDeactivated {
-						return
-					}
-
-					//fmt.Printf("2. ")
-					if err := component.onDependenciesActive(component.Context()); err != nil {
-						log.Debug("Event handler for : onDependencyComponentsActive failed",
-							log.Caller(),
-							"component", app.LogInstance(component.provider),
-							"err", err)
-					}
-				}
-			}
+		if allDependenciesDeactivated {
+			c.onDependenciesDeactivated(c.Context())
 		}
 	}
 }
 
-func (component *component) onDependenciesActive(activationContext context.Context) error {
-	//fmt.Printf("onDependencyComponentsActive: %v\n", component.component())
-	if recoveryProcessor, ok := component.provider.(Recoverable); ok {
-		//fmt.Printf("Do Recovery: %v\n", recoveryProcessor)
-		component.setState(Recovering)
-		go func() {
-			err := recoveryProcessor.Recover(activationContext)
+func (c *component) onDependenciesActive(ctx context.Context, onActivity onActivity) {
+	//fmt.Printf("onDependenciesActive: %s\n", c)
+	if recoverable, ok := c.provider.(Recoverable); ok {
+		c.setState(Recovering, false)
+		err := recoverable.Recover(ctx)
 
-			if err == nil {
-				component.setState(Active)
+		if err != nil {
+			c.setState(Failed, false)
+			if onActivity != nil {
+				onActivity(ctx, c, err)
 			}
-		}()
-	} else {
-		component.setState(Active)
+			return
+		}
 	}
 
-	return nil
+	c.activateProvider(ctx, onActivity)
 }
 
-func (component *component) onDependenciesDeactivated(_ context.Context) error {
-	component.setState(Deactivated)
-	return nil
+func (c *component) onDependenciesDeactivated(_ context.Context) {
+	c.setState(Deactivated, false)
+	if cd, ok := c.provider.(*componentDomain); ok {
+		cd.deactivate()
+	}
 }
 
 func (c *component) addDependency(dependency *component, locked bool) (*component, error) {
@@ -975,65 +1281,65 @@ func (c *component) addDependency(dependency *component, locked bool) (*componen
 	return c, nil
 }
 
-func (component *component) removeDependency(dependent *component, locked bool) {
+func (c *component) removeDependency(dependent *component, locked bool) {
 	if !locked {
-		component.Lock()
-		defer component.Unlock()
+		c.Lock()
+		defer c.Unlock()
 	}
 
 	if dependent != nil {
-		component.dependencies = component.dependencies.Remove(dependent)
+		c.dependencies = c.dependencies.Remove(dependent)
 	}
 }
 
-func (component *component) Dependencies() relations {
-	return component.dependencies
+func (c *component) Dependencies() relations {
+	return c.dependencies
 }
 
-func (component *component) HasDependencies() bool {
-	component.RLock()
-	hasDependencies := len(component.dependencies) > 0
-	component.RUnlock()
+func (c *component) HasDependencies() bool {
+	c.RLock()
+	hasDependencies := len(c.dependencies) > 0
+	c.RUnlock()
 	return hasDependencies
 }
 
-func (component *component) GetDependency(context context.Context, selector app.TypedSelector) relation {
+func (c *component) GetDependency(context context.Context, selector app.TypedSelector) relation {
 
-	component.RLock()
-	defer component.RUnlock()
+	c.RLock()
+	defer c.RUnlock()
 
-	for _, dependent := range component.Dependencies() {
+	for _, dependent := range c.Dependencies() {
 		//dependentType := reflect.TypeOf(dependent)
 		if /*processorType == dependentType ||*/
 		/*(processorType.Kind() == reflect.Interface && dependentType.Implements(processorType)) &&*/ selector.Test(context, dependent) {
-			return component
+			return c
 		}
 	}
 
-	for _, parent := range component.dependents {
+	for _, parent := range c.dependents {
 		dependent := parent.GetDependency(context, selector)
 		if dependent != nil {
 			return dependent
 		}
 	}
 
-	if component.componentDomain != nil {
-		return component.componentDomain.GetDependency(context, selector)
+	if c.componentDomain != nil {
+		return c.componentDomain.GetDependency(context, selector)
 	}
 
 	return nil
 }
 
-func (component *component) HasDependency(context context.Context, selector app.TypedSelector) bool {
-	return component.GetDependency(context, selector) != nil
+func (c *component) HasDependency(context context.Context, selector app.TypedSelector) bool {
+	return c.GetDependency(context, selector) != nil
 }
 
-func (component *component) checkDependencyActivations() bool {
-	if component.HasDependencies() {
-		component.RLock()
-		defer component.RUnlock()
+func (c *component) checkDependencyActivations() bool {
+	if c.HasDependencies() {
+		c.RLock()
+		defer c.RUnlock()
 
-		for _, component := range component.Dependencies() {
+		for _, component := range c.Dependencies() {
 			if component.State() != Active {
 				return false
 			}

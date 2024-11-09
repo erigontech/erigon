@@ -2,17 +2,14 @@ package component
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"runtime"
 	"strconv"
-	"sync"
 
 	"github.com/erigontech/erigon-lib/app"
 	"github.com/erigontech/erigon-lib/app/event"
 	"github.com/erigontech/erigon-lib/app/util"
 	"github.com/erigontech/erigon-lib/app/workerpool"
-	pkg_errors "github.com/pkg/errors"
 )
 
 var rootComponentDomain *componentDomain
@@ -209,332 +206,36 @@ func (cd *componentDomain) QueueSize() int {
 	return 0
 }
 
-// lock to ensure that only one componentDomain collects and activates
-// at a time - to avoid multiple activations of subsidiary components
-var activationMutex = sync.Mutex{}
+func (cd *componentDomain) deactivate() {
+	if log.DebugEnabled() {
+		log.Debug("Unregistering from Service Bus",
+			"component", cd.Id().String())
+	}
 
-func (cd *componentDomain) Activate(activationContext context.Context) (chan *component, chan error) {
-	cResOut := make(chan *component, 1)
-	cErrOut := make(chan error, 1)
-
-	activationMutex.Lock()
-	cd.RLock()
-
-	activationList := make([]*component, 0, len(cd.dependencies))
-	var errors []error
-
-	for _, dependency := range cd.dependencies {
-		if !dependency.State().IsActivated() {
-			if dependency.State() == Instantiated ||
-				dependency.State() == Unknown {
-				if configurable, ok := dependency.(Configurable); ok {
-					if !dependency.State().IsConfigured() {
-						err := func() (err error) {
-							defer func() {
-								if r := recover(); r != nil {
-									var ok bool
-									if err, ok = r.(error); ok {
-										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked with error: %s", dependency, err))
-									} else {
-										err = pkg_errors.WithStack(fmt.Errorf("%T configure panicked: %v", dependency, r))
-									}
-								}
-							}()
-
-							return configurable.Configure(activationContext, asComponent(dependency).options...)
-						}()
-
-						if err != nil {
-							errors = append(errors, err)
-							continue
-						}
-					}
-				}
-			}
-
-			activation := asComponent(dependency)
-			activation.setState(Activating)
-			activationList = append(activationList, activation)
-		}
-
-		if len(errors) > 0 {
-			cErrOut <- fmt.Errorf("Activate failed with the following errors %v", errors)
-			close(cResOut)
-			close(cErrOut)
-			cd.Unlock()
-			return cResOut, cErrOut
+	if err := cd.ServiceBus().UnregisterAll(cd); err != nil {
+		if log.DebugEnabled() {
+			log.Debug("Unregister from Service Bus failed",
+				"component", cd.Id().String(),
+				"err", err)
 		}
 	}
 
-	cd.RUnlock()
-	activationMutex.Unlock()
-
-	if cd.State().IsActivated() {
-		if len(activationList) == 0 {
-			cResOut <- cd.component
-			close(cResOut)
-			close(cErrOut)
-		} else {
-			cd.activateDependents(activationContext, activationList, cResOut, cErrOut)
+	if cd.serviceBus != nil {
+		if log.DebugEnabled() {
+			log.Debug("Deactivating Service Bus",
+				"component", cd.Id().String())
 		}
-	} else {
-		cd.setState(Activating)
-		cd.activateDependents(activationContext, activationList, cResOut, cErrOut)
+		cd.ServiceBus().Deactivate()
 	}
 
-	return cResOut, cErrOut
-}
-
-func (cd *componentDomain) activateDependents(activationContext context.Context, activationList []*component, cResOut chan *component, cErrOut chan error) {
-	if len(activationList) == 0 {
-		if log.TraceEnabled() {
-			log.Trace("Activated", "domain", app.LogInstance(cd))
+	if cd.execPool != nil {
+		if log.DebugEnabled() {
+			log.Debug("Stopping Exec Pool",
+				"component", cd.Id().String())
 		}
-
-		err := cd.onDependenciesActive(activationContext)
-
-		if err != nil {
-			cErrOut <- err
-		} else {
-			cResOut <- cd.component
-		}
-
-		close(cResOut)
-		close(cErrOut)
-	} else {
-		var wg sync.WaitGroup
-		dependentActivationContext, cancel := context.WithCancel(activationContext)
-		errors := make([]error, 0, len(activationList))
-
-		activate := func(dependency *component) {
-			defer wg.Done()
-			if log.TraceEnabled() {
-				log.Trace("Activating",
-					"domain", app.LogInstance(cd),
-					"dependency", app.LogInstance(dependency))
-			}
-
-			cres, cerr := dependency.activate(dependentActivationContext)
-
-			if cres == nil || cerr == nil {
-				errors = append(errors, fmt.Errorf("Activate Failed: Resolve channels are undefined"))
-			}
-
-			for {
-				select {
-				case _, ok := <-cres:
-					if ok {
-						if log.TraceEnabled() {
-							log.Trace("Dependency activated",
-								"domain", app.LogInstance(cd),
-								"dependency", app.LogInstance(dependency))
-						}
-						return
-					}
-				case err, ok := <-cerr:
-					if ok {
-						errors = append(errors, err)
-						cancel()
-						return
-					}
-				case <-dependentActivationContext.Done():
-					return
-				}
-			}
-		}
-
-		wg.Add(len(activationList))
-		for _, p := range activationList {
-			go activate(p)
-		}
-
-		go func() {
-			wg.Wait()
-			if log.TraceEnabled() {
-				log.Trace("Activated",
-					"domain", app.LogInstance(cd))
-			}
-			if len(errors) > 0 {
-				cErrOut <- fmt.Errorf("Activate failed with the following errors %v", errors)
-			} else {
-				err := cd.onDependenciesActive(activationContext)
-
-				if err != nil {
-					cErrOut <- err
-				} else {
-					cResOut <- cd.component
-				}
-			}
-			close(cResOut)
-			close(cErrOut)
-		}()
+		cd.execPool.StopWait()
+		cd.execPool = nil
 	}
-}
-
-func (cd *componentDomain) Deactivate(deactivationContext context.Context) (chan *component, chan error) {
-	cResOut, cErrOut := MakeResultChannels()
-
-	if cd.State().IsDeactivated() {
-		go func() {
-			if _, err := cd.AwaitState(Deactivated); err != nil {
-				cErrOut <- err
-			} else {
-				//fmt.Printf("%s Deactivated: %v\n", component.Name(), component.State())
-				cResOut <- cd.component
-			}
-			close(cResOut)
-			close(cErrOut)
-		}()
-		return cResOut, cErrOut
-	}
-
-	cd.setState(Deactivating)
-
-	/*fmt.Printf("%s Deactivate Deps\n", manager.Name())
-	for _, dep := range manager.dependents {
-		fmt.Printf("  %v:%v:%p\n", manager.Name(), dep.Name(), dep)
-	}*/
-
-	deactivationList := make([]*component, len(cd.dependencies))
-
-	cd.RLock()
-	for i, component := range cd.dependencies {
-		deactivationList[i] = asComponent(component)
-	}
-	cd.RUnlock()
-
-	if len(deactivationList) == 0 {
-		err := cd.onDependenciesDeactivated(deactivationContext)
-
-		if err != nil {
-			cErrOut <- err
-		} else {
-			cResOut <- cd.component
-		}
-
-		close(cResOut)
-		close(cErrOut)
-	} else {
-		var wg sync.WaitGroup
-		dependentDeactivationContext, cancel := context.WithCancel(deactivationContext)
-		errors := make([]error, 0, len(deactivationList))
-
-		deactivate := func(dependency *component) {
-			defer wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					if err, ok := r.(error); ok {
-						errors = append(errors, pkg_errors.WithStack(fmt.Errorf("%T Panicked with error: %w", dependency, err)))
-					} else {
-						errors = append(errors, pkg_errors.WithStack(fmt.Errorf("%T Panicked: %v", dependency, r)))
-					}
-				}
-			}()
-
-			//fmt.Printf("%s  Deactivating  %v:%p\n", manager.Name(), dependency.(Component).Name(), dependency)
-			if dependency.State().IsDeactivated() {
-				return
-			}
-
-			cres, cerr := dependency.deactivate(dependentDeactivationContext)
-
-			if cres == nil || cerr == nil {
-				errors = append(errors, fmt.Errorf("Deactivate Failed: Resolve channels are undefined"))
-			}
-
-			for {
-				select {
-				case _ /*component*/, ok := <-cres:
-					if ok {
-						//fmt.Printf("%s DEACTIVATED %s\n", manager.Name(), component.Name())
-						return
-					}
-				case err, ok := <-cerr:
-					if ok {
-						errors = append(errors, err)
-						cancel()
-						return
-					}
-				case <-dependentDeactivationContext.Done():
-					return
-				}
-			}
-		}
-
-		wg.Add(len(deactivationList))
-		for _, p := range deactivationList {
-			go deactivate(p)
-		}
-
-		go func() {
-			wg.Wait()
-			//fmt.Printf("Group Dectivation Done %v\n", manager)
-			if len(errors) > 0 {
-				cErrOut <- fmt.Errorf("Deactivate failed with the following errors %v", errors)
-			} else {
-				dependentsDeactivated := true
-
-				for _, dependent := range deactivationList {
-					if dependent.State() == Active {
-						dependentsDeactivated = false
-						break
-					}
-				}
-
-				if dependentsDeactivated {
-					err := cd.onDependenciesDeactivated(deactivationContext)
-
-					if err != nil {
-						cErrOut <- err
-					} else {
-						cResOut <- cd.component
-					}
-				} else {
-					_, err := cd.AwaitState(Deactivated)
-
-					if err != nil {
-						cErrOut <- err
-					} else {
-						cResOut <- cd.component
-					}
-				}
-			}
-			close(cResOut)
-			close(cErrOut)
-
-			if log.DebugEnabled() {
-				log.Debug("Unregistering from Service Bus",
-					"component", cd.Id().String())
-			}
-
-			if err := cd.ServiceBus().UnregisterAll(cd); err != nil {
-				if log.DebugEnabled() {
-					log.Debug("Unregister from Service Bus failed",
-						"component", cd.Id().String(),
-						"err", err)
-				}
-			}
-
-			if cd.serviceBus != nil {
-				if log.DebugEnabled() {
-					log.Debug("Deactivating Service Bus",
-						"component", cd.Id().String())
-				}
-				cd.ServiceBus().Deactivate()
-			}
-
-			if cd.execPool != nil {
-				if log.DebugEnabled() {
-					log.Debug("Stopping Exec Pool",
-						"component", cd.Id().String())
-				}
-				cd.execPool.StopWait()
-				cd.execPool = nil
-			}
-		}()
-	}
-
-	return cResOut, cErrOut
 }
 
 func (cd *componentDomain) ServiceBus() *event.ServiceBus {

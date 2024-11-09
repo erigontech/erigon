@@ -6,6 +6,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/app/component"
 	"github.com/stretchr/testify/require"
+	gomock "go.uber.org/mock/gomock"
 )
 
 type provider struct {
@@ -91,4 +92,82 @@ func TestCreateComponentInDomain(t *testing.T) {
 	require.Equal(t, "root:domain-2", d2.Id().String())
 	require.Equal(t, "domain-2:provider", c.Id().String())
 	require.Equal(t, "domain-2:provider", c1.Id().String())
+}
+
+func mockProvider(ctrl *gomock.Controller, callCount int) *component.MockComponentProvider {
+	p := component.NewMockComponentProvider(ctrl)
+	p.EXPECT().
+		Configure(gomock.Any(), gomock.Any()).
+		Return(nil).
+		Times(callCount)
+	p.EXPECT().
+		Initialize(gomock.Any(), gomock.Any()).
+		Return(nil).
+		Times(callCount)
+	p.EXPECT().
+		Recover(gomock.Any()).
+		Return(nil).
+		Times(callCount)
+	p.EXPECT().
+		Activate(gomock.Any()).
+		Return(nil).
+		Times(callCount)
+	p.EXPECT().
+		Deactivate(gomock.Any()).
+		Return(nil).
+		Times(callCount)
+	return p
+}
+func TestComponentLifecycle(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	c, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+
+	err = c.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err := c.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+
+	err = c.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+
+	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d)
+	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+
+	c1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("c1"),
+		component.WithProvider(mockProvider(ctrl, 1)),
+		component.WithDependencies(d))
+	require.Nil(t, err)
+	require.NotNil(t, c1)
+	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+
+	err = c1.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c1.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Active, d.State())
+
+	err = c1.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c1.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Deactivated, d.State())
 }
