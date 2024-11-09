@@ -53,26 +53,12 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 
 // Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	highestBlock, err := rawdb.ReadLastNewBlockSeen(tx)
+	reply, err := api.ethBackend.Syncing(ctx)
 	if err != nil {
 		return false, err
 	}
-
-	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return false, err
-	}
-
-	frozenBlocks := api._blockReader.FrozenBlocks()
-	if highestBlock < frozenBlocks {
-		highestBlock = frozenBlocks
-	}
+	highestBlock := reply.LastNewBlockSeen
+	currentBlock := reply.CurrentBlock
 
 	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
 	if highestBlock == 0 {
@@ -95,13 +81,9 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		BlockNumber hexutil.Uint64 `json:"block_number"`
 	}
 	stagesMap := make([]S, len(stages.AllStages))
-	for i, stage := range stages.AllStages {
-		progress, err := stages.GetStageProgress(tx, stage)
-		if err != nil {
-			return nil, err
-		}
-		stagesMap[i].StageName = string(stage)
-		stagesMap[i].BlockNumber = hexutil.Uint64(progress)
+	for i, stage := range reply.Stages {
+		stagesMap[i].StageName = stage.StageName
+		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
 	}
 
 	return map[string]interface{}{
