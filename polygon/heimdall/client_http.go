@@ -630,7 +630,7 @@ func internalFetch(ctx context.Context, handler httpRequestHandler, u *url.URL, 
 		return nil, err
 	}
 
-	logger.Trace(heimdallLogPrefix("http handler get request"), "uri", u.RequestURI())
+	logger.Trace(heimdallLogPrefix("http client get request"), "uri", u.RequestURI())
 
 	res, err := handler.Do(req)
 	if err != nil {
