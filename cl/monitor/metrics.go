@@ -19,6 +19,8 @@ var (
 	metricProposerHit = metrics.GetOrCreateCounter("validator_proposal_hit")
 	// metricProposerMiss is the number of proposals that miss for those validators we observe in previous slot
 	metricProposerMiss = metrics.GetOrCreateCounter("validator_proposal_miss")
+	// aggregateAndProofSignatures is the sum of signatures in all the aggregates in the recent slot
+	aggregateAndProofSignatures = metrics.GetOrCreateGauge("aggregate_and_proof_signatures")
 
 	// Block processing metrics
 	fullBlockProcessingTime        = metrics.GetOrCreateGauge("full_block_processing_time")
@@ -28,16 +30,16 @@ var (
 	executionTime                  = metrics.GetOrCreateGauge("execution_time")
 
 	// Epoch processing metrics
-	epochProcessingTime                     = metrics.GetOrCreateGauge("epoch_processing_time")
-	processJustificationBitsAndFinalityTime = metrics.GetOrCreateGauge("process_justification_bits_and_finality_time")
+	EpochProcessingTime                     = metrics.GetOrCreateGauge("epoch_processing_time")
+	ProcessJustificationBitsAndFinalityTime = metrics.GetOrCreateGauge("process_justification_bits_and_finality_time")
 	ProcessInactivityScoresTime             = metrics.GetOrCreateGauge("process_inactivity_ccores_time")
-	processRewardsAndPenaltiesTime          = metrics.GetOrCreateGauge("process_rewards_and_penalties_time")
-	processRegistryUpdatesTime              = metrics.GetOrCreateGauge("process_registry_updates_time")
-	processSlashingsTime                    = metrics.GetOrCreateGauge("process_slashings_time")
-	processEffectiveBalanceUpdatesTime      = metrics.GetOrCreateGauge("process_effective_balance_updates_time")
-	processHistoricalRootsUpdateTime        = metrics.GetOrCreateGauge("process_historical_roots_update_time")
-	processParticipationFlagUpdatesTime     = metrics.GetOrCreateGauge("process_participation_flag_updates_time")
-	processSyncCommitteeUpdateTime          = metrics.GetOrCreateGauge("process_sync_committee_update_time")
+	ProcessRewardsAndPenaltiesTime          = metrics.GetOrCreateGauge("process_rewards_and_penalties_time")
+	ProcessRegistryUpdatesTime              = metrics.GetOrCreateGauge("process_registry_updates_time")
+	ProcessSlashingsTime                    = metrics.GetOrCreateGauge("process_slashings_time")
+	ProcessEffectiveBalanceUpdatesTime      = metrics.GetOrCreateGauge("process_effective_balance_updates_time")
+	ProcessHistoricalRootsUpdateTime        = metrics.GetOrCreateGauge("process_historical_roots_update_time")
+	ProcessParticipationFlagUpdatesTime     = metrics.GetOrCreateGauge("process_participation_flag_updates_time")
+	ProcessSyncCommitteeUpdateTime          = metrics.GetOrCreateGauge("process_sync_committee_update_time")
 
 	// Network metrics
 	gossipTopicsMetricCounterPrefix = "gossip_topics_seen"
@@ -54,6 +56,7 @@ var (
 	activeValidatorsCount = metrics.GetOrCreateGauge("active_validators_count")
 	currentSlot           = metrics.GetOrCreateGauge("current_slot")
 	currentEpoch          = metrics.GetOrCreateGauge("current_epoch")
+	aggregateAttestation  = metrics.GetOrCreateGauge("aggregate_attestation")
 
 	// Libp2p metrics
 	totalInBytes  = metrics.GetOrCreateGauge("total_in_bytes")
@@ -121,54 +124,27 @@ func microToMilli(micros int64) float64 {
 	return float64(micros) / 1000
 }
 
-// ObserveEpochProcessingTime sets last epoch processing time
-func ObserveEpochProcessingTime(startTime time.Time) {
-	epochProcessingTime.Set(float64(time.Since(startTime).Microseconds()))
+// ObserveNumberOfAggregateSignatures sets the average processing time for each attestation in aggregate
+func ObserveNumberOfAggregateSignatures(signatures int) {
+	aggregateAndProofSignatures.Add(float64(signatures))
 }
 
-// ObserveProcessJustificationBitsAndFinalityTime sets ProcessJustificationBitsAndFinality time
-func ObserveProcessJustificationBitsAndFinalityTime(startTime time.Time) {
-	processJustificationBitsAndFinalityTime.Set(float64(time.Since(startTime).Microseconds()))
+type TimeMeasure struct {
+	start  time.Time
+	metric metrics.Gauge
 }
 
-// ObserveProcessRewardsAndPenaltiesTime sets ProcessRewardsAndPenalties time
-func ObserveProcessRewardsAndPenaltiesTime(startTime time.Time) {
-	processRewardsAndPenaltiesTime.Set(float64(time.Since(startTime).Microseconds()))
+func (m TimeMeasure) End() {
+	m.metric.Set(float64(time.Since(m.start).Microseconds()))
 }
 
-// ObserveProcessParticipationFlagUpdatesTime sets ProcessParticipationFlagUpdates time
-func ObserveProcessParticipationFlagUpdatesTime(startTime time.Time) {
-	processParticipationFlagUpdatesTime.Set(float64(time.Since(startTime).Microseconds()))
+func ObserveElaspedTime(m metrics.Gauge) TimeMeasure {
+	return TimeMeasure{start: time.Now(), metric: m}
 }
 
-// ObserveProcessInactivityScoresTime sets ProcessJustificationBitsAndFinality time
-func ObserveProcessInactivityScoresTime(startTime time.Time) {
-	ProcessInactivityScoresTime.Set(float64(time.Since(startTime).Microseconds()))
-}
-
-// ObserveProcessHistoricalRootsUpdateTime sets ProcessHistoricalRootsUpdate time
-func ObserveProcessHistoricalRootsUpdateTime(startTime time.Time) {
-	processHistoricalRootsUpdateTime.Set(float64(time.Since(startTime).Microseconds()))
-}
-
-// ObserveProcessSyncCommitteeUpdateTime sets ProcessSyncCommitteeUpdate time
-func ObserveProcessSyncCommitteeUpdateTime(startTime time.Time) {
-	processSyncCommitteeUpdateTime.Set(float64(time.Since(startTime).Microseconds()))
-}
-
-// ObserveProcessEffectiveBalanceUpdatesTime sets ProcessEffectiveBalanceUpdates time
-func ObserveProcessEffectiveBalanceUpdatesTime(startTime time.Time) {
-	processEffectiveBalanceUpdatesTime.Set(float64(time.Since(startTime).Microseconds()))
-}
-
-// ObserveProcessRegistryUpdatesTime sets ProcessRegistryUpdates time
-func ObserveProcessRegistryUpdatesTime(startTime time.Time) {
-	processRegistryUpdatesTime.Set(float64(time.Since(startTime).Microseconds()))
-}
-
-// ObserveProcessSlashingsTime sets ProcessSlashings time
-func ObserveProcessSlashingsTime(startTime time.Time) {
-	processSlashingsTime.Set(float64(time.Since(startTime).Microseconds()))
+// ObserveAggregateAttestation sets the time it took add new attestation to aggregateAndProof
+func ObserveAggregateAttestation(startTime time.Time) {
+	aggregateAttestation.Set(float64(time.Since(startTime).Microseconds()))
 }
 
 // ObserveAttestHit increments the attestation hit metric
@@ -212,6 +188,9 @@ func ObserveActiveValidatorsCount(count int) {
 }
 
 func ObserveCurrentSlot(slot uint64) {
+	if currentSlot.GetValueUint64() != slot {
+		aggregateAndProofSignatures.Set(0)
+	}
 	currentSlot.Set(float64(slot))
 }
 

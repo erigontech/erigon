@@ -58,15 +58,24 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	if a.beaconChainCfg.GetCurrentStateVersion(*slot/a.beaconChainCfg.SlotsPerEpoch) < clparams.CapellaVersion {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the specified state is not a capella state"))
 	}
-	headRoot, _, err := a.forkchoiceStore.GetHead()
+	headRoot, _, statusCode, err := a.getHead()
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
+
 	if a.syncedData.Syncing() {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
 	if root == headRoot {
-		return newBeaconResponse(state.ExpectedWithdrawals(a.syncedData.HeadState(), state.Epoch(a.syncedData.HeadState()))).WithFinalized(false), nil
+		headState, cn := a.syncedData.HeadState()
+		defer cn()
+		if headState == nil {
+			return nil, beaconhttp.NewEndpointError(
+				http.StatusServiceUnavailable,
+				errors.New("node is syncing"),
+			)
+		}
+		return newBeaconResponse(state.ExpectedWithdrawals(headState, state.Epoch(headState))).WithFinalized(false), nil
 	}
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {

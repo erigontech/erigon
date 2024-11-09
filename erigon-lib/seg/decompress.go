@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -514,30 +514,6 @@ func (d *Decompressor) DisableReadAhead() {
 
 	if !dbg.SnapshotMadvRnd { // all files
 		_ = mmap.MadviseNormal(d.mmapHandle1)
-		return
-	}
-
-	if dbg.KvMadvNormal != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files
-		for _, t := range strings.Split(dbg.KvMadvNormal, ",") {
-			if !strings.Contains(d.FileName(), t) {
-				continue
-			}
-			_ = mmap.MadviseNormal(d.mmapHandle1)
-			return
-		}
-	}
-
-	if dbg.KvMadvNormalNoLastLvl != "" && strings.HasSuffix(d.FileName(), ".kv") { //all .kv files - except last-level `v1-storage.0-1024.kv` - starting from step 0
-		for _, t := range strings.Split(dbg.KvMadvNormalNoLastLvl, ",") {
-			if !strings.Contains(d.FileName(), t) {
-				continue
-			}
-			if strings.Contains(d.FileName(), t+".0-") {
-				continue
-			}
-			_ = mmap.MadviseNormal(d.mmapHandle1)
-			return
-		}
 		return
 	}
 
@@ -1088,4 +1064,29 @@ func (g *Getter) FastNext(buf []byte) ([]byte, uint64) {
 	g.dataP = postLoopPos
 	g.dataBit = 0
 	return buf[:wordLen], postLoopPos
+}
+
+// BinarySearch - !expecting sorted file - does Seek `g` to key which >= `fromPrefix` by using BinarySearch - means unoptimal and touching many places in file
+// use `.Next` to read found
+// at `ok = false` leaving `g` in unpredictible state
+func (g *Getter) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool) {
+	var key []byte
+	foundItem := sort.Search(count, func(i int) bool {
+		offset := getOffset(uint64(i))
+		g.Reset(offset)
+		if g.HasNext() {
+			key, _ = g.Next(key[:0])
+			return bytes.Compare(key, seek) >= 0
+		}
+		return false
+	})
+	if foundItem == count { // `Search` returns `n` if not found
+		return 0, false
+	}
+	foundOffset = getOffset(uint64(foundItem))
+	g.Reset(foundOffset)
+	if !g.HasNext() {
+		return 0, false
+	}
+	return foundOffset, true
 }

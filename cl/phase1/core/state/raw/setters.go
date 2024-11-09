@@ -398,6 +398,8 @@ func (b *BeaconState) AddInactivityScore(score uint64) {
 }
 
 func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if index >= b.inactivityScores.Length() {
 		return ErrInvalidValidatorIndex
 	}

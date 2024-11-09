@@ -26,11 +26,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/trie"
 )
@@ -135,6 +134,11 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 }
 
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
+	if vmConfig.NoBaseFee {
+		if txCtx.GasPrice.IsZero() {
+			blockCtx.BaseFee = new(uint256.Int)
+		}
+	}
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
