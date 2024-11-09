@@ -20,6 +20,14 @@ const (
 	CmdErrInvalidCommand  = 9 // CmdErrInvalidCommand for invalid/unknown command error
 )
 
+var (
+	ErrAlreadyStarted  = errors.New("client already started")
+	ErrAlreadyStopped  = errors.New("client already stopped")
+	ErrBadFromEntry    = errors.New("invalid starting entry number")
+	ErrBadFromBookmark = errors.New("invalid starting bookmark")
+	ErrInvalidCommand  = errors.New("invalid/unknown command")
+)
+
 type ResultEntry struct {
 	PacketType uint8 // 0xff:Result
 	Length     uint32

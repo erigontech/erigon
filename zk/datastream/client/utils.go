@@ -8,32 +8,33 @@ import (
 	"net"
 )
 
-// writeFullUint64ToConn writes a uint64 to a connection
+var (
+	ErrSocket        = errors.New("socket error")
+	ErrNilConnection = errors.New("nil connection")
+)
+
 func writeFullUint64ToConn(conn net.Conn, value uint64) error {
 	buffer := make([]byte, 8)
 	binary.BigEndian.PutUint64(buffer, value)
 
 	if conn == nil {
-		return errors.New("error nil connection")
+		return fmt.Errorf("%w: %w", ErrSocket, ErrNilConnection)
 	}
 
-	_, err := conn.Write(buffer)
-	if err != nil {
-		return fmt.Errorf("%s Error sending to server: %v", conn.RemoteAddr().String(), err)
+	if _, err := conn.Write(buffer); err != nil {
+		return fmt.Errorf("%w: conn.Write: %v", ErrSocket, err)
 	}
 
 	return nil
 }
 
-// writeFullUint64ToConn writes a uint64 to a connection
 func writeBytesToConn(conn net.Conn, value []byte) error {
 	if conn == nil {
-		return errors.New("error nil connection")
+		return fmt.Errorf("%w: %w", ErrSocket, ErrNilConnection)
 	}
 
-	_, err := conn.Write(value)
-	if err != nil {
-		return fmt.Errorf("%s Error sending to server: %v", conn.RemoteAddr().String(), err)
+	if _, err := conn.Write(value); err != nil {
+		return fmt.Errorf("%w: conn.Write: %w", ErrSocket, err)
 	}
 
 	return nil
@@ -45,12 +46,11 @@ func writeFullUint32ToConn(conn net.Conn, value uint32) error {
 	binary.BigEndian.PutUint32(buffer, value)
 
 	if conn == nil {
-		return errors.New("error nil connection")
+		return fmt.Errorf("%w: %w", ErrSocket, ErrNilConnection)
 	}
 
-	_, err := conn.Write(buffer)
-	if err != nil {
-		return fmt.Errorf("%s Error sending to server: %v", conn.RemoteAddr().String(), err)
+	if _, err := conn.Write(buffer); err != nil {
+		return fmt.Errorf("%w: conn.Write: %w", ErrSocket, err)
 	}
 
 	return nil
@@ -61,7 +61,7 @@ func readBuffer(conn net.Conn, n uint32) ([]byte, error) {
 	buffer := make([]byte, n)
 	rbc, err := io.ReadFull(conn, buffer)
 	if err != nil {
-		return []byte{}, parseIoReadError(err)
+		return []byte{}, fmt.Errorf("%w: io.ReadFull: %w", ErrSocket, err)
 	}
 
 	if uint32(rbc) != n {
@@ -69,13 +69,4 @@ func readBuffer(conn net.Conn, n uint32) ([]byte, error) {
 	}
 
 	return buffer, nil
-}
-
-// parseIoReadError parses an error returned from io.ReadFull and returns a more concrete one
-func parseIoReadError(err error) error {
-	if err == io.EOF {
-		return errors.New("server close connection")
-	} else {
-		return fmt.Errorf("reading from server: %v", err)
-	}
 }

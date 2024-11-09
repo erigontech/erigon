@@ -8,6 +8,40 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
+func CalculateBananaAccInputHash(
+	oldAccInputHash common.Hash,
+	batchTransactionData []byte,
+	l1InfoRoot common.Hash,
+	limitTimestamp uint64,
+	sequencerAddress common.Address,
+	forcedBlockHashL1 common.Hash,
+) *common.Hash {
+	return CalculateEtrogAccInputHash(
+		oldAccInputHash,
+		batchTransactionData,
+		l1InfoRoot,
+		limitTimestamp,
+		sequencerAddress,
+		forcedBlockHashL1)
+}
+
+func CalculateBananaValidiumAccInputHash(
+	oldAccInputHash common.Hash,
+	batchTransactionData common.Hash,
+	l1InfoRoot common.Hash,
+	limitTimestamp uint64,
+	sequencerAddress common.Address,
+	forcedBlockHashL1 common.Hash,
+) *common.Hash {
+	return CalculateEtrogValidiumAccInputHash(
+		oldAccInputHash,
+		batchTransactionData,
+		l1InfoRoot,
+		limitTimestamp,
+		sequencerAddress,
+		forcedBlockHashL1)
+}
+
 // calculates the new accInputHash based on the old one and data frem one new batch
 // this returns the accInputHash for the current batch
 // oldAccInputHash - the accInputHash from the previous batch

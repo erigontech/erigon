@@ -20,7 +20,7 @@ import (
 // if current sync is before verified batch - short circuit to verified batch, otherwise to enx of next batch
 // if there is no new fully downloaded batch - do not short circuit
 // returns (shouldShortCircuit, blockNumber, error)
-func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, error) {
+func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string, l2ShortCircuitToVerifiedBatch bool) (bool, uint64, error) {
 	hermezDb := hermez_db.NewHermezDb(tx)
 
 	// get highest verified batch
@@ -48,10 +48,10 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 	var shortCircuitBatch, shortCircuitBlock, cycle uint64
 
 	// this is so empty batches work
-	for shortCircuitBlock == 0 {
+	for shortCircuitBlock == 0 || (!l2ShortCircuitToVerifiedBatch && executedBatch+cycle < downloadedBatch) {
 		cycle++
-		// if executed lower than verified, short curcuit up to verified
-		if executedBatch < highestVerifiedBatchNo {
+		// if executed lower than verified, short circuit up to verified (only if l2ShortCircuitToVerifiedBatch is true)
+		if executedBatch < highestVerifiedBatchNo && l2ShortCircuitToVerifiedBatch {
 			if downloadedBatch < highestVerifiedBatchNo {
 				shortCircuitBatch = downloadedBatch
 			} else {
@@ -59,7 +59,7 @@ func ShouldShortCircuitExecution(tx kv.RwTx, logPrefix string) (bool, uint64, er
 			}
 		} else if executedBatch+cycle <= downloadedBatch { // else short circuit up to next downloaded batch
 			shortCircuitBatch = executedBatch + cycle
-		} else { // if we don't have at least one more full downlaoded batch, don't short circuit and just execute to latest block
+		} else { // if we don't have at least one more full downloaded batch, don't short circuit and just execute to latest block
 			return false, 0, nil
 		}
 

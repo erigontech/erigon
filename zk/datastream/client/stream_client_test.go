@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -27,7 +26,7 @@ func TestStreamClientReadHeaderEntry(t *testing.T) {
 		name           string
 		input          []byte
 		expectedResult *types.HeaderEntry
-		expectedError  error
+		expectedError  string
 	}
 	testCases := []testCase{
 		{
@@ -40,18 +39,18 @@ func TestStreamClientReadHeaderEntry(t *testing.T) {
 				TotalLength:  24,
 				TotalEntries: 64,
 			},
-			expectedError: nil,
+			expectedError: "",
 		},
 		{
 			name:           "Invalid byte array length",
 			input:          []byte{20, 21, 22, 23, 24, 20},
 			expectedResult: nil,
-			expectedError:  errors.New("failed to read header bytes reading from server: unexpected EOF"),
+			expectedError:  "read header bytes: readBuffer: socket error: io.ReadFull: unexpected EOF",
 		},
 	}
 
 	for _, testCase := range testCases {
-		c := NewClient(context.Background(), "", 0, 0, 0)
+		c := NewClient(context.Background(), "", 0, 2*time.Second, 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -64,7 +63,11 @@ func TestStreamClientReadHeaderEntry(t *testing.T) {
 			}()
 
 			header, err := c.readHeaderEntry()
-			require.Equal(t, testCase.expectedError, err)
+			if testCase.expectedError != "" {
+				require.EqualError(t, err, testCase.expectedError)
+			} else {
+				require.NoError(t, err)
+			}
 			assert.DeepEqual(t, testCase.expectedResult, header)
 		})
 	}
@@ -75,7 +78,7 @@ func TestStreamClientReadResultEntry(t *testing.T) {
 		name           string
 		input          []byte
 		expectedResult *types.ResultEntry
-		expectedError  error
+		expectedError  string
 	}
 	testCases := []testCase{
 		{
@@ -87,7 +90,7 @@ func TestStreamClientReadResultEntry(t *testing.T) {
 				ErrorNum:   0,
 				ErrorStr:   []byte{},
 			},
-			expectedError: nil,
+			expectedError: "",
 		},
 		{
 			name:  "Happy path - error str length",
@@ -98,24 +101,24 @@ func TestStreamClientReadResultEntry(t *testing.T) {
 				ErrorNum:   0,
 				ErrorStr:   []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 			},
-			expectedError: nil,
+			expectedError: "",
 		},
 		{
 			name:           "Invalid byte array length",
 			input:          []byte{20, 21, 22, 23, 24, 20},
 			expectedResult: nil,
-			expectedError:  errors.New("failed to read main result bytes reading from server: unexpected EOF"),
+			expectedError:  "read main result bytes: readBuffer: socket error: io.ReadFull: unexpected EOF",
 		},
 		{
 			name:           "Invalid error length",
 			input:          []byte{0, 0, 0, 12, 0, 0, 0, 0, 20, 21},
 			expectedResult: nil,
-			expectedError:  errors.New("failed to read result errStr bytes reading from server: unexpected EOF"),
+			expectedError:  "read result errStr bytes: readBuffer: socket error: io.ReadFull: unexpected EOF",
 		},
 	}
 
 	for _, testCase := range testCases {
-		c := NewClient(context.Background(), "", 0, 0, 0)
+		c := NewClient(context.Background(), "", 0, 2*time.Second, 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -128,7 +131,11 @@ func TestStreamClientReadResultEntry(t *testing.T) {
 			}()
 
 			result, err := c.readResultEntry([]byte{1})
-			require.Equal(t, testCase.expectedError, err)
+			if testCase.expectedError != "" {
+				require.EqualError(t, err, testCase.expectedError)
+			} else {
+				require.NoError(t, err)
+			}
 			assert.DeepEqual(t, testCase.expectedResult, result)
 		})
 	}
@@ -139,7 +146,7 @@ func TestStreamClientReadFileEntry(t *testing.T) {
 		name           string
 		input          []byte
 		expectedResult *types.FileEntry
-		expectedError  error
+		expectedError  string
 	}
 	testCases := []testCase{
 		{
@@ -152,7 +159,7 @@ func TestStreamClientReadFileEntry(t *testing.T) {
 				EntryNum:   45,
 				Data:       []byte{0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 64},
 			},
-			expectedError: nil,
+			expectedError: "",
 		}, {
 			name:  "Happy path - no data",
 			input: []byte{2, 0, 0, 0, 17, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45},
@@ -163,28 +170,28 @@ func TestStreamClientReadFileEntry(t *testing.T) {
 				EntryNum:   45,
 				Data:       []byte{},
 			},
-			expectedError: nil,
+			expectedError: "",
 		},
 		{
 			name:           "Invalid packet type",
 			input:          []byte{5, 0, 0, 0, 17, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45},
 			expectedResult: nil,
-			expectedError:  errors.New("expected data packet type 2 or 254 and received 5"),
+			expectedError:  "expected data packet type 2 or 254 and received 5",
 		},
 		{
 			name:           "Invalid byte array length",
 			input:          []byte{2, 21, 22, 23, 24, 20},
 			expectedResult: nil,
-			expectedError:  errors.New("error reading file bytes: reading from server: unexpected EOF"),
+			expectedError:  "reading file bytes: readBuffer: socket error: io.ReadFull: unexpected EOF",
 		}, {
 			name:           "Invalid data length",
 			input:          []byte{2, 0, 0, 0, 31, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 64},
 			expectedResult: nil,
-			expectedError:  errors.New("error reading file data bytes: reading from server: unexpected EOF"),
+			expectedError:  "reading file data bytes: readBuffer: socket error: io.ReadFull: unexpected EOF",
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient(context.Background(), "", 0, 0, 0)
+		c := NewClient(context.Background(), "", 0, 2*time.Second, 0)
 		server, conn := net.Pipe()
 		defer c.Stop()
 		defer server.Close()
@@ -197,16 +204,25 @@ func TestStreamClientReadFileEntry(t *testing.T) {
 			}()
 
 			result, err := c.NextFileEntry()
-			require.Equal(t, testCase.expectedError, err)
+			if testCase.expectedError != "" {
+				require.EqualError(t, err, testCase.expectedError)
+			} else {
+				require.NoError(t, err)
+			}
 			assert.DeepEqual(t, testCase.expectedResult, result)
 		})
 	}
 }
 
 func TestStreamClientReadParsedProto(t *testing.T) {
-	c := NewClient(context.Background(), "", 0, 0, 0)
+	c := NewClient(context.Background(), "", 0, 2*time.Second, 0)
 	serverConn, clientConn := net.Pipe()
 	c.conn = clientConn
+	c.checkTimeout = 1 * time.Second
+
+	c.header = &types.HeaderEntry{
+		TotalEntries: 3,
+	}
 	defer func() {
 		serverConn.Close()
 		clientConn.Close()
@@ -253,7 +269,7 @@ func TestStreamClientReadParsedProto(t *testing.T) {
 		close(errCh)
 	}()
 
-	parsedEntry, err := ReadParsedProto(c)
+	parsedEntry, entryNum, err := ReadParsedProto(c)
 	require.NoError(t, err)
 	serverErr := <-errCh
 	require.NoError(t, serverErr)
@@ -261,6 +277,7 @@ func TestStreamClientReadParsedProto(t *testing.T) {
 	expectedL2Block := types.ConvertToFullL2Block(l2Block)
 	expectedL2Block.L2Txs = append(expectedL2Block.L2Txs, *expectedL2Tx)
 	require.Equal(t, expectedL2Block, parsedEntry)
+	require.Equal(t, uint64(3), entryNum)
 }
 
 func TestStreamClientGetLatestL2Block(t *testing.T) {
@@ -270,9 +287,9 @@ func TestStreamClientGetLatestL2Block(t *testing.T) {
 		clientConn.Close()
 	}()
 
-	c := NewClient(context.Background(), "", 0, 0, 0)
+	c := NewClient(context.Background(), "", 0, 2*time.Second, 0)
 	c.conn = clientConn
-
+	c.checkTimeout = 1 * time.Second
 	expectedL2Block, _ := createL2BlockAndTransactions(t, 5, 0)
 	l2BlockProto := &types.L2BlockProto{L2Block: expectedL2Block}
 	l2BlockRaw, err := l2BlockProto.Marshal()
@@ -383,9 +400,12 @@ func TestStreamClientGetL2BlockByNumber(t *testing.T) {
 		clientConn.Close()
 	}()
 
-	c := NewClient(context.Background(), "", 0, 0, 0)
+	c := NewClient(context.Background(), "", 0, 2*time.Second, 0)
+	c.header = &types.HeaderEntry{
+		TotalEntries: 4,
+	}
 	c.conn = clientConn
-
+	c.checkTimeout = 1 * time.Second
 	bookmark := types.NewBookmarkProto(blockNum, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
 	bookmarkRaw, err := bookmark.Marshal()
 	require.NoError(t, err)
@@ -472,13 +492,15 @@ func TestStreamClientGetL2BlockByNumber(t *testing.T) {
 
 	go createServerResponses(t, serverConn, bookmarkRaw, l2BlockRaw, l2TxsRaw, l2BlockEndRaw, errCh)
 
-	l2Block, errCode, err := c.GetL2BlockByNumber(blockNum)
+	l2Block, err := c.GetL2BlockByNumber(blockNum)
 	require.NoError(t, err)
-	require.Equal(t, types.CmdErrOK, errCode)
 
-	serverErr := <-errCh
+	var serverErr error
+	select {
+	case serverErr = <-errCh:
+	default:
+	}
 	require.NoError(t, serverErr)
-
 	l2TxsProto := make([]types.L2TransactionProto, len(l2Txs))
 	for i, tx := range l2Txs {
 		l2TxProto := types.ConvertToL2TransactionProto(tx)

@@ -11,6 +11,7 @@ type TestDatastreamClient struct {
 	gerUpdates            []types.GerUpdate
 	lastWrittenTimeAtomic atomic.Int64
 	streamingAtomic       atomic.Bool
+	stopReadingToChannel  atomic.Bool
 	progress              atomic.Uint64
 	entriesChan           chan interface{}
 	errChan               chan error
@@ -28,10 +29,6 @@ func NewTestDatastreamClient(fullL2Blocks []types.FullL2Block, gerUpdates []type
 	return client
 }
 
-func (c *TestDatastreamClient) EnsureConnected() (bool, error) {
-	return true, nil
-}
-
 func (c *TestDatastreamClient) ReadAllEntriesToChannel() error {
 	c.streamingAtomic.Store(true)
 	defer c.streamingAtomic.Swap(false)
@@ -43,7 +40,22 @@ func (c *TestDatastreamClient) ReadAllEntriesToChannel() error {
 		c.entriesChan <- &c.gerUpdates[i]
 	}
 
+	c.entriesChan <- nil // needed to stop processing
+
+	for {
+		if c.stopReadingToChannel.Load() {
+			break
+		}
+	}
+
 	return nil
+}
+
+func (c *TestDatastreamClient) RenewEntryChannel() {
+}
+
+func (c *TestDatastreamClient) StopReadingToChannel() {
+	c.stopReadingToChannel.Store(true)
 }
 
 func (c *TestDatastreamClient) GetEntryChan() *chan interface{} {
@@ -54,14 +66,14 @@ func (c *TestDatastreamClient) GetErrChan() chan error {
 	return c.errChan
 }
 
-func (c *TestDatastreamClient) GetL2BlockByNumber(blockNum uint64) (*types.FullL2Block, int, error) {
+func (c *TestDatastreamClient) GetL2BlockByNumber(blockNum uint64) (*types.FullL2Block, error) {
 	for _, l2Block := range c.fullL2Blocks {
 		if l2Block.L2BlockNumber == blockNum {
-			return &l2Block, types.CmdErrOK, nil
+			return &l2Block, nil
 		}
 	}
 
-	return nil, -1, nil
+	return nil, nil
 }
 
 func (c *TestDatastreamClient) GetLatestL2Block() (*types.FullL2Block, error) {
@@ -73,10 +85,6 @@ func (c *TestDatastreamClient) GetLatestL2Block() (*types.FullL2Block, error) {
 
 func (c *TestDatastreamClient) GetLastWrittenTimeAtomic() *atomic.Int64 {
 	return &c.lastWrittenTimeAtomic
-}
-
-func (c *TestDatastreamClient) GetStreamingAtomic() *atomic.Bool {
-	return &c.streamingAtomic
 }
 
 func (c *TestDatastreamClient) GetProgressAtomic() *atomic.Uint64 {

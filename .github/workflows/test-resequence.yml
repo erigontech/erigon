@@ -55,6 +55,7 @@ jobs:
           sed -i '/zkevm.sequencer-non-empty-batch-seal-time:/d' templates/cdk-erigon/config.yml
           sed -i '/sentry.drop-useless-peers:/d' templates/cdk-erigon/config.yml
           sed -i '/zkevm.pool-manager-url/d' templates/cdk-erigon/config.yml
+          sed -i '/zkevm.l2-datastreamer-timeout:/d' templates/cdk-erigon/config.yml
       - name: Configure Kurtosis CDK
         working-directory: ./kurtosis-cdk
         run: |

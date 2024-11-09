@@ -33,6 +33,8 @@ const (
 var (
 	// ErrFileEntryNotFound denotes error that is returned when the certain file entry is not found in the datastream
 	ErrFileEntryNotFound = errors.New("file entry not found")
+
+	minimumCheckTimeout = 500 * time.Millisecond
 )
 
 type StreamClient struct {
@@ -41,8 +43,9 @@ type StreamClient struct {
 	version      int
 	streamType   StreamType
 	conn         net.Conn
-	id           string        // Client id
 	checkTimeout time.Duration // time to wait for data before reporting an error
+
+	header *types.HeaderEntry
 
 	// atomic
 	lastWrittenTime      atomic.Int64
@@ -78,7 +81,6 @@ func NewClient(ctx context.Context, server string, version int, checkTimeout tim
 		server:       server,
 		version:      version,
 		streamType:   StSequencer,
-		id:           "",
 		entryChan:    make(chan interface{}, 100000),
 		currentFork:  uint64(latestDownloadedForkId),
 	}
@@ -94,50 +96,80 @@ func (c *StreamClient) GetEntryChan() *chan interface{} {
 	return &c.entryChan
 }
 
+func (c *StreamClient) GetEntryNumberLimit() uint64 {
+	return c.header.TotalEntries
+}
+
+var (
+	ErrFailedAttempts = errors.New("failed to get the L2 block within 5 attempts")
+)
+
 // GetL2BlockByNumber queries the data stream by sending the L2 block start bookmark for the certain block number
 // and streams the changes for that block (including the transactions).
 // Note that this function is intended for on demand querying and it disposes the connection after it ends.
-func (c *StreamClient) GetL2BlockByNumber(blockNum uint64) (*types.FullL2Block, int, error) {
-	if _, err := c.EnsureConnected(); err != nil {
-		return nil, -1, err
-	}
-	defer c.Stop()
-
+func (c *StreamClient) GetL2BlockByNumber(blockNum uint64) (fullBLock *types.FullL2Block, err error) {
 	var (
-		l2Block   *types.FullL2Block
-		err       error
-		isL2Block bool
+		connected bool = c.conn != nil
 	)
+	count := 0
+	for {
+		select {
+		case <-c.ctx.Done():
+			return nil, fmt.Errorf("context done - stopping")
+
+		default:
+		}
+		if count > 5 {
+			return nil, ErrFailedAttempts
+		}
+		if connected {
+			if err := c.stopStreamingIfStarted(); err != nil {
+				return nil, fmt.Errorf("stopStreamingIfStarted: %w", err)
+			}
+
+			if fullBLock, err = c.getL2BlockByNumber(blockNum); err == nil {
+				break
+			}
+
+			if errors.Is(err, types.ErrAlreadyStarted) {
+				// if the client is already started, we can stop the client and try again
+				c.Stop()
+			} else if !errors.Is(err, ErrSocket) {
+				return nil, fmt.Errorf("getL2BlockByNumber: %w", err)
+			}
+
+		}
+		time.Sleep(1 * time.Second)
+		connected = c.handleSocketError(err)
+		count++
+	}
+
+	return fullBLock, nil
+}
+
+func (c *StreamClient) getL2BlockByNumber(blockNum uint64) (l2Block *types.FullL2Block, err error) {
+	var isL2Block bool
 
 	bookmark := types.NewBookmarkProto(blockNum, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
 	bookmarkRaw, err := bookmark.Marshal()
 	if err != nil {
-		return nil, -1, err
+		return nil, fmt.Errorf("bookmark.Marshal: %w", err)
 	}
 
-	re, err := c.initiateDownloadBookmark(bookmarkRaw)
-	if err != nil {
-		errorCode := -1
-		if re != nil {
-			errorCode = int(re.ErrorNum)
-		}
-		return nil, errorCode, err
+	if _, err := c.initiateDownloadBookmark(bookmarkRaw); err != nil {
+		return nil, fmt.Errorf("initiateDownloadBookmark: %w", err)
 	}
 
 	for l2Block == nil {
 		select {
 		case <-c.ctx.Done():
-			errorCode := -1
-			if re != nil {
-				errorCode = int(re.ErrorNum)
-			}
-			return l2Block, errorCode, nil
+			return l2Block, fmt.Errorf("context done - stopping")
 		default:
 		}
 
-		parsedEntry, err := ReadParsedProto(c)
+		parsedEntry, _, err := ReadParsedProto(c)
 		if err != nil {
-			return nil, -1, err
+			return nil, fmt.Errorf("ReadParsedProto: %w", err)
 		}
 
 		l2Block, isL2Block = parsedEntry.(*types.FullL2Block)
@@ -147,41 +179,88 @@ func (c *StreamClient) GetL2BlockByNumber(blockNum uint64) (*types.FullL2Block, 
 	}
 
 	if l2Block.L2BlockNumber != blockNum {
-		return nil, -1, fmt.Errorf("expected block number %d but got %d", blockNum, l2Block.L2BlockNumber)
+		return nil, fmt.Errorf("expected block number %d but got %d", blockNum, l2Block.L2BlockNumber)
 	}
 
-	return l2Block, types.CmdErrOK, nil
+	return l2Block, nil
 }
 
 // GetLatestL2Block queries the data stream by reading the header entry and based on total entries field,
 // it retrieves the latest File entry that is of EntryTypeL2Block type.
 // Note that this function is intended for on demand querying and it disposes the connection after it ends.
 func (c *StreamClient) GetLatestL2Block() (l2Block *types.FullL2Block, err error) {
-	if _, err := c.EnsureConnected(); err != nil {
-		return nil, err
-	}
-	defer c.Stop()
+	var (
+		connected bool = c.conn != nil
+	)
+	count := 0
+	for {
+		select {
+		case <-c.ctx.Done():
+			return nil, errors.New("context done - stopping")
+		default:
+		}
+		if count > 5 {
+			return nil, ErrFailedAttempts
+		}
+		if connected {
+			if err := c.stopStreamingIfStarted(); err != nil {
+				return nil, fmt.Errorf("stopStreamingIfStarted: %w", err)
+			}
 
+			if l2Block, err = c.getLatestL2Block(); err == nil {
+				break
+			}
+			if !errors.Is(err, ErrSocket) {
+				return nil, fmt.Errorf("getLatestL2Block: %w", err)
+			}
+		}
+
+		time.Sleep(1 * time.Second)
+		connected = c.handleSocketError(err)
+		count++
+	}
+	return l2Block, nil
+}
+
+// don't check for errors here, we just need to empty the socket for next reads
+func (c *StreamClient) stopStreamingIfStarted() error {
+	if c.streaming.Load() {
+		c.sendStopCmd()
+		c.streaming.Store(false)
+	}
+
+	// empty the socket buffer
+	for {
+		c.conn.SetReadDeadline(time.Now().Add(100))
+		if _, err := c.readBuffer(100); err != nil {
+			break
+		}
+	}
+
+	return nil
+}
+
+func (c *StreamClient) getLatestL2Block() (l2Block *types.FullL2Block, err error) {
 	h, err := c.GetHeader()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("GetHeader: %w", err)
 	}
 
 	latestEntryNum := h.TotalEntries - 1
 
 	for l2Block == nil && latestEntryNum > 0 {
 		if err := c.sendEntryCmdWrapper(latestEntryNum); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("sendEntryCmdWrapper: %w", err)
 		}
 
 		entry, err := c.NextFileEntry()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("NextFileEntry: %w", err)
 		}
 
 		if entry.EntryType == types.EntryTypeL2Block {
 			if l2Block, err = types.UnmarshalL2Block(entry.Data); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("UnmarshalL2Block: %w", err)
 			}
 		}
 
@@ -189,7 +268,7 @@ func (c *StreamClient) GetLatestL2Block() (l2Block *types.FullL2Block, err error
 	}
 
 	if latestEntryNum == 0 {
-		return nil, errors.New("failed to retrieve the latest block from the data stream")
+		return nil, errors.New("no block found")
 	}
 
 	return l2Block, nil
@@ -198,9 +277,7 @@ func (c *StreamClient) GetLatestL2Block() (l2Block *types.FullL2Block, err error
 func (c *StreamClient) GetLastWrittenTimeAtomic() *atomic.Int64 {
 	return &c.lastWrittenTime
 }
-func (c *StreamClient) GetStreamingAtomic() *atomic.Bool {
-	return &c.streaming
-}
+
 func (c *StreamClient) GetProgressAtomic() *atomic.Uint64 {
 	return &c.progress
 }
@@ -211,10 +288,8 @@ func (c *StreamClient) Start() error {
 	var err error
 	c.conn, err = net.Dial("tcp", c.server)
 	if err != nil {
-		return fmt.Errorf("error connecting to server %s: %v", c.server, err)
+		return fmt.Errorf("connecting to server %s: %w", c.server, err)
 	}
-
-	c.id = c.conn.LocalAddr().String()
 
 	return nil
 }
@@ -224,47 +299,47 @@ func (c *StreamClient) Stop() {
 		return
 	}
 	if err := c.sendStopCmd(); err != nil {
-		log.Warn(fmt.Sprintf("Failed to send the stop command to the data stream server: %s", err))
+		log.Warn(fmt.Sprintf("send stop command: %v", err))
 	}
-	c.conn.Close()
-	c.conn = nil
-
-	c.clearEntryCHannel()
+	// c.conn.Close()
+	// c.conn = nil
 }
 
 // Command header: Get status
 // Returns the current status of the header.
 // If started, terminate the connection.
 func (c *StreamClient) GetHeader() (*types.HeaderEntry, error) {
+	if err := c.stopStreamingIfStarted(); err != nil {
+		return nil, fmt.Errorf("stopStreamingIfStarted: %w", err)
+	}
+
 	if err := c.sendHeaderCmd(); err != nil {
-		return nil, fmt.Errorf("%s send header error: %v", c.id, err)
+		return nil, fmt.Errorf("sendHeaderCmd: %w", err)
 	}
 
 	// Read packet
-	packet, err := readBuffer(c.conn, 1)
+	packet, err := c.readBuffer(1)
 	if err != nil {
-		return nil, fmt.Errorf("%s read buffer: %v", c.id, err)
+		return nil, fmt.Errorf("readBuffer: %w", err)
 	}
 
 	// Check packet type
 	if packet[0] != PtResult {
-		return nil, fmt.Errorf("%s error expecting result packet type %d and received %d", c.id, PtResult, packet[0])
+		return nil, fmt.Errorf("expecting result packet type %d and received %d", PtResult, packet[0])
 	}
 
 	// Read server result entry for the command
-	r, err := c.readResultEntry(packet)
-	if err != nil {
-		return nil, fmt.Errorf("%s read result entry error: %v", c.id, err)
-	}
-	if err := r.GetError(); err != nil {
-		return nil, fmt.Errorf("%s got Result error code %d: %v", c.id, r.ErrorNum, err)
+	if _, err := c.readResultEntry(packet); err != nil {
+		return nil, fmt.Errorf("readResultEntry: %w", err)
 	}
 
 	// Read header entry
 	h, err := c.readHeaderEntry()
 	if err != nil {
-		return nil, fmt.Errorf("%s read header entry error: %v", c.id, err)
+		return nil, fmt.Errorf("readHeaderEntry: %w", err)
 	}
+
+	c.header = h
 
 	return h, nil
 }
@@ -272,13 +347,11 @@ func (c *StreamClient) GetHeader() (*types.HeaderEntry, error) {
 // sendEntryCmdWrapper sends CmdEntry command and reads packet type and decodes result entry.
 func (c *StreamClient) sendEntryCmdWrapper(entryNum uint64) error {
 	if err := c.sendEntryCmd(entryNum); err != nil {
-		return err
+		return fmt.Errorf("sendEntryCmd: %w", err)
 	}
 
-	if re, err := c.readPacketAndDecodeResultEntry(); err != nil {
-		return fmt.Errorf("failed to retrieve the result entry: %w", err)
-	} else if err := re.GetError(); err != nil {
-		return err
+	if _, err := c.readPacketAndDecodeResultEntry(); err != nil {
+		return fmt.Errorf("readPacketAndDecodeResultEntry: %w", err)
 	}
 
 	return nil
@@ -288,16 +361,16 @@ func (c *StreamClient) ExecutePerFile(bookmark *types.BookmarkProto, function fu
 	// Get header from server
 	header, err := c.GetHeader()
 	if err != nil {
-		return fmt.Errorf("%s get header error: %v", c.id, err)
+		return fmt.Errorf("GetHeader: %w", err)
 	}
 
 	protoBookmark, err := bookmark.Marshal()
 	if err != nil {
-		return fmt.Errorf("failed to marshal bookmark: %v", err)
+		return fmt.Errorf("bookmark.Marshal: %w", err)
 	}
 
 	if _, err := c.initiateDownloadBookmark(protoBookmark); err != nil {
-		return err
+		return fmt.Errorf("initiateDownloadBookmark: %w", err)
 	}
 	count := uint64(0)
 	logTicker := time.NewTicker(10 * time.Second)
@@ -313,10 +386,10 @@ func (c *StreamClient) ExecutePerFile(bookmark *types.BookmarkProto, function fu
 		}
 		file, err := c.NextFileEntry()
 		if err != nil {
-			return fmt.Errorf("reading file entry: %v", err)
+			return fmt.Errorf("NextFileEntry: %w", err)
 		}
 		if err := function(file); err != nil {
-			return fmt.Errorf("executing function: %v", err)
+			return fmt.Errorf("execute function: %w", err)
 
 		}
 		count++
@@ -326,45 +399,83 @@ func (c *StreamClient) ExecutePerFile(bookmark *types.BookmarkProto, function fu
 }
 
 func (c *StreamClient) clearEntryCHannel() {
-	select {
-	case <-c.entryChan:
-		close(c.entryChan)
+	defer func() {
 		for range c.entryChan {
 		}
-	default:
-	}
+	}()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Warn("[datastream_client] Channel is already closed")
+		}
+	}()
+
+	close(c.entryChan)
 }
 
 // close old entry chan and read all elements before opening a new one
-func (c *StreamClient) renewEntryChannel() {
+func (c *StreamClient) RenewEntryChannel() {
 	c.clearEntryCHannel()
 	c.entryChan = make(chan interface{}, entryChannelSize)
 }
 
-func (c *StreamClient) EnsureConnected() (bool, error) {
-	if c.conn == nil {
-		if err := c.tryReConnect(); err != nil {
-			return false, fmt.Errorf("failed to reconnect the datastream client: %w", err)
+func (c *StreamClient) ReadAllEntriesToChannel() (err error) {
+	var (
+		connected bool = c.conn != nil
+	)
+	count := 0
+	for {
+		select {
+		case <-c.ctx.Done():
+			return fmt.Errorf("context done - stopping")
+		default:
+		}
+		if connected {
+			if err := c.stopStreamingIfStarted(); err != nil {
+				return fmt.Errorf("stopStreamingIfStarted: %w", err)
+			}
+
+			if err = c.readAllEntriesToChannel(); err == nil {
+				break
+			}
+			if !errors.Is(err, ErrSocket) {
+				return fmt.Errorf("readAllEntriesToChannel: %w", err)
+			}
 		}
 
-		c.renewEntryChannel()
+		time.Sleep(1 * time.Second)
+		connected = c.handleSocketError(err)
+		count++
 	}
 
-	return true, nil
+	return nil
+}
+
+func (c *StreamClient) handleSocketError(socketErr error) bool {
+	if socketErr != nil {
+		log.Warn(fmt.Sprintf("%v", socketErr))
+	}
+	if err := c.tryReConnect(); err != nil {
+		log.Warn(fmt.Sprintf("try reconnect: %v", err))
+		return false
+	}
+
+	c.RenewEntryChannel()
+
+	return true
 }
 
 // reads entries to the end of the stream
 // at end will wait for new entries to arrive
-func (c *StreamClient) ReadAllEntriesToChannel() error {
+func (c *StreamClient) readAllEntriesToChannel() (err error) {
 	c.streaming.Store(true)
-	defer c.streaming.Store(false)
+	c.stopReadingToChannel.Store(false)
 
 	var bookmark *types.BookmarkProto
 	progress := c.progress.Load()
 	if progress == 0 {
 		bookmark = types.NewBookmarkProto(0, datastream.BookmarkType_BOOKMARK_TYPE_BATCH)
 	} else {
-		bookmark = types.NewBookmarkProto(progress, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
+		bookmark = types.NewBookmarkProto(progress+1, datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK)
 	}
 
 	protoBookmark, err := bookmark.Marshal()
@@ -374,117 +485,128 @@ func (c *StreamClient) ReadAllEntriesToChannel() error {
 
 	// send start command
 	if _, err := c.initiateDownloadBookmark(protoBookmark); err != nil {
-		return err
+		return fmt.Errorf("initiateDownloadBookmark: %w", err)
 	}
 
 	if err := c.readAllFullL2BlocksToChannel(); err != nil {
-		err2 := fmt.Errorf("%s read full L2 blocks error: %v", c.id, err)
-
-		if c.conn != nil {
-			if err2 := c.conn.Close(); err2 != nil {
-				log.Error("failed to close connection after error", "original-error", err, "new-error", err2)
-			}
-			c.conn = nil
-		}
-
-		return err2
+		return fmt.Errorf("readAllFullL2BlocksToChannel: %w", err)
 	}
 
-	return nil
+	return
 }
 
 // runs the prerequisites for entries download
 func (c *StreamClient) initiateDownloadBookmark(bookmark []byte) (*types.ResultEntry, error) {
 	// send CmdStartBookmark command
 	if err := c.sendBookmarkCmd(bookmark, true); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sendBookmarkCmd: %w", err)
 	}
 
 	re, err := c.afterStartCommand()
 	if err != nil {
-		return re, fmt.Errorf("after start command error: %v", err)
+		return re, fmt.Errorf("afterStartCommand: %w", err)
 	}
 
 	return re, nil
 }
 
 func (c *StreamClient) afterStartCommand() (*types.ResultEntry, error) {
-	re, err := c.readPacketAndDecodeResultEntry()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := re.GetError(); err != nil {
-		return re, fmt.Errorf("got Result error code %d: %v", re.ErrorNum, err)
-	}
-
-	return re, nil
+	return c.readPacketAndDecodeResultEntry()
 }
 
 // reads all entries from the server and sends them to a channel
 // sends the parsed FullL2Blocks with transactions to a channel
-func (c *StreamClient) readAllFullL2BlocksToChannel() error {
-	var err error
-
+func (c *StreamClient) readAllFullL2BlocksToChannel() (err error) {
+	readNewProto := true
+	entryNum := uint64(0)
+	parsedProto := interface{}(nil)
 LOOP:
 	for {
 		select {
 		default:
 		case <-c.ctx.Done():
-			log.Warn("[Datastream client] Context done - stopping")
+			return fmt.Errorf("context done - stopping")
+		}
+
+		if c.stopReadingToChannel.Load() {
 			break LOOP
 		}
 
-		if c.checkTimeout > 0 {
-			c.conn.SetReadDeadline(time.Now().Add(c.checkTimeout))
+		var timeout time.Time
+		if c.checkTimeout < minimumCheckTimeout {
+			timeout = time.Now().Add(minimumCheckTimeout)
+		} else {
+			timeout = time.Now().Add(c.checkTimeout)
 		}
 
-		parsedProto, localErr := ReadParsedProto(c)
-		if localErr != nil {
-			err = localErr
-			break
+		if err = c.conn.SetReadDeadline(timeout); err != nil {
+			return err
+		}
+
+		if readNewProto {
+			if parsedProto, entryNum, err = ReadParsedProto(c); err != nil {
+				return err
+			}
+			readNewProto = false
 		}
 		c.lastWrittenTime.Store(time.Now().UnixNano())
 
 		switch parsedProto := parsedProto.(type) {
 		case *types.BookmarkProto:
+			readNewProto = true
 			continue
 		case *types.BatchStart:
 			c.currentFork = parsedProto.ForkId
-			c.entryChan <- parsedProto
 		case *types.GerUpdate:
-			c.entryChan <- parsedProto
 		case *types.BatchEnd:
-			c.entryChan <- parsedProto
 		case *types.FullL2Block:
 			parsedProto.ForkId = c.currentFork
-			log.Trace("writing block to channel", "blockNumber", parsedProto.L2BlockNumber, "batchNumber", parsedProto.BatchNumber)
-			c.entryChan <- parsedProto
+			log.Trace("[Datastream client] writing block to channel", "blockNumber", parsedProto.L2BlockNumber, "batchNumber", parsedProto.BatchNumber)
 		default:
-			err = fmt.Errorf("unexpected entry type: %v", parsedProto)
+			return fmt.Errorf("unexpected entry type: %v", parsedProto)
+		}
+		select {
+		case c.entryChan <- parsedProto:
+			readNewProto = true
+		default:
+			time.Sleep(10 * time.Microsecond)
+		}
+
+		if c.header.TotalEntries == entryNum+1 {
+			log.Trace("[Datastream client] reached the current end of the stream", "header_totalEntries", c.header.TotalEntries, "entryNum", entryNum)
+
+			retries := 0
+		INTERNAL_LOOP:
+			for {
+				select {
+				case c.entryChan <- nil:
+					break INTERNAL_LOOP
+				default:
+					if retries > 5 {
+						return errors.New("[Datastream client] failed to write final entry to channel after 5 retries")
+					}
+					retries++
+					log.Warn("[Datastream client] Channel is full, waiting to write nil and end stream client read")
+					time.Sleep(1 * time.Second)
+				}
+			}
 			break LOOP
 		}
 	}
 
-	return err
+	return nil
 }
 
-func (c *StreamClient) tryReConnect() error {
-	var err error
-	for i := 0; i < 50; i++ {
-		if c.conn != nil {
-			if err := c.conn.Close(); err != nil {
-				log.Warn(fmt.Sprintf("[%d. iteration] failed to close the DS connection: %s", i+1, err))
-				return err
-			}
-			c.conn = nil
+func (c *StreamClient) tryReConnect() (err error) {
+	if c.conn != nil {
+		if err := c.conn.Close(); err != nil {
+			log.Warn(fmt.Sprintf("close DS connection: %v", err))
+			return err
 		}
-		if err = c.Start(); err != nil {
-			log.Warn(fmt.Sprintf("[%d. iteration] failed to start the DS connection: %s", i+1, err))
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		return nil
+		c.conn = nil
+	}
+	if err = c.Start(); err != nil {
+		log.Warn(fmt.Sprintf("start DS connection: %v", err))
 	}
 
 	return err
@@ -496,21 +618,24 @@ func (c *StreamClient) StopReadingToChannel() {
 
 type FileEntryIterator interface {
 	NextFileEntry() (*types.FileEntry, error)
+	GetEntryNumberLimit() uint64
 }
 
 func ReadParsedProto(iterator FileEntryIterator) (
 	parsedEntry interface{},
+	entryNum uint64,
 	err error,
 ) {
 	file, err := iterator.NextFileEntry()
 	if err != nil {
-		err = fmt.Errorf("read file entry error: %w", err)
+		err = fmt.Errorf("NextFileEntry: %w", err)
 		return
 	}
 
 	if file == nil {
-		return nil, nil
+		return
 	}
+	entryNum = file.EntryNum
 
 	switch file.EntryType {
 	case types.BookmarkEntryType:
@@ -524,6 +649,7 @@ func ReadParsedProto(iterator FileEntryIterator) (
 	case types.EntryTypeL2Block:
 		var l2Block *types.FullL2Block
 		if l2Block, err = types.UnmarshalL2Block(file.Data); err != nil {
+			err = fmt.Errorf("UnmarshalL2Block: %w", err)
 			return
 		}
 
@@ -534,17 +660,20 @@ func ReadParsedProto(iterator FileEntryIterator) (
 	LOOP:
 		for {
 			if innerFile, err = iterator.NextFileEntry(); err != nil {
+				err = fmt.Errorf("NextFileEntry: %w", err)
 				return
 			}
-
+			entryNum = innerFile.EntryNum
 			if innerFile.IsL2Tx() {
 				if l2Tx, err = types.UnmarshalTx(innerFile.Data); err != nil {
+					err = fmt.Errorf("UnmarshalTx: %w", err)
 					return
 				}
 				txs = append(txs, *l2Tx)
 			} else if innerFile.IsL2BlockEnd() {
 				var l2BlockEnd *types.L2BlockEndProto
 				if l2BlockEnd, err = types.UnmarshalL2BlockEnd(innerFile.Data); err != nil {
+					err = fmt.Errorf("UnmarshalL2BlockEnd: %w", err)
 					return
 				}
 				if l2BlockEnd.GetBlockNumber() != l2Block.L2BlockNumber {
@@ -555,6 +684,11 @@ func ReadParsedProto(iterator FileEntryIterator) (
 			} else if innerFile.IsBookmark() {
 				var bookmark *types.BookmarkProto
 				if bookmark, err = types.UnmarshalBookmark(innerFile.Data); err != nil || bookmark == nil {
+					if err != nil {
+						err = fmt.Errorf("UnmarshalBookmark: %w", err)
+					} else {
+						err = fmt.Errorf("unexpected nil bookmark")
+					}
 					return
 				}
 				if bookmark.BookmarkType() == datastream.BookmarkType_BOOKMARK_TYPE_L2_BLOCK {
@@ -565,12 +699,16 @@ func ReadParsedProto(iterator FileEntryIterator) (
 				}
 			} else if innerFile.IsBatchEnd() {
 				if _, err = types.UnmarshalBatchEnd(file.Data); err != nil {
+					err = fmt.Errorf("UnmarshalBatchEnd: %w", err)
 					return
 				}
 				break LOOP
 			} else {
 				err = fmt.Errorf("unexpected entry type inside a block: %d", innerFile.EntryType)
 				return
+			}
+			if entryNum == iterator.GetEntryNumberLimit() {
+				break LOOP
 			}
 		}
 
@@ -579,12 +717,17 @@ func ReadParsedProto(iterator FileEntryIterator) (
 		return
 	case types.EntryTypeL2BlockEnd:
 		log.Debug(fmt.Sprintf("retrieved EntryTypeL2BlockEnd: %+v", file))
+		parsedEntry, err = types.UnmarshalL2BlockEnd(file.Data)
+		if err != nil {
+			err = fmt.Errorf("UnmarshalL2BlockEnd: %w", err)
+		}
 		return
 	case types.EntryTypeL2Tx:
 		err = errors.New("unexpected L2 tx entry, found outside of block")
 	default:
 		err = fmt.Errorf("unexpected entry type: %d", file.EntryType)
 	}
+
 	return
 }
 
@@ -592,21 +735,17 @@ func ReadParsedProto(iterator FileEntryIterator) (
 // returns the parsed FileEntry
 func (c *StreamClient) NextFileEntry() (file *types.FileEntry, err error) {
 	// Read packet type
-	packet, err := readBuffer(c.conn, 1)
+	packet, err := c.readBuffer(1)
 	if err != nil {
-		return file, fmt.Errorf("failed to read packet type: %v", err)
+		return file, fmt.Errorf("readBuffer: %w", err)
 	}
 
 	packetType := packet[0]
 	// Check packet type
 	if packetType == PtResult {
 		// Read server result entry for the command
-		r, err := c.readResultEntry(packet)
-		if err != nil {
-			return file, err
-		}
-		if err := r.GetError(); err != nil {
-			return file, fmt.Errorf("got Result error code %d: %v", r.ErrorNum, err)
+		if _, err := c.readResultEntry(packet); err != nil {
+			return file, fmt.Errorf("readResultEntry: %w", err)
 		}
 		return file, nil
 	} else if packetType != PtData && packetType != PtDataRsp {
@@ -614,9 +753,9 @@ func (c *StreamClient) NextFileEntry() (file *types.FileEntry, err error) {
 	}
 
 	// Read the rest of fixed size fields
-	buffer, err := readBuffer(c.conn, types.FileEntryMinSize-1)
+	buffer, err := c.readBuffer(types.FileEntryMinSize - 1)
 	if err != nil {
-		return file, fmt.Errorf("error reading file bytes: %v", err)
+		return file, fmt.Errorf("reading file bytes: readBuffer: %w", err)
 	}
 
 	if packetType != PtData {
@@ -627,19 +766,19 @@ func (c *StreamClient) NextFileEntry() (file *types.FileEntry, err error) {
 	// Read variable field (data)
 	length := binary.BigEndian.Uint32(buffer[1:5])
 	if length < types.FileEntryMinSize {
-		return file, errors.New("error reading data entry: wrong data length")
+		return file, errors.New("reading data entry: wrong data length")
 	}
 
 	// Read rest of the file data
-	bufferAux, err := readBuffer(c.conn, length-types.FileEntryMinSize)
+	bufferAux, err := c.readBuffer(length - types.FileEntryMinSize)
 	if err != nil {
-		return file, fmt.Errorf("error reading file data bytes: %v", err)
+		return file, fmt.Errorf("reading file data bytes: readBuffer: %w", err)
 	}
 	buffer = append(buffer, bufferAux...)
 
 	// Decode binary data to data entry struct
 	if file, err = types.DecodeFileEntry(buffer); err != nil {
-		return file, fmt.Errorf("decode file entry error: %v", err)
+		return file, fmt.Errorf("DecodeFileEntry: %w", err)
 	}
 
 	if file.EntryType == types.EntryTypeNotFound {
@@ -654,24 +793,24 @@ func (c *StreamClient) NextFileEntry() (file *types.FileEntry, err error) {
 func (c *StreamClient) readHeaderEntry() (h *types.HeaderEntry, err error) {
 
 	// Read header stream bytes
-	binaryHeader, err := readBuffer(c.conn, types.HeaderSizePreEtrog)
+	binaryHeader, err := c.readBuffer(types.HeaderSizePreEtrog)
 	if err != nil {
-		return h, fmt.Errorf("failed to read header bytes %v", err)
+		return h, fmt.Errorf("read header bytes: readBuffer: %w", err)
 	}
 
 	headLength := binary.BigEndian.Uint32(binaryHeader[1:5])
 	if headLength == types.HeaderSize {
 		// Read the rest of fixed size fields
-		buffer, err := readBuffer(c.conn, types.HeaderSize-types.HeaderSizePreEtrog)
+		buffer, err := c.readBuffer(types.HeaderSize - types.HeaderSizePreEtrog)
 		if err != nil {
-			return h, fmt.Errorf("failed to read header bytes %v", err)
+			return h, fmt.Errorf("read header bytes: readBuffer: %w", err)
 		}
 		binaryHeader = append(binaryHeader, buffer...)
 	}
 
 	// Decode bytes stream to header entry struct
 	if h, err = types.DecodeHeaderEntry(binaryHeader); err != nil {
-		return h, fmt.Errorf("error decoding binary header: %v", err)
+		return h, fmt.Errorf("DecodeHeaderEntry: %w", err)
 	}
 
 	return
@@ -685,28 +824,45 @@ func (c *StreamClient) readResultEntry(packet []byte) (re *types.ResultEntry, er
 	}
 
 	// Read the rest of fixed size fields
-	buffer, err := readBuffer(c.conn, types.ResultEntryMinSize-1)
+	buffer, err := c.readBuffer(types.ResultEntryMinSize - 1)
 	if err != nil {
-		return re, fmt.Errorf("failed to read main result bytes %v", err)
+		return re, fmt.Errorf("read main result bytes: readBuffer: %w", err)
 	}
 	buffer = append(packet, buffer...)
 
 	// Read variable field (errStr)
 	length := binary.BigEndian.Uint32(buffer[1:5])
 	if length < types.ResultEntryMinSize {
-		return re, fmt.Errorf("%s Error reading result entry", c.id)
+		return re, errors.New("failed reading result entry")
 	}
 
 	// read the rest of the result
-	bufferAux, err := readBuffer(c.conn, length-types.ResultEntryMinSize)
+	bufferAux, err := c.readBuffer(length - types.ResultEntryMinSize)
 	if err != nil {
-		return re, fmt.Errorf("failed to read result errStr bytes %v", err)
+		return re, fmt.Errorf("read result errStr bytes: readBuffer: %w", err)
 	}
 	buffer = append(buffer, bufferAux...)
 
 	// Decode binary entry result
 	if re, err = types.DecodeResultEntry(buffer); err != nil {
-		return re, fmt.Errorf("decode result entry error: %v", err)
+		return re, fmt.Errorf("DecodeResultEntry: %w", err)
+	}
+
+	if !re.IsOk() {
+		switch re.ErrorNum {
+		case types.CmdErrAlreadyStarted:
+			return re, fmt.Errorf("%w: %s", types.ErrAlreadyStarted, re.ErrorStr)
+		case types.CmdErrAlreadyStopped:
+			return re, fmt.Errorf("%w: %s", types.ErrAlreadyStopped, re.ErrorStr)
+		case types.CmdErrBadFromEntry:
+			return re, fmt.Errorf("%w: %s", types.ErrBadFromEntry, re.ErrorStr)
+		case types.CmdErrBadFromBookmark:
+			return re, fmt.Errorf("%w: %s", types.ErrBadFromBookmark, re.ErrorStr)
+		case types.CmdErrInvalidCommand:
+			return re, fmt.Errorf("%w: %s", types.ErrInvalidCommand, re.ErrorStr)
+		default:
+			return re, fmt.Errorf("unknown error code: %s", re.ErrorStr)
+		}
 	}
 
 	return re, nil
@@ -715,16 +871,77 @@ func (c *StreamClient) readResultEntry(packet []byte) (re *types.ResultEntry, er
 // readPacketAndDecodeResultEntry reads the packet from the connection and tries to decode the ResultEntry from it.
 func (c *StreamClient) readPacketAndDecodeResultEntry() (*types.ResultEntry, error) {
 	// Read packet
-	packet, err := readBuffer(c.conn, 1)
+	packet, err := c.readBuffer(1)
 	if err != nil {
-		return nil, fmt.Errorf("read buffer error: %w", err)
+		return nil, fmt.Errorf("read buffer: %w", err)
 	}
 
 	// Read server result entry for the command
 	r, err := c.readResultEntry(packet)
 	if err != nil {
-		return nil, fmt.Errorf("read result entry error: %w", err)
+		return nil, fmt.Errorf("readResultEntry: %w", err)
 	}
 
 	return r, nil
+}
+
+func (c *StreamClient) readBuffer(amount uint32) ([]byte, error) {
+	if err := c.resetReadTimeout(); err != nil {
+		return nil, fmt.Errorf("resetReadTimeout: %w", err)
+	}
+	return readBuffer(c.conn, amount)
+}
+
+func (c *StreamClient) writeToConn(data interface{}) error {
+	if err := c.resetWriteTimeout(); err != nil {
+		return fmt.Errorf("resetWriteTimeout: %w", err)
+	}
+	switch parsed := data.(type) {
+	case []byte:
+		if err := writeBytesToConn(c.conn, parsed); err != nil {
+			return fmt.Errorf("writeBytesToConn: %w", err)
+		}
+	case uint32:
+		if err := writeFullUint32ToConn(c.conn, parsed); err != nil {
+			return fmt.Errorf("writeFullUint32ToConn: %w", err)
+		}
+	case uint64:
+		if err := writeFullUint64ToConn(c.conn, parsed); err != nil {
+			return fmt.Errorf("writeFullUint64ToConn: %w", err)
+		}
+	default:
+		return errors.New("unexpected write type")
+	}
+
+	return nil
+}
+
+func (c *StreamClient) resetWriteTimeout() error {
+	var timeout time.Time
+	if c.checkTimeout < minimumCheckTimeout {
+		timeout = time.Now().Add(minimumCheckTimeout)
+	} else {
+		timeout = time.Now().Add(c.checkTimeout)
+	}
+
+	if err := c.conn.SetWriteDeadline(timeout); err != nil {
+		return fmt.Errorf("%w: conn.SetWriteDeadline: %v", ErrSocket, err)
+	}
+
+	return nil
+}
+
+func (c *StreamClient) resetReadTimeout() error {
+	var timeout time.Time
+	if c.checkTimeout < minimumCheckTimeout {
+		timeout = time.Now().Add(minimumCheckTimeout)
+	} else {
+		timeout = time.Now().Add(c.checkTimeout)
+	}
+
+	if err := c.conn.SetReadDeadline(timeout); err != nil {
+		return fmt.Errorf("%w: conn.SetReadDeadline: %v", ErrSocket, err)
+	}
+
+	return nil
 }

@@ -16,8 +16,8 @@ const (
 	sequenceBatchesValidiumMethodName = "sequenceBatchesValidium"
 )
 
-func GetAccInputDataCalcFunction(l1InfoRoot common.Hash, decodedSequenceInteerface interface{}) (accInputHashCalcFn func(prevAccInputHash common.Hash, index int) *common.Hash, totalSequenceBatches int, err error) {
-	switch decodedSequence := decodedSequenceInteerface.(type) {
+func GetAccInputDataCalcFunction(l1InfoRoot common.Hash, decodedSequenceInterface interface{}) (accInputHashCalcFn func(prevAccInputHash common.Hash, index int) *common.Hash, totalSequenceBatches int, err error) {
+	switch decodedSequence := decodedSequenceInterface.(type) {
 	case *SequenceBatchesCalldataPreEtrog:
 		accInputHashCalcFn = func(prevAccInputHash common.Hash, index int) *common.Hash {
 			return utils.CalculatePreEtrogAccInputHash(prevAccInputHash, decodedSequence.Batches[index].Transactions, decodedSequence.Batches[index].GlobalExitRoot, decodedSequence.Batches[index].Timestamp, decodedSequence.L2Coinbase)
@@ -31,6 +31,11 @@ func GetAccInputDataCalcFunction(l1InfoRoot common.Hash, decodedSequenceInteerfa
 	case *SequenceBatchesCalldataElderberry:
 		accInputHashCalcFn = func(prevAccInputHash common.Hash, index int) *common.Hash {
 			return utils.CalculateEtrogAccInputHash(prevAccInputHash, decodedSequence.Batches[index].Transactions, l1InfoRoot, decodedSequence.MaxSequenceTimestamp, decodedSequence.L2Coinbase, decodedSequence.Batches[index].ForcedBlockHashL1)
+		}
+		totalSequenceBatches = len(decodedSequence.Batches)
+	case *SequenceBatchesCalldataBanana:
+		accInputHashCalcFn = func(prevAccInputHash common.Hash, index int) *common.Hash {
+			return utils.CalculateBananaAccInputHash(prevAccInputHash, decodedSequence.Batches[index].Transactions, l1InfoRoot, decodedSequence.MaxSequenceTimestamp, decodedSequence.L2Coinbase, decodedSequence.Batches[index].ForcedBlockHashL1)
 		}
 		totalSequenceBatches = len(decodedSequence.Batches)
 	case *SequenceBatchesCalldataValidiumPreEtrog:
@@ -48,8 +53,13 @@ func GetAccInputDataCalcFunction(l1InfoRoot common.Hash, decodedSequenceInteerfa
 			return utils.CalculateEtrogValidiumAccInputHash(prevAccInputHash, decodedSequence.Batches[index].TransactionsHash, l1InfoRoot, decodedSequence.MaxSequenceTimestamp, decodedSequence.L2Coinbase, decodedSequence.Batches[index].ForcedBlockHashL1)
 		}
 		totalSequenceBatches = len(decodedSequence.Batches)
+	case *SequenceBatchesCalldataValidiumBanana:
+		accInputHashCalcFn = func(prevAccInputHash common.Hash, index int) *common.Hash {
+			return utils.CalculateBananaValidiumAccInputHash(prevAccInputHash, decodedSequence.Batches[index].TransactionHash, l1InfoRoot, decodedSequence.MaxSequenceTimestamp, decodedSequence.L2Coinbase, decodedSequence.Batches[index].ForcedBlockHashL1)
+		}
+		totalSequenceBatches = len(decodedSequence.Batches)
 	default:
-		return nil, 0, fmt.Errorf("unexpected type of decoded sequence calldata: %T", decodedSequenceInteerface)
+		return nil, 0, fmt.Errorf("unexpected type of decoded sequence calldata: %T", decodedSequenceInterface)
 	}
 
 	return accInputHashCalcFn, totalSequenceBatches, nil
@@ -101,9 +111,93 @@ func DecodeSequenceBatchesCalldata(data []byte) (calldata interface{}, err error
 		} else {
 			return decodeElderberryBatchesValidiumCallData(unpackedCalldata), nil
 		}
+	case contracts.SequenceBatchesBanana:
+		if method.Name == sequenceBatchesMethodName {
+			return decodeBananaSequenceBatchesCallData(unpackedCalldata), nil
+		} else {
+			return decodeBananaSequenceBatchesValidiumCallData(unpackedCalldata), nil
+		}
 	default:
 		return nil, fmt.Errorf("no decoder found for method signature: %s", methodSig)
 	}
+}
+
+type SequencedBatchBanana struct {
+	Transactions         []byte
+	ForcedGlobalExitRoot common.Hash
+	ForcedTimestamp      uint64
+	ForcedBlockHashL1    common.Hash
+}
+
+type SequenceBatchesCalldataBanana struct {
+	Batches              []SequencedBatchBanana
+	L2Coinbase           common.Address
+	MaxSequenceTimestamp uint64
+}
+
+func decodeBananaSequenceBatchesCallData(unpackedCalldata map[string]interface{}) *SequenceBatchesCalldataBanana {
+	unpackedbatches := unpackedCalldata["batches"].([]struct {
+		Transactions         []uint8   `json:"transactions"`
+		ForcedGlobalExitRoot [32]uint8 `json:"forcedGlobalExitRoot"`
+		ForcedTimestamp      uint64    `json:"forcedTimestamp"`
+		ForcedBlockHashL1    [32]uint8 `json:"forcedBlockHashL1"`
+	})
+
+	calldata := &SequenceBatchesCalldataBanana{
+		Batches:              make([]SequencedBatchBanana, len(unpackedbatches)),
+		L2Coinbase:           unpackedCalldata["l2Coinbase"].(common.Address),
+		MaxSequenceTimestamp: unpackedCalldata["maxSequenceTimestamp"].(uint64),
+	}
+
+	for i, batch := range unpackedbatches {
+		calldata.Batches[i] = SequencedBatchBanana{
+			Transactions:         batch.Transactions,
+			ForcedGlobalExitRoot: common.BytesToHash(batch.ForcedGlobalExitRoot[:]),
+			ForcedTimestamp:      batch.ForcedTimestamp,
+			ForcedBlockHashL1:    common.BytesToHash(batch.ForcedBlockHashL1[:]),
+		}
+	}
+
+	return calldata
+}
+
+type SequencedBatchValidiumBanana struct {
+	TransactionHash      common.Hash
+	ForcedGlobalExitRoot common.Hash
+	ForcedTimestamp      uint64
+	ForcedBlockHashL1    common.Hash
+}
+
+type SequenceBatchesCalldataValidiumBanana struct {
+	Batches              []SequencedBatchValidiumBanana
+	L2Coinbase           common.Address
+	MaxSequenceTimestamp uint64
+}
+
+func decodeBananaSequenceBatchesValidiumCallData(unpackedCalldata map[string]interface{}) *SequenceBatchesCalldataValidiumBanana {
+	unpackedbatches := unpackedCalldata["batches"].([]struct {
+		TransactionHash      [32]uint8 `json:"transactionHash"`
+		ForcedGlobalExitRoot [32]uint8 `json:"forcedGlobalExitRoot"`
+		ForcedTimestamp      uint64    `json:"forcedTimestamp"`
+		ForcedBlockHashL1    [32]uint8 `json:"forcedBlockHashL1"`
+	})
+
+	calldata := &SequenceBatchesCalldataValidiumBanana{
+		Batches:              make([]SequencedBatchValidiumBanana, len(unpackedbatches)),
+		L2Coinbase:           unpackedCalldata["l2Coinbase"].(common.Address),
+		MaxSequenceTimestamp: unpackedCalldata["maxSequenceTimestamp"].(uint64),
+	}
+
+	for i, batch := range unpackedbatches {
+		calldata.Batches[i] = SequencedBatchValidiumBanana{
+			TransactionHash:      common.BytesToHash(batch.TransactionHash[:]),
+			ForcedGlobalExitRoot: common.BytesToHash(batch.ForcedGlobalExitRoot[:]),
+			ForcedTimestamp:      batch.ForcedTimestamp,
+			ForcedBlockHashL1:    common.BytesToHash(batch.ForcedBlockHashL1[:]),
+		}
+	}
+
+	return calldata
 }
 
 type SequencedBatchElderberry struct {

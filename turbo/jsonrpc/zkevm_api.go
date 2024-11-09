@@ -258,6 +258,16 @@ func (api *ZkEvmAPIImpl) VirtualBatchNumber(ctx context.Context) (hexutil.Uint64
 	}
 
 	if latestSequencedBatch == nil {
+		forkId, err := hermezDb.GetForkId(0)
+		if err != nil {
+			return hexutil.Uint64(0), err
+		}
+
+		// injected batch post etrog must be both virtual and verified
+		if forkId >= uint64(chain.ForkID7Etrog) {
+			return hexutil.Uint64(1), nil
+		}
+
 		return hexutil.Uint64(0), nil
 	}
 
@@ -733,12 +743,12 @@ func (api *ZkEvmAPIImpl) getAccInputHash(ctx context.Context, db SequenceReader,
 		return nil, fmt.Errorf("failed to get old acc input hash for batch %d: %w", prevSequenceBatch, err)
 	}
 
-	decodedSequenceInteerface, err := syncer.DecodeSequenceBatchesCalldata(sequenceBatchesCalldata)
+	decodedSequenceInterface, err := syncer.DecodeSequenceBatchesCalldata(sequenceBatchesCalldata)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode calldata for tx %s: %w", batchSequence.L1TxHash, err)
 	}
 
-	accInputHashCalcFn, totalSequenceBatches, err := syncer.GetAccInputDataCalcFunction(batchSequence.L1InfoRoot, decodedSequenceInteerface)
+	accInputHashCalcFn, totalSequenceBatches, err := syncer.GetAccInputDataCalcFunction(batchSequence.L1InfoRoot, decodedSequenceInterface)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get accInputHash calculation func: %w", err)
 	}
@@ -748,6 +758,9 @@ func (api *ZkEvmAPIImpl) getAccInputHash(ctx context.Context, db SequenceReader,
 	}
 
 	accInputHash = &prevSequenceAccinputHash
+	if prevSequenceBatch == 0 {
+		return
+	}
 	// calculate acc input hash
 	for i := 0; i < int(batchNum-prevSequenceBatch); i++ {
 		accInputHash = accInputHashCalcFn(prevSequenceAccinputHash, i)

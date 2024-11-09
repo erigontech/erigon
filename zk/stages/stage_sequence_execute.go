@@ -429,7 +429,7 @@ func sequencingBatchStep(
 									In this case we make note that we have had a transaction that overflowed and continue attempting to process transactions
 									Once we reach the cap for these attempts we will stop producing blocks and consider the batch done
 							*/
-							if !batchState.hasAnyTransactionsInThisBatch {
+							if !batchState.hasAnyTransactionsInThisBatch && len(batchState.builtBlocks) == 0 {
 								// mark the transaction to be removed from the pool
 								cfg.txPool.MarkForDiscardFromPendingBest(txHash)
 								log.Info(fmt.Sprintf("[%s] single transaction %s cannot fit into batch", logPrefix, txHash))

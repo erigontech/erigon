@@ -207,6 +207,10 @@ func (s *SMT) SetContractStorage(ethAddr string, storage map[string]string, prog
 }
 
 func (s *SMT) SetStorage(ctx context.Context, logPrefix string, accChanges map[libcommon.Address]*accounts.Account, codeChanges map[libcommon.Address]string, storageChanges map[libcommon.Address]map[string]string) ([]*utils.NodeKey, []*utils.NodeValue8, error) {
+	if len(storageChanges) == 0 && len(accChanges) == 0 && len(codeChanges) == 0 {
+		return nil, nil, nil
+	}
+
 	var isDelete bool
 	var err error
 
