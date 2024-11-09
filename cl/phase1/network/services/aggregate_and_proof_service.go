@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/Giulio2002/bls"
@@ -62,9 +61,6 @@ type aggregateAndProofServiceImpl struct {
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
-
-	// set of aggregates that are scheduled for later processing
-	aggregatesScheduledForLaterExecution sync.Map
 }
 
 func NewAggregateAndProofService(
@@ -89,7 +85,6 @@ func NewAggregateAndProofService(
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
 	}
-	go a.loop(ctx)
 	return a
 }
 
@@ -105,11 +100,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	target := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Target
 	slot := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Slot
 	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex
-
-	if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
-		a.scheduleAggregateForLaterProcessing(aggregateAndProof)
-		return ErrIgnore
-	}
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
@@ -354,59 +344,4 @@ func AggregateMessageSignature(
 	}
 
 	return indexedAttestation.Signature[:], signingRoot[:], pubKeys, nil
-}
-
-func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
-	aggregateAndProof *cltypes.SignedAggregateAndProofData,
-) {
-	key, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
-	if err != nil {
-		panic(err)
-	}
-
-	a.aggregatesScheduledForLaterExecution.Store(key, &aggregateJob{
-		aggregate:    aggregateAndProof,
-		creationTime: time.Now(),
-	})
-}
-
-func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
-	ticker := time.NewTicker(attestationJobsIntervalTick)
-	defer ticker.Stop()
-	keysToDel := make([][32]byte, 0)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		keysToDel = keysToDel[:0]
-		a.aggregatesScheduledForLaterExecution.Range(func(key, value any) bool {
-			if a.syncedDataManager.Syncing() {
-				// Discard the job if we can't get the head state
-				keysToDel = append(keysToDel, key.([32]byte))
-				return false
-			}
-			job := value.(*aggregateJob)
-			// check if it has expired
-			if time.Since(job.creationTime) > attestationJobExpiry {
-				keysToDel = append(keysToDel, key.([32]byte))
-				return true
-			}
-			aggregateData := job.aggregate.SignedAggregateAndProof.Message.Aggregate.Data
-			if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
-				return true
-			}
-			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
-				log.Trace("blob sidecar verification failed", "err", err)
-				return true
-			}
-
-			keysToDel = append(keysToDel, key.([32]byte))
-			return true
-		})
-		for _, key := range keysToDel {
-			a.aggregatesScheduledForLaterExecution.Delete(key)
-		}
-	}
 }
