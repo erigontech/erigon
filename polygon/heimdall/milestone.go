@@ -29,7 +29,7 @@ type MilestoneId uint64
 
 // Milestone defines a response object type of bor milestone
 type Milestone struct {
-	Id          MilestoneId // numerical one that we assign in heimdall handler
+	Id          MilestoneId // numerical one that we assign in heimdall client
 	MilestoneId string      // string based in original json response
 	Fields      WaypointFields
 }
