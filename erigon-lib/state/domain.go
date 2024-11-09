@@ -47,6 +47,12 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
+var sortableBuffersPool = sync.Pool{
+	New: func() interface{} {
+		return etl.NewSortableBuffer(etl.BufferOptimalSize)
+	},
+}
+
 // StepsInColdFile - files of this size are completely frozen/immutable.
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 const StepsInColdFile = 64
@@ -1943,7 +1949,11 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 
 	var valsCursor kv.RwCursor
 
-	ancientDomainValsCollector := etl.NewCollector(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), dt.d.logger).LogLvl(log.LvlTrace)
+	sortableBuffer := sortableBuffersPool.Get().(etl.Buffer)
+	sortableBuffer.Reset()
+	defer sortableBuffersPool.Put(sortableBuffer)
+
+	ancientDomainValsCollector := etl.NewCollector(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, sortableBuffer, dt.d.logger).LogLvl(log.LvlTrace)
 	defer ancientDomainValsCollector.Close()
 
 	if dt.d.largeVals {
