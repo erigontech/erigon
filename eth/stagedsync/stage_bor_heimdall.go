@@ -240,10 +240,9 @@ func BorHeimdallForward(
 	defer logTimer.Stop()
 
 	logger.Info(fmt.Sprintf("[%s] Processing sync events...", s.LogPrefix()), "from", lastBlockNum+1, "to", headNumber)
-
 	var nextEventRecord *heimdall.EventRecordWithTime
 
-	// sometimes via config eveents are skipped from particular blocks and
+	// sometimes via config events are skipped from particular blocks and
 	// pushed into the next one, when this happens we need to skip validation
 	// as the times won't match the expected window. In practice it only affects
 	// these blocks: 14949120,14949184, 14953472, 14953536, 14953600, 14953664,
@@ -252,7 +251,22 @@ func BorHeimdallForward(
 	// this becomes more prevalent this will need to be re-thought
 	var skipCount int
 
+	// allow commit every N blocks to avoid long transactions and lost progress
+	// N=1000 is not verified to be most optimal value, but works fine in unit tests
+	var commitBatchLimit = 1_000
+	var commitCnt int
+
+	// newTx==true means a batch has been committed and should init a fresh new tx to handle next batch
+	newTx := false
 	for blockNum = lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
+		if !useExternalTx && newTx {
+			newTx = false
+			tx, err = cfg.db.BeginRw(ctx)
+			if err != nil {
+				return err
+			}
+			chainReader = NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
+		}
 		select {
 		default:
 		case <-logTimer.C:
@@ -283,7 +297,7 @@ func BorHeimdallForward(
 		}
 
 		// Whitelist whitelistService is called to check if the bor chainReader is
-		// on the cannonical chainReader according to milestones
+		// on the canonical chainReader according to milestones
 		if whitelistService != nil && !whitelistService.IsValidChain(blockNum, []*types.Header{header}) {
 			logger.Debug(
 				fmt.Sprintf("[%s] Verification failed for header", s.LogPrefix()),
@@ -350,7 +364,7 @@ func BorHeimdallForward(
 
 			snapInitTime = snapInitTime + time.Since(snapStart)
 
-			if err = persistValidatorSets(
+			err = persistValidatorSets(
 				snap,
 				u,
 				tx,
@@ -363,7 +377,8 @@ func BorHeimdallForward(
 				cfg.snapDb,
 				logger,
 				s.LogPrefix(),
-			); err != nil {
+			)
+			if err != nil {
 				return fmt.Errorf("can't persist validator sets: %w", err)
 			}
 		}
@@ -426,36 +441,44 @@ func BorHeimdallForward(
 		fetchTime += callTime
 		syncEventTime = syncEventTime + time.Since(syncEventStart)
 
-	}
+		commitCnt++
+		if (commitCnt >= commitBatchLimit && !useExternalTx) || blockNum == headNumber {
+			newTx = true
+			if err = s.Update(tx, blockNum); err != nil {
+				return err
+			}
+			lastStateSyncEventID, _, _ = cfg.blockReader.LastEventId(ctx, tx)
 
-	if err = s.Update(tx, headNumber); err != nil {
-		return err
-	}
+			if err = tx.Commit(); err != nil {
+				return err
+			}
 
-	lastStateSyncEventID, _, _ = cfg.blockReader.LastEventId(ctx, tx)
+			logger.Info(
+				fmt.Sprintf("[%s] Sync events", s.LogPrefix()),
+				"progress", blockNum-1,
+				"lastSpanID", lastSpanID,
+				"lastSpanID", lastSpanID,
+				"lastCheckpointId", lastCheckpointId,
+				"lastMilestoneId", lastMilestoneId,
+				"lastStateSyncEventID", lastStateSyncEventID,
+				"total records", eventRecords,
+				"sync event time", syncEventTime,
+				"fetch time", fetchTime,
+				"snap time", snapTime,
+				"waypoint time", waypointTime,
+				"process time", time.Since(processStart),
+			)
 
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
+			// reset metrics
+			commitCnt = 0
+			eventRecords = 0
+			syncEventTime = time.Duration(0)
+			fetchTime = time.Duration(0)
+			snapTime = time.Duration(0)
+			waypointTime = time.Duration(0)
+			processStart = time.Now()
 		}
 	}
-
-	logger.Info(
-		fmt.Sprintf("[%s] Sync events", s.LogPrefix()),
-		"progress", blockNum-1,
-		"lastSpanID", lastSpanID,
-		"lastSpanID", lastSpanID,
-		"lastCheckpointId", lastCheckpointId,
-		"lastMilestoneId", lastMilestoneId,
-		"lastStateSyncEventID", lastStateSyncEventID,
-		"total records", eventRecords,
-		"sync event time", syncEventTime,
-		"fetch time", fetchTime,
-		"snap time", snapTime,
-		"waypoint time", waypointTime,
-		"process time", time.Since(processStart),
-	)
-
 	return
 }
 
