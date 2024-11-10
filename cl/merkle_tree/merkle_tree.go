@@ -226,9 +226,7 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	for i := 0; i < len(m.layers); i++ {
 		// If the destination buffer is too short, extend it
 		if len(m.layers[i]) > cap(other.layers[i]) {
-			tmp := other.layers[i]
 			other.layers[i] = make([]byte, len(m.layers[i]), (len(m.layers[i])*3)/2)
-			copy(other.layers[i], tmp)
 		}
 		// Normalizr the destination length
 		other.layers[i] = other.layers[i][:len(m.layers[i])]
