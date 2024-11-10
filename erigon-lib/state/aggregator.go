@@ -1732,10 +1732,10 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 
 // -- range end
 
-func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	switch name {
-	case kv.AccountsHistory:
-		v, ok, err = ac.d[kv.AccountsDomain].ht.HistorySeek(key, ts, tx)
+func (ac *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
+	switch domain {
+	case kv.AccountsDomain:
+		v, ok, err = ac.d[domain].ht.HistorySeek(key, ts, tx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -1743,37 +1743,13 @@ func (ac *AggregatorRoTx) HistorySeek(name kv.History, key []byte, ts uint64, tx
 			return v, ok, nil
 		}
 		return v, true, nil
-	case kv.StorageHistory:
-		return ac.d[kv.StorageDomain].ht.HistorySeek(key, ts, tx)
-	case kv.CodeHistory:
-		return ac.d[kv.CodeDomain].ht.HistorySeek(key, ts, tx)
-	case kv.CommitmentHistory:
-		return ac.d[kv.CommitmentDomain].ht.HistorySeek(key, ts, tx)
-	case kv.ReceiptHistory:
-		return ac.d[kv.ReceiptDomain].ht.HistorySeek(key, ts, tx)
-	//case kv.GasUsedHistory:
-	//	return ac.d[kv.GasUsedDomain].ht.HistorySeek(key, ts, tx)
 	default:
-		panic(fmt.Sprintf("unexpected: %s", name))
+		return ac.d[domain].ht.HistorySeek(key, ts, tx)
 	}
 }
 
-func (ac *AggregatorRoTx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
-	//TODO: aggTx to store array of histories
-	var domainName kv.Domain
-
-	switch name {
-	case kv.AccountsHistory:
-		domainName = kv.AccountsDomain
-	case kv.StorageHistory:
-		domainName = kv.StorageDomain
-	case kv.CodeHistory:
-		domainName = kv.CodeDomain
-	default:
-		return nil, fmt.Errorf("unexpected history name: %s", name)
-	}
-
-	hr, err := ac.d[domainName].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
+func (ac *AggregatorRoTx) HistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
+	hr, err := ac.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -1844,11 +1820,11 @@ func (ac *AggregatorRoTx) DomainRange(ctx context.Context, tx kv.Tx, domain kv.D
 func (ac *AggregatorRoTx) DomainRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	return ac.d[domain].DomainRangeLatest(tx, from, to, limit)
 }
-func (ac *AggregatorRoTx) DomainGetAsOfFile(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (ac *AggregatorRoTx) GetAsOfFile(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return ac.d[name].GetAsOfFile(key, ts)
 }
 
-func (ac *AggregatorRoTx) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (ac *AggregatorRoTx) GetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return ac.d[name].GetAsOf(key, ts, tx)
 }
 func (ac *AggregatorRoTx) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {

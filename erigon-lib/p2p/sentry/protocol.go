@@ -5,7 +5,7 @@ import (
 )
 
 func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
-	for p := sentryproto.Protocol_ETH65; p <= sentryproto.Protocol_ETH68; p++ {
+	for p := sentryproto.Protocol_ETH67; p <= sentryproto.Protocol_ETH68; p++ {
 		if ids, ok := ProtoIds[p]; ok {
 			if _, ok := ids[m]; ok {
 				return p
@@ -21,38 +21,6 @@ func ProtocolVersion(p sentryproto.Protocol) uint {
 }
 
 var ProtoIds = map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}{
-	sentryproto.Protocol_ETH65: {
-		sentryproto.MessageId_GET_BLOCK_HEADERS_65:             struct{}{},
-		sentryproto.MessageId_BLOCK_HEADERS_65:                 struct{}{},
-		sentryproto.MessageId_GET_BLOCK_BODIES_65:              struct{}{},
-		sentryproto.MessageId_BLOCK_BODIES_65:                  struct{}{},
-		sentryproto.MessageId_GET_NODE_DATA_65:                 struct{}{},
-		sentryproto.MessageId_NODE_DATA_65:                     struct{}{},
-		sentryproto.MessageId_GET_RECEIPTS_65:                  struct{}{},
-		sentryproto.MessageId_RECEIPTS_65:                      struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_HASHES_65:              struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_65:                     struct{}{},
-		sentryproto.MessageId_TRANSACTIONS_65:                  struct{}{},
-		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_65: struct{}{},
-		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_65:       struct{}{},
-		sentryproto.MessageId_POOLED_TRANSACTIONS_65:           struct{}{},
-	},
-	sentryproto.Protocol_ETH66: {
-		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
-		sentryproto.MessageId_BLOCK_HEADERS_66:                 struct{}{},
-		sentryproto.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
-		sentryproto.MessageId_BLOCK_BODIES_66:                  struct{}{},
-		sentryproto.MessageId_GET_NODE_DATA_66:                 struct{}{},
-		sentryproto.MessageId_NODE_DATA_66:                     struct{}{},
-		sentryproto.MessageId_GET_RECEIPTS_66:                  struct{}{},
-		sentryproto.MessageId_RECEIPTS_66:                      struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
-		sentryproto.MessageId_NEW_BLOCK_66:                     struct{}{},
-		sentryproto.MessageId_TRANSACTIONS_66:                  struct{}{},
-		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: struct{}{},
-		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
-		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
-	},
 	sentryproto.Protocol_ETH67: {
 		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
 		sentryproto.MessageId_BLOCK_HEADERS_66:                 struct{}{},

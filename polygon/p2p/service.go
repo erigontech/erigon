@@ -19,103 +19,111 @@ package p2p
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/big"
 
 	"golang.org/x/sync/errgroup"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-//go:generate mockgen -typed=true -source=./service.go -destination=./service_mock.go -package=p2p . Service
-type Service interface {
-	Fetcher
-	MessageListener
-	PeerTracker
-	PeerPenalizer
-	Publisher
-	Run(ctx context.Context) error
-	MaxPeers() int
-}
-
-func NewService(
-	maxPeers int,
-	logger log.Logger,
-	sentryClient sentryproto.SentryClient,
-	statusDataFactory sentry.StatusDataFactory,
-) Service {
-	return newService(maxPeers, defaultFetcherConfig, logger, sentryClient, statusDataFactory, rand.Uint64)
-}
-
-func newService(
-	maxPeers int,
-	fetcherConfig FetcherConfig,
-	logger log.Logger,
-	sentryClient sentryproto.SentryClient,
-	statusDataFactory sentry.StatusDataFactory,
-	requestIdGenerator RequestIdGenerator,
-) *service {
-	peerPenalizer := NewPeerPenalizer(sentryClient)
-	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
-	peerTracker := NewPeerTracker(logger, sentryClient, messageListener)
-	messageSender := NewMessageSender(sentryClient)
-	fetcher := NewFetcher(logger, fetcherConfig, messageListener, messageSender, requestIdGenerator)
+func NewService(maxPeers int, logger log.Logger, sc sentryproto.SentryClient, sdf sentry.StatusDataFactory) *Service {
+	peerPenalizer := NewPeerPenalizer(sc)
+	messageListener := NewMessageListener(logger, sc, sdf, peerPenalizer)
+	peerTracker := NewPeerTracker(logger, sc, messageListener)
+	messageSender := NewMessageSender(sc)
+	var fetcher Fetcher
+	fetcher = NewFetcher(logger, messageListener, messageSender)
 	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
 	fetcher = NewTrackingFetcher(fetcher, peerTracker)
 	publisher := NewPublisher(logger, messageSender, peerTracker)
-	return &service{
-		Fetcher:         fetcher,
-		MessageListener: messageListener,
-		PeerPenalizer:   peerPenalizer,
-		PeerTracker:     peerTracker,
-		Publisher:       publisher,
+	return &Service{
+		fetcher:         fetcher,
+		messageListener: messageListener,
+		peerPenalizer:   peerPenalizer,
+		peerTracker:     peerTracker,
+		publisher:       publisher,
 		maxPeers:        maxPeers,
 	}
 }
 
-type service struct {
-	Fetcher
-	MessageListener
-	PeerPenalizer
-	PeerTracker
-	Publisher
-	maxPeers int
+type Service struct {
+	fetcher         Fetcher
+	messageListener *MessageListener
+	peerPenalizer   *PeerPenalizer
+	peerTracker     *PeerTracker
+	publisher       *Publisher
+	maxPeers        int
 }
 
-func (s *service) Run(ctx context.Context) error {
+func (s *Service) Run(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
-		err := s.MessageListener.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("message listener failed: %w", err)
+		if err := s.messageListener.Run(ctx); err != nil {
+			return fmt.Errorf("message listener failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 	eg.Go(func() error {
-		err := s.PeerTracker.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("peer tracker failed: %w", err)
+		if err := s.peerTracker.Run(ctx); err != nil {
+			return fmt.Errorf("peer tracker failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 	eg.Go(func() error {
-		err := s.Publisher.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("peer publisher failed: %w", err)
+		if err := s.publisher.Run(ctx); err != nil {
+			return fmt.Errorf("peer Publisher failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 
 	return eg.Wait()
 }
 
-func (s *service) MaxPeers() int {
+func (s *Service) MaxPeers() int {
 	return s.maxPeers
+}
+
+func (s *Service) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
+	return s.peerTracker.ListPeersMayHaveBlockNum(blockNum)
+}
+
+func (s *Service) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	return s.fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
+}
+
+func (s *Service) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
+	return s.fetcher.FetchBodies(ctx, headers, peerId, opts...)
+}
+
+func (s *Service) FetchBlocksBackwardsByHash(ctx context.Context, hash libcommon.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Block], error) {
+	return s.fetcher.FetchBlocksBackwardsByHash(ctx, hash, amount, peerId, opts...)
+}
+
+func (s *Service) PublishNewBlock(block *types.Block, td *big.Int) {
+	s.publisher.PublishNewBlock(block, td)
+}
+
+func (s *Service) PublishNewBlockHashes(block *types.Block) {
+	s.publisher.PublishNewBlockHashes(block)
+}
+
+func (s *Service) Penalize(ctx context.Context, peerId *PeerId) error {
+	return s.peerPenalizer.Penalize(ctx, peerId)
+}
+
+func (s *Service) RegisterNewBlockObserver(o polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) polygoncommon.UnregisterFunc {
+	return s.messageListener.RegisterNewBlockObserver(o)
+}
+
+func (s *Service) RegisterNewBlockHashesObserver(o polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) polygoncommon.UnregisterFunc {
+	return s.messageListener.RegisterNewBlockHashesObserver(o)
 }

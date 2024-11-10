@@ -16,18 +16,25 @@
 
 package p2p
 
-import "time"
+import (
+	"math/rand"
+	"time"
+)
 
 var defaultFetcherConfig = FetcherConfig{
-	responseTimeout: 5 * time.Second,
-	retryBackOff:    time.Second,
-	maxRetries:      1,
+	responseTimeout:    5 * time.Second,
+	retryBackOff:       time.Second,
+	maxRetries:         1,
+	requestIdGenerator: rand.Uint64,
 }
 
+type RequestIdGenerator func() uint64
+
 type FetcherConfig struct {
-	responseTimeout time.Duration
-	retryBackOff    time.Duration
-	maxRetries      uint64
+	responseTimeout    time.Duration
+	retryBackOff       time.Duration
+	maxRetries         uint64
+	requestIdGenerator RequestIdGenerator
 }
 
 func (fc FetcherConfig) CopyWithOptions(opts ...FetcherOption) FetcherConfig {
@@ -47,9 +54,23 @@ func WithResponseTimeout(responseTimeout time.Duration) FetcherOption {
 	}
 }
 
+func WithRetryBackOff(retryBackOff time.Duration) FetcherOption {
+	return func(config FetcherConfig) FetcherConfig {
+		config.retryBackOff = retryBackOff
+		return config
+	}
+}
+
 func WithMaxRetries(maxRetries uint64) FetcherOption {
 	return func(config FetcherConfig) FetcherConfig {
 		config.maxRetries = maxRetries
+		return config
+	}
+}
+
+func WithRequestIdGenerator(requestIdGenerator RequestIdGenerator) FetcherOption {
+	return func(config FetcherConfig) FetcherConfig {
+		config.requestIdGenerator = requestIdGenerator
 		return config
 	}
 }
