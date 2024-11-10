@@ -50,7 +50,7 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress libcommon.Address, start 
 		return StorageRangeResult{}, err
 	}
 	defer r.Close()
-	for i := 0; i < maxResult && r.HasNext(); i++ {
+	for len(result.Storage) < maxResult && r.HasNext() {
 		k, v, err := r.Next()
 		if err != nil {
 			return StorageRangeResult{}, err

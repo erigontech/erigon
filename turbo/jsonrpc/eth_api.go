@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -139,7 +140,8 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
-	bridgeReader bridgeReader
+	useBridgeReader bool
+	bridgeReader    bridgeReader
 
 	evmCallTimeout      time.Duration
 	dirs                datadir.Dirs
@@ -173,6 +175,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		receiptsGenerator:   receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
 		borReceiptGenerator: receipts.NewBorGenerator(receiptsCacheLimit, blockReader, engine),
 		dirs:                dirs,
+		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
 		bridgeReader:        bridgeReader,
 	}
 }
@@ -302,7 +305,7 @@ func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumbe
 
 func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {
 	var stateSyncEvents []*types.Message
-	if api.bridgeReader != nil {
+	if api.useBridgeReader {
 		events, err := api.bridgeReader.Events(ctx, blockNum)
 		if err != nil {
 			return nil, err
@@ -395,7 +398,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
-	if base.bridgeReader != nil {
+	if base.useBridgeReader {
 		logger.Info("starting rpc with polygon bridge")
 	}
 

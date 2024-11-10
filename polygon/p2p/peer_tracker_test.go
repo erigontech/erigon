@@ -271,7 +271,7 @@ type peerTrackerTest struct {
 	ctx                context.Context
 	ctxCancel          context.CancelFunc
 	t                  *testing.T
-	peerTracker        PeerTracker
+	peerTracker        *PeerTracker
 	peerProvider       *MockpeerProvider
 	peerEventRegistrar *MockpeerEventRegistrar
 }

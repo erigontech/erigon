@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	erigonlibtypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/core/types"
@@ -765,11 +765,6 @@ func TestFetcherFetchBlockByHashErrMissingBodies(t *testing.T) {
 
 func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetcherTest {
 	ctx, cancel := context.WithCancel(context.Background())
-	fetcherConfig := FetcherConfig{
-		responseTimeout: 200 * time.Millisecond,
-		retryBackOff:    time.Second,
-		maxRetries:      1,
-	}
 	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
 	sentryClient := direct.NewMockSentryClient(ctrl)
@@ -779,7 +774,13 @@ func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetche
 	peerPenalizer := NewPeerPenalizer(sentryClient)
 	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
 	messageSender := NewMessageSender(sentryClient)
-	fetcher := newFetcher(logger, fetcherConfig, messageListener, messageSender, requestIdGenerator)
+	fetcherOpts := []FetcherOption{
+		WithResponseTimeout(200 * time.Millisecond),
+		WithRetryBackOff(time.Second),
+		WithMaxRetries(1),
+		WithRequestIdGenerator(requestIdGenerator),
+	}
+	fetcher := NewFetcher(logger, messageListener, messageSender, fetcherOpts...)
 	return &fetcherTest{
 		ctx:                  ctx,
 		ctxCancel:            cancel,
@@ -796,10 +797,10 @@ type fetcherTest struct {
 	ctx                  context.Context
 	ctxCancel            context.CancelFunc
 	t                    *testing.T
-	fetcher              *fetcher
+	fetcher              *FetcherBase
 	logger               log.Logger
 	sentryClient         *direct.MockSentryClient
-	messageListener      MessageListener
+	messageListener      *MessageListener
 	requestResponseMocks map[uint64]requestResponseMock
 	peerEvents           chan *delayedMessage[*sentryproto.PeerEvent]
 }
@@ -890,7 +891,7 @@ func (ft *fetcherTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 			}
 
 			return &sentryproto.SentPeers{
-				Peers: []*erigonlibtypes.H512{req.PeerId},
+				Peers: []*typesproto.H512{req.PeerId},
 			}, nil
 		}).
 		AnyTimes()

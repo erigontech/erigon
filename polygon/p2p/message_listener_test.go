@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
 	"github.com/erigontech/erigon-lib/direct"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/rlp"
@@ -62,9 +62,9 @@ func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {
 		unregister := test.messageListener.RegisterBlockHeadersObserver(observer)
 		t.Cleanup(unregister)
 
-		test.inboundMessagesStream <- &delayedMessage[*sentry.InboundMessage]{
-			message: &sentry.InboundMessage{
-				Id:     sentry.MessageId_BLOCK_HEADERS_66,
+		test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+			message: &sentryproto.InboundMessage{
+				Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 				PeerId: peerId.H512(),
 				Data:   newMockBlockHeadersPacket66Bytes(t, 1, 2),
 			},
@@ -82,19 +82,19 @@ func TestMessageListenerRegisterPeerEventObserver(t *testing.T) {
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(message *sentry.PeerEvent) {
+		observer := func(message *sentryproto.PeerEvent) {
 			require.Equal(t, peerId.H512(), message.PeerId)
-			require.Equal(t, sentry.PeerEvent_Connect, message.EventId)
+			require.Equal(t, sentryproto.PeerEvent_Connect, message.EventId)
 			done.Store(true)
 		}
 
 		unregister := test.messageListener.RegisterPeerEventObserver(observer)
 		t.Cleanup(unregister)
 
-		test.peerEventsStream <- &delayedMessage[*sentry.PeerEvent]{
-			message: &sentry.PeerEvent{
+		test.peerEventsStream <- &delayedMessage[*sentryproto.PeerEvent]{
+			message: &sentryproto.PeerEvent{
 				PeerId:  peerId.H512(),
-				EventId: sentry.PeerEvent_Connect,
+				EventId: sentryproto.PeerEvent_Connect,
 			},
 		}
 
@@ -119,9 +119,9 @@ func TestMessageListenerRegisterNewBlockObserver(t *testing.T) {
 		unregister := test.messageListener.RegisterNewBlockObserver(observer)
 		t.Cleanup(unregister)
 
-		test.inboundMessagesStream <- &delayedMessage[*sentry.InboundMessage]{
-			message: &sentry.InboundMessage{
-				Id:     sentry.MessageId_NEW_BLOCK_66,
+		test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+			message: &sentryproto.InboundMessage{
+				Id:     sentryproto.MessageId_NEW_BLOCK_66,
 				PeerId: peerId.H512(),
 				Data:   newMockNewBlockPacketBytes(t),
 			},
@@ -149,9 +149,9 @@ func TestMessageListenerRegisterNewBlockHashesObserver(t *testing.T) {
 		unregister := test.messageListener.RegisterNewBlockHashesObserver(observer)
 		t.Cleanup(unregister)
 
-		test.inboundMessagesStream <- &delayedMessage[*sentry.InboundMessage]{
-			message: &sentry.InboundMessage{
-				Id:     sentry.MessageId_NEW_BLOCK_HASHES_66,
+		test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+			message: &sentryproto.InboundMessage{
+				Id:     sentryproto.MessageId_NEW_BLOCK_HASHES_66,
 				PeerId: peerId.H512(),
 				Data:   newMockNewBlockHashesPacketBytes(t),
 			},
@@ -179,9 +179,9 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 		unregister := test.messageListener.RegisterBlockBodiesObserver(observer)
 		t.Cleanup(unregister)
 
-		test.inboundMessagesStream <- &delayedMessage[*sentry.InboundMessage]{
-			message: &sentry.InboundMessage{
-				Id:     sentry.MessageId_BLOCK_BODIES_66,
+		test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+			message: &sentryproto.InboundMessage{
+				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 				PeerId: peerId.H512(),
 				Data:   newMockBlockBodiesPacketBytes(t, 23, &types.Body{}),
 			},
@@ -209,17 +209,17 @@ func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 		unregister := test.messageListener.RegisterBlockHeadersObserver(observer)
 		t.Cleanup(unregister)
 
-		test.inboundMessagesStream <- &delayedMessage[*sentry.InboundMessage]{
-			message: &sentry.InboundMessage{
-				Id:     sentry.MessageId_BLOCK_HEADERS_66,
+		test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+			message: &sentryproto.InboundMessage{
+				Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 				PeerId: peerId1.H512(),
 				Data:   []byte{'i', 'n', 'v', 'a', 'l', 'i', 'd', '.', 'r', 'l', 'p'},
 			},
 		}
 
-		test.inboundMessagesStream <- &delayedMessage[*sentry.InboundMessage]{
-			message: &sentry.InboundMessage{
-				Id:     sentry.MessageId_BLOCK_HEADERS_66,
+		test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+			message: &sentryproto.InboundMessage{
+				Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 				PeerId: peerId2.H512(),
 				Data:   newMockBlockHeadersPacket66Bytes(t, 1, 1),
 			},
@@ -233,19 +233,20 @@ func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
-	inboundMessagesStream := make(chan *delayedMessage[*sentry.InboundMessage])
-	peerEventsStream := make(chan *delayedMessage[*sentry.PeerEvent])
+	inboundMessagesStream := make(chan *delayedMessage[*sentryproto.InboundMessage])
+	peerEventsStream := make(chan *delayedMessage[*sentryproto.PeerEvent])
 	sentryClient := direct.NewMockSentryClient(ctrl)
-	statusDataFactory := libsentry.StatusDataFactory(func(ctx context.Context) (*sentry.StatusData, error) {
-		return &sentry.StatusData{}, nil
+	statusDataFactory := sentry.StatusDataFactory(func(ctx context.Context) (*sentryproto.StatusData, error) {
+		return &sentryproto.StatusData{}, nil
 	})
+	peerPenalizer := NewPeerPenalizer(sentryClient)
 	return &messageListenerTest{
 		ctx:                   ctx,
 		ctxCancel:             cancel,
 		t:                     t,
 		logger:                logger,
 		sentryClient:          sentryClient,
-		messageListener:       newMessageListener(logger, sentryClient, statusDataFactory, NewPeerPenalizer(sentryClient)),
+		messageListener:       NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer),
 		inboundMessagesStream: inboundMessagesStream,
 		peerEventsStream:      peerEventsStream,
 	}
@@ -257,9 +258,9 @@ type messageListenerTest struct {
 	t                     *testing.T
 	logger                log.Logger
 	sentryClient          *direct.MockSentryClient
-	messageListener       *messageListener
-	inboundMessagesStream chan *delayedMessage[*sentry.InboundMessage]
-	peerEventsStream      chan *delayedMessage[*sentry.PeerEvent]
+	messageListener       *MessageListener
+	inboundMessagesStream chan *delayedMessage[*sentryproto.InboundMessage]
+	peerEventsStream      chan *delayedMessage[*sentryproto.PeerEvent]
 }
 
 // run is needed so that we can properly shut down tests due to how the sentry multi client
@@ -310,7 +311,7 @@ func (mlt *messageListenerTest) mockSentryStreams() {
 	mlt.sentryClient.
 		EXPECT().
 		Messages(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&mockSentryMessagesStream[*sentry.InboundMessage]{
+		Return(&mockSentryMessagesStream[*sentryproto.InboundMessage]{
 			ctx:    mlt.ctx,
 			stream: mlt.inboundMessagesStream,
 		}, nil).
@@ -318,7 +319,7 @@ func (mlt *messageListenerTest) mockSentryStreams() {
 	mlt.sentryClient.
 		EXPECT().
 		PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&mockSentryMessagesStream[*sentry.PeerEvent]{
+		Return(&mockSentryMessagesStream[*sentryproto.PeerEvent]{
 			ctx:    mlt.ctx,
 			stream: mlt.peerEventsStream,
 		}, nil).
@@ -369,23 +370,23 @@ func (s *mockSentryMessagesStream[M]) RecvMsg(msg any) error {
 		}
 
 		switch any(mockMsg.message).(type) {
-		case *sentry.InboundMessage:
-			msg, ok := msg.(*sentry.InboundMessage)
+		case *sentryproto.InboundMessage:
+			msg, ok := msg.(*sentryproto.InboundMessage)
 			if !ok {
 				return errors.New("unexpected msg type")
 			}
 
-			mockMsg := any(mockMsg.message).(*sentry.InboundMessage)
+			mockMsg := any(mockMsg.message).(*sentryproto.InboundMessage)
 			msg.Id = mockMsg.Id
 			msg.Data = mockMsg.Data
 			msg.PeerId = mockMsg.PeerId
-		case *sentry.PeerEvent:
-			msg, ok := msg.(*sentry.PeerEvent)
+		case *sentryproto.PeerEvent:
+			msg, ok := msg.(*sentryproto.PeerEvent)
 			if !ok {
 				return errors.New("unexpected msg type")
 			}
 
-			mockMsg := any(mockMsg.message).(*sentry.PeerEvent)
+			mockMsg := any(mockMsg.message).(*sentryproto.PeerEvent)
 			msg.PeerId = mockMsg.PeerId
 			msg.EventId = mockMsg.EventId
 		default:
@@ -464,7 +465,7 @@ func newMockBlockBodiesPacketBytes(t *testing.T, requestId uint64, bodies ...*ty
 func mockExpectPenalizePeer(t *testing.T, sentryClient *direct.MockSentryClient, peerId *PeerId) {
 	sentryClient.EXPECT().
 		PenalizePeer(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, req *sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
+		DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
 			require.Equal(t, peerId, PeerIdFromH512(req.PeerId))
 			return &emptypb.Empty{}, nil
 		}).
