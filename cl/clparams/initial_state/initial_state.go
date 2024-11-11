@@ -50,7 +50,7 @@ var sepoliaStateSSZ []byte
 //go:embed gnosis.state.ssz
 var gnosisStateSSZ []byte
 
-//go:embed gnosis.state.ssz
+//go:embed chidao.state.ssz
 var chidaoStateSSZ []byte
 
 // Return genesis state
