@@ -46,7 +46,7 @@ import (
 
 func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, notify []string, noVerify bool,
 	heimdallClient heimdall.HeimdallClient, withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
-	logger log.Logger, polygonBridge bridge.Service, heimdallService heimdall.Service,
+	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) consensus.Engine {
 	var eng consensus.Engine
 

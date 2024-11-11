@@ -14,10 +14,20 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package p2p
+package sync
 
-type PeerTrackerOption func(*PeerTracker)
+import "time"
 
-func WithPreservingPeerShuffle(pt *PeerTracker) {
-	pt.peerShuffle = PreservingPeerShuffle
+type BlockDownloaderOption func(downloader *BlockDownloader)
+
+func WithRetryBackOff(retryBackOff time.Duration) BlockDownloaderOption {
+	return func(downloader *BlockDownloader) {
+		downloader.retryBackOff = retryBackOff
+	}
+}
+
+func WithMaxWorkers(maxWorkers int) BlockDownloaderOption {
+	return func(downloader *BlockDownloader) {
+		downloader.maxWorkers = maxWorkers
+	}
 }

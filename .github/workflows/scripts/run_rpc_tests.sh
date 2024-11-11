@@ -35,6 +35,8 @@ disabled_tests=(
     debug_traceBlockByNumber/test_10.tar
     debug_traceBlockByNumber/test_11.tar
     debug_traceBlockByNumber/test_12.tar
+    # modified expected in case of empty rsp
+    debug_storageRangeAt/test_11.json
     # remove this line after https://github.com/erigontech/rpc-tests/pull/281
     parity_getBlockReceipts
     parity_listStorageKeys/test_12.json
@@ -66,7 +68,9 @@ disabled_tests=(
     net_peerCount/test_1.json
     net_version/test_1.json
     txpool_status/test_1.json
-    web3_clientVersion/test_1.json)
+    web3_clientVersion/test_1.json
+    # broken by https://github.com/erigontech/erigon/pull/12642 (@AskAlexSharov will fix)
+    debug_storageRangeAt/test_11.json)
 
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
