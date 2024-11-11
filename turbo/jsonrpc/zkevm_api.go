@@ -764,6 +764,7 @@ func (api *ZkEvmAPIImpl) getAccInputHash(ctx context.Context, db SequenceReader,
 	// calculate acc input hash
 	for i := 0; i < int(batchNum-prevSequenceBatch); i++ {
 		accInputHash = accInputHashCalcFn(prevSequenceAccinputHash, i)
+		prevSequenceAccinputHash = *accInputHash
 	}
 
 	return
