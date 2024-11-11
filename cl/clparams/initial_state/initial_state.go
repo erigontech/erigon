@@ -50,6 +50,9 @@ var sepoliaStateSSZ []byte
 //go:embed gnosis.state.ssz
 var gnosisStateSSZ []byte
 
+//go:embed chiado.state.ssz
+var chiadoStateSSZ []byte
+
 // Return genesis state
 func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
 	_, config := clparams.GetConfigsByNetwork(network)
@@ -69,7 +72,7 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 			return nil, err
 		}
 	case clparams.ChiadoNetwork:
-		if err := returnState.DecodeSSZ(gnosisStateSSZ, int(clparams.Phase0Version)); err != nil {
+		if err := returnState.DecodeSSZ(chiadoStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	case clparams.HoleskyNetwork:
