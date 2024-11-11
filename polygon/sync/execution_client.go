@@ -44,12 +44,12 @@ type ExecutionClient interface {
 	GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error)
 }
 
-type executionClient struct {
-	client executionproto.ExecutionClient
+func newExecutionClient(client executionproto.ExecutionClient) *executionClient {
+	return &executionClient{client}
 }
 
-func NewExecutionClient(client executionproto.ExecutionClient) ExecutionClient {
-	return &executionClient{client}
+type executionClient struct {
+	client executionproto.ExecutionClient
 }
 
 func (e *executionClient) Prepare(ctx context.Context) error {

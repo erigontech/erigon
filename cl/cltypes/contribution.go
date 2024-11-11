@@ -187,6 +187,12 @@ func (agg *SyncContribution) HashSSZ() ([32]byte, error) {
 
 }
 
+type SyncCommitteeMessageWithGossipData struct {
+	SyncCommitteeMessage  *SyncCommitteeMessage
+	GossipData            *sentinel.GossipData
+	ImmediateVerification bool
+}
+
 type SyncCommitteeMessage struct {
 	Slot            uint64            `json:"slot,string"`
 	BeaconBlockRoot libcommon.Hash    `json:"beacon_block_root"`
