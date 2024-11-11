@@ -17,6 +17,7 @@
 package dbg
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,8 +25,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
-	"golang.org/x/net/context"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
