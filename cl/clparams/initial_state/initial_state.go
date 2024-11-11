@@ -51,7 +51,7 @@ var sepoliaStateSSZ []byte
 var gnosisStateSSZ []byte
 
 //go:embed chiado.state.ssz
-var chidaoStateSSZ []byte
+var chiadoStateSSZ []byte
 
 // Return genesis state
 func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
