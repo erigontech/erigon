@@ -72,7 +72,7 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 			return nil, err
 		}
 	case clparams.ChiadoNetwork:
-		if err := returnState.DecodeSSZ(chidaoStateSSZ, int(clparams.Phase0Version)); err != nil {
+		if err := returnState.DecodeSSZ(chiadoStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
 	case clparams.HoleskyNetwork:
