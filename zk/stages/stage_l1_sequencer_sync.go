@@ -64,7 +64,6 @@ func SpawnL1SequencerSyncStage(
 	}
 	if progress == 0 {
 		progress = cfg.zkCfg.L1FirstBlock - 1
-
 	}
 
 	// if the flag is set - wait for that block to be finalized on L1 before continuing
@@ -200,7 +199,7 @@ Loop:
 
 const (
 	injectedBatchLogTransactionStartByte = 128
-	injectedBatchLastGerStartByte        = 31
+	injectedBatchLastGerStartByte        = 32
 	injectedBatchLastGerEndByte          = 64
 	injectedBatchSequencerStartByte      = 76
 	injectedBatchSequencerEndByte        = 96
