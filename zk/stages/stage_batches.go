@@ -66,7 +66,8 @@ type DatastreamClient interface {
 	GetLatestL2Block() (*types.FullL2Block, error)
 	GetProgressAtomic() *atomic.Uint64
 	Start() error
-	Stop()
+	Stop() error
+	PrepUnwind()
 }
 
 type DatastreamReadRunner interface {
@@ -208,7 +209,7 @@ func SpawnStageBatches(
 			log.Info(fmt.Sprintf("[%s] Waiting for at least one new block in datastream", logPrefix), "datastreamBlock", highestDSL2Block.L2BlockNumber, "last processed block", stageProgressBlockNo)
 			newBlockCheckStartTIme = time.Now()
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	log.Debug(fmt.Sprintf("[%s] Highest block in db and datastream", logPrefix), "datastreamBlock", highestDSL2Block.L2BlockNumber, "dbBlock", stageProgressBlockNo)
@@ -630,6 +631,7 @@ func rollback(
 	tx kv.RwTx,
 	u stagedsync.Unwinder,
 ) (uint64, error) {
+	dsQueryClient.PrepUnwind()
 	ancestorBlockNum, ancestorBlockHash, err := findCommonAncestor(eriDb, hermezDb, dsQueryClient, latestDSBlockNum)
 	if err != nil {
 		return 0, err
@@ -746,7 +748,9 @@ func newStreamClient(ctx context.Context, cfg BatchesCfg, latestForkId uint64) (
 			return nil, nil, fmt.Errorf("dsClient.Start: %w", err)
 		}
 		stopFn = func() {
-			dsClient.Stop()
+			if err := dsClient.Stop(); err != nil {
+				log.Warn("Failed to stop datastream client", "err", err)
+			}
 		}
 	} else {
 		dsClient = cfg.dsClient

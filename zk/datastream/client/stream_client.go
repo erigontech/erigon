@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/log/v3"
+	"sync"
 )
 
 type StreamType uint64
@@ -49,7 +50,8 @@ type StreamClient struct {
 
 	// atomic
 	lastWrittenTime      atomic.Int64
-	streaming            atomic.Bool
+	mtxStreaming         *sync.Mutex
+	streaming            bool
 	progress             atomic.Uint64
 	stopReadingToChannel atomic.Bool
 
@@ -58,6 +60,11 @@ type StreamClient struct {
 
 	// keeps track of the latest fork from the stream to assign to l2 blocks
 	currentFork uint64
+
+	// used for testing, during normal execution lots of stop streaming commands are sent
+	// which makes sense for an active server listening for these things but in unit tests
+	// this makes behaviour very unpredictable and hard to test
+	allowStops bool
 }
 
 const (
@@ -83,6 +90,7 @@ func NewClient(ctx context.Context, server string, version int, checkTimeout tim
 		streamType:   StSequencer,
 		entryChan:    make(chan interface{}, 100000),
 		currentFork:  uint64(latestDownloadedForkId),
+		mtxStreaming: &sync.Mutex{},
 	}
 
 	return c
@@ -133,7 +141,9 @@ func (c *StreamClient) GetL2BlockByNumber(blockNum uint64) (fullBLock *types.Ful
 
 			if errors.Is(err, types.ErrAlreadyStarted) {
 				// if the client is already started, we can stop the client and try again
-				c.Stop()
+				if errStop := c.Stop(); errStop != nil {
+					log.Warn("failed to send stop command", "error", errStop)
+				}
 			} else if !errors.Is(err, ErrSocket) {
 				return nil, fmt.Errorf("getL2BlockByNumber: %w", err)
 			}
@@ -142,6 +152,7 @@ func (c *StreamClient) GetL2BlockByNumber(blockNum uint64) (fullBLock *types.Ful
 		time.Sleep(1 * time.Second)
 		connected = c.handleSocketError(err)
 		count++
+		err = nil
 	}
 
 	return fullBLock, nil
@@ -182,6 +193,10 @@ func (c *StreamClient) getL2BlockByNumber(blockNum uint64) (l2Block *types.FullL
 		return nil, fmt.Errorf("expected block number %d but got %d", blockNum, l2Block.L2BlockNumber)
 	}
 
+	if err := c.Stop(); err != nil {
+		return nil, fmt.Errorf("Stop: %w", err)
+	}
+
 	return l2Block, nil
 }
 
@@ -203,16 +218,25 @@ func (c *StreamClient) GetLatestL2Block() (l2Block *types.FullL2Block, err error
 			return nil, ErrFailedAttempts
 		}
 		if connected {
-			if err := c.stopStreamingIfStarted(); err != nil {
-				return nil, fmt.Errorf("stopStreamingIfStarted: %w", err)
+			if err = c.stopStreamingIfStarted(); err != nil {
+				err = fmt.Errorf("stopStreamingIfStarted: %w", err)
+			}
+			if err == nil {
+				if l2Block, err = c.getLatestL2Block(); err == nil {
+					break
+				}
+				err = fmt.Errorf("getLatestL2Block: %w", err)
 			}
 
-			if l2Block, err = c.getLatestL2Block(); err == nil {
-				break
+			if err != nil && !errors.Is(err, ErrSocket) {
+				return nil, err
+			} else if errors.Is(err, types.ErrAlreadyStarted) {
+				// if the client is already started, we can stop the client and try again
+				if errStop := c.Stop(); errStop != nil {
+					log.Warn("failed to send stop command", "error", errStop)
+				}
 			}
-			if !errors.Is(err, ErrSocket) {
-				return nil, fmt.Errorf("getLatestL2Block: %w", err)
-			}
+			err = nil
 		}
 
 		time.Sleep(1 * time.Second)
@@ -222,17 +246,31 @@ func (c *StreamClient) GetLatestL2Block() (l2Block *types.FullL2Block, err error
 	return l2Block, nil
 }
 
+func (c *StreamClient) getStreaming() bool {
+	c.mtxStreaming.Lock()
+	defer c.mtxStreaming.Unlock()
+	return c.streaming
+}
+
+func (c *StreamClient) setStreaming(val bool) {
+	c.mtxStreaming.Lock()
+	defer c.mtxStreaming.Unlock()
+	c.streaming = val
+}
+
 // don't check for errors here, we just need to empty the socket for next reads
 func (c *StreamClient) stopStreamingIfStarted() error {
-	if c.streaming.Load() {
-		c.sendStopCmd()
-		c.streaming.Store(false)
+	if c.getStreaming() {
+		if err := c.sendStopCmd(); err != nil {
+			return fmt.Errorf("sendStopCmd: %w", err)
+		}
+		c.setStreaming(false)
 	}
 
 	// empty the socket buffer
 	for {
-		c.conn.SetReadDeadline(time.Now().Add(100))
-		if _, err := c.readBuffer(100); err != nil {
+		c.conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
+		if _, err := readBuffer(c.conn, 1000 /* arbitrary number*/); err != nil {
 			break
 		}
 	}
@@ -271,6 +309,10 @@ func (c *StreamClient) getLatestL2Block() (l2Block *types.FullL2Block, err error
 		return nil, errors.New("no block found")
 	}
 
+	if err := c.Stop(); err != nil {
+		return nil, fmt.Errorf("Stop: %w", err)
+	}
+
 	return l2Block, nil
 }
 
@@ -294,15 +336,15 @@ func (c *StreamClient) Start() error {
 	return nil
 }
 
-func (c *StreamClient) Stop() {
-	if c.conn == nil {
-		return
+func (c *StreamClient) Stop() error {
+	if c.conn == nil || !c.allowStops {
+		return nil
 	}
 	if err := c.sendStopCmd(); err != nil {
-		log.Warn(fmt.Sprintf("send stop command: %v", err))
+		return fmt.Errorf("sendStopCmd: %w", err)
 	}
-	// c.conn.Close()
-	// c.conn = nil
+
+	return nil
 }
 
 // Command header: Get status
@@ -467,7 +509,7 @@ func (c *StreamClient) handleSocketError(socketErr error) bool {
 // reads entries to the end of the stream
 // at end will wait for new entries to arrive
 func (c *StreamClient) readAllEntriesToChannel() (err error) {
-	c.streaming.Store(true)
+	c.setStreaming(true)
 	c.stopReadingToChannel.Store(false)
 
 	var bookmark *types.BookmarkProto
@@ -501,6 +543,8 @@ func (c *StreamClient) initiateDownloadBookmark(bookmark []byte) (*types.ResultE
 	if err := c.sendBookmarkCmd(bookmark, true); err != nil {
 		return nil, fmt.Errorf("sendBookmarkCmd: %w", err)
 	}
+
+	c.setStreaming(true)
 
 	re, err := c.afterStartCommand()
 	if err != nil {
@@ -944,4 +988,12 @@ func (c *StreamClient) resetReadTimeout() error {
 	}
 
 	return nil
+}
+
+// PrepUnwind handles the state of the client prior to searching to the
+// common ancestor block
+func (c *StreamClient) PrepUnwind() {
+	// this is to ensure that the later call to stop streaming if streaming
+	// is activated.
+	c.setStreaming(true)
 }
