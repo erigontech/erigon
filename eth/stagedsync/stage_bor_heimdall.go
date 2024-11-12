@@ -265,6 +265,7 @@ func BorHeimdallForward(
 			if err != nil {
 				return err
 			}
+			defer tx.Rollback() // rollback nil tx is supported
 			chainReader = NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 		}
 		select {
