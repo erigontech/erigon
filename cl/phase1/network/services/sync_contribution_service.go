@@ -53,6 +53,7 @@ type syncContributionService struct {
 	seenSyncCommitteeContributions map[seenSyncCommitteeContribution]struct{}
 	emitters                       *beaconevents.EventEmitter
 	ethClock                       eth_clock.EthereumClock
+	batchSignatureVerifier         *BatchSignatureVerifier
 	test                           bool
 
 	mu sync.Mutex
@@ -65,6 +66,7 @@ func NewSyncContributionService(
 	syncContributionPool sync_contribution_pool.SyncContributionPool,
 	ethClock eth_clock.EthereumClock,
 	emitters *beaconevents.EventEmitter,
+	batchSignatureVerifier *BatchSignatureVerifier,
 	test bool,
 ) SyncContributionService {
 	return &syncContributionService{
@@ -74,16 +76,17 @@ func NewSyncContributionService(
 		seenSyncCommitteeContributions: make(map[seenSyncCommitteeContribution]struct{}),
 		ethClock:                       ethClock,
 		emitters:                       emitters,
+		batchSignatureVerifier:         batchSignatureVerifier,
 		test:                           test,
 	}
 }
 
 // ProcessMessage processes a sync contribution message
-func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *uint64, signedContribution *cltypes.SignedContributionAndProof) error {
+func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *uint64, signedContribution *cltypes.SignedContributionAndProofWithGossipData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	contributionAndProof := signedContribution.Message
+	contributionAndProof := signedContribution.SignedContributionAndProof.Message
 	selectionProof := contributionAndProof.SelectionProof
 	aggregationBits := contributionAndProof.Contribution.AggregationBits
 
@@ -129,32 +132,74 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 			return ErrIgnore
 		}
 
-		// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
-		if err := verifySyncContributionSelectionProof(headState, contributionAndProof); !s.test && err != nil {
+		// aggregate signatures for later verification
+		aggregateVerificationData, err := s.GetSignaturesOnContributionSignatures(headState, contributionAndProof, signedContribution, subcommiteePubsKeys)
+		if err != nil {
 			return err
 		}
-		// [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid.
-		if err := verifyAggregatorSignatureForSyncContribution(headState, signedContribution); !s.test && err != nil {
-			return err
-		}
-		// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived
-		// from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
-		if err := verifySyncContributionProofAggregatedSignature(headState, contributionAndProof.Contribution, subcommiteePubsKeys); !s.test && err != nil {
-			return err
-		}
-		// mark the valid contribution as seen
-		s.markContributionAsSeen(contributionAndProof)
 
-		// emit contribution_and_proof
-		s.emitters.Operation().SendContributionProof(signedContribution)
-		// add the contribution to the pool
-		err = s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
-		if errors.Is(err, sync_contribution_pool.ErrIsSuperset) {
-			return ErrIgnore
+		aggregateVerificationData.GossipData = signedContribution.GossipData
+
+		// further processing will be done after async signature verification
+		aggregateVerificationData.F = func() {
+
+			// mark the valid contribution as seen
+			s.markContributionAsSeen(contributionAndProof)
+
+			// emit contribution_and_proof
+
+			s.emitters.Operation().SendContributionProof(signedContribution.SignedContributionAndProof)
+			// add the contribution to the pool
+			err = s.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
+			if errors.Is(err, sync_contribution_pool.ErrIsSuperset) {
+				return
+			}
 		}
-		return err
+
+		if signedContribution.ImmediateVerification {
+			return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		}
+
+		// push the signatures to verify asynchronously and run final functions after that.
+		s.batchSignatureVerifier.AsyncVerifySyncContribution(aggregateVerificationData)
+
+		// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
+		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
+		// in BatchVerification function. After validating signatures, if they are valid we will publish the
+		// gossip ourselves or ban the peer which sent that particular invalid signature.
+		return ErrIgnore
 	})
+}
 
+func (s *syncContributionService) GetSignaturesOnContributionSignatures(
+	headState *state.CachingBeaconState,
+	contributionAndProof *cltypes.ContributionAndProof,
+	signedContribution *cltypes.SignedContributionAndProofWithGossipData,
+	subcommiteePubsKeys []libcommon.Bytes48) (*AggregateVerificationData, error) {
+
+	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
+	signature1, signatureRoot1, pubKey1, err := verifySyncContributionSelectionProof(headState, contributionAndProof)
+	if !s.test && err != nil {
+		return nil, err
+	}
+
+	// [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid.
+	signature2, signatureRoot2, pubKey2, err := verifyAggregatorSignatureForSyncContribution(headState, signedContribution.SignedContributionAndProof)
+	if !s.test && err != nil {
+		return nil, err
+	}
+	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived
+	// from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
+	signature3, signatureRoot3, pubKey3, err := verifySyncContributionProofAggregatedSignature(headState, contributionAndProof.Contribution, subcommiteePubsKeys)
+	if !s.test && err != nil {
+		return nil, err
+	}
+
+	return &AggregateVerificationData{
+		Signatures: [][]byte{signature1, signature2, signature3},
+		SignRoots:  [][]byte{signatureRoot1, signatureRoot2, signatureRoot3},
+		Pks:        [][]byte{pubKey1, pubKey2, pubKey3},
+	}, nil
 }
 
 // def get_sync_subcommittee_pubkeys(state: BeaconState, subcommittee_index: uint64) -> Sequence[BLSPubkey]:
@@ -207,7 +252,7 @@ func (s *syncContributionService) markContributionAsSeen(contribution *cltypes.C
 }
 
 // verifySyncContributionProof verifies the sync contribution proof.
-func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contributionAndProof *cltypes.ContributionAndProof) error {
+func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contributionAndProof *cltypes.ContributionAndProof) ([]byte, []byte, []byte, error) {
 	syncAggregatorSelectionData := &cltypes.SyncAggregatorSelectionData{
 		Slot:              contributionAndProof.Contribution.Slot,
 		SubcommitteeIndex: contributionAndProof.Contribution.SubcommitteeIndex,
@@ -216,39 +261,32 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 
 	aggregatorPubKey, err := st.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
 	domain, err := st.GetDomain(st.BeaconConfig().DomainSyncCommitteeSelectionProof, state.GetEpochAtSlot(st.BeaconConfig(), contributionAndProof.Contribution.Slot))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
 	selectionDataRoot, err := fork.ComputeSigningRoot(syncAggregatorSelectionData, domain)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
-	valid, err := bls.Verify(selectionProof[:], selectionDataRoot[:], aggregatorPubKey[:])
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return errors.New("invalid selectionProof signature")
-	}
-	return nil
+	return selectionProof[:], selectionDataRoot[:], aggregatorPubKey[:], nil
 }
 
 // verifySyncContributionProof verifies the contribution aggregated signature.
-func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []libcommon.Bytes48) error {
+func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []libcommon.Bytes48) ([]byte, []byte, []byte, error) {
 	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.Epoch(s))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
 	msg := utils.Sha256(contribution.BeaconBlockRoot[:], domain)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	// only use the ones pertaining to the aggregation bits
 	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
@@ -258,38 +296,28 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 		}
 	}
 
-	valid, err := bls.VerifyAggregate(contribution.Signature[:], msg[:], subCommitteePubsKeys)
+	pubKeys, err := bls.AggregatePublickKeys(subCommitteePubsKeys)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
-	if !valid {
-		return errors.New("invalid signature for aggregate sync contribution")
-	}
-	return nil
+	return contribution.Signature[:], msg[:], pubKeys, nil
 }
 
-func verifyAggregatorSignatureForSyncContribution(s *state.CachingBeaconState, signedContributionAndProof *cltypes.SignedContributionAndProof) error {
+func verifyAggregatorSignatureForSyncContribution(s *state.CachingBeaconState, signedContributionAndProof *cltypes.SignedContributionAndProof) ([]byte, []byte, []byte, error) {
 	contribution := signedContributionAndProof.Message.Contribution
 	domain, err := s.GetDomain(s.BeaconConfig().DomainContributionAndProof, contribution.Slot/s.BeaconConfig().SlotsPerEpoch)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
 	signingRoot, err := fork.ComputeSigningRoot(signedContributionAndProof.Message, domain)
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	aggregatorPubKey, err := s.ValidatorPublicKey(int(signedContributionAndProof.Message.AggregatorIndex))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	valid, err := bls.Verify(signedContributionAndProof.Signature[:], signingRoot[:], aggregatorPubKey[:])
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return errors.New("invalid aggregator signature")
-	}
-	return nil
+	return signedContributionAndProof.Signature[:], signingRoot[:], aggregatorPubKey[:], nil
 }
