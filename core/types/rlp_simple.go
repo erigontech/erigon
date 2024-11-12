@@ -310,6 +310,10 @@ func (buf *encBuffer) EncodeBytes(src []byte) {
 	buf._encodeString(src)
 }
 
+func (buf *encBuffer) Flush(w io.Writer) error {
+	return buf._flush(w)
+}
+
 /* ========================================================
 	Example struct. For testing and demonstration purposes
 ======================================================== */
@@ -355,7 +359,7 @@ func (t *ExampleStruct) encodeRLP(w io.Writer) error {
 
 	// t.EncodeList(buf)
 	EncodeList(t, buf)
-	return buf._flush(w)
+	return buf.Flush(w)
 }
 
 func (t *ExampleStruct) EncodeContents(buf *encBuffer) {
