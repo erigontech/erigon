@@ -202,6 +202,8 @@ If the endpoint is not in the list below, it means this specific endpoint is not
 - zkevm_getProverInput
 - zkevm_getVersionHistory
 - zkevm_getWitness
+- zkevm_getRollupAddress
+- zkevm_getRollupManagerAddress
 - zkevm_isBlockConsolidated
 - zkevm_isBlockVirtualized
 - zkevm_verifiedBatchNumber

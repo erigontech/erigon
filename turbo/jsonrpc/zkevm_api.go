@@ -78,6 +78,8 @@ type ZkEvmAPI interface {
 	GetForkById(ctx context.Context, forkId hexutil.Uint64) (res json.RawMessage, err error)
 	GetForkIdByBatchNumber(ctx context.Context, batchNumber rpc.BlockNumber) (hexutil.Uint64, error)
 	GetForks(ctx context.Context) (res json.RawMessage, err error)
+	GetRollupAddress(ctx context.Context) (res json.RawMessage, err error)
+	GetRollupManagerAddress(ctx context.Context) (res json.RawMessage, err error)
 }
 
 const getBatchWitness = "getBatchWitness"
@@ -1845,4 +1847,26 @@ func (api *ZkEvmAPIImpl) GetForks(ctx context.Context) (res json.RawMessage, err
 	}
 
 	return forksJson, err
+}
+
+func (api *ZkEvmAPIImpl) GetRollupAddress(ctx context.Context) (res json.RawMessage, err error) {
+	rollupAddress := api.config.AddressZkevm
+
+	rollupAddressJson, err := json.Marshal(rollupAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	return rollupAddressJson, err
+}
+
+func (api *ZkEvmAPIImpl) GetRollupManagerAddress(ctx context.Context) (res json.RawMessage, err error) {
+	rollupManagerAddress := api.config.AddressRollup
+
+	rollupManagerAddressJson, err := json.Marshal(rollupManagerAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	return rollupManagerAddressJson, err
 }
