@@ -747,6 +747,16 @@ func (api *ZkEvmAPIImpl) getAccInputHash(ctx context.Context, db SequenceReader,
 		return nil, fmt.Errorf("failed to get %s for batch %d", missing, batchNum)
 	}
 
+	// if we are asking for the injected batch or genesis return 0x0..0
+	if (batchNum == 0 || batchNum == 1) && prevSequence.BatchNo == 0 {
+		return &common.Hash{}, nil
+	}
+
+	// if prev is 0, set to 1 (injected batch)
+	if prevSequence.BatchNo == 0 {
+		prevSequence.BatchNo = 1
+	}
+
 	// get batch range for sequence
 	prevSequenceBatch, currentSequenceBatch := prevSequence.BatchNo, batchSequence.BatchNo
 	// get call data for tx
