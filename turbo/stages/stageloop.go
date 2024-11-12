@@ -403,7 +403,7 @@ func (h *Hook) LastNewBlockSeen(n uint64) {
 	if h == nil || h.notifications == nil {
 		return
 	}
-	h.notifications.LastNewBlockSeen.Store(n)
+	h.notifications.NewLastBlockSeen(n)
 }
 func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	if h == nil {

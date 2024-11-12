@@ -1006,6 +1006,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.LoopBlockLimit,
 			polygonBridge,
 			heimdallService,
+			backend.notifications,
 		)
 
 		// we need to initiate download before the heimdall services start rather than
