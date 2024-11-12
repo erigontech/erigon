@@ -139,10 +139,44 @@ jobs:
             --attest type=provenance,mode=max \
             --sbom=true \
             --platform linux/amd64,linux/arm64 .
+      
+      - name: Cleanup some space
+        run: |
+          df -h
+          sudo rm -drf \
+            /usr/share/dotnet \
+            /usr/share/swift \
+            /usr/local/julia* \
+            /opt/google/chrome \
+            /opt/microsoft/msedge \
+            /opt/microsoft/powershell \
+            /usr/lib/mono \
+            /usr/local/lib/android \
+            /usr/local/share/chromium 
+          echo DEBUG current list of docker images
+          docker image ls
+          echo DEBUG Removing legacy node:1 matching docker images
+          sudo docker image rm $(docker image ls --filter=reference='node:1*' -q)
+          echo DEBUG new disk free output
+          df -h
 
-      - name: test-assertor
-        uses: ./test-kurtosis-assertoor.yml
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
+
+      - name: download kurtosis config - with pectra
+        env:
+          BUILD_VERSION: local-${{ steps.getCommitId.outputs.short_commit_id }}
+        # TODO: update the path to the config file with main branch before PR is merged
+        run: |
+          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/feat/assertor-testing/.github/workflows/kurtosis/config.properties
+          sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.BUILD_VERSION }}#g' kurtosis_config_with_p.yaml > kurtosis_config.yaml
+
+      - name: Run Kurtosis + assertoor tests
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-          checkout_ref: ${{ github.sha }}
-          os: ${{ needs.define_matrix.outputs.os }}
-          docker_build_tag: local-${{ steps.getCommitId.outputs.short_commit_id }}
+            enclave_name: "kurtosis-run-${{ github.run_id }}"
+            ethereum_package_args: "./kurtosis_config.yaml"
+            #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            enclave_dump: false
+
