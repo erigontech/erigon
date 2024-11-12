@@ -22,8 +22,9 @@ import (
 	"errors"
 	"math"
 
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
@@ -149,6 +150,8 @@ func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remo
 		reply.Syncing = true
 		return reply, nil
 	}
+
+	reply.LastNewBlockSeen = highestBlock
 	reorgRange := 8
 
 	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
@@ -157,13 +160,13 @@ func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remo
 		return reply, nil
 	}
 
-	reply.LastNewBlockSeen = highestBlock
 	reply.Stages = make([]*remote.SyncingReply_StageProgress, len(stages.AllStages))
 	for i, stage := range stages.AllStages {
 		progress, err := stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return nil, err
 		}
+		reply.Stages[i] = &remote.SyncingReply_StageProgress{}
 		reply.Stages[i].StageName = string(stage)
 		reply.Stages[i].BlockNumber = progress
 	}

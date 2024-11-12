@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 )
@@ -80,7 +79,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		StageName   string         `json:"stage_name"`
 		BlockNumber hexutil.Uint64 `json:"block_number"`
 	}
-	stagesMap := make([]S, len(stages.AllStages))
+	stagesMap := make([]S, len(reply.Stages))
 	for i, stage := range reply.Stages {
 		stagesMap[i].StageName = stage.StageName
 		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
