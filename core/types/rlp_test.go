@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/rlp"
 )
 
-const RUNS = 100 // for local tests increase this number
+const RUNS = 1 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -414,6 +414,54 @@ func compareBodies(t *testing.T, a, b *Body) error {
 	return nil
 }
 
+func compareExampleStructs(t *testing.T, a, b *ExampleStruct) error {
+
+	if a._bool != b._bool {
+		return fmt.Errorf("_bool mismatch: %v, got: %v", a._bool, b._bool)
+	}
+
+	if a._uint != b._uint {
+		return fmt.Errorf("_uint mismatch: %v, got: %v", a._uint, b._uint)
+	}
+
+	if a._bigInt != nil && b._bigInt == nil {
+		return fmt.Errorf("_bigInt `a` nil mismatch: %v, got: %v", a._bigInt, b._bigInt)
+	}
+	if a._bigInt == nil && b._bigInt != nil {
+		return fmt.Errorf("_bigInt `b` nil mismatch: %v, got: %v", a._bigInt, b._bigInt)
+	}
+	if a._bigInt != nil && b._bigInt != nil {
+		if a._bigInt.Cmp(b._bigInt) != 0 {
+			return fmt.Errorf("_bigInt mismatch: %v, got: %v", a._bigInt, b._bigInt)
+		}
+	}
+
+	// fmt.Println([]byte(a._string), []byte(b._string))
+	// fmt.Println(a._bytes, b._bytes)
+	if len(a._string) != len(b._string) {
+		return fmt.Errorf("len(_string) mismatch: %v, got: %v", len(a._string), len(b._string))
+	}
+	check(t, "ExampleStruct._string", a._string, b._string)
+
+	if len(a._bytes) != len(b._bytes) {
+		return fmt.Errorf("len(_bytes) mismatch: %v, got: %v", len(a._bytes), len(b._bytes))
+	}
+	check(t, "ExampleStruct._bytes", a._bytes, b._bytes)
+
+	if len(a._2Darray) != len(b._2Darray) {
+		return fmt.Errorf("len(_2Darray) mismatch: %v, got: %v", len(a._2Darray), len(a._2Darray))
+	}
+
+	for i := 0; i < len(a._2Darray); i++ {
+		if len(a._2Darray[i]) != len(b._2Darray[i]) {
+			return fmt.Errorf("len(_2Darray[%v]) mismatch: %v, got: %v", i, len(a._2Darray[i]), len(b._2Darray[i]))
+		}
+		check(t, "ExampleStruct._2Darray[i]", a._2Darray[i], b._2Darray[i])
+	}
+
+	return nil
+}
+
 // func TestRawBodyEncodeDecodeRLP(t *testing.T) {
 // 	tr := NewTRand()
 // 	var buf bytes.Buffer
@@ -458,5 +506,65 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		if err := compareBodies(t, enc, dec); err != nil {
 			t.Errorf("error: compareBodies: %v", err)
 		}
+	}
+}
+
+func TestSimpleEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := &ExampleStruct{
+			_bool:   true,
+			_uint:   *tr.RandUint64(),
+			_bigInt: tr.RandBig(),
+			// _uint256: ,
+			_string: string(tr.RandBytes(tr.RandIntInRange(20, 128))),
+			_bytes:  tr.RandBytes(tr.RandIntInRange(20, 128)),
+		}
+
+		n := tr.RandIntInRange(2, 5)
+		enc._2Darray = make([][]byte, n)
+		for i := 0; i < n; i++ {
+			enc._2Darray[i] = append(enc._2Darray[i], tr.RandBytes(tr.RandIntInRange(0, 256))...)
+		}
+
+		buf.Reset()
+		if err := enc.encodeRLP(&buf); err != nil {
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		dec := &ExampleStruct{}
+		if err := dec.decodeRLP(s); err != nil {
+			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		if err := compareExampleStructs(t, enc, dec); err != nil {
+			t.Errorf("error: compareExampleStructs: %v", err)
+		}
+	}
+}
+
+var enc = ExampleStruct{
+	_bool:   true,
+	_uint:   14574322559637061330,
+	_bigInt: big.NewInt(7539289644572858757),
+	// _string: "Lorem ipsum dolor sit amet, consectetur adipiscing elit",
+	_bytes: []byte{24, 194, 219, 106, 226, 74, 167, 246, 164, 192, 108, 19, 32, 107, 94, 244, 82, 144, 104, 12, 219, 230, 27, 100, 179, 119, 12, 246, 220, 82, 246, 52, 30, 72, 235, 77, 85, 94, 11, 50, 85, 186, 68, 26, 109, 224, 135, 214, 14, 221, 17, 79, 252, 31},
+	_2Darray: [][]byte{
+		{143, 140, 213, 113, 255, 222, 243, 68, 54, 5, 229, 248, 124, 97, 220, 251, 192, 166, 30, 217, 148, 216, 23, 116, 57, 204, 238, 144, 47, 79, 228, 227, 222, 40, 66, 136, 200},
+		{185, 126, 200, 124, 78, 89, 210, 207, 204, 137, 167, 140, 50, 46, 222, 236, 108, 163, 79, 68, 169, 129, 98, 154, 133, 19, 250, 254, 222, 23, 159, 98, 252, 91, 107, 96, 79, 174},
+		{60, 99, 99, 225, 242, 89, 206, 183, 39, 202, 239, 172, 205, 117, 230, 169, 62, 255, 169, 82, 134, 11, 92, 168, 173, 248, 227, 157, 32, 6, 155, 2, 251, 82, 73, 240, 172, 68, 91, 188, 35, 218, 164, 218, 163, 62, 37, 16, 182, 134},
+		{90, 158, 213, 191, 12, 68, 177, 240, 235, 37, 156, 131, 86, 138, 207, 157, 75, 58, 239, 168, 210, 55, 192, 19, 90, 110, 151, 204, 182, 147, 176, 137, 19, 120, 42, 183, 117, 105, 148, 214, 60, 10, 26, 186},
+	},
+}
+
+func BenchmarkExampleStructRLPBENCH(b *testing.B) {
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		enc.encodeRLP(&buf)
 	}
 }
