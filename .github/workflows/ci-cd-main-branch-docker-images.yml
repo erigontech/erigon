@@ -86,8 +86,8 @@ jobs:
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
-          make erigon GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
-          erigon"
+          make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
 
       - name: Build for linux/amd64
         run: >
@@ -100,8 +100,8 @@ jobs:
           -w /erigon --entrypoint /bin/bash
           ${{ env.BUILDER_IMAGE }}
           -c "git config --global --add safe.directory /erigon;
-          make erigon GOARCH=amd64 GOAMD64=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb 
-          erigon;
+          make GOARCH=amd64 GOAMD64=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb 
+          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
           find / -name libsilkworm_capi.so -exec install {} /erigon-build \; "
 
       - name: Create archives and checksums
