@@ -1475,7 +1475,7 @@ func TestGetRollupManagerAddress(t *testing.T) {
 	cfgZk := ethconfig.DefaultZkConfig
 	assert.NotNil(cfgZk)
 
-	// Check rollup address of default ZkConfig
+	// Check rollup manager address of default ZkConfig
 	assert.Equal(cfgZk.AddressRollup, common.HexToAddress("0x0"))
 
 	// Modify ZkConfig
