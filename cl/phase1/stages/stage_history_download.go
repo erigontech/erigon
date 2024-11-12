@@ -375,7 +375,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 					continue
 				}
 				if block.Signature != header.Signature {
-					return errors.New("signature mismatch beetwen blob and stored block")
+					return errors.New("signature mismatch between blob and stored block")
 				}
 				return nil
 			}
