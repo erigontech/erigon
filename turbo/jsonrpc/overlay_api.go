@@ -420,7 +420,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	overrideBlockHash = make(map[uint64]common.Hash)
 
 	blockNumber := rpc.BlockNumber(blockNum)
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockNumber: &blockNumber}, tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber_zkevm(rpc.BlockNumberOrHash{BlockNumber: &blockNumber}, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +580,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		end = num
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, nil)
+		latest, _, _, err := rpchelper.GetBlockNumber_zkevm(rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, nil)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -592,7 +592,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 				begin = uint64(fromBlock)
 			} else {
 				blockNum := rpc.BlockNumber(fromBlock)
-				begin, _, _, err = rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNum), tx, api.filters)
+				begin, _, _, err = rpchelper.GetBlockNumber_zkevm(rpc.BlockNumberOrHashWithNumber(blockNum), tx, api.filters)
 				if err != nil {
 					return 0, 0, err
 				}
@@ -606,7 +606,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 				end = uint64(toBlock)
 			} else {
 				blockNum := rpc.BlockNumber(toBlock)
-				end, _, _, err = rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNum), tx, api.filters)
+				end, _, _, err = rpchelper.GetBlockNumber_zkevm(rpc.BlockNumberOrHashWithNumber(blockNum), tx, api.filters)
 				if err != nil {
 					return 0, 0, err
 				}

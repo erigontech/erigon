@@ -848,7 +848,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 
-	blockNumber, blockHash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNumber, blockHash, _, err := rpchelper.GetBlockNumber_zkevm(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -923,7 +923,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(*blockNrOrHash, tx, api.filters)
+	blockNumber, hash, _, err := rpchelper.GetBlockNumber_zkevm(*blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -1095,7 +1095,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.filters)
+	blockNumber, hash, _, err := rpchelper.GetBlockNumber_zkevm(*parentNrOrHash, dbtx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -1141,7 +1141,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.filters)
+	blockNumber, hash, _, err := rpchelper.GetBlockNumber_zkevm(*parentNrOrHash, dbtx, api.filters)
 	if err != nil {
 		return nil, nil, err
 	}

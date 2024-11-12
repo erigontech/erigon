@@ -58,7 +58,7 @@ func getHeaderByNumber(ctx context.Context, number rpc.BlockNumber, api *BorImpl
 		return block.Header(), nil
 	}
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber_zkevm(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}

@@ -209,7 +209,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(simulateContext.BlockNumber, tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber_zkevm(simulateContext.BlockNumber, tx, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err

@@ -62,7 +62,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	defer func(start time.Time) { log.Trace("Executing EVM callMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(simulateContext.BlockNumber, tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber_zkevm(simulateContext.BlockNumber, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}

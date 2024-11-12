@@ -407,7 +407,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		}
 	}
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber_zkevm(rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}

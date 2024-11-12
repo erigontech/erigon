@@ -56,7 +56,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber_zkevm(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 
 // headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
 func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, api *APIImpl) (*types.Header, error) {
-	_, bNrOrHashHash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters)
+	_, bNrOrHashHash, _, err := rpchelper.GetCanonicalBlockNumber_zkevm(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.Block
 		return block.Header(), nil
 	}
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber_zkevm(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +227,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	engine := api.engine()
 
-	latestCanBlockNumber, latestCanHash, isLatest, err := rpchelper.GetCanonicalBlockNumber(bNrOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	latestCanBlockNumber, latestCanHash, isLatest, err := rpchelper.GetCanonicalBlockNumber_zkevm(bNrOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return 0, err
 	}
@@ -329,7 +329,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, fmt.Errorf("not supported by Erigon3")
 	}
 
-	blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNr, _, _, err := rpchelper.GetBlockNumber_zkevm(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +444,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	engine := api.engine()
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(bNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber_zkevm(bNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}

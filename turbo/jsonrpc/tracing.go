@@ -62,7 +62,7 @@ func (api *PrivateDebugAPIImpl) traceBlock_deprecated(ctx context.Context, block
 		return fmt.Errorf("invalid arguments; neither block nor hash specified")
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber_zkevm(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -307,7 +307,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	engine := api.engine()
 
-	blockNumber, hash, isLatest, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
+	blockNumber, hash, isLatest, err := rpchelper.GetBlockNumber_zkevm(blockNrOrHash, dbtx, api.filters)
 	if err != nil {
 		return fmt.Errorf("get block number: %v", err)
 	}
@@ -405,7 +405,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany_deprecated(ctx context.Context, bu
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(simulateContext.BlockNumber, tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber_zkevm(simulateContext.BlockNumber, tx, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err

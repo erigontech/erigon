@@ -1036,12 +1036,12 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 		return nil, fmt.Errorf("not supported by Erigon3")
 	}
 
-	blockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(startBlockNrOrHash, tx, api.ethApi.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNr, _, _, err := rpchelper.GetCanonicalBlockNumber_zkevm(startBlockNrOrHash, tx, api.ethApi.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
 
-	endBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(endBlockNrOrHash, tx, api.ethApi.filters) // DoCall cannot be executed on non-canonical blocks
+	endBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber_zkevm(endBlockNrOrHash, tx, api.ethApi.filters) // DoCall cannot be executed on non-canonical blocks
 
 	if err != nil {
 		return nil, err
@@ -1635,7 +1635,7 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 		return nil, fmt.Errorf("not supported by Erigon3")
 	}
 
-	blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNr, _, _, err := rpchelper.GetBlockNumber_zkevm(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
