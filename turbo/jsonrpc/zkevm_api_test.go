@@ -1448,3 +1448,41 @@ func TestGetForks(t *testing.T) {
 	assert.Equal(forks[2].Version, "")
 	assert.Equal(forks[2].BlockNumber, hexutil.Uint64(3000))
 }
+
+func TestGetRollupAddress(t *testing.T) {
+	assert := assert.New(t)
+
+	// Init new ZkConfig
+	cfgZk := ethconfig.DefaultZkConfig
+	assert.NotNil(cfgZk)
+
+	// Check rollup address of default ZkConfig
+	assert.Equal(cfgZk.AddressZkevm, common.HexToAddress("0x0"))
+
+	// Modify ZkConfig
+	cfgZk.AddressZkevm = common.HexToAddress("0x1")
+	assert.Equal(cfgZk.AddressZkevm, common.HexToAddress("0x1"))
+	cfgZk.AddressZkevm = common.HexToAddress("0x9f77a1fB020Bf0980b75828e3fbdAB13A1D7824A")
+	assert.Equal(cfgZk.AddressZkevm, common.HexToAddress("0x9f77a1fB020Bf0980b75828e3fbdAB13A1D7824A"))
+	cfgZk.AddressZkevm = common.HexToAddress("0x5F5221e63CC430C00E65cb9D85066f710650faa9")
+	assert.Equal(cfgZk.AddressZkevm, common.HexToAddress("0x5F5221e63CC430C00E65cb9D85066f710650faa9"))
+}
+
+func TestGetRollupManagerAddress(t *testing.T) {
+	assert := assert.New(t)
+
+	// Init new ZkConfig
+	cfgZk := ethconfig.DefaultZkConfig
+	assert.NotNil(cfgZk)
+
+	// Check rollup manager address of default ZkConfig
+	assert.Equal(cfgZk.AddressRollup, common.HexToAddress("0x0"))
+
+	// Modify ZkConfig
+	cfgZk.AddressRollup = common.HexToAddress("0x1")
+	assert.Equal(cfgZk.AddressRollup, common.HexToAddress("0x1"))
+	cfgZk.AddressRollup = common.HexToAddress("0x9f77a1fB020Bf0980b75828e3fbdAB13A1D7824A")
+	assert.Equal(cfgZk.AddressRollup, common.HexToAddress("0x9f77a1fB020Bf0980b75828e3fbdAB13A1D7824A"))
+	cfgZk.AddressRollup = common.HexToAddress("0x5F5221e63CC430C00E65cb9D85066f710650faa9")
+	assert.Equal(cfgZk.AddressRollup, common.HexToAddress("0x5F5221e63CC430C00E65cb9D85066f710650faa9"))
+}
