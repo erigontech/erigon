@@ -592,8 +592,6 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, rpcBatchNumber rp
 				batch.Closed = true
 			}
 		}
-
-		batch.Closed = batchNo <= latestClosedbatchNum
 	}
 
 	// verification - if we can't find one, maybe this batch was verified along with a higher batch number
