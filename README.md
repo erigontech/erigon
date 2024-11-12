@@ -208,6 +208,15 @@ Useful config entries:
 - `zkevm.sync-limit`: This will ensure the network only syncs to a given block height.
 - `debug.timers`: This will enable debug timers in the logs to help with performance tuning. Recording timings of witness generation, etc. at INFO level.
 
+Metrics and pprof configuration flags:
+
+- `metrics:` Enables or disables the metrics collection. Set to true to enable.
+- `metrics.addr`: The address on which the metrics server will listen. Default is "0.0.0.0".
+- `metrics.port`: The port on which the metrics server will listen. Default is 6060.
+- `pprof`: Enables or disables the pprof profiling. Set to true to enable.
+- `pprof.addr`: The address on which the pprof server will listen. Default is "0.0.0.0".
+- `pprof.port`: The port on which the pprof server will listen. Default is 6061.
+
 ***
 
 

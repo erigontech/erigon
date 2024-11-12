@@ -194,6 +194,9 @@ lint:
 	@./erigon-lib/tools/golangci_lint.sh
 	@./erigon-lib/tools/mod_tidy_check.sh
 
+cpu_monitor:
+	@.github/scripts/cpu_monitor.sh
+
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
 	go clean -cache

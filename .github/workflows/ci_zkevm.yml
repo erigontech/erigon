@@ -117,6 +117,23 @@ jobs:
         run: | 
           kurtosis run --enclave cdk-v1 --image-download always . '{"args": {"data_availability_mode": "${{ matrix.da-mode }}", "cdk_erigon_node_image": "cdk-erigon:local"}}'
 
+      - name: Run process with CPU monitoring
+        working-directory: ./cdk-erigon
+        run: |
+          # Start monitoring in background
+          bash ./.github/scripts/cpu_monitor.sh &
+          monitor_pid=$!
+
+          # Wait for 30 seconds
+          sleep 30
+
+          # Stop monitoring and get analysis
+          kill -TERM $monitor_pid
+          wait $monitor_pid || {
+            echo "CPU usage exceeded threshold!"
+            exit 1
+          }
+
       - name: Monitor verified batches
         working-directory: ./kurtosis-cdk
         shell: bash
