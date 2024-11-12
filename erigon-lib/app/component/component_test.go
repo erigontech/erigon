@@ -2,9 +2,11 @@ package component_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/app/component"
+	liblog "github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -200,7 +202,7 @@ func TestComponentLifecycle(t *testing.T) {
 		component.WithDependencies(d1, d2, d3))
 
 	require.Nil(t, err)
-	require.NotNil(t, c1)
+	require.NotNil(t, c2)
 	require.Equal(t, "root:c2", c2.Id().String())
 
 	err = c2.Activate(context.Background())
@@ -228,4 +230,182 @@ func TestComponentLifecycle(t *testing.T) {
 	require.Equal(t, component.Deactivated, d.State())
 	require.Equal(t, component.Deactivated, c1.State())
 	require.Equal(t, component.Deactivated, c.State())
+}
+
+func TestConfigre(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	p := component.NewMockConfigurable(ctrl)
+	p.EXPECT().
+		Configure(gomock.Any(), gomock.Any()).
+		Return(nil).
+		Times(2)
+
+	c, err := component.NewComponent[component.MockConfigurable](context.Background(),
+		component.WithProvider(p))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:mockconfigurable", c.Id().String())
+
+	err = c.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err := c.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Active, c.State())
+
+	err = c.Configure(context.Background())
+	require.Nil(t, err)
+	require.Equal(t, component.Active, c.State())
+
+	err = c.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Deactivated, c.State())
+
+	p1 := component.NewMockConfigurable(ctrl)
+	p1.EXPECT().
+		Configure(gomock.Any(), gomock.Any()).
+		Return(nil).
+		Times(1)
+
+	c1, err := component.NewComponent[component.MockConfigurable](context.Background(),
+		component.WithProvider(p1))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:mockconfigurable", c.Id().String())
+
+	err = c1.Configure(context.Background())
+	require.Nil(t, err)
+	require.Equal(t, component.Configured, c1.State())
+
+	err = c1.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c1.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Active, c1.State())
+}
+
+func TestDomainLifecycle(t *testing.T) {
+	dom, err := component.NewComponentDomain(context.Background(), "domain")
+	require.Nil(t, err)
+	require.NotNil(t, dom)
+	require.Equal(t, "root:domain", dom.Id().String())
+
+	ctrl := gomock.NewController(t)
+	c, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithDependentDomain(dom),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+
+	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d)
+	require.Equal(t, "root:d", d.Id().String())
+
+	c1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithDependentDomain(dom),
+		component.WithId("c1"),
+		component.WithProvider(mockProvider(ctrl, 1)),
+		component.WithDependencies(d))
+	require.Nil(t, err)
+	require.NotNil(t, c1)
+	require.Equal(t, "root:c1", c1.Id().String())
+
+	d1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d1"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d1)
+	require.Equal(t, "root:d1", d1.Id().String())
+
+	d2, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d2"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d2)
+	require.Equal(t, "root:d2", d2.Id().String())
+
+	d3, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d3"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d3)
+	require.Equal(t, "root:d3", d3.Id().String())
+
+	c2, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithDependentDomain(dom),
+		component.WithId("c2"),
+		component.WithProvider(mockProvider(ctrl, 1)),
+		component.WithDependencies(d1, d2, d3))
+	require.Nil(t, err)
+	require.NotNil(t, c2)
+	require.Equal(t, "root:c2", c2.Id().String())
+
+	err = dom.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err := dom.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Active, dom.State())
+	require.Equal(t, component.Active, d1.State())
+	require.Equal(t, component.Active, d2.State())
+	require.Equal(t, component.Active, d3.State())
+	require.Equal(t, component.Active, d.State())
+	require.Equal(t, component.Active, c1.State())
+	require.Equal(t, component.Active, c2.State())
+	require.Equal(t, component.Active, c.State())
+
+	err = dom.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = dom.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Deactivated, dom.State())
+	require.Equal(t, component.Deactivated, d1.State())
+	require.Equal(t, component.Deactivated, d2.State())
+	require.Equal(t, component.Deactivated, d3.State())
+	require.Equal(t, component.Deactivated, d.State())
+	require.Equal(t, component.Deactivated, c1.State())
+	require.Equal(t, component.Deactivated, c2.State())
+	require.Equal(t, component.Deactivated, c.State())
+}
+
+func TestLogger(t *testing.T) {
+	liblog.Root().SetHandler(
+		liblog.FuncHandler(func(r *liblog.Record) error {
+			require.True(t, strings.HasPrefix(r.Msg, "[component:root:provider]"))
+			require.False(t, strings.HasSuffix(r.Msg, " "))
+			return nil
+		}))
+
+	component.LogLevel(liblog.LvlTrace)
+
+	c, err := component.NewComponent[provider](context.Background())
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:provider", c.Id().String())
+
+	c.Activate(context.Background())
+	c.AwaitState(context.Background(), component.Active)
+}
+
+func TestContext(t *testing.T) {
+}
+
+func TestEvents(t *testing.T) {
+}
+
+func TestAddRemoveDeps(t *testing.T) {
 }

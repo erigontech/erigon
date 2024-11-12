@@ -195,6 +195,7 @@ type logger struct {
 	label      string
 	labelParts []string
 	ctx        []interface{}
+	parent     *logger
 	logger     log.Logger
 }
 
@@ -203,11 +204,7 @@ func NewLogger(level log.Lvl, labels []string, ctx []interface{}) Logger {
 }
 
 func (l *logger) New(ctx ...any) log.Logger {
-	parent := l.logger
-	if parent == nil {
-		parent = log.GetDefaultLogger()
-	}
-	return &logger{ctx: ctx, level: l.level, labelParts: l.labelParts, logger: parent.New()}
+	return &logger{ctx: ctx, level: l.level, labelParts: l.labelParts, parent: l}
 }
 
 func (l *logger) GetHandler() log.Handler {
@@ -254,52 +251,84 @@ func (l *logger) GetLabels() []string {
 }
 
 func (l *logger) Trace(msg string, ctx ...interface{}) {
-	l.Log(log.LvlTrace, msg, ctx...)
+	l.log(log.LvlTrace, msg, ctx...)
 }
 
 func (l *logger) Debug(msg string, ctx ...interface{}) {
-	l.Log(log.LvlDebug, msg, ctx...)
+	l.log(log.LvlDebug, msg, ctx...)
 }
 
 func (l *logger) Info(msg string, ctx ...interface{}) {
-	l.Log(log.LvlInfo, msg, ctx...)
+	l.log(log.LvlInfo, msg, ctx...)
 }
 
 func (l *logger) Warn(msg string, ctx ...interface{}) {
-	l.Log(log.LvlWarn, msg, ctx...)
+	l.log(log.LvlWarn, msg, ctx...)
 }
 
 func (l *logger) Error(msg string, ctx ...interface{}) {
-	l.Log(log.LvlError, msg, ctx...)
+	l.log(log.LvlError, msg, ctx...)
 }
 
 func (l *logger) Crit(msg string, ctx ...interface{}) {
-	l.Log(log.LvlCrit, msg, ctx...)
+	l.log(log.LvlCrit, msg, ctx...)
 }
 
 func (l *logger) Log(level log.Lvl, msg string, ctx ...interface{}) {
-	l.RLock()
-	enabled := l.level >= level
-	l.RUnlock()
-	if enabled {
+	l.log(log.LvlCrit, msg, ctx...)
+}
+
+func labelParts(l *logger) []string {
+	var parentParts []string
+	if l.parent != nil {
+		parentParts = labelParts(l.parent)
+	}
+	return append(parentParts, l.labelParts...)
+}
+
+func ctxParts(l *logger) []any {
+	var parentCtx []any
+	if l.parent != nil {
+		parentCtx = ctxParts(l.parent)
+	}
+	return append(parentCtx, l.ctx...)
+}
+
+func logProvider(l *logger) log.Logger {
+	if logger := l.logger; logger != nil {
+		return logger
+	}
+	if l.parent != nil {
+		return logProvider(l.parent)
+	}
+	return log.GetDefaultLogger()
+}
+
+func (l *logger) log(level log.Lvl, msg string, ctx ...interface{}) {
+	if l.Enabled(level) {
 		l.RLock()
 		label := l.label
-		labelParts := l.labelParts
-		ctx = append(l.ctx, ctx)
+		labelParts := labelParts(l)
+		ctx = append(ctxParts(l), ctx...)
+		logger := logProvider(l)
 		l.RUnlock()
 
 		if label == "" && len(labelParts) > 0 {
-			label = "[" + strings.Join(l.labelParts, ":") + "]"
+			label = "[" + strings.Join(labelParts, ":") + "]"
 			l.Lock()
 			l.label = label
 			l.Unlock()
 		}
 
-		if label != "" {
+		if len(msg) == 0 {
+			msg = label
+		} else if label != "" {
 			msg = strings.Join([]string{label, msg}, " ")
 		}
 
-		log.GetDefaultLogger().Log(level, msg, ctx...)
+		logger.(interface {
+			LogAtDepth(depth int, level log.Lvl, msg string, ctx ...any)
+		}).LogAtDepth(4, level, msg, ctx...)
 	}
 }
 

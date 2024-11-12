@@ -143,13 +143,13 @@ type logger struct {
 	h   *swapHandler
 }
 
-func (l *logger) write(msg string, lvl Lvl, ctx []any) {
+func (l *logger) write(msg string, lvl Lvl, depth int, ctx []any) {
 	l.h.Log(&Record{
 		Time: time.Now(),
 		Lvl:  lvl,
 		Msg:  msg,
 		Ctx:  newContext(l.ctx, ctx),
-		Call: stack.Caller(2),
+		Call: stack.Caller(depth),
 		KeyNames: RecordKeyNames{
 			Time: timeKey,
 			Msg:  msgKey,
@@ -173,32 +173,36 @@ func newContext(prefix []any, suffix []any) []any {
 }
 
 func (l *logger) Trace(msg string, ctx ...any) {
-	l.write(msg, LvlTrace, ctx)
+	l.write(msg, LvlTrace, 2, ctx)
 }
 
 func (l *logger) Debug(msg string, ctx ...any) {
-	l.write(msg, LvlDebug, ctx)
+	l.write(msg, LvlDebug, 2, ctx)
 }
 
 func (l *logger) Info(msg string, ctx ...any) {
-	l.write(msg, LvlInfo, ctx)
+	l.write(msg, LvlInfo, 2, ctx)
 }
 
 func (l *logger) Warn(msg string, ctx ...any) {
-	l.write(msg, LvlWarn, ctx)
+	l.write(msg, LvlWarn, 2, ctx)
 }
 
 func (l *logger) Error(msg string, ctx ...any) {
-	l.write(msg, LvlError, ctx)
+	l.write(msg, LvlError, 2, ctx)
 }
 
 func (l *logger) Crit(msg string, ctx ...any) {
-	l.write(msg, LvlCrit, ctx)
+	l.write(msg, LvlCrit, 2, ctx)
 }
 
 // Log method to route configurable log level
 func (l *logger) Log(level Lvl, msg string, ctx ...any) {
-	l.write(msg, level, ctx)
+	l.write(msg, level, 2, ctx)
+}
+
+func (l *logger) LogAtDepth(depth int, level Lvl, msg string, ctx ...any) {
+	l.write(msg, level, depth, ctx)
 }
 
 func (l *logger) GetHandler() Handler {

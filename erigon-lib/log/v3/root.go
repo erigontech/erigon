@@ -44,37 +44,37 @@ func Root() Logger {
 
 // Trace is a convenient alias for Root().Trace
 func Trace(msg string, ctx ...interface{}) {
-	root.write(msg, LvlTrace, ctx)
+	root.write(msg, LvlTrace, 2, ctx)
 }
 
 // Debug is a convenient alias for Root().Debug
 func Debug(msg string, ctx ...interface{}) {
-	root.write(msg, LvlDebug, ctx)
+	root.write(msg, LvlDebug, 2, ctx)
 }
 
 // Info is a convenient alias for Root().Info
 func Info(msg string, ctx ...interface{}) {
-	root.write(msg, LvlInfo, ctx)
+	root.write(msg, LvlInfo, 2, ctx)
 }
 
 // Warn is a convenient alias for Root().Warn
 func Warn(msg string, ctx ...interface{}) {
-	root.write(msg, LvlWarn, ctx)
+	root.write(msg, LvlWarn, 2, ctx)
 }
 
 // Error is a convenient alias for Root().Error
 func Error(msg string, ctx ...interface{}) {
-	root.write(msg, LvlError, ctx)
+	root.write(msg, LvlError, 2, ctx)
 }
 
 // Crit is a convenient alias for Root().Crit
 func Crit(msg string, ctx ...interface{}) {
-	root.write(msg, LvlCrit, ctx)
+	root.write(msg, LvlCrit, 2, ctx)
 }
 
 // Log method to route configurable log level
 func Log(level Lvl, msg string, ctx ...interface{}) {
-	root.write(msg, level, ctx)
+	root.write(msg, level, 2, ctx)
 }
 
 // SetRootHandler recreates root logger and set h as multihandler along with existed root handler

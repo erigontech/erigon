@@ -355,6 +355,7 @@ type component struct {
 	dependents      relations
 	dependencies    relations
 	provider        interface{}
+	log             app.Logger
 }
 
 func WithName(name string) app.Option {
@@ -427,6 +428,7 @@ func NewComponent[P any](context context.Context, options ...app.Option) (Compon
 		RWMutex: sync.RWMutex{},
 		context: context,
 		state:   Instantiated,
+		log:     log,
 	}
 
 	var opts componentOptions
@@ -485,6 +487,9 @@ func NewComponent[P any](context context.Context, options ...app.Option) (Compon
 			c.AddDependency(dependency)
 		}
 	}
+
+	c.log = log.New().(app.Logger)
+	c.log.SetLabels(c.Id().String())
 
 	return typedComponent[P]{c}, nil
 }
@@ -546,8 +551,8 @@ func (c *component) setState(state State, locked bool) {
 		previousState := c.state
 		c.state = state
 
-		if log.DebugEnabled() {
-			log.Debug("", "provider", app.LogInstance(c.provider), "state", state.String())
+		if c.log.DebugEnabled() {
+			c.log.Debug("", "provider", app.LogInstance(c.provider), "state", state.String())
 		}
 		c.ServiceBus().Post(newComponentStateChanged(c, state, previousState))
 	}
@@ -644,10 +649,10 @@ func (c *component) InstanceId() string {
 var activationMutex = sync.Mutex{}
 
 func (c *component) Configure(ctx context.Context, options ...app.Option) error {
-	return c.configure(ctx, false, func(context.Context, *component, error) {}, options...)
+	return c.configure(ctx, true, false, func(context.Context, *component, error) {}, options...)
 }
 
-func (c *component) configure(ctx context.Context, activationLocked bool, onActivity onActivity, options ...app.Option) error {
+func (c *component) configure(ctx context.Context, force bool, activationLocked bool, onActivity onActivity, options ...app.Option) error {
 	if !activationLocked {
 		activationMutex.Lock()
 		defer activationMutex.Unlock()
@@ -660,8 +665,8 @@ func (c *component) configure(ctx context.Context, activationLocked bool, onActi
 		var errs []error
 
 		for _, dependency := range c.dependencies {
-			if !dependency.State().IsConfigured() {
-				if dependency.State() == Instantiated ||
+			if force || !dependency.State().IsConfigured() {
+				if force || dependency.State() == Instantiated ||
 					dependency.State() == Unknown {
 					if dependency.isConfigurable() {
 						err := func() (err error) {
@@ -676,7 +681,7 @@ func (c *component) configure(ctx context.Context, activationLocked bool, onActi
 								}
 							}()
 
-							return asComponent(dependency).configure(ctx, true, func(context.Context, *component, error) {}, options...)
+							return asComponent(dependency).configure(ctx, force, true, func(context.Context, *component, error) {}, options...)
 						}()
 
 						if err != nil {
@@ -700,7 +705,7 @@ func (c *component) configure(ctx context.Context, activationLocked bool, onActi
 		return err
 	}
 
-	if !c.State().IsConfigured() {
+	if force || !c.State().IsConfigured() {
 		if err := c.configureProvider(ctx, onActivity, options...); err != nil {
 			return err
 		}
@@ -714,8 +719,10 @@ func (c *component) configureProvider(ctx context.Context, onActivity onActivity
 	defer c.Unlock()
 
 	if configurable, ok := c.provider.(Configurable); ok {
-		if err := configurable.Configure(ctx, append(c.options, options...)...); err != nil {
-			return err
+		if _, ok := c.provider.(*componentDomain); !ok {
+			if err := configurable.Configure(ctx, append(c.options, options...)...); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -799,8 +806,10 @@ func (c *component) initializeProvider(ctx context.Context, onActivity onActivit
 	defer c.Unlock()
 
 	if configurable, ok := c.provider.(Initializable); ok {
-		if err := configurable.Initialize(ctx, append(c.options, options...)...); err != nil {
-			return err
+		if _, ok := c.provider.(*componentDomain); !ok {
+			if err := configurable.Initialize(ctx, append(c.options, options...)...); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -821,7 +830,7 @@ func (c *component) activate(ctx context.Context, onActivity onActivity) error {
 		activationMutex.Lock()
 		defer activationMutex.Unlock()
 
-		if err := c.configure(ctx, true, onActivity); err != nil {
+		if err := c.configure(ctx, false, true, onActivity); err != nil {
 			return err
 		}
 
@@ -862,8 +871,8 @@ func (c *component) activate(ctx context.Context, onActivity onActivity) error {
 
 func (c *component) activateDependencies(ctx context.Context, activationList []*component, onActivity onActivity) {
 	if len(activationList) == 0 {
-		if log.TraceEnabled() {
-			log.Trace("Activated", "component", app.LogInstance(c))
+		if c.log.TraceEnabled() {
+			c.log.Trace("Activated", "component", app.LogInstance(c))
 		}
 		c.onDependenciesActive(ctx, onActivity)
 	} else {
@@ -883,8 +892,8 @@ func (c *component) activateDependencies(ctx context.Context, activationList []*
 					}
 				}()
 
-				if log.TraceEnabled() {
-					log.Trace("Activating",
+				if c.log.TraceEnabled() {
+					c.log.Trace("Activating",
 						"component", app.LogInstance(c),
 						"dependency", app.LogInstance(dependency))
 				}
@@ -901,8 +910,8 @@ func (c *component) activateDependencies(ctx context.Context, activationList []*
 		}
 
 		err := wg.Wait()
-		if log.TraceEnabled() {
-			log.Trace("Activated dependencies",
+		if c.log.TraceEnabled() {
+			c.log.Trace("Activated dependencies",
 				"domain", app.LogInstance(c))
 		}
 		if err != nil {
@@ -1076,6 +1085,9 @@ func (c *component) setDomain(cm *componentDomain, domainLocked bool) error {
 		if cm != nil {
 			if c.id != nil {
 				c.id, _ = cm.NewId(context.Background(), c.id.Value())
+				if c.log != nil {
+					c.log.SetLabels(c.id.String())
+				}
 			}
 			cm.addDependency(c, domainLocked)
 

@@ -41,6 +41,13 @@ func init() {
 
 type ComponentDomain interface {
 	Id() app.Id
+
+	State() State
+	AwaitState(ctx context.Context, state State) (State, error)
+
+	Activate(ctx context.Context, handler ...ActivityHandler[ComponentDomain]) error
+	Deactivate(ctx context.Context, handler ...ActivityHandler[ComponentDomain]) error
+
 	ServiceBus() *event.ServiceBus
 	Post(args ...interface{})
 	Register(fns ...interface{}) (err error)
@@ -169,6 +176,22 @@ func NewComponentDomain(context context.Context, id string, options ...app.Optio
 
 func (cd *componentDomain) Id() app.Id {
 	return cd.component.Id()
+}
+
+func (cd *componentDomain) Activate(ctx context.Context, handler ...ActivityHandler[ComponentDomain]) error {
+	return cd.activate(ctx, func(ctx context.Context, c *component, err error) {
+		if len(handler) > 0 {
+			handler[0].OnActivity(ctx, typedComponent[ComponentDomain]{cd.component}, c.State(), err)
+		}
+	})
+}
+
+func (cd *componentDomain) Deactivate(ctx context.Context, handler ...ActivityHandler[ComponentDomain]) error {
+	return cd.component.deactivate(ctx, func(ctx context.Context, c *component, err error) {
+		if len(handler) > 0 {
+			handler[0].OnActivity(ctx, typedComponent[ComponentDomain]{cd.component}, c.State(), err)
+		}
+	})
 }
 
 // Exec executes a task in the mamagers workerpool.  This is primarily used for event processing
