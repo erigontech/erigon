@@ -140,19 +140,17 @@ func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remo
 	reply := &remote.SyncingReply{
 		CurrentBlock:     currentBlock,
 		FrozenBlocks:     frozenBlocks,
-		LastNewBlockSeen: math.MaxUint64,
+		LastNewBlockSeen: highestBlock,
+		Syncing:          true,
 	}
 
 	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
 	if highestBlock == 0 {
-		reply.Syncing = true
 		return reply, nil
 	}
 
-	reply.LastNewBlockSeen = highestBlock
-	reorgRange := 8
-
 	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
+	reorgRange := 8
 	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
 		reply.Syncing = false
 		return reply, nil
