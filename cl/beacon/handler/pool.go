@@ -355,27 +355,28 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 		}
 
 		for _, subnet := range publishingSubnets {
-			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, v); err != nil && !errors.Is(err, services.ErrIgnore) {
+
+			var syncCommitteeMessageWithGossipData cltypes.SyncCommitteeMessageWithGossipData
+			syncCommitteeMessageWithGossipData.SyncCommitteeMessage = v
+			syncCommitteeMessageWithGossipData.ImmediateVerification = true
+
+			encodedSSZ, err := syncCommitteeMessageWithGossipData.SyncCommitteeMessage.EncodeSSZ(nil)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			subnetId := subnet
+			syncCommitteeMessageWithGossipData.GossipData = &sentinel.GossipData{
+				Data:     encodedSSZ,
+				Name:     gossip.TopicNamePrefixSyncCommittee,
+				SubnetId: &subnetId,
+			}
+
+			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, &syncCommitteeMessageWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
 				log.Warn("[Beacon REST] failed to process attestation in syncCommittee service", "err", err)
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
-			}
-			// Broadcast to gossip
-			if a.sentinel != nil {
-				encodedSSZ, err := v.EncodeSSZ(nil)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				subnetId := subnet // this effectively makes a copy
-				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
-					Data:     encodedSSZ,
-					Name:     gossip.TopicNamePrefixSyncCommittee,
-					SubnetId: &subnetId,
-				}); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
 			}
 		}
 	}
@@ -397,32 +398,31 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 		return
 	}
 	failures := []poolingFailure{}
-	var err error
 	for idx, v := range msgs {
 		if bytes.Equal(v.Message.Contribution.AggregationBits, make([]byte, len(v.Message.Contribution.AggregationBits))) {
 			continue // skip empty contributions
 		}
-		if err = a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, v); err != nil && !errors.Is(err, services.ErrIgnore) {
+
+		var signedContributionAndProofWithGossipData cltypes.SignedContributionAndProofWithGossipData
+		signedContributionAndProofWithGossipData.SignedContributionAndProof = v
+		signedContributionAndProofWithGossipData.ImmediateVerification = true
+
+		encodedSSZ, err := signedContributionAndProofWithGossipData.SignedContributionAndProof.EncodeSSZ(nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Warn("[Beacon REST] failed to encode aggregate and proof", "err", err)
+			return
+		}
+
+		signedContributionAndProofWithGossipData.GossipData = &sentinel.GossipData{
+			Data: encodedSSZ,
+			Name: gossip.TopicNameSyncCommitteeContributionAndProof,
+		}
+
+		if err = a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, &signedContributionAndProofWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
 			log.Warn("[Beacon REST] failed to process sync contribution", "err", err)
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
-		}
-		// Broadcast to gossip
-		if a.sentinel != nil {
-			encodedSSZ, err := v.EncodeSSZ(nil)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				log.Warn("[Beacon REST] failed to encode sync contribution", "err", err)
-				return
-			}
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
-				Data: encodedSSZ,
-				Name: gossip.TopicNameSyncCommitteeContributionAndProof,
-			}); err != nil {
-				log.Warn("[Beacon REST] failed to publish gossip", "err", err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
 		}
 	}
 

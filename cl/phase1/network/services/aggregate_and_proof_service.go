@@ -398,7 +398,6 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 				return true
 			}
 			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
-				log.Trace("blob sidecar verification failed", "err", err)
 				return true
 			}
 
