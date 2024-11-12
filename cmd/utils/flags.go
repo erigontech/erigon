@@ -758,6 +758,11 @@ var (
 		Usage: "Seal the batch immediately when detecting a counter overflow",
 		Value: false,
 	}
+	MockWitnessGeneration = cli.BoolFlag{
+		Name:  "zkevm.mock-witness-generation",
+		Usage: "Mock the witness generation",
+		Value: false,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",

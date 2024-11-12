@@ -191,6 +191,12 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 		log.Info("Generating witness timing", "batch", batchNum, "blockFrom", blocks[0].NumberU64(), "blockTo", blocks[len(blocks)-1].NumberU64(), "taken", diff)
 	}()
 
+	areExecutorUrlsEmpty := len(g.zkConfig.ExecutorUrls) == 0 || g.zkConfig.ExecutorUrls[0] == ""
+	shouldGenerateMockWitness := g.zkConfig.MockWitnessGeneration && areExecutorUrlsEmpty
+	if shouldGenerateMockWitness {
+		return g.generateMockWitness(batchNum, blocks, debug)
+	}
+
 	endBlock := blocks[len(blocks)-1].NumberU64()
 	startBlock := blocks[0].NumberU64()
 
@@ -324,7 +330,6 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 		chainReader := stagedsync.NewChainReaderImpl(g.chainCfg, tx, nil, log.New())
 
 		_, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, hermezDb, &prevStateRoot)
-
 		if err != nil {
 			return nil, err
 		}
@@ -361,4 +366,22 @@ func getWitnessBytes(witness *trie.Witness, debug bool) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func (g *Generator) generateMockWitness(batchNum uint64, blocks []*eritypes.Block, debug bool) ([]byte, error) {
+	mockWitness := []byte("mockWitness")
+	startBlockNumber := blocks[0].NumberU64()
+	endBlockNumber := blocks[len(blocks)-1].NumberU64()
+
+	if debug {
+		log.Info(
+			"Generated mock witness",
+			"witness", mockWitness,
+			"batch", batchNum,
+			"startBlockNumber", startBlockNumber,
+			"endBlockNumber", endBlockNumber,
+		)
+	}
+
+	return mockWitness, nil
 }
