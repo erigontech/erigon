@@ -16,7 +16,6 @@ import (
 
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
@@ -92,7 +91,7 @@ type ZkEvmAPIImpl struct {
 	l1Syncer         *syncer.L1Syncer
 	l2SequencerUrl   string
 	semaphores       map[string]chan struct{}
-	datastreamServer *server.DataStreamServer
+	datastreamServer server.DataStreamServer
 }
 
 func (api *ZkEvmAPIImpl) initializeSemaphores(functionLimits map[string]int) {
@@ -113,13 +112,8 @@ func NewZkEvmAPI(
 	zkConfig *ethconfig.Config,
 	l1Syncer *syncer.L1Syncer,
 	l2SequencerUrl string,
-	datastreamServer *datastreamer.StreamServer,
+	dataStreamServer server.DataStreamServer,
 ) *ZkEvmAPIImpl {
-
-	var streamServer *server.DataStreamServer
-	if datastreamServer != nil {
-		streamServer = server.NewDataStreamServer(datastreamServer, zkConfig.Zk.L2ChainId)
-	}
 
 	a := &ZkEvmAPIImpl{
 		ethApi:           base,
@@ -128,7 +122,7 @@ func NewZkEvmAPI(
 		config:           zkConfig,
 		l1Syncer:         l1Syncer,
 		l2SequencerUrl:   l2SequencerUrl,
-		datastreamServer: streamServer,
+		datastreamServer: dataStreamServer,
 	}
 
 	a.initializeSemaphores(map[string]int{

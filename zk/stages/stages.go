@@ -10,6 +10,11 @@ import (
 
 	stages "github.com/ledgerwatch/erigon/eth/stagedsync"
 	stages2 "github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
+)
+
+var (
+	dataStreamServerFactory = server.NewZkEVMDataStreamServerFactory()
 )
 
 func SequencerZkStages(

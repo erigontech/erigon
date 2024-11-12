@@ -14,7 +14,6 @@ import (
 
 	"fmt"
 
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -33,13 +32,13 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/l1infotree"
 	verifier "github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/zk/l1infotree"
 )
 
 const (
@@ -75,8 +74,7 @@ type SequenceBlockCfg struct {
 	syncCfg          ethconfig.Sync
 	genesis          *types.Genesis
 	agg              *libstate.Aggregator
-	stream           *datastreamer.StreamServer
-	datastreamServer *server.DataStreamServer
+	dataStreamServer server.DataStreamServer
 	zk               *ethconfig.Zk
 	miningConfig     *params.MiningConfig
 
@@ -107,7 +105,7 @@ func StageSequenceBlocksCfg(
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	agg *libstate.Aggregator,
-	stream *datastreamer.StreamServer,
+	dataStreamServer server.DataStreamServer,
 	zk *ethconfig.Zk,
 	miningConfig *params.MiningConfig,
 
@@ -135,8 +133,7 @@ func StageSequenceBlocksCfg(
 		historyV3:        historyV3,
 		syncCfg:          syncCfg,
 		agg:              agg,
-		stream:           stream,
-		datastreamServer: server.NewDataStreamServer(stream, chainConfig.ChainID.Uint64()),
+		dataStreamServer: dataStreamServer,
 		zk:               zk,
 		miningConfig:     miningConfig,
 		txPool:           txPool,
@@ -173,10 +170,10 @@ func (sCfg *SequenceBlockCfg) toErigonExecuteBlockCfg() stagedsync.ExecuteBlockC
 
 func validateIfDatastreamIsAheadOfExecution(
 	s *stagedsync.StageState,
-// u stagedsync.Unwinder,
+	// u stagedsync.Unwinder,
 	ctx context.Context,
 	cfg SequenceBlockCfg,
-// historyCfg stagedsync.HistoryCfg,
+	// historyCfg stagedsync.HistoryCfg,
 ) error {
 	roTx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
@@ -189,7 +186,7 @@ func validateIfDatastreamIsAheadOfExecution(
 		return err
 	}
 
-	lastDatastreamBlock, err := cfg.datastreamServer.GetHighestBlockNumber()
+	lastDatastreamBlock, err := cfg.dataStreamServer.GetHighestBlockNumber()
 	if err != nil {
 		return err
 	}

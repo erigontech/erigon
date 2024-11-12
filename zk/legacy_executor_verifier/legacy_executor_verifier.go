@@ -11,8 +11,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -123,7 +121,7 @@ type LegacyExecutorVerifier struct {
 	executorNumber         int
 	cancelAllVerifications atomic.Bool
 
-	streamServer     *server.DataStreamServer
+	streamServer     server.DataStreamServer
 	WitnessGenerator WitnessGenerator
 
 	promises    []*Promise[*VerifierBundle]
@@ -133,12 +131,10 @@ type LegacyExecutorVerifier struct {
 func NewLegacyExecutorVerifier(
 	cfg ethconfig.Zk,
 	executors []*Executor,
-	chainCfg *chain.Config,
 	db kv.RwDB,
 	witnessGenerator WitnessGenerator,
-	stream *datastreamer.StreamServer,
+	streamServer server.DataStreamServer,
 ) *LegacyExecutorVerifier {
-	streamServer := server.NewDataStreamServer(stream, chainCfg.ChainID.Uint64())
 	return &LegacyExecutorVerifier{
 		db:                     db,
 		cfg:                    cfg,
