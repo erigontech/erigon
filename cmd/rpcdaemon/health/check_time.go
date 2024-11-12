@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -20,13 +22,13 @@ func checkTime(
 	if err != nil {
 		return err
 	}
-	timestamp := 0
+	timestamp := uint64(0)
 	if ts, ok := i["timestamp"]; ok {
-		if cs, ok := ts.(uint64); ok {
-			timestamp = int(cs)
+		if cs, ok := ts.(hexutil.Uint64); ok {
+			timestamp = cs.Uint64()
 		}
 	}
-	if timestamp < seconds {
+	if timestamp < uint64(seconds) {
 		return fmt.Errorf("%w: got ts: %d, need: %d", errTimestampTooOld, timestamp, seconds)
 	}
 
