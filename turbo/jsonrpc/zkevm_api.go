@@ -576,6 +576,21 @@ func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, rpcBatchNumber rp
 			return nil, err
 		}
 
+		if batchNo <= latestClosedbatchNum {
+			// simple check if we have a closed batch entry higher than or equal to the one requested
+			batch.Closed = true
+		} else {
+			// we might be missing a batch end along the way so lets double check if we have a block
+			// from the next batch or not
+			_, foundHigher, err := hermezDb.GetLowestBlockInBatch(batchNo + 1)
+			if err != nil {
+				return nil, err
+			}
+			if foundHigher {
+				batch.Closed = true
+			}
+		}
+
 		batch.Closed = batchNo <= latestClosedbatchNum
 	}
 
