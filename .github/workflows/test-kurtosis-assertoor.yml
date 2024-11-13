@@ -73,20 +73,6 @@ jobs:
             ~/go/pkg
             ~/.cache
 
-      # - name: Build for linux/arm64
-      #   run: >
-      #     docker run --platform linux/arm64
-      #     --rm
-      #     -v $(pwd)/erigon:/erigon:ro
-      #     -v ${GITHUB_WORKSPACE}/build-arm64:/erigon-build
-      #     -v ${HOME}/.cache:/root/.cache
-      #     -v ${HOME}/go/pkg/mod:/go/pkg/mod
-      #     -w /erigon --entrypoint /bin/bash
-      #     ${{ env.BUILDER_IMAGE }}
-      #     -c "git config --global --add safe.directory /erigon;
-      #     make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
-      #     erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
-
       - name: Build for linux/amd64
         run: >
           docker run --platform linux/amd64
@@ -101,25 +87,6 @@ jobs:
           make GOARCH=amd64 GOAMD64=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb 
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
           find / -name libsilkworm_capi.so -exec install {} /erigon-build \; "
-
-      - name: Create archives and checksums
-        env:
-          RELEASE_VERSION: "local-${{ steps.getCommitId.outputs.short_commit_id }}"
-        run: |
-          cd ${GITHUB_WORKSPACE}
-          mkdir $GITHUB_WORKSPACE/release
-          for dir in build-*; do
-            cd $dir
-            echo Current directory is $(pwd). Checksum file and archive will be created for this directory
-            # sha256sum * > checksums.txt
-            tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,').tar.gz \
-              --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,')/," .
-            cd -
-          done
-          cd $GITHUB_WORKSPACE/release
-          sha256sum * > ${APPLICATION}_${RELEASE_VERSION}_checksums.txt
-          echo Content of release directory:
-          find . -type f -ls
           
       - name: Build multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ref branch
         env:
