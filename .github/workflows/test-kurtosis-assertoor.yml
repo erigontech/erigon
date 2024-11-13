@@ -1,5 +1,4 @@
-name: CI-CD build and deploy docker images based on the last commit in the main branch
-run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the main branch"
+name: Kurtosis Assertoor GitHub Action
 
 env:
   APPLICATION: "erigon"
