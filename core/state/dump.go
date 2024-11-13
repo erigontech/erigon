@@ -198,7 +198,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 				println("no codehash")
 			}
 			account.CodeHash = hexutility.Bytes(acc.CodeHash.Bytes())
-			println("account codehash:", account.CodeHash.String())
+			println("account codehash1:", account.CodeHash.String())
 
 			if !excludeCode {
 				r, _, err := ttx.DomainGet(kv.CodeDomain, k, nil)
