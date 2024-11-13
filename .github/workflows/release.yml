@@ -238,13 +238,10 @@ jobs:
              ${{ inputs.release_version }} \
              *.tar.gz ${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
 
-  in-case-failure:
+  In-case-of-failure:
+    name: "In case of failure: remove remote git tag pointing to the new version."
     needs: [ build-release ]
-    if: |
-        always() &&
-        !contains(needs.build-release.result, 'success') && 
-        ${{ inputs.perform_release }} && 
-        ${{ (inputs.release_version != '') }}
+    if: always() && !contains(needs.build-release.result, 'success') && ${{ inputs.perform_release }} && ${{ (inputs.release_version != '') }}
     runs-on: ubuntu-22.04
 
     steps:
@@ -256,7 +253,7 @@ jobs:
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
 
-      - name: Remove git tag 
+      - name: Rollback - remove git tag 
         run: |
           cd erigon
           git push -d origin ${{ inputs.release_version }}
