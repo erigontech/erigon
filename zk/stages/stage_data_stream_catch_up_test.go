@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"gotest.tools/v3/assert"
 )
 
 func TestSpawnStageDataStreamCatchup(t *testing.T) {
@@ -95,5 +96,8 @@ func TestSpawnStageDataStreamCatchup(t *testing.T) {
 	require.NoError(t, err)
 
 	// Assert
-
+	// check SaveStageProgress
+	stageProgress, err := stages.GetStageProgress(tx1, stages.DataStream)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(20), stageProgress)
 }
