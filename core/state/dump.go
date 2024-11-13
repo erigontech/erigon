@@ -191,14 +191,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			Storage:  make(map[string]string),
 		}
 		if acc.CodeHash != emptyCodeHash {
-			println("here for account ", libcommon.BytesToAddress(k).Hex())
-			if account.CodeHash != nil {
-				println("account codehash:", acc.CodeHash.String())
-			} else {
-				println("no codehash")
-			}
 			account.CodeHash = hexutility.Bytes(acc.CodeHash.Bytes())
-			//println("account codehash1:", account.CodeHash.String())
 
 			if !excludeCode {
 				r, _, err := ttx.DomainGet(kv.CodeDomain, k, nil)
