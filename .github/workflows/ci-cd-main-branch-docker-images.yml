@@ -136,6 +136,8 @@ jobs:
             --build-arg VERSION=${{ env.BUILD_VERSION }} \
             --build-arg APPLICATION=${{ env.APPLICATION }} \
             -t ${{ env.APPLICATION }}:${{ env.BUILD_VERSION }} \
+            -t ${{ env.APPLICATION }}:latest \
+            -t ${{ env.APPLICATION }} \
             --target release \
             --attest type=provenance,mode=max \
             --sbom=true \
