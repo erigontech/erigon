@@ -172,8 +172,13 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if err != nil {
 			return nil, err
 		}
+		//if maxResults > 0 && numberOfResults >= maxResults {
+		//	nextKey = append(nextKey[:0], k...)
+		//	break
+		//}
 		if maxResults > 0 && numberOfResults >= maxResults {
-			nextKey = append(nextKey[:0], k...)
+			nextKey = make([]byte, len(k))
+			copy(nextKey, k)
 			break
 		}
 		if len(v) == 0 {
