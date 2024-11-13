@@ -65,7 +65,7 @@ jobs:
       - name: download kurtosis config - with pectra
         env:
           BUILD_VERSION: ${{ inputs.docker_build_tag }}
-        # TODO: update the path to the config file with correct branch before PR is merged
+        # TODO: update the path to the config file with main branch before PR is merged
         run: |
           wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/feat/assertor-testing/.github/workflows/kurtosis/config.properties
           sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.BUILD_VERSION }}#g' kurtosis_config_with_p.yaml > kurtosis_config.yaml

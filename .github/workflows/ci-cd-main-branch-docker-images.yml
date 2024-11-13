@@ -29,12 +29,9 @@ jobs:
        id: os
        run: echo 'os=ubuntu-latest' >> "$GITHUB_OUTPUT"
 
-  Build:
+  Build_and_test:
     needs: define_matrix
     runs-on: ${{ needs.define_matrix.outputs.os }}
-    timeout-minutes: 45
-    outputs:
-      docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
 
     steps:
       - name: Fast checkout git repository
@@ -141,22 +138,44 @@ jobs:
             --tag ${{ env.APPLICATION }}:latest \
             --tag ${{ env.APPLICATION }} \
             --target release .
+      
+      - name: Cleanup some space
+        run: |
+          df -h
+          sudo rm -drf \
+            /usr/share/dotnet \
+            /usr/share/swift \
+            /usr/local/julia* \
+            /opt/google/chrome \
+            /opt/microsoft/msedge \
+            /opt/microsoft/powershell \
+            /usr/lib/mono \
+            /usr/local/lib/android \
+            /usr/local/share/chromium 
+          echo DEBUG current list of docker images
+          docker image ls
+          echo DEBUG Removing legacy node:1 matching docker images
+          sudo docker image rm $(docker image ls --filter=reference='node:1*' -q)
+          echo DEBUG new disk free output
+          df -h
 
-      - name: export and print docker build tag
-        id: built_tag_export
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
+
+      - name: download kurtosis config - with pectra
         env:
           BUILD_VERSION: local-${{ steps.getCommitId.outputs.short_commit_id }}
+        # TODO: update the path to the config file with main branch before PR is merged
         run: |
-          echo "docker_build_tag=${{ env.APPLICATION }}:${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
-          echo The following docker images have been published:
-          echo "${{ env.APPLICATION }}:${{ env.BUILD_VERSION }}"
-          echo "${{ env.APPLICATION }}:latest"
-          echo "${{ env.APPLICATION }}"
+          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/feat/assertor-testing/.github/workflows/kurtosis/config.properties
+          sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.APPLICATION }}:${{ env.BUILD_VERSION }}#g' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
-  run-kurtosis-assertoor:
-    needs: [define_matrix, Build]
-    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@feat/assertor-testing
-    with:
-      checkout_ref: ${{ github.sha }}
-      os: ${{ needs.define_matrix.outputs.os }}
-      docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}
+      - name: Run Kurtosis + assertoor tests
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        with:
+            enclave_name: "kurtosis-run-${{ github.run_id }}"
+            ethereum_package_args: "./kurtosis_config.yaml"
+            #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            enclave_dump: false
+
