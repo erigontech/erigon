@@ -4,7 +4,7 @@ run-name: Build release ${{ inputs.release_version }} from branch ${{ inputs.che
 env:
   APPLICATION: "erigon"
   BUILDER_IMAGE: "golang:1.22-bookworm"
-  DOCKER_BASE_IMAGE: "debian:12.7-slim"
+  DOCKER_BASE_IMAGE: "debian:12.8-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -251,7 +251,8 @@ jobs:
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
 
-      - name: Rollback - remove git tag 
+      - name: Rollback - remove git tag ${{ inputs.release_version }}
+        if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         run: |
           cd erigon
           git push -d origin ${{ inputs.release_version }}
