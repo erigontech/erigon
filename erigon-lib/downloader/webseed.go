@@ -378,7 +378,6 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
 			continue
 		}
-		manifestResponse
 		listsOfFiles = append(listsOfFiles, manifestResponse)
 	}
 
