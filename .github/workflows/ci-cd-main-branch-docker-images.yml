@@ -135,9 +135,9 @@ jobs:
             --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
             --build-arg VERSION=${{ env.BUILD_VERSION }} \
             --build-arg APPLICATION=${{ env.APPLICATION }} \
-            -t ${{ env.APPLICATION }}:${{ env.BUILD_VERSION }} \
-            -t ${{ env.APPLICATION }}:latest \
-            -t ${{ env.APPLICATION }} \
+            --tag ${{ env.APPLICATION }}:${{ env.BUILD_VERSION }} \
+            --tag ${{ env.APPLICATION }}:latest \
+            --tag ${{ env.APPLICATION }} \
             --target release \
             --attest type=provenance,mode=max \
             --sbom=true \
