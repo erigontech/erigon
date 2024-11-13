@@ -75,19 +75,19 @@ jobs:
             ~/go/pkg
             ~/.cache
 
-      - name: Build for linux/arm64
-        run: >
-          docker run --platform linux/arm64
-          --rm
-          -v $(pwd)/erigon:/erigon:ro
-          -v ${GITHUB_WORKSPACE}/build-arm64:/erigon-build
-          -v ${HOME}/.cache:/root/.cache
-          -v ${HOME}/go/pkg/mod:/go/pkg/mod
-          -w /erigon --entrypoint /bin/bash
-          ${{ env.BUILDER_IMAGE }}
-          -c "git config --global --add safe.directory /erigon;
-          make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
-          erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
+      # - name: Build for linux/arm64
+      #   run: >
+      #     docker run --platform linux/arm64
+      #     --rm
+      #     -v $(pwd)/erigon:/erigon:ro
+      #     -v ${GITHUB_WORKSPACE}/build-arm64:/erigon-build
+      #     -v ${HOME}/.cache:/root/.cache
+      #     -v ${HOME}/go/pkg/mod:/go/pkg/mod
+      #     -w /erigon --entrypoint /bin/bash
+      #     ${{ env.BUILDER_IMAGE }}
+      #     -c "git config --global --add safe.directory /erigon;
+      #     make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+      #     erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
 
       - name: Build for linux/amd64
         run: >
@@ -142,7 +142,7 @@ jobs:
             --attest type=provenance,mode=max \
             --sbom=true \
             --load \
-            --platform linux/amd64,linux/arm64 .
+            --platform linux/amd64 .
       
       - name: Cleanup some space
         run: |
