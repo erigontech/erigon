@@ -130,7 +130,7 @@ jobs:
         run: |
             cd ${GITHUB_WORKSPACE}/release
             echo "Current directory is $(pwd) ."
-            docker buildx build \
+            docker build \
             --file ${{ github.workspace }}/erigon/${{ env.DOCKERFILE_PATH }} \
             --build-arg RELEASE_DOCKER_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
             --build-arg VERSION=${{ env.BUILD_VERSION }} \
@@ -138,10 +138,7 @@ jobs:
             --tag ${{ env.APPLICATION }}:${{ env.BUILD_VERSION }} \
             --tag ${{ env.APPLICATION }}:latest \
             --tag ${{ env.APPLICATION }} \
-            --target release \
-            --attest type=provenance,mode=max \
-            --sbom=true \
-            --load .
+            --target release .
       
       - name: Cleanup some space
         run: |
