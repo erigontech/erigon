@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -356,7 +357,7 @@ func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, webSeedProviderUR
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, files []string, rootDir string) {
-	fmt.Println("A")
+	fmt.Println("Aaaaaa")
 	listsOfFiles := d.constructListsOfFiles(ctx, d.seeds, files)
 	torrentMap := d.makeTorrentUrls(listsOfFiles)
 	webSeedMap := d.downloadTorrentFilesFromProviders(ctx, rootDir, torrentMap)
@@ -488,6 +489,7 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 }
 
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
+	debug.PrintStack()
 	// allow: host.com/v2/manifest.txt
 	u := webSeedProviderUrl.JoinPath("manifest.txt")
 	{ //do HEAD request with small timeout first
@@ -527,7 +529,6 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	if err != nil {
 		return nil, fmt.Errorf("webseed.http: read: %w, url=%s, ", err, u.String())
 	}
-	fmt.Println(string(b))
 
 	response := snaptype.WebSeedsFromProvider{}
 	fileNames := strings.Split(string(b), "\n")
