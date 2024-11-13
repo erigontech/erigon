@@ -218,6 +218,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	for i, addr := range addrList {
 		account := accountList[i]
 
+		nextKey = make([]byte, len(addr.Bytes()))
+		copy(nextKey, addr.Bytes())
+
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			nextAcc, _ := kv.NextSubtree(addr[:])
