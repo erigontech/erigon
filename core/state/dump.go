@@ -20,6 +20,7 @@
 package state
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -178,7 +179,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		//}
 		if maxResults > 0 && numberOfResults >= maxResults {
 			nextKey = make([]byte, len(k))
-			println("k:", string(k), "v:", string(v))
+			println("k", base64.StdEncoding.EncodeToString(k))
 			copy(nextKey, k)
 			break
 		}
