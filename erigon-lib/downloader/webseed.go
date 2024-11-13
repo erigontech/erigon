@@ -489,7 +489,6 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 }
 
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
-	debug.PrintStack()
 	// allow: host.com/v2/manifest.txt
 	u := webSeedProviderUrl.JoinPath("manifest.txt")
 	{ //do HEAD request with small timeout first
@@ -529,6 +528,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	if err != nil {
 		return nil, fmt.Errorf("webseed.http: read: %w, url=%s, ", err, u.String())
 	}
+	debug.PrintStack()
 
 	response := snaptype.WebSeedsFromProvider{}
 	fileNames := strings.Split(string(b), "\n")
