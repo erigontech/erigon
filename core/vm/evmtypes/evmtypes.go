@@ -84,6 +84,7 @@ type IntraBlockState interface {
 	SetState(common.Address, *common.Hash, uint256.Int)
 	HasLiveAccount(addr common.Address) bool
 	SeenAccount(addr common.Address) bool
+	IsDirtyJournal(addr common.Address) bool
 	HasLiveState(addr common.Address, key *common.Hash) bool
 
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int

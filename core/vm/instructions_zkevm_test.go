@@ -211,3 +211,5 @@ func (ibs TestIntraBlockState) Prepare(rules *chain.Rules, sender, coinbase comm
 func (ibs TestIntraBlockState) Selfdestruct6780(common.Address) {}
 
 func (ibs TestIntraBlockState) SetDisableBalanceInc(disable bool) {}
+
+func (ibs TestIntraBlockState) IsDirtyJournal(addr common.Address) bool { return false }
