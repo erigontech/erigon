@@ -1107,7 +1107,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneExecutionStage(p, tx, cfg, ctx)
+		err = stagedsync.PruneExecutionStage(p, tx, cfg, ctx, logger)
 		if err != nil {
 			return err
 		}
