@@ -177,9 +177,15 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		//	nextKey = append(nextKey[:0], k...)
 		//	break
 		//}
+		println("addr in 1", libcommon.BytesToAddress(k).Hex())
 		if maxResults > 0 && numberOfResults >= maxResults {
 			nextKey = make([]byte, len(k))
 			println("k", base64.StdEncoding.EncodeToString(k))
+			addr, err := base64.StdEncoding.DecodeString("7OccHV8SY/H0OL8pFdGA2HHH7Go=")
+			if err != nil {
+				return nil, err
+			}
+			println("addr", libcommon.BytesToAddress(addr).Hex())
 			copy(nextKey, k)
 			break
 		}
@@ -219,7 +225,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 	for i, addr := range addrList {
 		account := accountList[i]
-
+		println("address in list:", addr.Hex())
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			nextAcc, _ := kv.NextSubtree(addr[:])
