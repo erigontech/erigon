@@ -141,8 +141,7 @@ jobs:
             --target release \
             --attest type=provenance,mode=max \
             --sbom=true \
-            --load \
-            --platform linux/amd64 .
+            --load .
       
       - name: Cleanup some space
         run: |
