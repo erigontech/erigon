@@ -1452,37 +1452,73 @@ func TestGetForks(t *testing.T) {
 func TestGetRollupAddress(t *testing.T) {
 	assert := assert.New(t)
 
-	// Init new ZkConfig
-	cfgZk := ethconfig.DefaultZkConfig
-	assert.NotNil(cfgZk)
+	//////////////
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	contractBackend.Commit()
+	///////////
 
-	// Check rollup address of default ZkConfig
-	assert.Equal(cfgZk.AddressZkevm, common.HexToAddress("0x0"))
+	db := contractBackend.DB()
+	agg := contractBackend.Agg()
 
-	// Modify ZkConfig
-	cfgZk.AddressZkevm = common.HexToAddress("0x1")
-	assert.Equal(cfgZk.AddressZkevm, common.HexToAddress("0x1"))
-	cfgZk.AddressZkevm = common.HexToAddress("0x9f77a1fB020Bf0980b75828e3fbdAB13A1D7824A")
-	assert.Equal(cfgZk.AddressZkevm, common.HexToAddress("0x9f77a1fB020Bf0980b75828e3fbdAB13A1D7824A"))
-	cfgZk.AddressZkevm = common.HexToAddress("0x5F5221e63CC430C00E65cb9D85066f710650faa9")
-	assert.Equal(cfgZk.AddressZkevm, common.HexToAddress("0x5F5221e63CC430C00E65cb9D85066f710650faa9"))
+	baseApi := NewBaseApi(nil, stateCache, contractBackend.BlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout, contractBackend.Engine(), datadir.New(t.TempDir()))
+	ethImpl := NewEthAPI(baseApi, db, nil, nil, nil, 5000000, 100_000, 100_000, &ethconfig.Defaults, false, 100, 100, log.New())
+	var l1Syncer *syncer.L1Syncer
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, 100_000, &ethconfig.Defaults, l1Syncer, "", nil)
+
+	// Call the GetRollupAddress method and check that the result matches the default value.
+	var result common.Address
+	rollupAddress, err := zkEvmImpl.GetRollupAddress(ctx)
+	assert.NoError(err)
+
+	err = json.Unmarshal(rollupAddress, &result)
+	assert.NoError(err)
+	assert.Equal(result, common.HexToAddress("0x0"))
+
+	// Modify the ZkConfig and retry calling the method.
+	zkEvmImpl.config.AddressZkevm = common.HexToAddress("0x1")
+	rollupAddress, err = zkEvmImpl.GetRollupAddress(ctx)
+	assert.NoError(err)
+
+	err = json.Unmarshal(rollupAddress, &result)
+	assert.NoError(err)
+	assert.Equal(result, common.HexToAddress("0x1"))
 }
 
 func TestGetRollupManagerAddress(t *testing.T) {
 	assert := assert.New(t)
 
-	// Init new ZkConfig
-	cfgZk := ethconfig.DefaultZkConfig
-	assert.NotNil(cfgZk)
+	//////////////
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	defer contractBackend.Close()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	contractBackend.Commit()
+	///////////
 
-	// Check rollup manager address of default ZkConfig
-	assert.Equal(cfgZk.AddressRollup, common.HexToAddress("0x0"))
+	db := contractBackend.DB()
+	agg := contractBackend.Agg()
 
-	// Modify ZkConfig
-	cfgZk.AddressRollup = common.HexToAddress("0x1")
-	assert.Equal(cfgZk.AddressRollup, common.HexToAddress("0x1"))
-	cfgZk.AddressRollup = common.HexToAddress("0x9f77a1fB020Bf0980b75828e3fbdAB13A1D7824A")
-	assert.Equal(cfgZk.AddressRollup, common.HexToAddress("0x9f77a1fB020Bf0980b75828e3fbdAB13A1D7824A"))
-	cfgZk.AddressRollup = common.HexToAddress("0x5F5221e63CC430C00E65cb9D85066f710650faa9")
-	assert.Equal(cfgZk.AddressRollup, common.HexToAddress("0x5F5221e63CC430C00E65cb9D85066f710650faa9"))
+	baseApi := NewBaseApi(nil, stateCache, contractBackend.BlockReader(), agg, false, rpccfg.DefaultEvmCallTimeout, contractBackend.Engine(), datadir.New(t.TempDir()))
+	ethImpl := NewEthAPI(baseApi, db, nil, nil, nil, 5000000, 100_000, 100_000, &ethconfig.Defaults, false, 100, 100, log.New())
+	var l1Syncer *syncer.L1Syncer
+	zkEvmImpl := NewZkEvmAPI(ethImpl, db, 100_000, &ethconfig.Defaults, l1Syncer, "", nil)
+
+	// Call the GetRollupManagerAddress method and check that the result matches the default value.
+	var result common.Address
+	rollupManagerAddress, err := zkEvmImpl.GetRollupManagerAddress(ctx)
+	assert.NoError(err)
+
+	err = json.Unmarshal(rollupManagerAddress, &result)
+	assert.NoError(err)
+	assert.Equal(result, common.HexToAddress("0x0"))
+
+	// Modify the ZkConfig and retry calling the method.
+	zkEvmImpl.config.AddressRollup = common.HexToAddress("0x1")
+	rollupManagerAddress, err = zkEvmImpl.GetRollupManagerAddress(ctx)
+	assert.NoError(err)
+
+	err = json.Unmarshal(rollupManagerAddress, &result)
+	assert.NoError(err)
+	assert.Equal(result, common.HexToAddress("0x1"))
 }
