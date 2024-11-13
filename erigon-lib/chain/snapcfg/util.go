@@ -94,6 +94,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
+		if strings.HasPrefix(p.Name, "caplin") {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
+
 		var preferredVersion, minVersion snaptype.Version
 
 		countSep := 0
