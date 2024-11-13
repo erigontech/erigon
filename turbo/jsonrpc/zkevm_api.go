@@ -723,28 +723,34 @@ func (api *ZkEvmAPIImpl) fullTxBlockData(ctx context.Context, tx kv.Tx, hermezDb
 	return batchBlocksJson, batchTransactionsJson, nil
 }
 
-type SequenceReader interface {
-	GetRangeSequencesByBatch(batchNo uint64) (*zktypes.L1BatchInfo, *zktypes.L1BatchInfo, error)
-	GetForkId(batchNo uint64) (uint64, error)
-}
+//type SequenceReader interface {
+//	GetRangeSequencesByBatch(batchNo uint64) (*zktypes.L1BatchInfo, *zktypes.L1BatchInfo, error)
+//	GetForkId(batchNo uint64) (uint64, error)
+//
+//	///  TODO: get the db stuff we need
+//}
 
-func (api *ZkEvmAPIImpl) getAccInputHash(ctx context.Context, db SequenceReader, batchNum uint64) (accInputHash *common.Hash, err error) {
+func (api *ZkEvmAPIImpl) getAccInputHash(ctx context.Context, tx kv.Tx, db hermez_db.HermezDbReader, batchNum uint64) (accInputHash *common.Hash, err error) {
 	// get batch sequence
 	prevSequence, batchSequence, err := db.GetRangeSequencesByBatch(batchNum)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sequence range data for batch %d: %w", batchNum, err)
 	}
 
-	if prevSequence == nil || batchSequence == nil {
-		var missing string
-		if prevSequence == nil && batchSequence == nil {
-			missing = "previous and current batch sequences"
-		} else if prevSequence == nil {
-			missing = "previous batch sequence"
-		} else {
-			missing = "current batch sequence"
+	/*
+		when both are nil (i.e. no data in the L1, we must calculate
+		the entire set of accInputHashes sequentially ourselves
+	*/
+	l1Empty := false
+	if prevSequence == nil && batchSequence == nil {
+		prevSequence = &zktypes.L1BatchInfo{
+			BatchNo: 1,
 		}
-		return nil, fmt.Errorf("failed to get %s for batch %d", missing, batchNum)
+
+		batchSequence = &zktypes.L1BatchInfo{
+			BatchNo: batchNum,
+		}
+		l1Empty = true
 	}
 
 	// if we are asking for the injected batch or genesis return 0x0..0
@@ -759,48 +765,124 @@ func (api *ZkEvmAPIImpl) getAccInputHash(ctx context.Context, db SequenceReader,
 
 	// get batch range for sequence
 	prevSequenceBatch, currentSequenceBatch := prevSequence.BatchNo, batchSequence.BatchNo
-	// get call data for tx
-	l1Transaction, _, err := api.l1Syncer.GetTransaction(batchSequence.L1TxHash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction data for tx %s: %w", batchSequence.L1TxHash, err)
-	}
-	sequenceBatchesCalldata := l1Transaction.GetData()
-	if len(sequenceBatchesCalldata) < 10 {
-		return nil, fmt.Errorf("calldata for tx %s is too short", batchSequence.L1TxHash)
-	}
 
-	currentBatchForkId, err := db.GetForkId(currentSequenceBatch)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get fork id for batch %d: %w", currentSequenceBatch, err)
-	}
+	if !l1Empty {
+		// get call data for tx
+		l1Transaction, _, err := api.l1Syncer.GetTransaction(batchSequence.L1TxHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get transaction data for tx %s: %w", batchSequence.L1TxHash, err)
+		}
+		sequenceBatchesCalldata := l1Transaction.GetData()
+		if len(sequenceBatchesCalldata) < 10 {
+			return nil, fmt.Errorf("calldata for tx %s is too short", batchSequence.L1TxHash)
+		}
 
-	prevSequenceAccinputHash, err := api.GetccInputHash(ctx, currentBatchForkId, prevSequenceBatch)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get old acc input hash for batch %d: %w", prevSequenceBatch, err)
-	}
+		currentBatchForkId, err := db.GetForkId(currentSequenceBatch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get fork id for batch %d: %w", currentSequenceBatch, err)
+		}
 
-	decodedSequenceInterface, err := syncer.DecodeSequenceBatchesCalldata(sequenceBatchesCalldata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode calldata for tx %s: %w", batchSequence.L1TxHash, err)
-	}
+		prevSequenceAccinputHash, err := api.GetccInputHash(ctx, currentBatchForkId, prevSequenceBatch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get old acc input hash for batch %d: %w", prevSequenceBatch, err)
+		}
 
-	accInputHashCalcFn, totalSequenceBatches, err := syncer.GetAccInputDataCalcFunction(batchSequence.L1InfoRoot, decodedSequenceInterface)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get accInputHash calculation func: %w", err)
-	}
+		decodedSequenceInterface, err := syncer.DecodeSequenceBatchesCalldata(sequenceBatchesCalldata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode calldata for tx %s: %w", batchSequence.L1TxHash, err)
+		}
 
-	if totalSequenceBatches == 0 || batchNum-prevSequenceBatch > uint64(totalSequenceBatches) {
-		return nil, fmt.Errorf("batch %d is out of range of sequence calldata", batchNum)
-	}
+		accInputHashCalcFn, totalSequenceBatches, err := syncer.GetAccInputDataCalcFunction(batchSequence.L1InfoRoot, decodedSequenceInterface)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get accInputHash calculation func: %w", err)
+		}
 
-	accInputHash = &prevSequenceAccinputHash
-	if prevSequenceBatch == 0 {
-		return
-	}
-	// calculate acc input hash
-	for i := 0; i < int(batchNum-prevSequenceBatch); i++ {
-		accInputHash = accInputHashCalcFn(prevSequenceAccinputHash, i)
-		prevSequenceAccinputHash = *accInputHash
+		if totalSequenceBatches == 0 || batchNum-prevSequenceBatch > uint64(totalSequenceBatches) {
+			return nil, fmt.Errorf("batch %d is out of range of sequence calldata", batchNum)
+		}
+
+		accInputHash = &prevSequenceAccinputHash
+		if prevSequenceBatch == 0 {
+			return
+		}
+		// calculate acc input hash
+		for i := 0; i < int(batchNum-prevSequenceBatch); i++ {
+			accInputHash = accInputHashCalcFn(prevSequenceAccinputHash, i)
+			prevSequenceAccinputHash = *accInputHash
+		}
+	} else {
+		// l1 is empty
+		// loop the batches from 0-batchNum using the current forkid of the batch to get the accinputhash calculator
+		prevSequenceAccInputHash := common.Hash{}
+		for i := 0; i < int(batchNum-prevSequenceBatch); i++ {
+			currentForkId, err := db.GetForkId(uint64(i))
+			if err != nil {
+				return nil, fmt.Errorf("failed to get fork id for batch %d: %w", i, err)
+			}
+
+			/*
+				required data:
+					- sequencer addr - get current batch, get a block in it and use the coinbase
+					- batch data - construct the batchl2data from the db (think there's already a func to do this somewhere!)
+					- l1info root - from the DB
+					- limit timestamp - from the DB?
+					- forced block hash - nil afaik
+					- batch hash data - how to calculate for validium?
+					- global exit root - get from DB
+					- timestamp - from the DB
+					- batch transaction data - how to calculate for validium?
+			*/
+
+			batchBlockNos, err := db.GetL2BlockNosByBatch(uint64(i))
+			if err != nil {
+				return nil, fmt.Errorf("failed to get batch blocks for batch %d: %w", i, err)
+			}
+			var batchBlocks []*eritypes.Block
+			var coinbase common.Address
+			for in, blockNo := range batchBlockNos {
+				block, err := api.ethApi.BaseAPI.blockByNumberWithSenders(ctx, tx, blockNo)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get block %d: %w", blockNo, err)
+				}
+				if in == 0 {
+					coinbase = block.Coinbase()
+				}
+				batchBlocks = append(batchBlocks, block)
+			}
+			batchL2Data, err := utils.GenerateBatchDataFromDb(tx, &db, batchBlocks, currentForkId)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate batch data for batch %d: %w", i, err)
+			}
+
+			// pre-etrog data
+			ger, err := db.GetBatchGlobalExitRoot(uint64(i))
+			if err != nil {
+				return nil, fmt.Errorf("failed to get global exit root for batch %d: %w", i, err)
+			}
+
+			// etrog data
+			l1InfoRoot := db.GetL1InfoTreeIndexToRoots()
+
+			inputs := zkUtils.AccHashInputs{
+				OldAccInputHash:      prevSequenceAccInputHash,
+				Sequencer:            coinbase,
+				BatchData:            batchL2Data,
+				L1InfoRoot:           nil,
+				LimitTimestamp:       0,
+				ForcedBlockHash:      nil,
+				BatchHashData:        nil,
+				GlobalExitRoot:       &ger.GlobalExitRoot,
+				Timestamp:            ger.Timestamp,
+				BatchTransactionData: nil,
+				IsValidium:           len(api.config.Zk.DAUrl) > 0,
+			}
+
+			accInputHash, err := zkUtils.CalculateAccInputHashByForkId(inputs, currentForkId)
+			if err != nil {
+				return nil, fmt.Errorf("failed to calculate accInputHash for batch %d: %w", i, err)
+			}
+			prevSequenceAccInputHash = *accInputHash
+		}
 	}
 
 	return
