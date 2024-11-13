@@ -378,6 +378,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
 			continue
 		}
+		manifestResponse
 		listsOfFiles = append(listsOfFiles, manifestResponse)
 	}
 
@@ -525,6 +526,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	if err != nil {
 		return nil, fmt.Errorf("webseed.http: read: %w, url=%s, ", err, u.String())
 	}
+	fmt.Println(string(b))
 
 	response := snaptype.WebSeedsFromProvider{}
 	fileNames := strings.Split(string(b), "\n")
