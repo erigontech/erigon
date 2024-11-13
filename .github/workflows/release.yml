@@ -51,7 +51,7 @@ jobs:
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
 
-      - name: Check if tag ${{ inputs.release_version }} already exists in case perform_release is set.
+      - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         run: |
           if git ls-remote --exit-code --quiet --tags origin '${{ inputs.release_version }}'; then
@@ -59,7 +59,13 @@ jobs:
             exit 1
           else
             echo "OK: tag ${{ inputs.release_version }} does not exists. Proceeding."
+            git tag ${{ inputs.release_version }}
+            git push origin ${{ inputs.release_version }}
+            echo; echo "Git TAG ${{ inputs.release_version }} created and pushed."
           fi
+
+      - name: testing failure
+        run: exit 1
 
       - name: Run some commands, get commit id
         id: getCommitId
@@ -230,3 +236,16 @@ jobs:
             --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
              ${{ inputs.release_version }} \
              *.tar.gz ${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+
+  in-case-failure:
+    needs: [ build-release ]
+    if:  always() && !contains(needs.build-release.result, 'success') && ${{ (inputs.perform_release) && (inputs.release_version != '') }}
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Remove git tag 
+        run: |
+          cd erigon
+          git push -d origin ${{ inputs.release_version }}
+
+                  
