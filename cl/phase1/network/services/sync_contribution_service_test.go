@@ -38,26 +38,32 @@ func setupSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (Sy
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true, 0)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
-	s := NewSyncContributionService(syncedDataManager, cfg, syncContributionPool, ethClock, beaconevents.NewEventEmitter(), true)
+	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	go batchSignatureVerifier.Start()
+	s := NewSyncContributionService(syncedDataManager, cfg, syncContributionPool, ethClock, beaconevents.NewEventEmitter(), batchSignatureVerifier, true)
 	syncContributionPool.EXPECT().AddSyncContribution(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	return s, syncedDataManager, ethClock
 }
 
-func getObjectsForSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (*state.CachingBeaconState, *cltypes.SignedContributionAndProof) {
+func getObjectsForSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (*state.CachingBeaconState, *cltypes.SignedContributionAndProofWithGossipData) {
 	_, _, state := tests.GetBellatrixRandom()
 	br, _ := state.BlockRoot()
 	aggBits := make([]byte, 16)
 	aggBits[0] = 1
-	msg := &cltypes.SignedContributionAndProof{
-		Message: &cltypes.ContributionAndProof{
-			AggregatorIndex: 0,
-			Contribution: &cltypes.Contribution{
-				Slot:              state.Slot(),
-				BeaconBlockRoot:   br,
-				SubcommitteeIndex: 0,
-				AggregationBits:   aggBits,
+	msg := &cltypes.SignedContributionAndProofWithGossipData{
+		SignedContributionAndProof: &cltypes.SignedContributionAndProof{
+			Message: &cltypes.ContributionAndProof{
+				AggregatorIndex: 0,
+				Contribution: &cltypes.Contribution{
+					Slot:              state.Slot(),
+					BeaconBlockRoot:   br,
+					SubcommitteeIndex: 0,
+					AggregationBits:   aggBits,
+				},
 			},
 		},
+		GossipData:            nil,
+		ImmediateVerification: true,
 	}
 
 	return state, msg
@@ -93,7 +99,7 @@ func TestSyncContributionServiceBadSubcommitteeIndex(t *testing.T) {
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	state, msg := getObjectsForSyncContributionServiceTest(t, ctrl)
 	sd.OnHeadState(state)
-	msg.Message.Contribution.SubcommitteeIndex = 1000
+	msg.SignedContributionAndProof.Message.Contribution.SubcommitteeIndex = 1000
 	err := s.ProcessMessage(context.TODO(), nil, msg)
 	require.Error(t, err)
 }
@@ -106,7 +112,7 @@ func TestSyncContributionServiceBadAggregationBits(t *testing.T) {
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	state, msg := getObjectsForSyncContributionServiceTest(t, ctrl)
 	sd.OnHeadState(state)
-	msg.Message.Contribution.AggregationBits = make([]byte, 16)
+	msg.SignedContributionAndProof.Message.Contribution.AggregationBits = make([]byte, 16)
 	err := s.ProcessMessage(context.TODO(), nil, msg)
 	require.Error(t, err)
 }
@@ -129,8 +135,11 @@ func TestSyncContributionServiceSuccess(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
+	mockFuncs := &mockFuncs{ctrl: ctrl}
+	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 	s, sd, clock := setupSyncContributionServiceTest(t, ctrl)
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
 	state, msg := getObjectsForSyncContributionServiceTest(t, ctrl)
 	sd.OnHeadState(state)
 	err := s.ProcessMessage(context.TODO(), nil, msg)

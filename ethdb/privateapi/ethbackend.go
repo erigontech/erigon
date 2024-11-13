@@ -22,7 +22,6 @@ import (
 	"errors"
 	"math"
 
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -32,8 +31,8 @@ import (
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/builder"
@@ -141,29 +140,29 @@ func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remo
 	reply := &remote.SyncingReply{
 		CurrentBlock:     currentBlock,
 		FrozenBlocks:     frozenBlocks,
-		LastNewBlockSeen: math.MaxUint64,
+		LastNewBlockSeen: highestBlock,
+		Syncing:          true,
 	}
 
 	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
 	if highestBlock == 0 {
-		reply.Syncing = true
 		return reply, nil
 	}
-	reorgRange := 8
 
 	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
+	reorgRange := 8
 	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
 		reply.Syncing = false
 		return reply, nil
 	}
 
-	reply.LastNewBlockSeen = highestBlock
 	reply.Stages = make([]*remote.SyncingReply_StageProgress, len(stages.AllStages))
 	for i, stage := range stages.AllStages {
 		progress, err := stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return nil, err
 		}
+		reply.Stages[i] = &remote.SyncingReply_StageProgress{}
 		reply.Stages[i].StageName = string(stage)
 		reply.Stages[i].BlockNumber = progress
 	}

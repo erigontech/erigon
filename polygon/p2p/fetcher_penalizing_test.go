@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -33,9 +33,9 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenErrTooManyHeaders(t 
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	mockInboundMessages := []*sentry.InboundMessage{
+	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			// response should contain 2 headers instead we return 5
 			Data: newMockBlockHeadersPacket66Bytes(t, requestId, 5),
@@ -73,9 +73,9 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenErrNonSequentialHead
 	disconnectedHeaders[0] = mockBlockHeaders[0]
 	disconnectedHeaders[1] = mockBlockHeaders[2]
 	disconnectedHeaders[2] = mockBlockHeaders[4]
-	mockInboundMessages := []*sentry.InboundMessage{
+	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			Data:   blockHeadersPacket66Bytes(t, requestId, disconnectedHeaders),
 		},
@@ -112,9 +112,9 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenErrNonSequentialHead
 		Number:   big.NewInt(1),
 		GasLimit: 1234, // change a random value in order to change the header Hash
 	}
-	mockInboundMessages := []*sentry.InboundMessage{
+	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			Data:   blockHeadersPacket66Bytes(t, requestId, disconnectedHeaders),
 		},
@@ -149,9 +149,9 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenHeaderGtRequestedSta
 	requestId := uint64(1234)
 	mockBlockHeaders := newMockBlockHeaders(3)
 	incorrectOriginHeaders := mockBlockHeaders[1:]
-	mockInboundMessages := []*sentry.InboundMessage{
+	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			// response headers should be 2 and start at 1 - instead we start at 2
 			Data: blockHeadersPacket66Bytes(t, requestId, incorrectOriginHeaders),
@@ -186,9 +186,9 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 	requestId := uint64(1234)
 	headers := []*types.Header{{Number: big.NewInt(1)}}
 	hashes := []common.Hash{headers[0].Hash()}
-	mockInboundMessages := []*sentry.InboundMessage{
+	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
 			Data:   newMockBlockBodiesPacketBytes(t, requestId, &types.Body{}, &types.Body{}),
 		},
@@ -221,9 +221,9 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrMissingBodies(t *t
 	requestId := uint64(1234)
 	headers := []*types.Header{{Number: big.NewInt(1)}}
 	hashes := []common.Hash{headers[0].Hash()}
-	mockInboundMessages := []*sentry.InboundMessage{
+	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
 			Data:   newMockBlockBodiesPacketBytes(t, requestId),
 		},
@@ -257,9 +257,9 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrToo
 	requestId1 := uint64(1233)
 	headers := newMockBlockHeaders(1)
 	hash := headers[0].Hash()
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			Data:   blockHeadersPacket66Bytes(t, requestId1, headers),
 		},
@@ -273,9 +273,9 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrToo
 		wantReverse:                 true,
 	}
 	requestId2 := uint64(1234)
-	mockInboundMessages2 := []*sentry.InboundMessage{
+	mockInboundMessages2 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
 			Data:   newMockBlockBodiesPacketBytes(t, requestId2, &types.Body{}, &types.Body{}),
 		},
@@ -308,9 +308,9 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrMis
 	requestId1 := uint64(1233)
 	headers := newMockBlockHeaders(1)
 	hash := headers[0].Hash()
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			Data:   blockHeadersPacket66Bytes(t, requestId1, headers),
 		},
@@ -324,9 +324,9 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrMis
 		wantReverse:                 true,
 	}
 	requestId2 := uint64(1234)
-	mockInboundMessages2 := []*sentry.InboundMessage{
+	mockInboundMessages2 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
 			Data:   newMockBlockBodiesPacketBytes(t, requestId2),
 		},
@@ -360,9 +360,9 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrUne
 	requestId1 := uint64(1233)
 	headers := newMockBlockHeaders(2)
 	hash := headers[0].Hash()
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			Data:   blockHeadersPacket66Bytes(t, requestId1, headers[1:]),
 		},
@@ -397,9 +397,9 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrToo
 	requestId1 := uint64(1233)
 	headers := newMockBlockHeaders(2)
 	hash := headers[0].Hash()
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			Data:   blockHeadersPacket66Bytes(t, requestId1, headers),
 		},
@@ -434,9 +434,9 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrNon
 	requestId1 := uint64(1233)
 	headers := newMockBlockHeaders(3)
 	hash := headers[2].Hash()
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			Data:   blockHeadersPacket66Bytes(t, requestId1, []*types.Header{headers[2], headers[0]}),
 		},
@@ -476,9 +476,9 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrNon
 		GasLimit: 1234,
 	}
 	incorrectHeader.Hash()
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
 			Data:   blockHeadersPacket66Bytes(t, requestId1, []*types.Header{headers[1], incorrectHeader}),
 		},
