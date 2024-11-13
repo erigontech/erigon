@@ -1,4 +1,5 @@
 name: Release
+run-name: Build release ${{ inputs.release_version }} from branch ${{ inputs.checkout_ref }} by @${{ github.actor }}
 
 env:
   APPLICATION: "erigon"
@@ -241,7 +242,7 @@ jobs:
   In-case-of-failure:
     name: "In case of failure: remove remote git tag pointing to the new version."
     needs: [ build-release ]
-    if: always() && !contains(needs.build-release.result, 'success') && ${{ inputs.perform_release }} && ${{ (inputs.release_version != '') }}
+    if: always() && !contains(needs.build-release.result, 'success')
     runs-on: ubuntu-22.04
 
     steps:
