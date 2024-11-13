@@ -240,10 +240,22 @@ jobs:
 
   in-case-failure:
     needs: [ build-release ]
-    if:  always() && !contains(needs.build-release.result, 'success') && ${{ (inputs.perform_release) && (inputs.release_version != '') }}
+    if: |
+        always() &&
+        !contains(needs.build-release.result, 'success') && 
+        ${{ inputs.perform_release }} && 
+        ${{ (inputs.release_version != '') }}
     runs-on: ubuntu-22.04
 
     steps:
+      - name: Checkout git repository ${{ env.APP_REPO }}
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        with:
+          repository: ${{ env.APP_REPO }}
+          fetch-depth: 0
+          ref: ${{ inputs.checkout_ref }}
+          path: 'erigon'
+
       - name: Remove git tag 
         run: |
           cd erigon
