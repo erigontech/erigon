@@ -32,7 +32,6 @@ jobs:
   Build_and_test:
     needs: define_matrix
     runs-on: ${{ needs.define_matrix.outputs.os }}
-    timeout-minutes: 45
 
     steps:
       - name: Fast checkout git repository
