@@ -368,11 +368,12 @@ func (t *ExampleStruct) EncodeContents(buf *encBuffer) {
 	buf.EncodeBigInt(t._bigInt)
 	// encode uint256 here
 
+	// _2Dbytes(t._2Darray).EncodeList(buf)
+	EncodeList(_2Dbytes(t._2Darray), buf)
+
 	buf.EncodeString(t._string)
 	buf.EncodeBytes(t._bytes)
 
-	// _2Dbytes(t._2Darray).EncodeList(buf)
-	EncodeList(_2Dbytes(t._2Darray), buf)
 }
 
 func (t *ExampleStruct) decodeRLP(s *rlp.Stream) error {
@@ -406,16 +407,6 @@ func (t *ExampleStruct) decodeRLP(s *rlp.Stream) error {
 		t._bigInt = new(big.Int).SetBytes(b) //
 	}
 
-	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read t._string: %w", err)
-	}
-	t._string = string(b)
-	// fmt.Println(b)
-
-	if t._bytes, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read t._bytes: %w", err)
-	}
-	s.Bytes()
 	_, err = s.List()
 	if err != nil {
 		return fmt.Errorf("open t._2Darray: %w", err)
@@ -429,5 +420,80 @@ func (t *ExampleStruct) decodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("close BlobVersionedHashes: %w", err)
 	}
 
+	if b, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read t._string: %w", err)
+	}
+	t._string = string(b)
+	// fmt.Println(b)
+
+	if t._bytes, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read t._bytes: %w", err)
+	}
+	s.Bytes()
+
 	return s.ListEnd()
+}
+
+/* ========================================================
+	Header type test
+======================================================== */
+
+func (h *Header) EncodeContents(buf *encBuffer) {
+
+	buf.EncodeBytes(h.ParentHash[:])
+	buf.EncodeBytes(h.UncleHash[:])
+	buf.EncodeBytes(h.Coinbase[:])
+	buf.EncodeBytes(h.Root[:])
+	buf.EncodeBytes(h.TxHash[:])
+	buf.EncodeBytes(h.ReceiptHash[:])
+	buf.EncodeBytes(h.Bloom[:])
+
+	buf.EncodeBigInt(h.Difficulty)
+	buf.EncodeBigInt(h.Number)
+	buf.EncodeInt(h.GasLimit)
+	buf.EncodeInt(h.GasUsed)
+	buf.EncodeInt(h.Time)
+
+	buf.EncodeBytes(h.Extra)
+
+	if len(h.AuRaSeal) > 0 {
+		buf.EncodeInt(h.AuRaStep)
+		buf.EncodeBytes(h.AuRaSeal)
+	} else {
+		buf.EncodeBytes(h.MixDigest[:])
+	}
+
+	buf.EncodeBytes(h.Nonce[:])
+
+	if h.BaseFee != nil { // TODO(racytech): some values when 0 or nil are unstable, fix it
+		buf.EncodeBigInt(h.BaseFee)
+	}
+	if h.WithdrawalsHash != nil {
+		buf.EncodeBytes(h.WithdrawalsHash[:])
+	}
+	if h.BlobGasUsed != nil {
+		buf.EncodeInt(*h.BlobGasUsed)
+	}
+	if h.ExcessBlobGas != nil {
+		buf.EncodeInt(*h.ExcessBlobGas)
+	}
+	if h.ParentBeaconBlockRoot != nil {
+		buf.EncodeBytes(h.ParentBeaconBlockRoot.Bytes())
+	}
+	if h.RequestsHash != nil {
+		buf.EncodeBytes(h.RequestsHash.Bytes())
+	}
+	if h.Verkle {
+		buf.EncodeBytes(h.VerkleProof)
+		// h.VerkleKeyVals // needs own EncodeContents logic, so we can call EncodeList on it
+	}
+}
+
+func (h *Header) _encodeRLP(w io.Writer) error { // TODO(racytech): encodeRLP could be generic
+	buf := NewEncodeBuffer()
+	defer encBufferPool.Put(buf)
+
+	// t.EncodeList(buf)
+	EncodeList(h, buf)
+	return buf.Flush(w)
 }

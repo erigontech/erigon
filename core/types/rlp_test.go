@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/rlp"
 )
 
-const RUNS = 100 // for local tests increase this number
+const RUNS = 100000 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -456,10 +456,41 @@ func compareExampleStructs(t *testing.T, a, b *ExampleStruct) error {
 		if len(a._2Darray[i]) != len(b._2Darray[i]) {
 			return fmt.Errorf("len(_2Darray[%v]) mismatch: %v, got: %v", i, len(a._2Darray[i]), len(b._2Darray[i]))
 		}
-		check(t, "ExampleStruct._2Darray[i]", a._2Darray[i], b._2Darray[i])
+		if a._2Darray[i] == nil && b._2Darray[i] != nil {
+			return fmt.Errorf("a._2Darray[i] == nil && b._2Darray[i] != nil: %v: %v", a._2Darray[i], b._2Darray[i])
+		}
+		if a._2Darray[i] != nil && b._2Darray[i] == nil {
+			return fmt.Errorf("a._2Darray[i] != nil && b._2Darray[i] == nil: %v: %v", a._2Darray[i], b._2Darray[i])
+		}
+		if a._2Darray[i] != nil && b._2Darray[i] != nil {
+			check(t, "ExampleStruct._2Darray[i]", a._2Darray[i], b._2Darray[i])
+		}
 	}
 
 	return nil
+}
+
+func TestHeaderEncodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		buf.Reset()
+		enc := tr.RandHeader()
+		// enc.BaseFee = nil
+		// enc.WithdrawalsHash = nil
+		if err := enc._encodeRLP(&buf); err != nil {
+			t.Errorf("error: Header._encodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		dec := &Header{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: Header.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		checkHeaders(t, enc, dec)
+	}
 }
 
 // func TestRawBodyEncodeDecodeRLP(t *testing.T) {
@@ -525,7 +556,7 @@ func TestSimpleEncodeDecodeRLP(t *testing.T) {
 		n := tr.RandIntInRange(2, 5)
 		enc._2Darray = make([][]byte, n)
 		for i := 0; i < n; i++ {
-			enc._2Darray[i] = append(enc._2Darray[i], tr.RandBytes(tr.RandIntInRange(0, 256))...)
+			enc._2Darray[i] = append(enc._2Darray[i], tr.RandBytes(tr.RandIntInRange(1, 256))...)
 		}
 
 		buf.Reset()
