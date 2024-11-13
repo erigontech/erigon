@@ -41,8 +41,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // https://go.dev/doc/fuzz/
