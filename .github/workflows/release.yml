@@ -54,6 +54,7 @@ jobs:
       - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         run: |
+          cd erigon
           if git ls-remote --exit-code --quiet --tags origin '${{ inputs.release_version }}'; then
             echo "ERROR: tag ${{ inputs.release_version }} exists and workflow is performing release. Exit."
             exit 1
