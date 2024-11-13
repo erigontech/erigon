@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-func NewService(maxPeers int, logger log.Logger, sc sentryproto.SentryClient, sdf sentry.StatusDataFactory) *Service {
+func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf sentry.StatusDataFactory) *Service {
 	peerPenalizer := NewPeerPenalizer(sc)
 	messageListener := NewMessageListener(logger, sc, sdf, peerPenalizer)
 	peerTracker := NewPeerTracker(logger, sc, messageListener)
