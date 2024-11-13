@@ -398,6 +398,7 @@ func (d *WebSeeds) makeTorrentUrls(listsOfFiles []snaptype.WebSeedsFromProvider)
 	torrentUrls := snaptype.TorrentUrls{}
 	for _, urls := range listsOfFiles {
 		for name, wUrl := range urls {
+			fmt.Println(name, wUrl)
 			if !strings.HasSuffix(name, ".torrent") {
 				continue
 			}
