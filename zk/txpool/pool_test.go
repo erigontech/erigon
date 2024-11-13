@@ -3,6 +3,7 @@ package txpool
 import (
 	"context"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
@@ -20,6 +22,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 )
 
 func TestNonceFromAddress(t *testing.T) {
@@ -168,4 +172,75 @@ func TestNonceFromAddress(t *testing.T) {
 			assert.Equal(NonceTooLow, reason, reason.String())
 		}
 	}
+}
+
+func TestOnNewBlock(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	coreDB, db := memdb.NewTestDB(t), memdb.NewTestDB(t)
+	ctrl := gomock.NewController(t)
+
+	stream := remote.NewMockKV_StateChangesClient(ctrl)
+	i := 0
+	stream.EXPECT().
+		Recv().
+		DoAndReturn(func() (*remote.StateChangeBatch, error) {
+			if i > 0 {
+				return nil, io.EOF
+			}
+			i++
+			return &remote.StateChangeBatch{
+				StateVersionId: 1,
+				ChangeBatch: []*remote.StateChange{
+					{
+						Txs: [][]byte{
+							decodeHex(types.TxParseMainnetTests[0].PayloadStr),
+							decodeHex(types.TxParseMainnetTests[1].PayloadStr),
+							decodeHex(types.TxParseMainnetTests[2].PayloadStr),
+						},
+						BlockHeight: 1,
+						BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
+					},
+				},
+			}, nil
+		}).
+		AnyTimes()
+
+	stateChanges := remote.NewMockKVClient(ctrl)
+	stateChanges.
+		EXPECT().
+		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ *remote.StateChangeRequest, _ ...grpc.CallOption) (remote.KV_StateChangesClient, error) {
+			return stream, nil
+		})
+
+	pool := NewMockPool(ctrl)
+	pool.EXPECT().
+		ValidateSerializedTxn(gomock.Any()).
+		DoAndReturn(func(_ []byte) error {
+			return nil
+		}).
+		Times(3)
+
+	var minedTxs types.TxSlots
+	pool.EXPECT().
+		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(
+			func(
+				_ context.Context,
+				_ *remote.StateChangeBatch,
+				_ types.TxSlots,
+				minedTxsArg types.TxSlots,
+				_ kv.Tx,
+			) error {
+				minedTxs = minedTxsArg
+				return nil
+			},
+		).
+		Times(1)
+
+	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDB, db, *u256.N1)
+	err := fetch.handleStateChanges(ctx, stateChanges)
+	assert.ErrorIs(t, io.EOF, err)
+	assert.Equal(t, 3, len(minedTxs.Txs))
 }
