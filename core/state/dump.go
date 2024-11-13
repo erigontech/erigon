@@ -191,7 +191,13 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			Storage:  make(map[string]string),
 		}
 		if acc.CodeHash != emptyCodeHash {
-			println("here for account ", account.Address.Hex(), acc.CodeHash.Hex(), emptyCodeHash.Hex())
+			println("here for account ", account.Address.Hex())
+			if account.CodeHash != nil {
+				println("account codehash:", account.CodeHash.String())
+			} else {
+				println("no codehash")
+			}
+			println("empty:", emptyCodeHash.Hex())
 			account.CodeHash = acc.CodeHash[:]
 
 			if !excludeCode {
