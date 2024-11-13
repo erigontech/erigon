@@ -315,6 +315,7 @@ func SpawnStageBatches(
 				if tx, err = cfg.db.BeginRw(ctx); err != nil {
 					return fmt.Errorf("failed to open tx, %w", err)
 				}
+				defer tx.Rollback()
 				hermezDb.SetNewTx(tx)
 				eriDb.SetNewTx(tx)
 				batchProcessor.SetNewTx(tx)
