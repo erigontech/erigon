@@ -398,6 +398,9 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 		if !ok {
 			continue
 		}
+		if strings.Contains(p.Name, "caplin") {
+			continue
+		}
 
 		if info.Ext != ".seg" || (t != snaptype.Unknown && t != info.Type.Enum()) {
 			continue
