@@ -94,6 +94,7 @@ type Zk struct {
 	BadBatches                     []uint64
 	SealBatchImmediatelyOnOverflow bool
 	MockWitnessGeneration          bool
+	WitnessContractInclusion       []common.Address
 }
 
 var DefaultZkConfig = &Zk{}

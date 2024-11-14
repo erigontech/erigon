@@ -52,7 +52,8 @@ func prepareSMT(t *testing.T) (*smt.SMT, *trie.RetainList) {
 	err = intraBlockState.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err, "error committing block")
 
-	rl, err := tds.ResolveSMTRetainList()
+	inclusions := make(map[libcommon.Address][]libcommon.Hash)
+	rl, err := tds.ResolveSMTRetainList(inclusions)
 	require.NoError(t, err, "error resolving state trie")
 
 	memdb := db.NewMemDb()

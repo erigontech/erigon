@@ -46,6 +46,8 @@ import (
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"math"
 )
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
@@ -1023,6 +1025,7 @@ func (api *ZkEvmAPIImpl) buildGenerator(ctx context.Context, tx kv.Tx, witnessMo
 		chainConfig,
 		api.config.Zk,
 		api.ethApi._engine,
+		api.config.WitnessContractInclusion,
 	)
 
 	fullWitness := false
@@ -1709,7 +1712,31 @@ func (zkapi *ZkEvmAPIImpl) GetProof(ctx context.Context, address common.Address,
 		ibs.GetState(address, &key, value)
 	}
 
-	rl, err := tds.ResolveSMTRetainList()
+	blockNumber, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	chainCfg, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	plainState := state.NewPlainState(tx, blockNumber, systemcontracts.SystemContractCodeLookup[chainCfg.ChainName])
+	defer plainState.Close()
+
+	inclusion := make(map[libcommon.Address][]libcommon.Hash)
+	for _, contract := range zkapi.config.WitnessContractInclusion {
+		err = plainState.ForEachStorage(contract, libcommon.Hash{}, func(key, secKey libcommon.Hash, value uint256.Int) bool {
+			inclusion[contract] = append(inclusion[contract], key)
+			return false
+		}, math.MaxInt64)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	rl, err := tds.ResolveSMTRetainList(inclusion)
 	if err != nil {
 		return nil, err
 	}

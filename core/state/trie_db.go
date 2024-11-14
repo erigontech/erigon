@@ -885,7 +885,7 @@ func (tds *TrieDbState) GetTrieHash() common.Hash {
 	return tds.t.Hash()
 }
 
-func (tds *TrieDbState) ResolveSMTRetainList() (*trie.RetainList, error) {
+func (tds *TrieDbState) ResolveSMTRetainList(inclusion map[libcommon.Address][]libcommon.Hash) (*trie.RetainList, error) {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -965,6 +965,16 @@ func (tds *TrieDbState) ResolveSMTRetainList() (*trie.RetainList, error) {
 			return nil, err
 		}
 		keys = append(keys, smtPath)
+	}
+
+	for address, slots := range inclusion {
+		for _, slot := range slots {
+			smtPath, err := getSMTPath(address.String(), slot.String())
+			if err != nil {
+				return nil, err
+			}
+			keys = append(keys, smtPath)
+		}
 	}
 
 	rl := trie.NewRetainList(0)

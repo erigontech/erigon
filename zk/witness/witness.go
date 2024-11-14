@@ -35,6 +35,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
+	"github.com/holiman/uint256"
+	"math"
 )
 
 var (
@@ -44,14 +46,15 @@ var (
 )
 
 type Generator struct {
-	tx          kv.Tx
-	dirs        datadir.Dirs
-	historyV3   bool
-	agg         *libstate.Aggregator
-	blockReader services.FullBlockReader
-	chainCfg    *chain.Config
-	zkConfig    *ethconfig.Zk
-	engine      consensus.EngineReader
+	tx              kv.Tx
+	dirs            datadir.Dirs
+	historyV3       bool
+	agg             *libstate.Aggregator
+	blockReader     services.FullBlockReader
+	chainCfg        *chain.Config
+	zkConfig        *ethconfig.Zk
+	engine          consensus.EngineReader
+	forcedContracts []libcommon.Address
 }
 
 func NewGenerator(
@@ -62,15 +65,17 @@ func NewGenerator(
 	chainCfg *chain.Config,
 	zkConfig *ethconfig.Zk,
 	engine consensus.EngineReader,
+	forcedContracs []libcommon.Address,
 ) *Generator {
 	return &Generator{
-		dirs:        dirs,
-		historyV3:   historyV3,
-		agg:         agg,
-		blockReader: blockReader,
-		chainCfg:    chainCfg,
-		zkConfig:    zkConfig,
-		engine:      engine,
+		dirs:            dirs,
+		historyV3:       historyV3,
+		agg:             agg,
+		blockReader:     blockReader,
+		chainCfg:        chainCfg,
+		zkConfig:        zkConfig,
+		engine:          engine,
+		forcedContracts: forcedContracs,
 	}
 }
 
@@ -337,12 +342,23 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 		prevStateRoot = block.Root()
 	}
 
+	inclusion := make(map[libcommon.Address][]libcommon.Hash)
+	for _, contract := range g.forcedContracts {
+		err = reader.ForEachStorage(contract, libcommon.Hash{}, func(key, secKey libcommon.Hash, value uint256.Int) bool {
+			inclusion[contract] = append(inclusion[contract], key)
+			return false
+		}, math.MaxInt64)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	var rl trie.RetainDecider
 	// if full is true, we will send all the nodes to the witness
 	rl = &trie.AlwaysTrueRetainDecider{}
 
 	if !witnessFull {
-		rl, err = tds.ResolveSMTRetainList()
+		rl, err = tds.ResolveSMTRetainList(inclusion)
 		if err != nil {
 			return nil, err
 		}
