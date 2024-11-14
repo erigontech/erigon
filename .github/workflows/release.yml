@@ -66,9 +66,6 @@ jobs:
             echo; echo "Git TAG ${{ inputs.release_version }} created and pushed."
           fi
 
-      - name: simulate failure
-        run: exit 1
-
       - name: Run some commands, get commit id
         id: getCommitId
         run: |
