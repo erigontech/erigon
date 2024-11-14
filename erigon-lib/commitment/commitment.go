@@ -969,15 +969,24 @@ type Updates struct {
 	keccak cryptozerocopy.KeccakState
 	hasher keyHasher
 	keys   map[string]struct{}
-	etl    *etl.Collector
+	etl    *etl.Collector // all-in-one collector
 	tree   *btree.BTreeG[*KeyUpdate]
 	mode   Mode
 	tmpdir string
+
+	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
+	nibbles       [16]*etl.Collector
 }
 
 type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
+
+// Should be called right after updates initialisation. Otherwise could lost some data
+func (t *Updates) SetConcurrentCommitment() {
+	t.sortPerNibble = true
+	t.initCollector()
+}
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{
@@ -994,6 +1003,7 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	}
 	return t
 }
+
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
 	if t.mode == ModeDirect && t.keys == nil {
@@ -1006,6 +1016,24 @@ func (t *Updates) SetMode(m Mode) {
 }
 
 func (t *Updates) initCollector() {
+	if t.sortPerNibble {
+		for i := 0; i < len(t.nibbles); i++ {
+			if t.nibbles[i] != nil {
+				t.nibbles[i].Close()
+				t.nibbles[i] = nil
+			}
+
+			t.nibbles[i] = etl.NewCollector("commitment", t.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/4), log.Root().New("update-tree"))
+			t.nibbles[i].LogLvl(log.LvlDebug)
+			t.nibbles[i].SortAndFlushInBackground(true)
+		}
+		if t.etl != nil {
+			t.etl.Close()
+			t.etl = nil
+		}
+		return
+	}
+
 	if t.etl != nil {
 		t.etl.Close()
 		t.etl = nil
@@ -1049,8 +1077,15 @@ func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byt
 		}
 	case ModeDirect:
 		if _, ok := t.keys[string(key)]; !ok {
-			if err := t.etl.Collect(t.hasher(key), key); err != nil {
-				log.Warn("failed to collect updated key", "key", key, "err", err)
+			hk := t.hasher(key)
+			if !t.sortPerNibble {
+				if err := t.etl.Collect(hk, key); err != nil {
+					log.Warn("failed to collect updated key", "key", key, "err", err)
+				}
+			} else {
+				if err := t.nibbles[hk[0]].Collect(hk, key); err != nil {
+					log.Warn("failed to collect updated key", "key", key, "err", err)
+				}
 			}
 			t.keys[string(key)] = struct{}{}
 		}

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -431,4 +432,11 @@ func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Up
 			c.update = &updates[i]
 		})
 	}
+}
+
+type ParallelMockState struct {
+	MockState
+	accMu  sync.Mutex
+	stoMu  sync.Mutex
+	commMu sync.RWMutex
 }
