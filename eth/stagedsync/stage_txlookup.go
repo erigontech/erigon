@@ -261,9 +261,18 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 
 	if blockFrom < blockTo {
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
 		t := time.Now()
 		var pruneBlockNum = blockFrom
 		for ; pruneBlockNum < blockTo; pruneBlockNum++ {
+			select {
+			case <-logEvery.C:
+				logger.Info(fmt.Sprintf("[%s] pruning tx lookup periodic progress", logPrefix), "blockNum", pruneBlockNum)
+			default:
+			}
+
 			err = deleteTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger)
 			if err != nil {
 				return fmt.Errorf("prune TxLookUp: %w", err)

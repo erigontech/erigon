@@ -165,6 +165,10 @@ type Notifications struct {
 	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
 }
 
+func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
+	n.LastNewBlockSeen.Store(blockNum)
+}
+
 func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),
