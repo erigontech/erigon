@@ -177,7 +177,7 @@ jobs:
           BUILD_VERSION: local-${{ steps.getCommitId.outputs.short_commit_id }}
         # TODO: update the path to the config file with main branch before PR is merged
         run: |
-          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/feat/assertor-testing/.github/workflows/kurtosis/config.properties
+          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/feat/assertor-testing/.github/workflows/kurtosis/config-pectra.properties
           sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.APPLICATION }}:${{ env.BUILD_VERSION }}#g' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
       - name: Run Kurtosis + assertoor tests
