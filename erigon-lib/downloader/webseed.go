@@ -26,7 +26,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -357,7 +356,6 @@ func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, webSeedProviderUR
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, files []string, rootDir string) {
-	fmt.Println("Aaaaaa")
 	listsOfFiles := d.constructListsOfFiles(ctx, d.seeds, files)
 	torrentMap := d.makeTorrentUrls(listsOfFiles)
 	webSeedMap := d.downloadTorrentFilesFromProviders(ctx, rootDir, torrentMap)
@@ -404,7 +402,6 @@ func (d *WebSeeds) makeTorrentUrls(listsOfFiles []snaptype.WebSeedsFromProvider)
 				continue
 			}
 			if !nameWhitelisted(name, d.torrentsWhitelist) {
-				fmt.Println("rej", name, wUrl)
 				continue
 			}
 			uri, err := url.ParseRequestURI(wUrl)
@@ -412,7 +409,6 @@ func (d *WebSeeds) makeTorrentUrls(listsOfFiles []snaptype.WebSeedsFromProvider)
 				d.logger.Debug("[snapshots] url is invalid", "url", wUrl, "err", err)
 				continue
 			}
-			fmt.Println("acc", name, wUrl)
 			torrentUrls[name] = append(torrentUrls[name], uri)
 			torrentMap[*uri] = strings.TrimSuffix(name, ".torrent")
 		}
@@ -529,7 +525,6 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	if err != nil {
 		return nil, fmt.Errorf("webseed.http: read: %w, url=%s, ", err, u.String())
 	}
-	debug.PrintStack()
 
 	response := snaptype.WebSeedsFromProvider{}
 	fileNames := strings.Split(string(b), "\n")
@@ -597,7 +592,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			strings.HasSuffix(name, ".vi.torrent") ||
 			strings.HasSuffix(name, ".txt.torrent") ||
 			strings.HasSuffix(name, ".efi.torrent")
-		fmt.Println(name)
 		if !whiteListed {
 			_, fName := filepath.Split(name)
 			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
