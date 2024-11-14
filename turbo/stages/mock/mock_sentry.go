@@ -53,7 +53,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"
@@ -332,7 +331,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 	if !cfg.DeprecatedTxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
-		newTxs := make(chan types2.Announcements, 1024)
+		newTxs := make(chan txpool.Announcements, 1024)
 		if tb != nil {
 			tb.Cleanup(func() {
 				close(newTxs)

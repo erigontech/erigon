@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/types"
 )
 
 type MockSentry struct {
@@ -43,7 +42,7 @@ func NewMockSentry(ctx context.Context, sentryServer *sentry.MockSentryServer) *
 	}
 }
 
-var peerID types.PeerID = gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}) // "12345"
+var peerID PeerID = gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}) // "12345"
 
 func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
 	ms.lock.RLock()
@@ -93,14 +92,6 @@ func (ms *MockSentry) PeerEvents(req *sentry.PeerEventsRequest, stream sentry.Se
 	}
 }
 
-func toHashes(h ...byte) (out types.Hashes) {
-	for i := range h {
-		hash := [32]byte{h[i]}
-		out = append(out, hash[:]...)
-	}
-	return out
-}
-
 func testRlps(num int) [][]byte {
 	rlps := make([][]byte, num)
 	for i := 0; i < num; i++ {
@@ -109,7 +100,7 @@ func testRlps(num int) [][]byte {
 	return rlps
 }
 
-func toPeerIDs(h ...byte) (out []types.PeerID) {
+func toPeerIDs(h ...byte) (out []PeerID) {
 	for i := range h {
 		hash := [64]byte{h[i]}
 		out = append(out, gointerfaces.ConvertHashToH512(hash))

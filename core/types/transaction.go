@@ -36,8 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -76,7 +74,7 @@ type Transaction interface {
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte
-	GetAccessList() types2.AccessList
+	GetAccessList() AccessList
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int
@@ -408,7 +406,7 @@ type Message struct {
 	tip              uint256.Int
 	maxFeePerBlobGas uint256.Int
 	data             []byte
-	accessList       types2.AccessList
+	accessList       AccessList
 	checkNonce       bool
 	isFree           bool
 	blobHashes       []libcommon.Hash
@@ -416,7 +414,7 @@ type Message struct {
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
-	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool,
+	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	isFree bool, maxFeePerBlobGas *uint256.Int,
 ) Message {
 	m := Message{
@@ -454,7 +452,7 @@ func (m Message) Value() *uint256.Int             { return &m.amount }
 func (m Message) Gas() uint64                     { return m.gasLimit }
 func (m Message) Nonce() uint64                   { return m.nonce }
 func (m Message) Data() []byte                    { return m.data }
-func (m Message) AccessList() types2.AccessList   { return m.accessList }
+func (m Message) AccessList() AccessList          { return m.accessList }
 func (m Message) Authorizations() []Authorization { return m.authorizations }
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations

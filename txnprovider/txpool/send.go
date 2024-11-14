@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon-lib/rlp"
-	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 // Send - does send concrete P2P messages to Sentry. Same as Fetch but for outbound traffic
@@ -80,7 +79,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte, maxPeers uint64) (txSentTo []in
 		// Wait till the combined size of rlps so far is greater than a threshold and
 		// send them all at once. Then wait till end of array or this threshold hits again
 		if i == l-1 || size >= p2pTxPacketLimit {
-			txsData := types2.EncodeTransactions(rlps[prev:i+1], nil)
+			txsData := EncodeTransactions(rlps[prev:i+1], nil)
 			var txs66 *sentryproto.SendMessageToRandomPeersRequest
 			for _, sentryClient := range f.sentryClients {
 				if ready, ok := sentryClient.(interface{ Ready() bool }); ok && !ready.Ready() {
@@ -112,7 +111,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte, maxPeers uint64) (txSentTo []in
 	return
 }
 
-func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Hashes, maxPeers uint64) (hashSentTo []int) {
+func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes Hashes, maxPeers uint64) (hashSentTo []int) {
 	defer f.notifyTests()
 	hashSentTo = make([]int, len(types))
 	if len(types) == 0 {
@@ -205,7 +204,7 @@ func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Has
 	return
 }
 
-func (f *Send) PropagatePooledTxsToPeersList(peers []types2.PeerID, types []byte, sizes []uint32, hashes []byte) {
+func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, types []byte, sizes []uint32, hashes []byte) {
 	defer f.notifyTests()
 
 	if len(types) == 0 {

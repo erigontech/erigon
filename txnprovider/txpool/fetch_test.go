@@ -133,7 +133,7 @@ func TestSendTxPropagate(t *testing.T) {
 
 		m := NewMockSentry(ctx, sentryServer)
 		send := NewSend(ctx, []sentryproto.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
-		list := make(erigonlibtypes.Hashes, p2pTxPacketLimit*3)
+		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
 			copy(list[i:i+32], b)
@@ -213,7 +213,7 @@ func TestSendTxPropagate(t *testing.T) {
 
 		require.Equal(t, 3, len(requests))
 		for i, req := range requests {
-			assert.Equal(t, expectPeers[i], erigonlibtypes.PeerID(req.PeerId))
+			assert.Equal(t, expectPeers[i], PeerID(req.PeerId))
 			assert.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, req.Data.Id)
 			assert.True(t, len(req.Data.Data) > 0)
 		}
@@ -276,22 +276,13 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		Times(3)
 
-	var minedTxs erigonlibtypes.TxSlots
+	var minedTxs TxSlots
 	pool.EXPECT().
 		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(
-			func(
-				_ context.Context,
-				_ *remote.StateChangeBatch,
-				_ erigonlibtypes.TxSlots,
-				_ erigonlibtypes.TxSlots,
-				minedTxsArg erigonlibtypes.TxSlots,
-				_ kv.Tx,
-			) error {
-				minedTxs = minedTxsArg
-				return nil
-			},
-		).
+		DoAndReturn(func(_ context.Context, _ *remote.StateChangeBatch, _ TxSlots, _ TxSlots, minedTxsArg TxSlots, _ kv.Tx) error {
+			minedTxs = minedTxsArg
+			return nil
+		}).
 		Times(1)
 
 	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDB, db, *u256.N1, log.New())

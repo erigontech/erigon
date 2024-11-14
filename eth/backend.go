@@ -75,7 +75,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 	libstate "github.com/erigontech/erigon-lib/state"
-	libtypes "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
@@ -194,7 +193,7 @@ type Ethereum struct {
 
 	txPoolDB                kv.RwDB
 	txPool                  *txpool.TxPool
-	newTxs                  chan libtypes.Announcements
+	newTxs                  chan txpool.Announcements
 	txPoolFetch             *txpool.Fetch
 	txPoolSend              *txpool.Send
 	txPoolGrpcServer        txpoolproto.TxpoolServer
@@ -653,7 +652,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		//cacheConfig.MetricsLabel = "txpool"
 		//cacheConfig.StateV3 = config.HistoryV3w
 
-		backend.newTxs = make(chan libtypes.Announcements, 1024)
+		backend.newTxs = make(chan txpool.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpoolutil.AllComponents(
 			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, chainKv, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
