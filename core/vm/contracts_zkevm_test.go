@@ -1,8 +1,13 @@
 package vm
 
 import (
-	"testing"
+	"bytes"
+	"fmt"
 	"math/big"
+	"testing"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var (
@@ -10,6 +15,12 @@ var (
 	big10   = big.NewInt(10)
 	big8194 = big.NewInt(0).Lsh(big.NewInt(1), 8194)
 )
+
+// allPrecompiles does not map to the actual set of precompiles, as it also contains
+// repriced versions of precompiles at certain slots
+var allPrecompilesZkevm = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify_zkevm{enabled: true},
+}
 
 func Test_ModExpZkevm_Gas(t *testing.T) {
 	modExp := bigModExp_zkevm{enabled: true, eip2565: true}
@@ -66,4 +77,40 @@ func uint64ToDeterminedBytes(input *big.Int, length int) []byte {
 	result := make([]byte, length)
 	copy(result[length-len(bytes):], bytes)
 	return result
+}
+
+func TestP256VerifyZkevm(t *testing.T) {
+	testJsonZkevm("p256Verify", "0x0000000000000000000000000000000000000100", t)
+}
+
+func testJsonZkevm(name, addr string, t *testing.T) {
+	tests, err := loadJson(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range tests {
+		testPrecompiledZkevm(t, addr, test)
+	}
+}
+
+func testPrecompiledZkevm(t *testing.T, addr string, test precompiledTest) {
+	p := allPrecompilesZkevm[libcommon.HexToAddress(addr)]
+	in := libcommon.Hex2Bytes(test.Input)
+	gas := p.RequiredGas(in)
+	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
+		t.Parallel()
+		if res, _, err := RunPrecompiledContract(p, in, gas); err != nil {
+			t.Error(err)
+		} else if common.Bytes2Hex(res) != test.Expected {
+			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
+		}
+		if expGas := test.Gas; expGas != gas {
+			t.Errorf("%v: gas wrong, expected %d, got %d", test.Name, expGas, gas)
+		}
+		// Verify that the precompile did not touch the input buffer
+		exp := libcommon.Hex2Bytes(test.Input)
+		if !bytes.Equal(in, exp) {
+			t.Errorf("Precompiled %v modified input data", addr)
+		}
+	})
 }
