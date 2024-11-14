@@ -23,12 +23,12 @@ func resequence(
 
 	log.Info(fmt.Sprintf("[%s] Last batch %d is lower than highest batch in datastream %d, resequencing...", s.LogPrefix(), lastBatch, highestBatchInDs))
 
-	batches, err := cfg.datastreamServer.ReadBatches(lastBatch+1, highestBatchInDs)
+	batches, err := cfg.dataStreamServer.ReadBatches(lastBatch+1, highestBatchInDs)
 	if err != nil {
 		return err
 	}
 
-	if err = cfg.datastreamServer.UnwindToBatchStart(lastBatch + 1); err != nil {
+	if err = cfg.dataStreamServer.UnwindToBatchStart(lastBatch + 1); err != nil {
 		return err
 	}
 

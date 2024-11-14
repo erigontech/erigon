@@ -10,11 +10,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 const (
@@ -28,7 +28,7 @@ const (
 // basically writes a whole standalone batch
 // plus the GER updates if the batch gap is > 1
 // starts atomicOp and commits it internally
-func (srv *DataStreamServer) WriteWholeBatchToStream(
+func (srv *ZkEVMDataStreamServer) WriteWholeBatchToStream(
 	logPrefix string,
 	tx kv.Tx,
 	reader DbReader,
@@ -55,10 +55,10 @@ func (srv *DataStreamServer) WriteWholeBatchToStream(
 		return err
 	}
 
-	if err = srv.stream.StartAtomicOp(); err != nil {
+	if err = srv.streamServer.StartAtomicOp(); err != nil {
 		return err
 	}
-	defer srv.stream.RollbackAtomicOp()
+	defer srv.streamServer.RollbackAtomicOp()
 
 	blocks := make([]eritypes.Block, 0)
 	txsPerBlock := make(map[uint64][]eritypes.Transaction)
@@ -91,7 +91,7 @@ func (srv *DataStreamServer) WriteWholeBatchToStream(
 // writes consecutively blocks from-to
 // checks for all batch related stuff in the meantime - batch start, batche end, etc
 // starts atomicOp and commits it internally
-func (srv *DataStreamServer) WriteBlocksToStreamConsecutively(
+func (srv *ZkEVMDataStreamServer) WriteBlocksToStreamConsecutively(
 	ctx context.Context,
 	logPrefix string,
 	tx kv.Tx,
@@ -122,10 +122,10 @@ func (srv *DataStreamServer) WriteBlocksToStreamConsecutively(
 		return err
 	}
 
-	if err = srv.stream.StartAtomicOp(); err != nil {
+	if err = srv.streamServer.StartAtomicOp(); err != nil {
 		return err
 	}
-	defer srv.stream.RollbackAtomicOp()
+	defer srv.streamServer.RollbackAtomicOp()
 
 	// check if a new batch starts and the old needs closing before that
 	// if it is already closed with a batch end, do not add a new batch end
@@ -201,10 +201,10 @@ LOOP:
 				return err
 			}
 			entries = make([]DataStreamEntryProto, 0, insertEntryCount)
-			if err = srv.stream.CommitAtomicOp(); err != nil {
+			if err = srv.streamServer.CommitAtomicOp(); err != nil {
 				return err
 			}
-			if err = srv.stream.StartAtomicOp(); err != nil {
+			if err = srv.streamServer.StartAtomicOp(); err != nil {
 				return err
 			}
 		}
@@ -224,7 +224,7 @@ LOOP:
 // gets other needed data from the reader
 // writes a batchBookmark and batch start (if needed), block bookmark, block and txs in it
 // basically a full standalone block
-func (srv *DataStreamServer) WriteBlockWithBatchStartToStream(
+func (srv *ZkEVMDataStreamServer) WriteBlockWithBatchStartToStream(
 	logPrefix string,
 	tx kv.Tx,
 	reader DbReader,
@@ -241,10 +241,10 @@ func (srv *DataStreamServer) WriteBlockWithBatchStartToStream(
 		return err
 	}
 
-	if err = srv.stream.StartAtomicOp(); err != nil {
+	if err = srv.streamServer.StartAtomicOp(); err != nil {
 		return err
 	}
-	defer srv.stream.RollbackAtomicOp()
+	defer srv.streamServer.RollbackAtomicOp()
 
 	// if start of new batch add batch start entries
 	var batchStartEntries *DataStreamEntries
@@ -285,7 +285,7 @@ func (srv *DataStreamServer) WriteBlockWithBatchStartToStream(
 // if there is something, try to unwind it
 // in the unwind chek if the block is at batch start
 // if it is - unwind to previous batch's end, so it deletes batch stat of current batch as well
-func (srv *DataStreamServer) UnwindIfNecessary(logPrefix string, reader DbReader, blockNum, prevBlockBatchNum, batchNum uint64) error {
+func (srv *ZkEVMDataStreamServer) UnwindIfNecessary(logPrefix string, reader DbReader, blockNum, prevBlockBatchNum, batchNum uint64) error {
 	// if from is higher than the last datastream block number - unwind the stream
 	highestDatastreamBlock, err := srv.GetHighestBlockNumber()
 	if err != nil {
@@ -323,7 +323,7 @@ func (srv *DataStreamServer) UnwindIfNecessary(logPrefix string, reader DbReader
 	return nil
 }
 
-func (srv *DataStreamServer) WriteBatchEnd(
+func (srv *ZkEVMDataStreamServer) WriteBatchEnd(
 	reader DbReader,
 	batchNumber uint64,
 	stateRoot *common.Hash,
@@ -339,10 +339,10 @@ func (srv *DataStreamServer) WriteBatchEnd(
 		return err
 	}
 
-	if err = srv.stream.StartAtomicOp(); err != nil {
+	if err = srv.streamServer.StartAtomicOp(); err != nil {
 		return err
 	}
-	defer srv.stream.RollbackAtomicOp()
+	defer srv.streamServer.RollbackAtomicOp()
 
 	batchEndEntries, err := addBatchEndEntriesProto(batchNumber, stateRoot, gers, localExitRoot)
 	if err != nil {
@@ -361,7 +361,7 @@ func (srv *DataStreamServer) WriteBatchEnd(
 	return nil
 }
 
-func (srv *DataStreamServer) WriteGenesisToStream(
+func (srv *ZkEVMDataStreamServer) WriteGenesisToStream(
 	genesis *eritypes.Block,
 	reader *hermez_db.HermezDbReader,
 	tx kv.Tx,
@@ -376,11 +376,11 @@ func (srv *DataStreamServer) WriteGenesisToStream(
 		return err
 	}
 
-	err = srv.stream.StartAtomicOp()
+	err = srv.streamServer.StartAtomicOp()
 	if err != nil {
 		return err
 	}
-	defer srv.stream.RollbackAtomicOp()
+	defer srv.streamServer.RollbackAtomicOp()
 
 	batchBookmark := newBatchBookmarkEntryProto(genesis.NumberU64())
 	l2BlockBookmark := newL2BlockBookmarkEntryProto(genesis.NumberU64())

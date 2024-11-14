@@ -20,7 +20,7 @@ type SequencerBatchStreamWriter struct {
 	logPrefix      string
 	legacyVerifier *verifier.LegacyExecutorVerifier
 	sdb            *stageDb
-	streamServer   *server.DataStreamServer
+	streamServer   server.DataStreamServer
 	hasExecutors   bool
 }
 
@@ -32,7 +32,7 @@ func newSequencerBatchStreamWriter(batchContext *BatchContext, batchState *Batch
 		logPrefix:      batchContext.s.LogPrefix(),
 		legacyVerifier: batchContext.cfg.legacyVerifier,
 		sdb:            batchContext.sdb,
-		streamServer:   batchContext.cfg.datastreamServer,
+		streamServer:   batchContext.cfg.dataStreamServer,
 		hasExecutors:   batchState.hasExecutorForThisBatch,
 	}
 }
@@ -107,17 +107,17 @@ func (sbc *SequencerBatchStreamWriter) writeBlockDetailsToDatastream(verifiedBun
 }
 
 func alignExecutionToDatastream(batchContext *BatchContext, lastExecutedBlock uint64, u stagedsync.Unwinder) (bool, error) {
-	lastStartedDatastreamBatch, err := batchContext.cfg.datastreamServer.GetHighestBatchNumber()
+	lastStartedDatastreamBatch, err := batchContext.cfg.dataStreamServer.GetHighestBatchNumber()
 	if err != nil {
 		return false, err
 	}
 
-	lastClosedDatastreamBatch, err := batchContext.cfg.datastreamServer.GetHighestClosedBatch()
+	lastClosedDatastreamBatch, err := batchContext.cfg.dataStreamServer.GetHighestClosedBatch()
 	if err != nil {
 		return false, err
 	}
 
-	lastDatastreamBlock, err := batchContext.cfg.datastreamServer.GetHighestBlockNumber()
+	lastDatastreamBlock, err := batchContext.cfg.dataStreamServer.GetHighestBlockNumber()
 	if err != nil {
 		return false, err
 	}
@@ -147,7 +147,7 @@ func alignExecutionToDatastream(batchContext *BatchContext, lastExecutedBlock ui
 }
 
 func finalizeLastBatchInDatastreamIfNotFinalized(batchContext *BatchContext, batchToClose, blockToCloseAt uint64) error {
-	isLastEntryBatchEnd, err := batchContext.cfg.datastreamServer.IsLastEntryBatchEnd()
+	isLastEntryBatchEnd, err := batchContext.cfg.dataStreamServer.IsLastEntryBatchEnd()
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func finalizeLastBatchInDatastream(batchContext *BatchContext, batchToClose, blo
 		return err
 	}
 	root := lastBlock.Root()
-	if err = batchContext.cfg.datastreamServer.WriteBatchEnd(batchContext.sdb.hermezDb, batchToClose, &root, &ler); err != nil {
+	if err = batchContext.cfg.dataStreamServer.WriteBatchEnd(batchContext.sdb.hermezDb, batchToClose, &root, &ler); err != nil {
 		return err
 	}
 	return nil
