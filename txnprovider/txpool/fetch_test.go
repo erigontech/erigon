@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	erigonlibtypes "github.com/erigontech/erigon-lib/types"
 )
 
 func TestFetch(t *testing.T) {
@@ -247,9 +246,9 @@ func TestOnNewBlock(t *testing.T) {
 				ChangeBatch: []*remote.StateChange{
 					{
 						Txs: [][]byte{
-							decodeHex(erigonlibtypes.TxParseMainnetTests[0].PayloadStr),
-							decodeHex(erigonlibtypes.TxParseMainnetTests[1].PayloadStr),
-							decodeHex(erigonlibtypes.TxParseMainnetTests[2].PayloadStr),
+							decodeHex(TxParseMainnetTests[0].PayloadStr),
+							decodeHex(TxParseMainnetTests[1].PayloadStr),
+							decodeHex(TxParseMainnetTests[2].PayloadStr),
 						},
 						BlockHeight: 1,
 						BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
