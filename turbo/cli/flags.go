@@ -6,7 +6,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
