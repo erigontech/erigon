@@ -17,6 +17,7 @@ import (
 	borfinality "github.com/ledgerwatch/erigon/polygon/bor/finality"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -37,9 +38,18 @@ func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filt
 }
 
 func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *Filters) (blockNumber uint64, hash libcommon.Hash, latest bool, err error) {
-	finishedBlockNumber, err := stages.GetStageProgress(tx, stages.Finish)
-	if err != nil {
-		return 0, libcommon.Hash{}, false, fmt.Errorf("getting finished block number: %w", err)
+	var finishedBlockNumber uint64
+
+	if !sequencer.IsSequencer() {
+		finishedBlockNumber, err = stages.GetStageProgress(tx, stages.Finish)
+		if err != nil {
+			return 0, libcommon.Hash{}, false, fmt.Errorf("getting finished block number: %w", err)
+		}
+	} else {
+		finishedBlockNumber, err = stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return 0, libcommon.Hash{}, false, fmt.Errorf("getting finished block number: %w", err)
+		}
 	}
 
 	var ok bool
