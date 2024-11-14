@@ -76,6 +76,8 @@ var (
 // Pool is interface for the transaction pool
 // This interface exists for the convenience of testing, and not yet because
 // there are multiple implementations
+//
+//go:generate mockgen -typed=true -destination=./pool_mock.go -package=txpool . Pool
 type Pool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
