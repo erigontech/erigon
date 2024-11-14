@@ -16,6 +16,7 @@ on:
       docker_build_tag:
         required: true
         type: string
+  workflow_dispatch:
 
 jobs:
   assertoor_test:
