@@ -490,9 +490,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 
 	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
-
-	if err := s.stateSn.OpenFolder(); err != nil {
-		return err
+	if s.stateSn != nil {
+		if err := s.stateSn.OpenFolder(); err != nil {
+			return err
+		}
 	}
 
 	if s.snapgen {
