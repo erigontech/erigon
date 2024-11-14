@@ -143,7 +143,8 @@ func AwaitComponent[T any](cres chan *component, cerr chan error) (result Compon
 var deactivatoinWaiters = struct {
 	sync.Mutex
 	*util.ChannelGroup
-	cmap map[interface{}]*component
+	cmap   map[interface{}]*component
+	cancel func()
 }{
 	cmap: map[interface{}]*component{},
 }
@@ -926,39 +927,65 @@ func (c *component) activateProvider(ctx context.Context, onActivity onActivity)
 			return
 		}
 	}
-
 	c.setState(Active, false)
 
-	func() {
-		deactivatoinWaiters.Lock()
-		defer deactivatoinWaiters.Unlock()
-		if deactivatoinWaiters.ChannelGroup == nil {
-			deactivatoinWaiters.ChannelGroup = util.NewChannelGroup(context.Background())
-			go func() {
-				for wait := true; wait; {
-					wait = deactivatoinWaiters.Wait(
-						func(ch interface{}, _ interface{}, _ bool) (bool, bool) {
-							deactivatoinWaiters.Lock()
-							c, ok := deactivatoinWaiters.cmap[ch]
-							delete(deactivatoinWaiters.cmap, ch)
-							deactivatoinWaiters.Unlock()
-
-							if ok {
-								c.deactivate(context.Background(), noopHanlder)
-							}
-							return false, false
-						}, nil)
-				}
-				deactivatoinWaiters.Lock()
-				defer deactivatoinWaiters.Unlock()
-				deactivatoinWaiters.ChannelGroup = nil
-			}()
-		}
-		deactivatoinWaiters.cmap[c.context.Done()] = c
-		deactivatoinWaiters.Add(c.context.Done())
-	}()
+	deactivatoinWaiters.Lock()
+	deactivatoinWaiters.cmap[c.context.Done()] = c
+	deactivatoinWaiters.Unlock()
+	awaitDeactivationChannels()
 
 	onActivity(ctx, c, nil)
+}
+
+func awaitDeactivationChannels() {
+	deactivatoinWaiters.Lock()
+	defer deactivatoinWaiters.Unlock()
+
+	if deactivatoinWaiters.ChannelGroup != nil {
+		deactivatoinWaiters.cancel()
+	}
+
+	if len(deactivatoinWaiters.cmap) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	deactivatoinWaiters.ChannelGroup = util.NewChannelGroup(ctx)
+	deactivatoinWaiters.cancel = cancel
+
+	for dc := range deactivatoinWaiters.cmap {
+		deactivatoinWaiters.Add(dc)
+	}
+
+	waiters := &deactivatoinWaiters
+	go func() {
+		for wait := true; wait; {
+			waiters.Lock()
+			channels := waiters.ChannelGroup
+			waiters.Unlock()
+
+			if channels == nil {
+				break
+			}
+
+			wait = channels.Wait(
+				func(ch interface{}, _ interface{}, _ bool) (bool, bool) {
+					waiters.Lock()
+					c, ok := waiters.cmap[ch]
+					delete(waiters.cmap, ch)
+					waiters.Unlock()
+
+					if ok {
+						c.deactivate(context.Background(), noopHanlder)
+					}
+					return false, false
+				}, nil)
+		}
+		waiters.Lock()
+		defer waiters.Unlock()
+		waiters.ChannelGroup = nil
+		waiters.cancel = nil
+	}()
 }
 
 func (c *component) deactivate(ctx context.Context, onActivity onActivity) error {
@@ -1057,13 +1084,9 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 			}
 
 			deactivatoinWaiters.Lock()
-			waiters := &deactivatoinWaiters
+			delete(deactivatoinWaiters.cmap, c.context.Done())
 			deactivatoinWaiters.Unlock()
-
-			if waiters.ChannelGroup != nil {
-				delete(waiters.cmap, c.context.Done())
-				waiters.Remove(c.context.Done())
-			}
+			awaitDeactivationChannels()
 		}
 	}
 	return nil

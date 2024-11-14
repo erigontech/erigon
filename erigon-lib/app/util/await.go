@@ -147,6 +147,10 @@ func (mux *ChannelGroup) Remove(ichan interface{}) *ChannelGroup {
 }
 
 func (mux *ChannelGroup) Wait(chanFunc func(interface{}, interface{}, bool) (bool, bool), errorFunc func(error)) bool {
+	if mux == nil {
+		return false
+	}
+
 	inputCount := 0
 	hasResult := false
 
