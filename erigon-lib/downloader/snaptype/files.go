@@ -268,12 +268,8 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.To, o.To); res != 0 {
 		return res
 	}
-	if strings.Contains(f.name, "caplin/") || strings.Contains(o.name, "caplin/") {
-		return strings.Compare(f.name, o.name)
-	}
 
-	// this is a lexical comparison (don't use enum)
-	return strings.Compare(f.Type.Name(), o.Type.Name())
+	return strings.Compare(f.name, o.name)
 }
 
 func (f FileInfo) As(t Type) FileInfo {
