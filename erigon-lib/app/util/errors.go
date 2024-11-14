@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	ErrUnexpectedType = errors.New("Unexpected type")
-	ErrToDo           = errors.New("TODO")
+	ErrUnexpectedType = errors.New("unexpected type")
+	ErrToDo           = errors.New("TODO") //nolint
 )
 
 type DescriptiveErrorSetter func(descriptive bool)

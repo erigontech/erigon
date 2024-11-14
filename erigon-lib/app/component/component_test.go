@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/app"
 	"github.com/erigontech/erigon-lib/app/component"
 	liblog "github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
@@ -300,10 +301,11 @@ func TestDomainLifecycle(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	c, err := component.NewComponent[component.MockComponentProvider](context.Background(),
 		component.WithDependentDomain(dom),
+		component.WithId("c"),
 		component.WithProvider(mockProvider(ctrl, 1)))
 	require.Nil(t, err)
 	require.NotNil(t, c)
-	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+	require.Equal(t, "domain:c", c.Id().String())
 
 	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
 		component.WithId("d"),
@@ -319,7 +321,8 @@ func TestDomainLifecycle(t *testing.T) {
 		component.WithDependencies(d))
 	require.Nil(t, err)
 	require.NotNil(t, c1)
-	require.Equal(t, "root:c1", c1.Id().String())
+	require.Equal(t, "domain:c1", c1.Id().String())
+	require.Equal(t, "domain:d", d.Id().String())
 
 	d1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
 		component.WithId("d1"),
@@ -349,7 +352,10 @@ func TestDomainLifecycle(t *testing.T) {
 		component.WithDependencies(d1, d2, d3))
 	require.Nil(t, err)
 	require.NotNil(t, c2)
-	require.Equal(t, "root:c2", c2.Id().String())
+	require.Equal(t, "domain:c2", c2.Id().String())
+	require.Equal(t, "domain:d1", d1.Id().String())
+	require.Equal(t, "domain:d2", d2.Id().String())
+	require.Equal(t, "domain:d3", d3.Id().String())
 
 	err = dom.Activate(context.Background())
 	require.Nil(t, err)
@@ -383,6 +389,9 @@ func TestDomainLifecycle(t *testing.T) {
 }
 
 func TestLogger(t *testing.T) {
+	prev := liblog.Root().GetHandler()
+	defer liblog.Root().SetHandler(prev)
+
 	liblog.Root().SetHandler(
 		liblog.FuncHandler(func(r *liblog.Record) error {
 			require.True(t, strings.HasPrefix(r.Msg, "[component:root:provider]"))
@@ -401,10 +410,93 @@ func TestLogger(t *testing.T) {
 	c.AwaitState(context.Background(), component.Active)
 }
 
-func TestContext(t *testing.T) {
+type ctxprovider struct {
+	t *testing.T
+	c component.Component[ctxprovider]
 }
 
+func (p ctxprovider) Configure(ctx context.Context, options ...app.Option) error {
+	cmp := component.ComponentValue[ctxprovider](ctx)
+	require.Equal(p.t, cmp, p.c)
+	return nil
+}
+
+func (p ctxprovider) Initialize(ctx context.Context, options ...app.Option) error {
+	prev := liblog.Root().GetHandler()
+	defer liblog.Root().SetHandler(prev)
+
+	liblog.Root().SetHandler(
+		liblog.FuncHandler(func(r *liblog.Record) error {
+			require.True(p.t, strings.HasPrefix(r.Msg, "[component:root:c]"))
+			require.Equal(p.t, "[component:root:c] initializing (cmp)", r.Msg)
+			require.Equal(p.t, liblog.LvlInfo, r.Lvl)
+			return nil
+		}))
+
+	cmp := component.ComponentValue[ctxprovider](ctx)
+	log := app.CtxLogger(ctx)
+	log.SetLevel(liblog.LvlInfo)
+	require.Equal(p.t, cmp, p.c)
+	log.Info("initializing (cmp)")
+
+	llog := app.NewLogger(liblog.LvlWarn, []string{"component_test"}, nil)
+
+	liblog.Root().SetHandler(
+		liblog.FuncHandler(func(r *liblog.Record) error {
+			require.True(p.t, strings.HasPrefix(r.Msg, "[component_test:root:c]"))
+			require.Equal(p.t, "[component_test:root:c] initializing (ctx)", r.Msg)
+			require.Equal(p.t, liblog.LvlInfo, r.Lvl)
+			return nil
+		}))
+
+	log = llog.CtxLogger(ctx)
+	log.Info("initializing (ctx)")
+	return nil
+}
+
+func (p ctxprovider) Recover(ctx context.Context) error {
+	cmp := component.ComponentValue[ctxprovider](ctx)
+	require.Equal(p.t, cmp, p.c)
+	return nil
+}
+
+func (p ctxprovider) Activate(ctx context.Context) error {
+	cmp := component.ComponentValue[ctxprovider](ctx)
+	require.Equal(p.t, cmp, p.c)
+	return nil
+}
+
+func TestContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c, err := component.NewComponent[ctxprovider](ctx,
+		component.WithId("c"),
+		component.WithProvider(&ctxprovider{t: t}))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:c", c.Id().String())
+
+	c.Provider().c = c
+
+	c.Configure(context.Background())
+
+	c.Activate(context.Background())
+	state, err := c.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+
+	cancel()
+	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Deactivated, c.State())
+}
+
+func TestFlags(t *testing.T) {
+}
 func TestEvents(t *testing.T) {
+}
+
+func TestMultipleDependents(t *testing.T) {
 }
 
 func TestAddRemoveDeps(t *testing.T) {

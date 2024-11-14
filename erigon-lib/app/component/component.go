@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon-lib/app"
 	"github.com/erigontech/erigon-lib/app/event"
 	"github.com/erigontech/erigon-lib/app/util"
+	liblog "github.com/erigontech/erigon-lib/log/v3"
 	pkg_errors "github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
@@ -139,86 +140,30 @@ func AwaitComponent[T any](cres chan *component, cerr chan error) (result Compon
 	return result, err
 }
 
-type channelMultiplexer struct {
-	channels *util.ChannelGroup
-}
-
-func ChannelMultiplexer(waitContext context.Context) *channelMultiplexer {
-	return &channelMultiplexer{
-		channels: util.NewChannelGroup(waitContext),
-	}
-
-}
-
-func (mux *channelMultiplexer) Add(cres chan *component, cerr chan error) *channelMultiplexer {
-	mux.channels.
-		Add(cres).
-		Add(cerr)
-
-	return mux
-}
-
-func (mux *channelMultiplexer) Context() context.Context {
-	return mux.channels.Context()
-}
-
-func (mux *channelMultiplexer) Cancel() {
-	mux.channels.Cancel()
-}
-
-func (mux *channelMultiplexer) Done() bool {
-	return mux.channels.Done()
-}
-
-func (mux *channelMultiplexer) Await() (results []*component, errors []error) {
-	mux.channels.Wait(func(ichan interface{}) (bool, bool) {
-		switch crecv := ichan.(type) {
-		case chan error:
-			err := <-crecv
-			errors = append(errors, err)
-			return false, false
-		case chan *component:
-			res := <-crecv
-			results = append(results, res)
-			return true, false
-		default:
-			if crecv == mux.channels.Context().Done() {
-				errors = append(errors, mux.channels.Context().Err())
-				return false, true
-			}
-
-			return false, false
-		}
-	}, nil)
-
-	return results, errors
+var deactivatoinWaiters = struct {
+	sync.Mutex
+	*util.ChannelGroup
+	cmap map[interface{}]*component
+}{
+	cmap: map[interface{}]*component{},
 }
 
 type relations []relation
 
 func cmp(p0 relation, p1 relation) bool {
-	//fmt.Printf("[(%p<%p)(%v<%v)=%v]", p0, p1, reflect.ValueOf(p0).Pointer(), reflect.ValueOf(p1).Pointer(),
-	//	reflect.ValueOf(p0).Pointer() < reflect.ValueOf(p1).Pointer())
 	return reflect.ValueOf(p0).Pointer() < reflect.ValueOf(p1).Pointer()
 }
 
 func (c relations) Add(component relation) relations {
 	l := len(c)
 
-	//fmt.Printf("Add %p (len=%d)\n", component, l)
-
 	if l == 0 {
 		return relations{component}
 	}
 
-	/*is := sort.Search(l, func(i int) bool {
-		return cmp(c[i], component)
-	})*/
-
 	var i = l
 	for index := 0; index < l; index++ {
 		if cmp(c[index], component) && (index == l-1 || !cmp(c[index+1], component)) {
-			//fmt.Printf("\nadd res=%d (%d)\n", index, is)
 			i = index
 			break
 		}
@@ -228,7 +173,6 @@ func (c relations) Add(component relation) relations {
 		if reflect.ValueOf(c[0]).Pointer() == reflect.ValueOf(component).Pointer() {
 			return c
 		}
-		//fmt.Printf("\nappend\n")
 		return append(relations{component}, c...)
 	}
 
@@ -257,7 +201,6 @@ func (c relations) Remove(component relation) relations {
 	var i int
 	for i = 0; i < l; i++ {
 		if cmp(c[i], component) && (i == l-1 || !cmp(c[i+1], component)) {
-			//fmt.Printf("\nremove res=%d\n", i)
 			break
 		}
 	}
@@ -291,30 +234,17 @@ func (c relations) Contains(component relation) bool {
 		return false
 	}
 
-	/*fmt.Printf("len=%d", l)
-	for _, p := range c {
-		fmt.Printf("[%p]", p)
-	}
-	fmt.Printf("\nprocessor=%v, c:%v\n", component, c)*/
-
-	/*	i := sort.Search(l, cmp )
-	 */
-
 	var i = l
 	for index := 0; index < l; index++ {
 		if cmp(c[index], component) && (index == l-1 || !cmp(c[index+1], component)) {
-			//fmt.Printf("\nsearch res=%d\n", index)
 			i = index + 1
 			break
 		}
 	}
-	//fmt.Printf("search res=%v\n", i)
 
 	if i == l {
-		//fmt.Printf("res=%v\n", reflect.ValueOf(c[0]).Pointer() == reflect.ValueOf(component).Pointer())
 		return reflect.ValueOf(c[0]).Pointer() == reflect.ValueOf(component).Pointer()
 	}
-	//fmt.Printf("[%p==%p=%v]\n", c[i], component, reflect.ValueOf(c[i]).Pointer() == reflect.ValueOf(component).Pointer())
 	return reflect.ValueOf(c[i]).Pointer() == reflect.ValueOf(component).Pointer()
 }
 
@@ -386,6 +316,30 @@ type componentOptions struct {
 	dependencies relations
 	dependents   relations
 	id           string
+	logLabels    []string
+	logLvl       liblog.Lvl
+	logCtx       []interface{}
+}
+
+func WithLogLevel(lvl liblog.Lvl) app.Option {
+	return app.WithOption[componentOptions](
+		func(c *componentOptions) {
+			c.logLvl = lvl
+		})
+}
+
+func WithLogLabels(labels ...string) app.Option {
+	return app.WithOption[componentOptions](
+		func(c *componentOptions) {
+			c.logLabels = labels
+		})
+}
+
+func WithLogCtx(ctx ...interface{}) app.Option {
+	return app.WithOption[componentOptions](
+		func(c *componentOptions) {
+			c.logCtx = ctx
+		})
 }
 
 func WithId(id string) app.Option {
@@ -431,8 +385,12 @@ func NewComponent[P any](context context.Context, options ...app.Option) (Compon
 		log:     log,
 	}
 
-	var opts componentOptions
+	opts := componentOptions{
+		logLvl: -1,
+	}
 	options = app.ApplyOptions(&opts, options)
+	var domainOpts domainOptions
+	options = app.ApplyOptions(&domainOpts, options)
 	c.options = app.ApplyOptions(c, options)
 
 	if c.provider == nil {
@@ -446,6 +404,10 @@ func NewComponent[P any](context context.Context, options ...app.Option) (Compon
 			t = t.Elem()
 		}
 		c.name = t.String()
+	}
+
+	if domainOpts.dependent != nil {
+		opts.dependents = append(opts.dependents, domainOpts.dependent.component)
 	}
 
 	if len(opts.dependents) > 0 {
@@ -488,8 +450,15 @@ func NewComponent[P any](context context.Context, options ...app.Option) (Compon
 		}
 	}
 
-	c.log = log.New().(app.Logger)
-	c.log.SetLabels(c.Id().String())
+	c.log = log.New(opts.logCtx...).(app.Logger)
+	if len(opts.logLabels) > 0 {
+		c.log.SetLabels(opts.logLabels...)
+	} else {
+		c.log.SetLabels(c.Id().String())
+	}
+	if opts.logLvl >= 0 {
+		c.log.SetLevel(opts.logLvl)
+	}
 
 	return typedComponent[P]{c}, nil
 }
@@ -524,10 +493,6 @@ func (c *component) Context() context.Context {
 	}
 
 	return context.Background()
-}
-
-func (c *component) setContext(processorContext context.Context) {
-	c.context = processorContext
 }
 
 func (c *component) State() State {
@@ -649,7 +614,7 @@ func (c *component) InstanceId() string {
 var activationMutex = sync.Mutex{}
 
 func (c *component) Configure(ctx context.Context, options ...app.Option) error {
-	return c.configure(ctx, true, false, func(context.Context, *component, error) {}, options...)
+	return c.configure(ctx, true, false, noopHanlder, options...)
 }
 
 func (c *component) configure(ctx context.Context, force bool, activationLocked bool, onActivity onActivity, options ...app.Option) error {
@@ -681,7 +646,7 @@ func (c *component) configure(ctx context.Context, force bool, activationLocked 
 								}
 							}()
 
-							return asComponent(dependency).configure(ctx, force, true, func(context.Context, *component, error) {}, options...)
+							return asComponent(dependency).configure(ctx, force, true, noopHanlder, options...)
 						}()
 
 						if err != nil {
@@ -720,7 +685,8 @@ func (c *component) configureProvider(ctx context.Context, onActivity onActivity
 
 	if configurable, ok := c.provider.(Configurable); ok {
 		if _, ok := c.provider.(*componentDomain); !ok {
-			if err := configurable.Configure(ctx, append(c.options, options...)...); err != nil {
+			if err := configurable.Configure(
+				withComponent(ctx, c), append(c.options, options...)...); err != nil {
 				return err
 			}
 		}
@@ -735,7 +701,7 @@ func (c *component) configureProvider(ctx context.Context, onActivity onActivity
 }
 
 func (c *component) Initialize(ctx context.Context, options ...app.Option) error {
-	return c.initialize(ctx, false, func(context.Context, *component, error) {}, options...)
+	return c.initialize(ctx, false, noopHanlder, options...)
 }
 
 func (c *component) initialize(ctx context.Context, activationLocked bool, onActivity onActivity, options ...app.Option) error {
@@ -768,7 +734,7 @@ func (c *component) initialize(ctx context.Context, activationLocked bool, onAct
 								}
 							}()
 
-							return asComponent(dependency).initialize(ctx, true, func(context.Context, *component, error) {}, options...)
+							return asComponent(dependency).initialize(ctx, true, noopHanlder, options...)
 						}()
 
 						if err != nil {
@@ -807,7 +773,7 @@ func (c *component) initializeProvider(ctx context.Context, onActivity onActivit
 
 	if configurable, ok := c.provider.(Initializable); ok {
 		if _, ok := c.provider.(*componentDomain); !ok {
-			if err := configurable.Initialize(ctx, append(c.options, options...)...); err != nil {
+			if err := configurable.Initialize(withComponent(ctx, c), append(c.options, options...)...); err != nil {
 				return err
 			}
 		}
@@ -822,6 +788,8 @@ func (c *component) initializeProvider(ctx context.Context, onActivity onActivit
 }
 
 type onActivity func(ctx context.Context, c *component, err error)
+
+var noopHanlder = func(context.Context, *component, error) {}
 
 func (c *component) activate(ctx context.Context, onActivity onActivity) error {
 	activationList := make([]*component, 0, len(c.dependencies))
@@ -935,8 +903,22 @@ func (c *component) activateDependencies(ctx context.Context, activationList []*
 }
 
 func (c *component) activateProvider(ctx context.Context, onActivity onActivity) {
+	//fmt.Println("activateProvider", c.Id())
+	if c.context.Err() != nil {
+		c.setState(Deactivated, false)
+		onActivity(ctx, c, c.context.Err())
+		return
+	}
+
+	// TODO - not sure if this is usefukl - as
+	// it can leave things hanging - needs invetigation
+	//if ctx.Err() != nil {
+	//	onActivity(ctx, c, c.context.Err())
+	//	return
+	//}
+
 	if activatable, ok := c.provider.(Activatable); ok {
-		err := activatable.Activate(ctx)
+		err := activatable.Activate(withComponent(ctx, c))
 
 		if err != nil {
 			c.setState(Failed, false)
@@ -946,6 +928,36 @@ func (c *component) activateProvider(ctx context.Context, onActivity onActivity)
 	}
 
 	c.setState(Active, false)
+
+	func() {
+		deactivatoinWaiters.Lock()
+		defer deactivatoinWaiters.Unlock()
+		if deactivatoinWaiters.ChannelGroup == nil {
+			deactivatoinWaiters.ChannelGroup = util.NewChannelGroup(context.Background())
+			go func() {
+				for wait := true; wait; {
+					wait = deactivatoinWaiters.Wait(
+						func(ch interface{}, _ interface{}, _ bool) (bool, bool) {
+							deactivatoinWaiters.Lock()
+							c, ok := deactivatoinWaiters.cmap[ch]
+							delete(deactivatoinWaiters.cmap, ch)
+							deactivatoinWaiters.Unlock()
+
+							if ok {
+								c.deactivate(context.Background(), noopHanlder)
+							}
+							return false, false
+						}, nil)
+				}
+				deactivatoinWaiters.Lock()
+				defer deactivatoinWaiters.Unlock()
+				deactivatoinWaiters.ChannelGroup = nil
+			}()
+		}
+		deactivatoinWaiters.cmap[c.context.Done()] = c
+		deactivatoinWaiters.Add(c.context.Done())
+	}()
+
 	onActivity(ctx, c, nil)
 }
 
@@ -1036,12 +1048,21 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 		//fmt.Printf("%T:%p Deactivating: %v\n", component, component, component.State())
 
 		if deactivatable, ok := c.provider.(Deactivatable); ok {
-			err := deactivatable.Deactivate(ctx)
+			err := deactivatable.Deactivate(withComponent(ctx, c))
 
 			if err != nil {
 				c.setState(Failed, false)
 				onActivity(ctx, c, err)
 				return err
+			}
+
+			deactivatoinWaiters.Lock()
+			waiters := &deactivatoinWaiters
+			deactivatoinWaiters.Unlock()
+
+			if waiters.ChannelGroup != nil {
+				delete(waiters.cmap, c.context.Done())
+				waiters.Remove(c.context.Done())
 			}
 		}
 	}
@@ -1089,7 +1110,10 @@ func (c *component) setDomain(cm *componentDomain, domainLocked bool) error {
 					c.log.SetLabels(c.id.String())
 				}
 			}
-			cm.addDependency(c, domainLocked)
+
+			if len(c.dependents) == 0 {
+				cm.addDependency(c, domainLocked)
+			}
 
 			if err := cm.ServiceBus().Register(c, registrations...); err != nil {
 				return err
@@ -1156,6 +1180,12 @@ func (c *component) removeDependent(dependent *component, dependentLocked bool) 
 }
 
 func (component *component) registerSubscriptions() error {
+	if domain, ok := component.provider.(*componentDomain); ok {
+		if serviceBus := domain.ServiceBus(); serviceBus != nil {
+			return serviceBus.Register(component, component.onComponentStateChanged)
+		}
+	}
+
 	if !component.hasDomain() {
 		return nil
 	}
@@ -1189,14 +1219,7 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 			state = c.state
 
 			if c.dependencies.Contains(sourceComponent) {
-				//	fmt.Printf("%s Received Component State Changed [%v->%v] from: %v\n",
-				//		component.Name(), event.Previous(), event.Current(), event.Source())
-
 				if event.Current() == Active {
-					/*for _, dependent := range component.dependents {
-						fmt.Printf("%p dep: %p: %v\n", component, dependent, dependent)
-					}*/
-
 					if state.IsActivated() && state != Active {
 						allDependenciesActivated = true
 						for _, dependent := range c.dependencies {
@@ -1209,10 +1232,6 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 				}
 
 				if event.Current() == Deactivated {
-					/*for _, dependent := range component.dependents {
-						fmt.Printf("%p dep: %p: %v\n", component, dependent, dependent)
-					}*/
-
 					if state != Deactivated {
 						allDependenciesDeactivated = true
 						for _, dependent := range c.dependencies {
@@ -1227,10 +1246,10 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 		}()
 
 		if allDependenciesActivated {
-			c.onDependenciesActive(c.Context(), func(context.Context, *component, error) {})
+			c.onDependenciesActive(c.Context(), noopHanlder)
 		}
 
-		if allDependenciesDeactivated && state != Deactivated {
+		if allDependenciesDeactivated && state == Deactivating {
 			c.onDependenciesDeactivated(c.Context())
 		}
 	}
@@ -1251,10 +1270,10 @@ func (c *component) onDependenciesActive(ctx context.Context, onActivity onActiv
 		return
 	}
 
-	//fmt.Printf("onDependenciesActive: %s\n", c)
+	//fmt.Printf("onDependenciesActive: %s\n", c.Id())
 
 	if recoverable, ok := c.provider.(Recoverable); ok {
-		err := recoverable.Recover(ctx)
+		err := recoverable.Recover(withComponent(ctx, c))
 
 		if err != nil {
 			c.setState(Failed, false)
@@ -1292,19 +1311,6 @@ func (c *component) addDependency(dependency *component, locked bool) (*componen
 				}
 			}
 		}
-
-		/*if component.dependents.Contains(dependent.component()) {
-			fmt.Printf("%v ADD DEP dep: %p\n", component.Name(), dependent.component())
-			for _, dep := range component.dependents {
-				fmt.Printf("  %p %v\n", dep, dep)
-			}
-		} else {
-			fmt.Printf("%v ADD DEP FAILED dep: %p %v\n", component.Name(), dependent.component(), dependent)
-			for _, dep := range component.dependents {
-				fmt.Printf("  %p  %v\n", dep, dep)
-			}
-			panic("Shouldn't fail")
-		}*/
 	}
 
 	return c, nil
@@ -1361,19 +1367,4 @@ func (c *component) GetDependency(context context.Context, selector app.TypedSel
 
 func (c *component) HasDependency(context context.Context, selector app.TypedSelector) bool {
 	return c.GetDependency(context, selector) != nil
-}
-
-func (c *component) checkDependencyActivations() bool {
-	if c.HasDependencies() {
-		c.RLock()
-		defer c.RUnlock()
-
-		for _, component := range c.Dependencies() {
-			if component.State() != Active {
-				return false
-			}
-		}
-	}
-
-	return true
 }

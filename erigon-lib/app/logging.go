@@ -1,13 +1,16 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"reflect"
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon-lib/app/util"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
@@ -25,6 +28,12 @@ func isNil(value reflect.Value) bool {
 	}
 
 }
+
+func init() {
+	RegisterLevelUpdater(path.Base(util.CallerPackageName(1)), applog.SetLevel, func() log.Lvl { return applog.GetLevel() })
+}
+
+var applog = NewLogger(log.LvlTrace, []string{path.Base(util.CallerPackageName(1))}, nil)
 
 // LogString returns a string for use in a Str logging field
 // without failing is the value passed is nil
@@ -88,7 +97,12 @@ type Logger interface {
 	GetLabels() []string
 	SetLabels(parts ...string) []string
 
+	GetCtx() []interface{}
+	SetCtx(parts ...interface{}) []interface{}
+
 	Caller() log.CtxPair
+
+	CtxLogger(ctx context.Context) Logger
 }
 
 type LevelSetter func(level log.Lvl) log.Lvl
@@ -235,6 +249,22 @@ func (l *logger) GetLevel() log.Lvl {
 	return l.level
 }
 
+func (l *logger) CtxLogger(ctx context.Context) Logger {
+	ctxLogger := CtxLogger(ctx)
+
+	if ctxLogger == applog {
+		return l
+	}
+
+	return &logger{
+		level:      ctxLogger.GetLevel(),
+		labelParts: ctxLogger.GetLabels(),
+		ctx:        ctxLogger.GetCtx(),
+		parent:     l,
+		logger:     l.logger,
+	}
+}
+
 func (l *logger) SetLabels(parts ...string) []string {
 	l.Lock()
 	defer l.Unlock()
@@ -248,6 +278,20 @@ func (l *logger) GetLabels() []string {
 	l.RLock()
 	defer l.RUnlock()
 	return l.labelParts
+}
+
+func (l *logger) SetCtx(ctx ...interface{}) []interface{} {
+	l.Lock()
+	defer l.Unlock()
+	prev := l.ctx
+	l.ctx = ctx
+	return prev
+}
+
+func (l *logger) GetCtx() []interface{} {
+	l.RLock()
+	defer l.RUnlock()
+	return l.ctx
 }
 
 func (l *logger) Trace(msg string, ctx ...interface{}) {

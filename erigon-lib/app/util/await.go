@@ -106,11 +106,12 @@ func NopErrorChannel() chan error {
 }
 
 type ChannelGroup struct {
-	pending    []reflect.SelectCase
-	active     []reflect.SelectCase
-	mutex      sync.Mutex
-	context    context.Context
-	cancelFunc context.CancelFunc
+	pending       []reflect.SelectCase
+	active        []reflect.SelectCase
+	pendingRemove []reflect.Value
+	mutex         sync.Mutex
+	context       context.Context
+	cancelFunc    context.CancelFunc
 }
 
 func NewChannelGroup(waitContext context.Context) *ChannelGroup {
@@ -138,16 +139,41 @@ func (mux *ChannelGroup) Add(ichan interface{}) *ChannelGroup {
 	return mux
 }
 
-func (mux *ChannelGroup) Wait(chanFunc func(interface{}) (bool, bool), errorFunc func(error)) bool {
+func (mux *ChannelGroup) Remove(ichan interface{}) *ChannelGroup {
+	mux.mutex.Lock()
+	mux.pendingRemove = append(mux.pendingRemove, reflect.ValueOf(ichan))
+	mux.mutex.Unlock()
+	return mux
+}
 
+func (mux *ChannelGroup) Wait(chanFunc func(interface{}, interface{}, bool) (bool, bool), errorFunc func(error)) bool {
 	inputCount := 0
 	hasResult := false
 
+WAIT:
 	for {
 		mux.mutex.Lock()
 		mux.active = append(mux.active, mux.pending...)
 		inputCount += len(mux.pending)
 		mux.pending = nil
+		var active []reflect.SelectCase
+		for _, a := range mux.active {
+			var remove bool
+			for _, r := range mux.pendingRemove {
+				if a.Chan == r {
+					remove = true
+					break
+				}
+			}
+
+			if !remove {
+				active = append(active, a)
+			} else {
+				inputCount--
+			}
+		}
+		mux.pendingRemove = nil
+		mux.active = active
 		mux.mutex.Unlock()
 
 		if inputCount <= 1 {
@@ -161,24 +187,35 @@ func (mux *ChannelGroup) Wait(chanFunc func(interface{}) (bool, bool), errorFunc
 			return hasResult
 		}
 
-		chosen, recv, recvOK := reflect.Select(mux.active)
-		if recvOK {
-
+		if chosen, recv, recvOK := reflect.Select(mux.active); recvOK {
 			var gotResult, done bool
 
 			if chosen != 0 {
-				gotResult, done = chanFunc(recv.Interface())
-			}
+				for _, r := range mux.pendingRemove {
+					if mux.active[chosen].Chan == r {
+						continue WAIT
+					}
+				}
 
+				gotResult, done = chanFunc(mux.active[chosen].Chan.Interface(), recv.Interface(), true)
+			}
 			if gotResult {
 				hasResult = true
 			}
-
 			if done || chosen == 0 {
 				return hasResult
 			}
-
 		} else {
+			if chosen == 0 {
+				return hasResult
+			}
+			gotResult, done := chanFunc(mux.active[chosen].Chan.Interface(), recv.Interface(), false)
+			if gotResult {
+				hasResult = true
+			}
+			if done {
+				return hasResult
+			}
 			mux.active[chosen].Chan = reflect.ValueOf(nil)
 			inputCount--
 		}
@@ -197,254 +234,9 @@ func (mux *ChannelGroup) Context() context.Context {
 	return mux.context
 }
 
-type resultMultiplexer[T any] struct {
-	channels *ChannelGroup
-}
-
-func ResultMultiplexer[T any](waitContext context.Context) *resultMultiplexer[T] {
-	return &resultMultiplexer[T]{
-		channels: NewChannelGroup(waitContext),
-	}
-
-}
-
-func (mux *resultMultiplexer[T]) Add(cres chan T, cerr chan error) *resultMultiplexer[T] {
-	mux.channels.
-		Add(cres).
-		Add(cerr)
-
-	return mux
-}
-
-func (mux *resultMultiplexer[T]) Context() context.Context {
-	return mux.channels.Context()
-}
-
-func (mux *resultMultiplexer[T]) Cancel() {
-	mux.channels.Cancel()
-}
-
-func (mux *resultMultiplexer[T]) Done() bool {
-	return mux.channels.Done()
-}
-
-func (mux *resultMultiplexer[T]) AwaitOne() (res T, err error) {
-	mux.channels.Wait(func(ichan interface{}) (bool, bool) {
-		switch crecv := ichan.(type) {
-		case chan error:
-			err = <-crecv
-			return false, false
-		case chan interface{}:
-			val := <-crecv
-			res = val.(T)
-			mux.channels.Cancel()
-			return true, true
-		default:
-			if crecv == mux.channels.Context().Done() {
-				err = mux.channels.Context().Err()
-				return false, true
-			}
-
-			return false, false
-		}
-	}, nil)
-
-	return res, err
-}
-
-func (mux *resultMultiplexer[T]) AwaitAll() (results []T, errors []error) {
-	mux.channels.Wait(func(ichan interface{}) (bool, bool) {
-		switch crecv := ichan.(type) {
-		case chan error:
-			err := <-crecv
-			errors = append(errors, err)
-			return false, false
-		case chan interface{}:
-			res := <-crecv
-			results = append(results, res.(T))
-			return true, false
-		default:
-			if crecv == mux.channels.Context().Done() {
-				errors = append(errors, mux.channels.Context().Err())
-				return false, true
-			}
-
-			return false, false
-		}
-	}, nil)
-
-	return results, errors
-}
-
-func (mux *resultMultiplexer[T]) Select() (chan T, chan error) {
-	cres, cerr := MakeResultChannels[T]()
-
-	go func() {
-		mux.channels.Wait(func(ichan interface{}) (bool, bool) {
-			switch crecv := ichan.(type) {
-			case chan error:
-				err := <-crecv
-				cerr <- err
-				return false, false
-			case chan interface{}:
-				res := <-crecv
-				cres <- res.(T)
-				return true, false
-			default:
-				if crecv == mux.channels.Context().Done() {
-					cerr <- mux.channels.Context().Err()
-					return false, true
-				}
-
-				return false, false
-			}
-		}, nil)
-
-		CloseResultChannels(cres, cerr)
-	}()
-
-	return cres, cerr
-}
-
-type errorMultiplexer struct {
-	channels *ChannelGroup
-}
-
-func ErrorMultiplexer(waitContext context.Context) *errorMultiplexer {
-	return &errorMultiplexer{
-		channels: NewChannelGroup(waitContext),
-	}
-}
-
-func (mux *errorMultiplexer) Add(cerr chan error) *errorMultiplexer {
-	mux.channels.
-		Add(cerr)
-
-	return mux
-}
-
-func (mux *errorMultiplexer) Context() context.Context {
-	return mux.channels.Context()
-}
-
-func (mux *errorMultiplexer) Cancel() {
-	mux.channels.Cancel()
-}
-
-func (mux *errorMultiplexer) Done() bool {
-	return mux.channels.Done()
-}
-
-func (mux *errorMultiplexer) AwaitOne() (err error) {
-	mux.channels.Wait(func(ichan interface{}) (bool, bool) {
-		switch crecv := ichan.(type) {
-		case chan error:
-			err = <-crecv
-			return true, true
-		default:
-			if crecv == mux.channels.Context().Done() {
-				err = mux.channels.Context().Err()
-				return true, true
-			}
-
-			return false, false
-		}
-	}, nil)
-
-	return err
-}
-
-func (mux *errorMultiplexer) AwaitAll() (errors []error) {
-
-	mux.channels.Wait(func(ichan interface{}) (bool, bool) {
-		switch crecv := ichan.(type) {
-		case chan error:
-			err := <-crecv
-			errors = append(errors, err)
-			return true, false
-		default:
-			if crecv == mux.channels.Context().Done() {
-				errors = append(errors, mux.channels.Context().Err())
-				return true, true
-			}
-
-			return false, false
-		}
-	}, nil)
-
-	return errors
-}
-
-func (mux *errorMultiplexer) Select() chan error {
-	cerr := make(chan error, 1)
-
-	go func() {
-		mux.channels.Wait(func(ichan interface{}) (bool, bool) {
-			switch crecv := ichan.(type) {
-			case chan error:
-				err := <-crecv
-				cerr <- err
-				return true, false
-			default:
-				if crecv == mux.channels.Context().Done() {
-					cerr <- mux.channels.Context().Err()
-					return true, true
-				}
-
-				return false, false
-			}
-		}, nil)
-
-		close(cerr)
-	}()
-
-	return cerr
-}
-
 func AwaitError(cerr chan error) (err error) {
 	if cerr == nil {
 		return fmt.Errorf("Await Failed: channel is undefined")
 	}
-
 	return <-cerr
-}
-
-func AwaitErrors(waitContext context.Context, cerrs ...chan error) (err error) {
-	var chans []chan error
-
-	for _, cerr := range cerrs {
-		if cerr != nil {
-			chans = append(chans, cerr)
-		}
-	}
-
-	if len(chans) == 0 {
-		return fmt.Errorf("Await Failed: no channels to await")
-	}
-
-	mux := ErrorMultiplexer(waitContext)
-
-	for _, cerr := range chans {
-		if cerr != nil {
-			mux.Add(cerr)
-		}
-	}
-
-	if errs := mux.AwaitAll(); len(errs) > 0 {
-		return Errors(errs)
-	}
-
-	return nil
-}
-
-type ExitFunc func(exitContext context.Context) []chan error
-
-func AwaitExit(exitContext context.Context, exitFuncs ...ExitFunc) error {
-	var errorChannels []chan error
-
-	for _, exitFunc := range exitFuncs {
-		errorChannels = append(errorChannels, exitFunc(exitContext)...)
-	}
-
-	return AwaitErrors(exitContext, errorChannels...)
 }
