@@ -73,20 +73,32 @@ jobs:
             ~/go/pkg
             ~/.cache
 
+      # Runs a Docker container for compiling Erigon for the Linux/amd64 architecture
       - name: Build for linux/amd64
         run: >
           docker run --platform linux/amd64
+          # Automatically removes the container upon completion
           --rm
+          # Mounts the 'erigon' directory from the Git repository into the container in read-only mode
           -v $(pwd)/erigon:/erigon:ro
+          # Mounts a directory in the GitHub Actions workspace to collect the compilation output files
           -v ${GITHUB_WORKSPACE}/build-amd64:/erigon-build
+          # Mounts the host system cache inside the container to improve compilation performance
           -v ${HOME}/.cache:/root/.cache
+          # Mounts the Go dependencies cache inside the container
           -v ${HOME}/go/pkg/mod:/go/pkg/mod
+          # Sets the working directory inside the container
           -w /erigon --entrypoint /bin/bash
+          # Uses the Docker image defined in the BUILDER_IMAGE environment variable (in this case "golang:1.22-bookworm")
           ${{ env.BUILDER_IMAGE }}
-          -c "git config --global --add safe.directory /erigon;
+          -c "
+          # Configures Git to allow modifying files in the '/erigon' directory
+          git config --global --add safe.directory /erigon;
+          # Compiles the various Erigon components for the amd64 architecture
           make GOARCH=amd64 GOAMD64=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb 
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
-          find / -name libsilkworm_capi.so -exec install {} /erigon-build \; "
+          # Manually installs the libsilkworm_capi.so library required by Erigon
+          find / -name libsilkworm_capi.so -exec install {} /erigon-build \;"
 
       - name: Create archives and checksums
         env:
@@ -94,10 +106,14 @@ jobs:
         run: |
           cd ${GITHUB_WORKSPACE}
           mkdir $GITHUB_WORKSPACE/release
+          # Iterates over all directories starting with 'build-'
           for dir in build-*; do
             cd $dir
             echo Current directory is $(pwd). Checksum file and archive will be created for this directory
             # sha256sum * > checksums.txt
+            # Creates a gzipped tar archive for the current 'build-*' directory
+            # The archive file is named "<APPLICATION>_<RELEASE_VERSION>_linux_<platform>.tar.gz"
+            # and the contents are prefixed with "<APPLICATION>_<RELEASE_VERSION>_linux_<platform>/"
             tar czvf $GITHUB_WORKSPACE/release/${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,').tar.gz \
               --transform "s,^./,${APPLICATION}_${RELEASE_VERSION}_linux_$(echo $dir | sed 's,build-,,')/," .
             cd -
