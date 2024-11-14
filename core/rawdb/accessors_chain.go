@@ -1204,13 +1204,16 @@ func IsPosBlock(db kv.Getter, blockHash common.Hash) (trans bool, err error) {
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
-func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration) error {
+func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int, timeout time.Duration, logger log.Logger, logPrefix string) error {
 	t := time.Now()
 	c, err := tx.RwCursor(table)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
 	defer c.Close()
+
+	logEvery := time.NewTimer(30 * time.Second)
+	defer logEvery.Stop()
 
 	i := 0
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
@@ -1226,6 +1229,13 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 		if blockNum >= pruneTo {
 			break
 		}
+
+		select {
+		case <-logEvery.C:
+			logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), table, "blockNum", blockNum)
+		default:
+		}
+
 		if err = c.DeleteCurrent(); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}

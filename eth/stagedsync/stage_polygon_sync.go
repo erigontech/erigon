@@ -46,6 +46,7 @@ import (
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 var errBreakPolygonSyncStage = errors.New("break polygon sync stage")
@@ -64,6 +65,7 @@ func NewPolygonSyncStageCfg(
 	stopNode func() error,
 	blockLimit uint,
 	userUnwindTypeOverrides []string,
+	notifications *shards.Notifications,
 ) PolygonSyncStageCfg {
 	// using a buffered channel to preserve order of tx actions,
 	// do not expect to ever have more than 50 goroutines blocking on this channel
@@ -109,7 +111,7 @@ func NewPolygonSyncStageCfg(
 		Logger:       logger,
 		BorConfig:    borConfig,
 		EventFetcher: heimdallClient})
-	p2pService := p2p.NewService(maxPeers, logger, sentry, statusDataProvider.GetStatusData)
+	p2pService := p2p.NewService(logger, maxPeers, sentry, statusDataProvider.GetStatusData)
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
@@ -126,6 +128,7 @@ func NewPolygonSyncStageCfg(
 	)
 	events := polygonsync.NewTipEvents(logger, p2pService, heimdallService)
 	sync := polygonsync.NewSync(
+		logger,
 		syncStore,
 		executionEngine,
 		milestoneVerifier,
@@ -136,7 +139,7 @@ func NewPolygonSyncStageCfg(
 		heimdallService,
 		bridgeService,
 		events.Events(),
-		logger,
+		notifications,
 	)
 	syncService := &polygonSyncStageService{
 		logger:          logger,

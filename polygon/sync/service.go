@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 func NewService(
@@ -43,12 +44,13 @@ func NewService(
 	blockLimit uint,
 	bridgeService *bridge.Service,
 	heimdallService *heimdall.Service,
+	notifications *shards.Notifications,
 ) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
-	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
+	p2pService := p2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData)
 	execution := newExecutionClient(executionClient)
 	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
@@ -64,6 +66,7 @@ func NewService(
 	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService)
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
+		logger,
 		store,
 		execution,
 		milestoneVerifier,
@@ -74,7 +77,7 @@ func NewService(
 		heimdallService,
 		bridgeService,
 		events.Events(),
-		logger,
+		notifications,
 	)
 	return &Service{
 		sync:            sync,
