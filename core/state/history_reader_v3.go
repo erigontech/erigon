@@ -222,7 +222,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	st := btree.New(16)
 	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
-	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false , addr[:], s.blockNr)
+	accData, err := DomainGetAsOf(s.tx, s.accHistoryC, s.accChangesC, false , addr[:], s.blockNr)
 	if err != nil {
 		return err
 	}

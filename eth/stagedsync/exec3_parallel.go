@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -334,7 +336,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 			defer tx.Rollback()
 			pe.doms.SetTx(tx)
 
-			applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+			applyCtx, cancelApplyCtx = context.WithCancel(ctx) //nolint:fatcontext
 			defer cancelApplyCtx()
 			pe.applyLoopWg.Add(1)
 			go pe.applyLoop(applyCtx, maxTxNum, &blockComplete, pe.rwLoopErrCh)
@@ -375,6 +377,13 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			pe.applyWorker.RunTxTask(txTask, pe.isMining)
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
+			}
+			if pe.cfg.chaosMonkey {
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, txTask.Error)
+				if chaosErr != nil {
+					log.Warn("Monkey in a consensus")
+					return outputTxNum, conflicts, triggers, processedBlockNum, false, chaosErr
+				}
 			}
 			// TODO: post-validation of gasUsed and blobGasUsed
 			i++

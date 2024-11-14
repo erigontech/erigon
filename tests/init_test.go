@@ -228,7 +228,6 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 			t.Skip("Skipped by whitelist")
 		}
 	}
-	//t.Parallel()
 
 	// Load the file as map[string]<testType>.
 	m := makeMapFromTestFunc(runTest)
@@ -281,7 +280,6 @@ func sortedMapKeys(m reflect.Value) []string {
 }
 
 func runTestFunc(runTest interface{}, t *testing.T, name string, m reflect.Value, key string) {
-	t.Parallel()
 	reflect.ValueOf(runTest).Call([]reflect.Value{
 		reflect.ValueOf(t),
 		reflect.ValueOf(name),
@@ -290,7 +288,6 @@ func runTestFunc(runTest interface{}, t *testing.T, name string, m reflect.Value
 }
 
 func TestMatcherWhitelist(t *testing.T) {
-	//t.Parallel()
 	tm := new(testMatcher)
 	tm.whitelist("invalid*")
 	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *RLPTest) {

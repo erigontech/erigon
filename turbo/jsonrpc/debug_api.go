@@ -21,14 +21,13 @@ import (
 	"errors"
 	"fmt"
 
-	jsoniter "github.com/json-iterator/go"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -100,7 +99,8 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	return storageRangeAtV3(tx.(kv.TemporalTx), contractAddress, keyStart, minTxNum+txIndex, maxResult)
+	fromTxNum := minTxNum + txIndex + 1 //+1 for system txn in the beginning of block
+	return storageRangeAt(tx.(kv.TemporalTx), contractAddress, keyStart, fromTxNum, maxResult)
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
@@ -205,48 +205,40 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	if startNum > endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
-
 	//[from, to)
 	startTxNum, err := txNumsReader.Min(tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := txNumsReader.Max(tx, endNum-1)
+	endTxNum, err := txNumsReader.Min(tx, endNum)
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
+	return getModifiedAccounts(tx.(kv.TemporalTx), startTxNum, endTxNum-1)
 }
 
-// getModifiedAccountsV3 returns a list of addresses that were modified in the block range
+// getModifiedAccounts returns a list of addresses that were modified in the block range
 // [startNum:endNum)
-func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
-	it, err := tx.HistoryRange(kv.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
+func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+	it, err := tx.HistoryRange(kv.AccountsDomain, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
 	defer it.Close()
 
-	changedAddrs := make(map[common.Address]struct{})
+	var result []common.Address
+	saw := make(map[common.Address]struct{})
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		changedAddrs[common.BytesToAddress(k)] = struct{}{}
+		//TODO: data is sorted, enough to compare with prevKey
+		if _, ok := saw[common.BytesToAddress(k)]; !ok {
+			saw[common.BytesToAddress(k)] = struct{}{}
+			result = append(result, common.BytesToAddress(k))
+		}
 	}
-
-	if len(changedAddrs) == 0 {
-		return nil, nil
-	}
-
-	idx := 0
-	result := make([]common.Address, len(changedAddrs))
-	for addr := range changedAddrs {
-		copy(result[idx][:], addr[:])
-		idx++
-	}
-
 	return result, nil
 }
 
@@ -290,11 +282,11 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := txNumsReader.Max(tx, endNum-1)
+	endTxNum, err := txNumsReader.Min(tx, endNum)
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
+	return getModifiedAccounts(tx.(kv.TemporalTx), startTxNum, endTxNum-1)
 }
 
 func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {

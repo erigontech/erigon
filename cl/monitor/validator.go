@@ -123,27 +123,28 @@ func (m *validatorMonitorImpl) runReportProposerStatus() {
 	ticker := time.NewTicker(time.Duration(m.beaconCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		headState, cn := m.syncedData.HeadState()
+		prevSlot := m.ethClock.GetCurrentSlot() - 1
 
-		if headState == nil {
-			cn()
+		var proposerIndex uint64
+		if err := m.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) (err error) {
+			proposerIndex, err = headState.GetBeaconProposerIndexForSlot(prevSlot)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			log.Warn("failed to get proposer index", "err", err, "slot", prevSlot)
 			continue
 		}
 		// check proposer in previous slot
-		prevSlot := m.ethClock.GetCurrentSlot() - 1
-		proposerIndex, err := headState.GetBeaconProposerIndexForSlot(prevSlot)
-		cn()
-		if err != nil {
-			log.Warn("failed to get proposer index", "slot", prevSlot, "err", err)
-			return
-		}
+
 		if status := m.vaidatorStatuses.getValidatorStatus(proposerIndex, prevSlot/m.beaconCfg.SlotsPerEpoch); status != nil {
 			if status.proposeSlots.Contains(prevSlot) {
 				metricProposerHit.AddInt(1)
-				log.Info("[monitor] proposer hit", "slot", prevSlot, "proposerIndex", proposerIndex)
+				log.Warn("[monitor] proposer hit", "slot", prevSlot, "proposerIndex", proposerIndex)
 			} else {
 				metricProposerMiss.AddInt(1)
-				log.Info("[monitor] proposer miss", "slot", prevSlot, "proposerIndex", proposerIndex)
+				log.Warn("[monitor] proposer miss", "slot", prevSlot, "proposerIndex", proposerIndex)
 			}
 		}
 	}
@@ -196,7 +197,7 @@ func (s *validatorStatuses) addValidator(vid uint64) {
 	defer s.vStatusMutex.Unlock()
 	if _, ok := s.statuses[vid]; !ok {
 		s.statuses[vid] = make(map[uint64]*validatorStatus)
-		log.Info("[monitor] add validator", "vid", vid)
+		log.Trace("[monitor] add validator", "vid", vid)
 	}
 }
 
@@ -205,7 +206,7 @@ func (s *validatorStatuses) removeValidator(vid uint64) {
 	defer s.vStatusMutex.Unlock()
 	if _, ok := s.statuses[vid]; ok {
 		delete(s.statuses, vid)
-		log.Info("[monitor] remove validator", "vid", vid)
+		log.Trace("[monitor] remove validator", "vid", vid)
 	}
 }
 

@@ -81,7 +81,11 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 			Total:             blkRewards.Attestations + blkRewards.ProposerSlashings + blkRewards.AttesterSlashings + blkRewards.SyncAggregate,
 		}).WithFinalized(isFinalized).WithOptimistic(isOptimistic), nil
 	}
-	slotData, err := state_accessors.ReadSlotData(tx, slot)
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
+	slotData, err := state_accessors.ReadSlotData(stateGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -165,11 +169,15 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 		syncCommittee      *solid.SyncCommittee
 		totalActiveBalance uint64
 	)
+
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+	getter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	if slot < a.forkchoiceStore.LowestAvailableSlot() {
 		if !isCanonical {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("non-canonical finalized block not found"))
 		}
-		epochData, err := state_accessors.ReadEpochData(tx, a.beaconChainCfg.RoundSlotToEpoch(blk.Block.Slot))
+		epochData, err := state_accessors.ReadEpochData(getter, a.beaconChainCfg.RoundSlotToEpoch(blk.Block.Slot))
 		if err != nil {
 			return nil, err
 		}
@@ -177,7 +185,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("could not read historical sync committee rewards, node may not be archive or it still processing historical states"))
 		}
 		totalActiveBalance = epochData.TotalActiveBalance
-		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(tx, a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(blk.Block.Slot))
+		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(getter, a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(blk.Block.Slot))
 		if err != nil {
 			return nil, err
 		}

@@ -501,12 +501,14 @@ func init() {
 	withDataDir(cmdStageSenders)
 	withChain(cmdStageSenders)
 	withHeimdall(cmdStageSenders)
+	withChaosMonkey(cmdStageSenders)
 	rootCmd.AddCommand(cmdStageSenders)
 
 	withConfig(cmdStageSnapshots)
 	withDataDir(cmdStageSnapshots)
 	withChain(cmdStageSnapshots)
 	withReset(cmdStageSnapshots)
+	withChaosMonkey(cmdStageSnapshots)
 	rootCmd.AddCommand(cmdStageSnapshots)
 
 	withConfig(cmdStageHeaders)
@@ -516,6 +518,7 @@ func init() {
 	withReset(cmdStageHeaders)
 	withChain(cmdStageHeaders)
 	withHeimdall(cmdStageHeaders)
+	withChaosMonkey(cmdStageHeaders)
 	rootCmd.AddCommand(cmdStageHeaders)
 
 	withConfig(cmdStageBorHeimdall)
@@ -525,6 +528,7 @@ func init() {
 	withUnwindTypes(cmdStageBorHeimdall)
 	withChain(cmdStageBorHeimdall)
 	withHeimdall(cmdStageBorHeimdall)
+	withChaosMonkey(cmdStageBorHeimdall)
 	rootCmd.AddCommand(cmdStageBorHeimdall)
 
 	withConfig(cmdStageBodies)
@@ -532,6 +536,7 @@ func init() {
 	withUnwind(cmdStageBodies)
 	withChain(cmdStageBodies)
 	withHeimdall(cmdStageBodies)
+	withChaosMonkey(cmdStageBodies)
 	rootCmd.AddCommand(cmdStageBodies)
 
 	withConfig(cmdStagePolygon)
@@ -541,6 +546,7 @@ func init() {
 	withUnwindTypes(cmdStagePolygon)
 	withChain(cmdStagePolygon)
 	withHeimdall(cmdStagePolygon)
+	withChaosMonkey(cmdStagePolygon)
 	rootCmd.AddCommand(cmdStagePolygon)
 
 	withConfig(cmdStageExec)
@@ -555,6 +561,7 @@ func init() {
 	withChain(cmdStageExec)
 	withHeimdall(cmdStageExec)
 	withWorkers(cmdStageExec)
+	withChaosMonkey(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withConfig(cmdStageCustomTrace)
@@ -569,6 +576,7 @@ func init() {
 	withChain(cmdStageCustomTrace)
 	withHeimdall(cmdStageCustomTrace)
 	withWorkers(cmdStageCustomTrace)
+	withChaosMonkey(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withConfig(cmdStagePatriciaTrie)
@@ -580,6 +588,7 @@ func init() {
 	withIntegrityChecks(cmdStagePatriciaTrie)
 	withChain(cmdStagePatriciaTrie)
 	withHeimdall(cmdStagePatriciaTrie)
+	withChaosMonkey(cmdStagePatriciaTrie)
 	rootCmd.AddCommand(cmdStagePatriciaTrie)
 
 	withConfig(cmdStageTxLookup)
@@ -590,6 +599,7 @@ func init() {
 	withPruneTo(cmdStageTxLookup)
 	withChain(cmdStageTxLookup)
 	withHeimdall(cmdStageTxLookup)
+	withChaosMonkey(cmdStageTxLookup)
 	rootCmd.AddCommand(cmdStageTxLookup)
 
 	withConfig(cmdPrintMigrations)
@@ -710,12 +720,6 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if casted, ok := tx.(kv.CanWarmupDB); ok {
-				if err := casted.WarmupDB(false); err != nil {
-					return err
-				}
-			}
-
 			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
 				return err
 			}
@@ -783,75 +787,74 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, unwindTypes []string, log
 
 	heimdallClient := engine.(*bor.Bor).HeimdallClient
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		if reset {
-			if err := reset2.ResetBorHeimdall(ctx, tx); err != nil {
-				return err
-			}
-			return nil
+	var tx kv.RwTx
+	if reset {
+		if err := reset2.ResetBorHeimdall(ctx, tx, db); err != nil {
+			return err
 		}
-		if unwind > 0 {
-			sn, borSn, agg, _, bridgeStore, heimdallStore := allSnapshots(ctx, db, logger)
-			defer sn.Close()
-			defer borSn.Close()
-			defer agg.Close()
-
-			stageState := stage(sync, tx, nil, stages.BorHeimdall)
-
-			snapshotsMaxBlock := borSn.BlocksAvailable()
-			if unwind <= snapshotsMaxBlock {
-				return fmt.Errorf("cannot unwind past snapshots max block: %d", snapshotsMaxBlock)
-			}
-
-			if unwind > stageState.BlockNumber {
-				return fmt.Errorf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber)
-			}
-
-			unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
-			cfg := stagedsync.StageBorHeimdallCfg(db, nil, miningState, *chainConfig, nil, heimdallStore, bridgeStore, nil, nil, nil, nil, nil, false, unwindTypes)
-			if err := stagedsync.BorHeimdallUnwind(unwindState, ctx, stageState, tx, cfg); err != nil {
-				return err
-			}
-
-			stageProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
-			if err != nil {
-				return fmt.Errorf("re-read bor heimdall progress: %w", err)
-			}
-
-			logger.Info("progress", "bor heimdall", stageProgress)
-			return nil
-		}
-
+		return nil
+	}
+	if unwind > 0 {
 		sn, borSn, agg, _, bridgeStore, heimdallStore := allSnapshots(ctx, db, logger)
 		defer sn.Close()
 		defer borSn.Close()
 		defer agg.Close()
-		blockReader, _ := blocksIO(db, logger)
-		var (
-			snapDb     kv.RwDB
-			recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
-			signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
-		)
-		if bor, ok := engine.(*bor.Bor); ok {
-			snapDb = bor.DB
-			recents = bor.Recents
-			signatures = bor.Signatures
-		}
-		cfg := stagedsync.StageBorHeimdallCfg(db, snapDb, miningState, *chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes)
 
 		stageState := stage(sync, tx, nil, stages.BorHeimdall)
-		if err := stagedsync.BorHeimdallForward(stageState, sync, ctx, tx, cfg, logger); err != nil {
+
+		snapshotsMaxBlock := borSn.BlocksAvailable()
+		if unwind <= snapshotsMaxBlock {
+			return fmt.Errorf("cannot unwind past snapshots max block: %d", snapshotsMaxBlock)
+		}
+
+		if unwind > stageState.BlockNumber {
+			return fmt.Errorf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber)
+		}
+
+		unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
+		cfg := stagedsync.StageBorHeimdallCfg(db, nil, miningState, *chainConfig, nil, heimdallStore, bridgeStore, nil, nil, nil, nil, nil, false, unwindTypes)
+		if err := stagedsync.BorHeimdallUnwind(unwindState, ctx, stageState, tx, cfg); err != nil {
 			return err
 		}
 
-		stageProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
+		stageProgress, err := stagedsync.BorHeimdallStageProgress(tx, cfg)
 		if err != nil {
 			return fmt.Errorf("re-read bor heimdall progress: %w", err)
 		}
 
 		logger.Info("progress", "bor heimdall", stageProgress)
 		return nil
-	})
+	}
+
+	sn, borSn, agg, _, bridgeStore, heimdallStore := allSnapshots(ctx, db, logger)
+	defer sn.Close()
+	defer borSn.Close()
+	defer agg.Close()
+	blockReader, _ := blocksIO(db, logger)
+	var (
+		snapDb     kv.RwDB
+		recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
+		signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
+	)
+	if bor, ok := engine.(*bor.Bor); ok {
+		snapDb = bor.DB
+		recents = bor.Recents
+		signatures = bor.Signatures
+	}
+	cfg := stagedsync.StageBorHeimdallCfg(db, snapDb, miningState, *chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes)
+
+	stageState := stage(sync, tx, nil, stages.BorHeimdall)
+	if err := stagedsync.BorHeimdallForward(stageState, sync, ctx, tx, cfg, logger); err != nil {
+		return err
+	}
+
+	stageProgress, err := stagedsync.BorHeimdallStageProgress(tx, cfg)
+	if err != nil {
+		return fmt.Errorf("re-read bor heimdall progress: %w", err)
+	}
+
+	logger.Info("progress", "bor heimdall", stageProgress)
+	return nil
 }
 
 func stageBodies(db kv.RwDB, ctx context.Context, logger log.Logger) error {
@@ -910,7 +913,7 @@ func stagePolygonSync(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 
 		stageState := stage(stageSync, tx, nil, stages.PolygonSync)
 		cfg := stagedsync.NewPolygonSyncStageCfg(logger, chainConfig, nil, heimdallClient,
-			heimdallStore, bridgeStore, nil, 0, nil, blockReader, nil, 0, unwindTypes)
+			heimdallStore, bridgeStore, nil, 0, nil, blockReader, nil, 0, unwindTypes, nil /* notifications */)
 		// we only need blockReader and blockWriter (blockWriter is constructed in NewPolygonSyncStageCfg)
 		if unwind > 0 {
 			u := stageSync.NewUnwindState(stageState.ID, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
@@ -1063,7 +1066,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true /*alwaysGenerateChangesets=*/, false,
+		/*badBlockHalt=*/ true /*alwaysGenerateChangesets=*/, false, chaosMonkey,
 		dirs, br, nil, genesis, syncCfg, nil)
 
 	if unwind > 0 {
@@ -1104,7 +1107,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneExecutionStage(p, tx, cfg, ctx)
+		err = stagedsync.PruneExecutionStage(p, tx, cfg, ctx, logger)
 		if err != nil {
 			return err
 		}
@@ -1481,6 +1484,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				cfg.StateStream,
 				/*stateStream=*/ false,
 				/*alwaysGenerateChangesets=*/ false,
+				chaosMonkey,
 				dirs,
 				blockReader,
 				sentryControlServer.Hd,

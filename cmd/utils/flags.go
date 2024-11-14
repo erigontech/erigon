@@ -1073,6 +1073,12 @@ var (
 		Usage: "Enable speed test",
 		Value: false,
 	}
+
+	ChaosMonkeyFlag = cli.BoolFlag{
+		Name:  "chaos.monkey",
+		Usage: "Enable 'chaos monkey' to generate spontaneous network/consensus/etc failures. Use ONLY for testing",
+		Value: false,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}
@@ -1212,8 +1218,6 @@ func NewP2PConfig(
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
-	case direct.ETH66:
-		enodeDBPath = filepath.Join(dirs.Nodes, "eth66")
 	case direct.ETH67:
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth67")
 	case direct.ETH68:

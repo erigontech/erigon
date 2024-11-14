@@ -45,6 +45,12 @@ var (
 	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
 	ErrBadGateway            = errors.New("bad gateway")
 	ErrServiceUnavailable    = errors.New("service unavailable")
+
+	TransientErrors = []error{
+		ErrBadGateway,
+		ErrServiceUnavailable,
+		context.DeadlineExceeded,
+	}
 )
 
 const (
@@ -486,9 +492,6 @@ func FetchWithRetryEx[T any](
 ) (result *T, err error) {
 	attempt := 0
 	// create a new ticker for retrying the request
-	if client.retryBackOff < apiHeimdallTimeout {
-		client.retryBackOff = apiHeimdallTimeout + time.Second*2
-	}
 	ticker := time.NewTicker(client.retryBackOff)
 	defer ticker.Stop()
 

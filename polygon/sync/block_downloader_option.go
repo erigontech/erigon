@@ -14,26 +14,20 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package debug
+package sync
 
-import (
-	"fmt"
-	"runtime"
+import "time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-)
+type BlockDownloaderOption func(downloader *BlockDownloader)
 
-func PrintMemStats(short bool) {
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
-	if short {
-		fmt.Printf("HeapInuse: %vMb\n", ByteToMb(m.HeapInuse))
-	} else {
-		fmt.Printf("HeapInuse: %vMb, Alloc: %vMb, TotalAlloc: %vMb, Sys: %vMb, NumGC: %v, PauseNs: %d\n", ByteToMb(m.HeapInuse), ByteToMb(m.Alloc), ByteToMb(m.TotalAlloc), ByteToMb(m.Sys), m.NumGC, m.PauseNs[(m.NumGC+255)%256])
+func WithRetryBackOff(retryBackOff time.Duration) BlockDownloaderOption {
+	return func(downloader *BlockDownloader) {
+		downloader.retryBackOff = retryBackOff
 	}
 }
 
-func ByteToMb(b uint64) uint64 {
-	return b / 1024 / 1024
+func WithMaxWorkers(maxWorkers int) BlockDownloaderOption {
+	return func(downloader *BlockDownloader) {
+		downloader.maxWorkers = maxWorkers
+	}
 }

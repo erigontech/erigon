@@ -215,10 +215,10 @@ type Ethereum struct {
 	silkwormRPCDaemonService *silkworm.RpcDaemonService
 	silkwormSentryService    *silkworm.SentryService
 
-	polygonSyncService  polygonsync.Service
+	polygonSyncService  *polygonsync.Service
 	polygonDownloadSync *stagedsync.Sync
-	polygonBridge       bridge.PolygonBridge
-	heimdallService     heimdall.Service
+	polygonBridge       *bridge.Service
+	heimdallService     *heimdall.Service
 	stopNode            func() error
 }
 
@@ -425,13 +425,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return res
 		}
 
-		discovery := func() enode.Iterator {
-			d, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-			if err != nil {
-				panic(err)
-			}
-			return d
-		}
+		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)
 		if err != nil {
@@ -469,7 +463,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
-			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol, logger)
+			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger)
 			backend.sentryServers = append(backend.sentryServers, server)
 			sentries = append(sentries, direct.NewSentryClientDirect(protocol, server))
 		}
@@ -537,8 +531,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	var heimdallClient heimdall.HeimdallClient
-	var polygonBridge bridge.Service
-	var heimdallService heimdall.Service
+	var polygonBridge *bridge.Service
+	var heimdallService *heimdall.Service
 	var bridgeRPC *bridge.BackendServer
 	var heimdallRPC *heimdall.BackendServer
 
@@ -550,18 +544,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.PolygonSync {
 			borConfig := consensusConfig.(*borcfg.BorConfig)
 
-			polygonBridge = bridge.NewBridge(bridge.Config{
+			polygonBridge = bridge.NewService(bridge.ServiceConfig{
 				Store:        bridgeStore,
 				Logger:       logger,
 				BorConfig:    borConfig,
 				EventFetcher: heimdallClient,
 			})
 
-			heimdallService = heimdall.AssembleService(heimdall.ServiceConfig{
-				Store:       heimdallStore,
-				BorConfig:   borConfig,
-				HeimdallURL: config.HeimdallURL,
-				Logger:      logger,
+			heimdallService = heimdall.NewService(heimdall.ServiceConfig{
+				Store:     heimdallStore,
+				BorConfig: borConfig,
+				Client:    heimdallClient,
+				Logger:    logger,
 			})
 
 			bridgeRPC = bridge.NewBackendServer(ctx, polygonBridge)
@@ -717,6 +711,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				config.StateStream,
 				/*stateStream=*/ false,
 				/*alwaysGenerateChangesets=*/ false,
+				config.ChaosMonkey,
 				dirs,
 				blockReader,
 				backend.sentriesClient.Hd,
@@ -769,6 +764,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					config.StateStream,
 					/*stateStream=*/ false,
 					/*alwaysGenerateChangesets=*/ false,
+					config.ChaosMonkey,
 					dirs,
 					blockReader,
 					backend.sentriesClient.Hd,
@@ -788,7 +784,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Initialize ethbackend
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications, blockReader, logger, latestBlockBuiltStore)
 	// initialize engine backend
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
@@ -1007,10 +1003,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			executionRpc,
-			blockReader,
 			config.LoopBlockLimit,
 			polygonBridge,
 			heimdallService,
+			backend.notifications,
 		)
 
 		// we need to initiate download before the heimdall services start rather than

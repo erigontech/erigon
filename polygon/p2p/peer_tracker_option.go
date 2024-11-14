@@ -16,8 +16,8 @@
 
 package p2p
 
-type PeerTrackerOption func(*peerTracker)
+type PeerTrackerOption func(*PeerTracker)
 
-func WithPreservingPeerShuffle(pt *peerTracker) {
+func WithPreservingPeerShuffle(pt *PeerTracker) {
 	pt.peerShuffle = PreservingPeerShuffle
 }

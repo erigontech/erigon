@@ -22,6 +22,7 @@ linters:
     - testifylint #TODO: enable me
     - perfsprint #TODO: enable me
     - protogetter
+    - typecheck
   enable:
     - unconvert
     - predeclared
@@ -111,6 +112,7 @@ issues:
         - unused
         - gocritic
         - perfsprint
+        - typecheck
     - path: hack\.go
       linters:
         - gosec

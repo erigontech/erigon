@@ -21,6 +21,7 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -135,6 +136,8 @@ func NewDumper(db kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) 
 	}
 }
 
+var TooMuchIterations = errors.New("[rpc] dumper: too much iterations protection triggered")
+
 func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress libcommon.Address, maxResults int) ([]byte, error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = libcommon.Hash{}
@@ -159,7 +162,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	}
 
 	var nextKey []byte
-	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults)
+	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
 	if err != nil {
 		return nil, err
 	}
@@ -205,6 +208,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 		numberOfResults++
 	}
+	it.Close()
 
 	for i, addr := range addrList {
 		account := accountList[i]
@@ -212,7 +216,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			nextAcc, _ := kv.NextSubtree(addr[:])
-			r, err := ttx.DomainRange(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim)
+			r, err := ttx.DomainRange(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 			}
@@ -230,6 +234,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 				h, _ := libcommon.HashData(loc)
 				t.Update(h.Bytes(), libcommon.Copy(vs))
 			}
+			r.Close()
 
 			account.Root = t.Hash().Bytes()
 		}
