@@ -469,6 +469,13 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 				return err
 			}
 		}
+		if caplinState {
+			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+				Type: "caplin",
+			}); err != nil {
+				return err
+			}
+		}
 	}
 
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
