@@ -268,7 +268,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.To, o.To); res != 0 {
 		return res
 	}
-	if strings.Contains(f.name, "caplin/") {
+	if strings.Contains(f.name, "caplin/") || strings.Contains(o.name, "caplin/") {
 		return strings.Compare(f.name, o.name)
 	}
 
