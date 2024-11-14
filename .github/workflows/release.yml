@@ -1,9 +1,10 @@
 name: Release
+run-name: Build release ${{ inputs.release_version }} from branch ${{ inputs.checkout_ref }} by @${{ github.actor }}
 
 env:
   APPLICATION: "erigon"
   BUILDER_IMAGE: "golang:1.22-bookworm"
-  DOCKER_BASE_IMAGE: "debian:12.7-slim"
+  DOCKER_BASE_IMAGE: "debian:12.8-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
@@ -43,7 +44,7 @@ jobs:
     name: Build Artifacts and multi-platform Docker image, publish draft of the Release Notes
 
     steps:
-      - name: Checkout git repository ${{ env.APP_REPO }}
+      - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
           repository: ${{ env.APP_REPO }}
@@ -51,14 +52,18 @@ jobs:
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
 
-      - name: Check if tag ${{ inputs.release_version }} already exists in case perform_release is set.
+      - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         run: |
+          cd erigon
           if git ls-remote --exit-code --quiet --tags origin '${{ inputs.release_version }}'; then
             echo "ERROR: tag ${{ inputs.release_version }} exists and workflow is performing release. Exit."
             exit 1
           else
             echo "OK: tag ${{ inputs.release_version }} does not exists. Proceeding."
+            git tag ${{ inputs.release_version }}
+            git push origin ${{ inputs.release_version }}
+            echo; echo "Git TAG ${{ inputs.release_version }} created and pushed."
           fi
 
       - name: Run some commands, get commit id
@@ -230,3 +235,26 @@ jobs:
             --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
              ${{ inputs.release_version }} \
              *.tar.gz ${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+
+  In-case-of-failure:
+    name: "In case of failure: remove remote git tag pointing to the new version."
+    needs: [ build-release ]
+    if: always() && !contains(needs.build-release.result, 'success')
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
+        with:
+          repository: ${{ env.APP_REPO }}
+          fetch-depth: 0
+          ref: ${{ inputs.checkout_ref }}
+          path: 'erigon'
+
+      - name: Rollback - remove git tag ${{ inputs.release_version }}
+        if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
+        run: |
+          cd erigon
+          git push -d origin ${{ inputs.release_version }}
+
+                  
