@@ -400,11 +400,11 @@ func (d *WebSeeds) makeTorrentUrls(listsOfFiles []snaptype.WebSeedsFromProvider)
 	torrentUrls := snaptype.TorrentUrls{}
 	for _, urls := range listsOfFiles {
 		for name, wUrl := range urls {
-			fmt.Println(name, wUrl)
 			if !strings.HasSuffix(name, ".torrent") {
 				continue
 			}
 			if !nameWhitelisted(name, d.torrentsWhitelist) {
+				fmt.Println("rej", name, wUrl)
 				continue
 			}
 			uri, err := url.ParseRequestURI(wUrl)
@@ -412,6 +412,7 @@ func (d *WebSeeds) makeTorrentUrls(listsOfFiles []snaptype.WebSeedsFromProvider)
 				d.logger.Debug("[snapshots] url is invalid", "url", wUrl, "err", err)
 				continue
 			}
+			fmt.Println("acc", name, wUrl)
 			torrentUrls[name] = append(torrentUrls[name], uri)
 			torrentMap[*uri] = strings.TrimSuffix(name, ".torrent")
 		}

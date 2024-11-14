@@ -124,6 +124,9 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			}
 		}
 	}
+	if strings.Contains(fileName, "caplin/") {
+		return res, isStateFile, true
+	}
 	return res, isStateFile, isStateFile
 }
 
