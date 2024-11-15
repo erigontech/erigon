@@ -131,6 +131,15 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		badBatches = append(badBatches, val)
 	}
 
+	var witnessInclusion []libcommon.Address
+	for _, s := range strings.Split(ctx.String(utils.WitnessContractInclusion.Name), ",") {
+		if s == "" {
+			// if there are no entries then we can just ignore it and move on
+			continue
+		}
+		witnessInclusion = append(witnessInclusion, libcommon.HexToAddress(s))
+	}
+
 	cfg.Zk = &ethconfig.Zk{
 		L2ChainId:                              ctx.Uint64(utils.L2ChainIdFlag.Name),
 		L2RpcUrl:                               ctx.String(utils.L2RpcUrlFlag.Name),
@@ -210,6 +219,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		InfoTreeUpdateInterval:                 ctx.Duration(utils.InfoTreeUpdateInterval.Name),
 		SealBatchImmediatelyOnOverflow:         ctx.Bool(utils.SealBatchImmediatelyOnOverflow.Name),
 		MockWitnessGeneration:                  ctx.Bool(utils.MockWitnessGeneration.Name),
+		WitnessContractInclusion:               witnessInclusion,
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)

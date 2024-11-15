@@ -763,6 +763,11 @@ var (
 		Usage: "Mock the witness generation",
 		Value: false,
 	}
+	WitnessContractInclusion = cli.StringFlag{
+		Name:  "zkevm.witness-contract-inclusion",
+		Usage: "Contracts that will have all of their storage added to the witness every time",
+		Value: "",
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",

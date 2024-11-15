@@ -31,6 +31,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"sync"
 )
 
 func BaseCaseDB(t *testing.T) kv.RwDB {
@@ -1086,4 +1087,42 @@ func TestDB_BatchTime(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestDeadlock(t *testing.T) {
+	path := t.TempDir()
+	logger := log.New()
+	table := "Table"
+	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			table:       kv.TableCfgItem{Flags: kv.DupSort},
+			kv.Sequence: kv.TableCfgItem{},
+		}
+	}).MapSize(128 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+
+	wg := sync.WaitGroup{}
+	for i := 0; i < 300_000; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			ctx := context.Background()
+			// create a write transaction every X requests
+			if idx%5 == 0 {
+				tx, err := db.BeginRw(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback()
+			} else {
+				tx, err := db.BeginRo(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback()
+			}
+			wg.Done()
+		}(i)
+	}
+
+	wg.Wait()
 }

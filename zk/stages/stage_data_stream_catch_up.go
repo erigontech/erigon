@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -16,20 +15,18 @@ import (
 )
 
 type DataStreamCatchupCfg struct {
-	db            kv.RwDB
-	stream        *datastreamer.StreamServer
-	chainId       uint64
-	streamVersion int
-	hasExecutors  bool
+	db               kv.RwDB
+	dataStreamServer server.DataStreamServer
+	streamVersion    int
+	hasExecutors     bool
 }
 
-func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB, chainId uint64, streamVersion int, hasExecutors bool) DataStreamCatchupCfg {
+func StageDataStreamCatchupCfg(dataStreamServer server.DataStreamServer, db kv.RwDB, chainId uint64, streamVersion int, hasExecutors bool) DataStreamCatchupCfg {
 	return DataStreamCatchupCfg{
-		stream:        stream,
-		db:            db,
-		chainId:       chainId,
-		streamVersion: streamVersion,
-		hasExecutors:  hasExecutors,
+		dataStreamServer: dataStreamServer,
+		db:               db,
+		streamVersion:    streamVersion,
+		hasExecutors:     hasExecutors,
 	}
 }
 
@@ -41,9 +38,8 @@ func SpawnStageDataStreamCatchup(
 ) error {
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting...", logPrefix))
-	stream := cfg.stream
 
-	if stream == nil {
+	if cfg.dataStreamServer == nil {
 		// skip the stage if there is no streamer provided
 		log.Info(fmt.Sprintf("[%s] no streamer provided, skipping stage", logPrefix))
 		return nil
@@ -61,7 +57,7 @@ func SpawnStageDataStreamCatchup(
 		createdTx = true
 	}
 
-	finalBlockNumber, err := CatchupDatastream(ctx, logPrefix, tx, stream, cfg.chainId)
+	finalBlockNumber, err := CatchupDatastream(ctx, logPrefix, tx, cfg.dataStreamServer)
 	if err != nil {
 		return err
 	}
@@ -77,8 +73,7 @@ func SpawnStageDataStreamCatchup(
 	return err
 }
 
-func CatchupDatastream(ctx context.Context, logPrefix string, tx kv.RwTx, stream *datastreamer.StreamServer, chainId uint64) (uint64, error) {
-	srv := server.NewDataStreamServer(stream, chainId)
+func CatchupDatastream(ctx context.Context, logPrefix string, tx kv.RwTx, srv server.DataStreamServer) (uint64, error) {
 	reader := hermez_db.NewHermezDbReader(tx)
 
 	var (
@@ -122,7 +117,7 @@ func CatchupDatastream(ctx context.Context, logPrefix string, tx kv.RwTx, stream
 		// a quick check that we haven't written anything to the stream yet.  Stage progress is a little misleading
 		// for genesis as we are in fact at block 0 here!  Getting the header has some performance overhead, so
 		// we only want to do this when we know the previous progress is 0.
-		header := stream.GetHeader()
+		header := srv.GetStreamServer().GetHeader()
 		if header.TotalEntries == 0 {
 			genesis, err := rawdb.ReadBlockByNumber(tx, 0)
 			if err != nil {

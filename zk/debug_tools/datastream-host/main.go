@@ -9,9 +9,13 @@ import (
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	log2 "github.com/0xPolygonHermez/zkevm-data-streamer/log"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 )
 
-var file = ""
+var (
+	file                    = ""
+	dataStreamServerFactory = server.NewZkEVMDataStreamServerFactory()
+)
 
 func main() {
 	flag.StringVar(&file, "file", "", "datastream file")
@@ -23,7 +27,7 @@ func main() {
 		Outputs:     []string{"stdout"},
 	}
 
-	stream, err := datastreamer.NewServer(uint16(6900), uint8(3), 1, datastreamer.StreamType(1), file, 5*time.Second, 10*time.Second, 60*time.Second, logConfig)
+	stream, err := dataStreamServerFactory.CreateStreamServer(uint16(6900), uint8(3), 1, datastreamer.StreamType(1), file, 5*time.Second, 10*time.Second, 60*time.Second, logConfig)
 	if err != nil {
 		fmt.Println("Error creating datastream server:", err)
 		return

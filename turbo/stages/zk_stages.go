@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
@@ -16,11 +15,12 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
+	"github.com/ledgerwatch/erigon/zk/l1infotree"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/erigon/zk/txpool"
-	"github.com/ledgerwatch/erigon/zk/l1infotree"
 )
 
 // NewDefaultZkStages creates stages for zk syncer (RPC mode)
@@ -36,7 +36,7 @@ func NewDefaultZkStages(ctx context.Context,
 	engine consensus.Engine,
 	l1Syncer *syncer.L1Syncer,
 	datastreamClient zkStages.DatastreamClient,
-	datastreamServer *datastreamer.StreamServer,
+	dataStreamServer server.DataStreamServer,
 	infoTreeUpdater *l1infotree.Updater,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
@@ -54,7 +54,7 @@ func NewDefaultZkStages(ctx context.Context,
 		zkStages.StageL1SyncerCfg(db, l1Syncer, cfg.Zk),
 		zkStages.StageL1InfoTreeCfg(db, cfg.Zk, infoTreeUpdater),
 		zkStages.StageBatchesCfg(db, datastreamClient, cfg.Zk, controlServer.ChainConfig, &cfg.Miner),
-		zkStages.StageDataStreamCatchupCfg(datastreamServer, db, cfg.Genesis.Config.ChainID.Uint64(), cfg.DatastreamVersion, cfg.HasExecutors()),
+		zkStages.StageDataStreamCatchupCfg(dataStreamServer, db, cfg.Genesis.Config.ChainID.Uint64(), cfg.DatastreamVersion, cfg.HasExecutors()),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, nil),
 		stagedsync.StageExecuteBlocksCfg(
@@ -99,7 +99,7 @@ func NewSequencerZkStages(ctx context.Context,
 	agg *state.Aggregator,
 	forkValidator *engine_helpers.ForkValidator,
 	engine consensus.Engine,
-	datastreamServer *datastreamer.StreamServer,
+	dataStreamServer server.DataStreamServer,
 	sequencerStageSyncer *syncer.L1Syncer,
 	l1Syncer *syncer.L1Syncer,
 	l1BlockSyncer *syncer.L1Syncer,
@@ -120,7 +120,7 @@ func NewSequencerZkStages(ctx context.Context,
 		zkStages.StageL1SequencerSyncCfg(db, cfg.Zk, sequencerStageSyncer),
 		zkStages.StageL1InfoTreeCfg(db, cfg.Zk, infoTreeUpdater),
 		zkStages.StageSequencerL1BlockSyncCfg(db, cfg.Zk, l1BlockSyncer),
-		zkStages.StageDataStreamCatchupCfg(datastreamServer, db, cfg.Genesis.Config.ChainID.Uint64(), cfg.DatastreamVersion, cfg.HasExecutors()),
+		zkStages.StageDataStreamCatchupCfg(dataStreamServer, db, cfg.Genesis.Config.ChainID.Uint64(), cfg.DatastreamVersion, cfg.HasExecutors()),
 		zkStages.StageSequenceBlocksCfg(
 			db,
 			cfg.Prune,
@@ -138,7 +138,7 @@ func NewSequencerZkStages(ctx context.Context,
 			cfg.Genesis,
 			cfg.Sync,
 			agg,
-			datastreamServer,
+			dataStreamServer,
 			cfg.Zk,
 			&cfg.Miner,
 			txPool,
