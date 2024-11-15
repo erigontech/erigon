@@ -62,9 +62,9 @@ require (
 	golang.org/x/mod v0.21.0 // indirect
 	golang.org/x/tools v0.26.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240604185151-ef581f913117 // indirect
-	modernc.org/libc v1.50.4 // indirect
+	modernc.org/libc v1.55.3 // indirect
 	modernc.org/memory v1.8.0 // indirect
-	modernc.org/sqlite v1.29.8 // indirect
+	modernc.org/sqlite v1.33.1 // indirect
 )
 
 require (
