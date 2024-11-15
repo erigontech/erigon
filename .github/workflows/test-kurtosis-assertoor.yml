@@ -195,6 +195,7 @@ jobs:
 
       - name: Save job output
         if: always()
+        shell: bash
         run: |
           echo "::group::kurtosis_test_output"
           echo "${{ toJSON(steps.kurtosis-test.outputs) }}" > logs/kurtosis-outputs.json
@@ -212,5 +213,5 @@ jobs:
           retention-days: 14
 
       - name: Check test result
-        if: steps.kurtosis-test.outcome == 'failure'
+        if: steps.kurtosis-test.outcome != 'success'
         run: exit 1
