@@ -132,6 +132,9 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	if err := stateSn.OpenFolder(); err != nil {
 		return false, err
 	}
+	if stateSn.BlocksAvailable() == 0 {
+		return false, nil
+	}
 	blocksAvaiable := stateSn.BlocksAvailable()
 	stateSnRoTx := stateSn.View()
 	defer stateSnRoTx.Close()
@@ -485,11 +488,15 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err != nil {
 		return err
 	}
+
 	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
-	if s.snapgen {
+	if s.stateSn != nil {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
 		}
+	}
+
+	if s.snapgen {
 
 		// Keep gnosis out for a bit
 		if s.currentState.BeaconConfig().ConfigName == "gnosis" {

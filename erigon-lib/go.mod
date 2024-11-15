@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e
-	github.com/erigontech/interfaces v0.0.0-20241024130452-38a90d9c6fd5
+	github.com/erigontech/interfaces v0.0.0-20241026045526-56f59523ec08
 	github.com/erigontech/mdbx-go v0.39.0-alpha.0.20240712123041-0a5eddeb5ee5
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
@@ -19,7 +19,6 @@ require (
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
-	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/elastic/go-freelru v0.13.0
@@ -29,7 +28,6 @@ require (
 	github.com/google/btree v1.1.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/go-retryablehttp v0.7.7
-	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.3.1
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4

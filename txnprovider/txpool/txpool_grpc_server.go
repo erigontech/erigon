@@ -37,7 +37,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -172,7 +172,7 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_pro
 }
 
 func (s *GrpcServer) FindUnknown(ctx context.Context, in *txpool_proto.TxHashes) (*txpool_proto.TxHashes, error) {
-	return nil, fmt.Errorf("unimplemented")
+	return nil, errors.New("unimplemented")
 }
 
 func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txpool_proto.AddReply, error) {

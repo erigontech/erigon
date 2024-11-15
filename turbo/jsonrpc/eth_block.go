@@ -385,7 +385,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		var ok bool
 		var err error
 
-		if api.bridgeReader != nil {
+		if api.useBridgeReader {
 			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		} else {
 			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
@@ -435,7 +435,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		var ok bool
 		var err error
 
-		if api.bridgeReader != nil {
+		if api.useBridgeReader {
 			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
 		} else {
 			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)

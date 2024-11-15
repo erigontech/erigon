@@ -27,11 +27,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
-func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer PeerPenalizer) Fetcher {
-	return newPenalizingFetcher(logger, fetcher, peerPenalizer)
-}
-
-func newPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer PeerPenalizer) *penalizingFetcher {
+func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer *PeerPenalizer) *PenalizingFetcher {
 	fetchHeadersPenalizeErrs := []error{
 		&ErrTooManyHeaders{},
 		&ErrNonSequentialHeaderNumbers{},
@@ -47,7 +43,7 @@ func newPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer Peer
 	fetchBlocksBackwardsByHashPenalizeErrs = append(fetchBlocksBackwardsByHashPenalizeErrs, &ErrUnexpectedHeaderHash{})
 	fetchBlocksBackwardsByHashPenalizeErrs = append(fetchBlocksBackwardsByHashPenalizeErrs, fetchBodiesPenalizeErrs...)
 
-	return &penalizingFetcher{
+	return &PenalizingFetcher{
 		Fetcher:                                fetcher,
 		logger:                                 logger,
 		peerPenalizer:                          peerPenalizer,
@@ -57,16 +53,16 @@ func newPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer Peer
 	}
 }
 
-type penalizingFetcher struct {
+type PenalizingFetcher struct {
 	Fetcher
 	logger                                 log.Logger
-	peerPenalizer                          PeerPenalizer
+	peerPenalizer                          *PeerPenalizer
 	fetchHeadersPenalizeErrs               []error
 	fetchBodiesPenalizeErrs                []error
 	fetchBlocksBackwardsByHashPenalizeErrs []error
 }
 
-func (pf *penalizingFetcher) FetchHeaders(
+func (pf *PenalizingFetcher) FetchHeaders(
 	ctx context.Context,
 	start uint64,
 	end uint64,
@@ -81,7 +77,7 @@ func (pf *penalizingFetcher) FetchHeaders(
 	return headers, nil
 }
 
-func (pf *penalizingFetcher) FetchBodies(
+func (pf *PenalizingFetcher) FetchBodies(
 	ctx context.Context,
 	headers []*types.Header,
 	peerId *PeerId,
@@ -95,7 +91,7 @@ func (pf *penalizingFetcher) FetchBodies(
 	return bodies, nil
 }
 
-func (pf *penalizingFetcher) FetchBlocksBackwardsByHash(
+func (pf *PenalizingFetcher) FetchBlocksBackwardsByHash(
 	ctx context.Context,
 	hash common.Hash,
 	amount uint64,
@@ -111,7 +107,7 @@ func (pf *penalizingFetcher) FetchBlocksBackwardsByHash(
 	return blocks, nil
 }
 
-func (pf *penalizingFetcher) maybePenalize(ctx context.Context, peerId *PeerId, err error, penalizeErrs ...error) error {
+func (pf *PenalizingFetcher) maybePenalize(ctx context.Context, peerId *PeerId, err error, penalizeErrs ...error) error {
 	var shouldPenalize bool
 	for _, penalizeErr := range penalizeErrs {
 		if errors.Is(err, penalizeErr) {

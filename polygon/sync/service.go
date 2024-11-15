@@ -31,21 +31,8 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/turbo/shards"
 )
-
-type Service interface {
-	Run(ctx context.Context) error
-}
-
-type service struct {
-	sync            *Sync
-	p2pService      p2p.Service
-	store           Store
-	events          *TipEvents
-	heimdallService heimdall.Service
-	bridgeService   bridge.Service
-}
 
 func NewService(
 	logger log.Logger,
@@ -54,17 +41,17 @@ func NewService(
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
 	executionClient executionproto.ExecutionClient,
-	blockReader *freezeblocks.BlockReader,
 	blockLimit uint,
-	bridgeService bridge.Service,
-	heimdallService heimdall.Service,
-) Service {
+	bridgeService *bridge.Service,
+	heimdallService *heimdall.Service,
+	notifications *shards.Notifications,
+) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
-	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
-	execution := NewExecutionClient(executionClient)
+	p2pService := p2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData)
+	execution := newExecutionClient(executionClient)
 	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,
@@ -79,6 +66,7 @@ func NewService(
 	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService)
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
+		logger,
 		store,
 		execution,
 		milestoneVerifier,
@@ -89,9 +77,9 @@ func NewService(
 		heimdallService,
 		bridgeService,
 		events.Events(),
-		logger,
+		notifications,
 	)
-	return &service{
+	return &Service{
 		sync:            sync,
 		p2pService:      p2pService,
 		store:           store,
@@ -101,62 +89,59 @@ func NewService(
 	}
 }
 
-func (s *service) Run(parentCtx context.Context) error {
+type Service struct {
+	sync            *Sync
+	p2pService      *p2p.Service
+	store           Store
+	events          *TipEvents
+	heimdallService *heimdall.Service
+	bridgeService   *bridge.Service
+}
+
+func (s *Service) Run(parentCtx context.Context) error {
 	group, ctx := errgroup.WithContext(parentCtx)
 
 	group.Go(func() error {
-		err := s.p2pService.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("pos sync p2p failed: %w", err)
+		if err := s.p2pService.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync p2p failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 	group.Go(func() error {
-		err := s.store.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("pos sync store failed: %w", err)
+		if err := s.store.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync store failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 	group.Go(func() error {
-		err := s.events.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("pos sync events failed: %w", err)
+		if err := s.events.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync events failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 	group.Go(func() error {
-		err := s.heimdallService.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("pos sync heimdall failed: %w", err)
+		if err := s.heimdallService.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync heimdall failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 	group.Go(func() error {
-		err := s.bridgeService.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("pos sync bridge failed: %w", err)
+		if err := s.bridgeService.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync bridge failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 	group.Go(func() error {
-		err := s.sync.Run(ctx)
-
-		if err != nil {
-			err = fmt.Errorf("pos sync failed: %w", err)
+		if err := s.sync.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync failed: %w", err)
 		}
 
-		return err
+		return nil
 	})
 
 	return group.Wait()

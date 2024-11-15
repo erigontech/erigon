@@ -35,10 +35,10 @@ type BlockService Service[*cltypes.SignedBeaconBlock]
 type BlobSidecarsService Service[*cltypes.BlobSidecar]
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_committee_messages_service_mock.go -package=mock_services . SyncCommitteeMessagesService
-type SyncCommitteeMessagesService Service[*cltypes.SyncCommitteeMessage]
+type SyncCommitteeMessagesService Service[*cltypes.SyncCommitteeMessageWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_contribution_service_mock.go -package=mock_services . SyncContributionService
-type SyncContributionService Service[*cltypes.SignedContributionAndProof]
+type SyncContributionService Service[*cltypes.SignedContributionAndProofWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/aggregate_and_proof_service_mock.go -package=mock_services . AggregateAndProofService
 type AggregateAndProofService Service[*cltypes.SignedAggregateAndProofData]

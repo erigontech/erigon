@@ -17,6 +17,7 @@
 package dbg
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -231,5 +232,23 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	err = pprof.WriteHeapProfile(f)
 	if err != nil && logger != nil {
 		logger.Warn("[Experiment] could not write heap profile file", "err", err)
+	}
+}
+
+func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOption) {
+	if !saveHeapProfile {
+		return
+	}
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			SaveHeapProfileNearOOM(opts...)
+		}
 	}
 }

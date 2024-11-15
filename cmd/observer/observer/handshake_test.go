@@ -48,6 +48,6 @@ func TestHandshake(t *testing.T) {
 	assert.Contains(t, hello.ClientID, "erigon")
 
 	require.NotNil(t, status)
-	assert.Equal(t, uint32(direct.ETH66), status.ProtocolVersion)
+	assert.Equal(t, uint32(direct.ETH67), status.ProtocolVersion)
 	assert.Equal(t, uint64(1), status.NetworkID)
 }

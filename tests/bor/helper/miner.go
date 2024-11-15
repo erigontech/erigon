@@ -16,7 +16,6 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
@@ -27,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // InitGenesis initializes genesis file from json with sprint size and chain name as configurable inputs
@@ -88,7 +88,7 @@ func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, priv
 		Dirs:    datadir.New(dirName),
 		P2P: p2p.Config{
 			ListenAddr:      ":30303",
-			ProtocolVersion: []uint{direct.ETH68, direct.ETH67}, // No need to specify direct.ETH66, because 1 sentry is used for both 66 and 67
+			ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
 			MaxPeers:        100,
 			MaxPendingPeers: 1000,
 			AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307, 30308, 30309, 30310},
