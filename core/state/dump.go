@@ -173,22 +173,28 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if err != nil {
 			return nil, err
 		}
-		//if maxResults > 0 && numberOfResults >= maxResults {
-		//	nextKey = append(nextKey[:0], k...)
-		//	break
-		//}
-		println("addr in 1", libcommon.BytesToAddress(k).Hex())
 		if maxResults > 0 && numberOfResults >= maxResults {
-			nextKey = make([]byte, len(k))
-			println("k", base64.StdEncoding.EncodeToString(k))
+			nextKey = append(nextKey[:0], k...)
+			println("k", base64.StdEncoding.EncodeToString(nextKey), libcommon.BytesToAddress(nextKey).Hex())
 			addr, err := base64.StdEncoding.DecodeString("7OccHV8SY/H0OL8pFdGA2HHH7Go=")
 			if err != nil {
 				return nil, err
 			}
 			println("addr", libcommon.BytesToAddress(addr).Hex())
-			copy(nextKey, k)
 			break
 		}
+		//println("addr in 1", libcommon.BytesToAddress(k).Hex())
+		//if maxResults > 0 && numberOfResults >= maxResults {
+		//	nextKey = make([]byte, len(k))
+		//	println("k", base64.StdEncoding.EncodeToString(k))
+		//	addr, err := base64.StdEncoding.DecodeString("7OccHV8SY/H0OL8pFdGA2HHH7Go=")
+		//	if err != nil {
+		//		return nil, err
+		//	}
+		//	println("addr", libcommon.BytesToAddress(addr).Hex())
+		//	copy(nextKey, k)
+		//	break
+		//}
 		if len(v) == 0 {
 			continue
 		}
