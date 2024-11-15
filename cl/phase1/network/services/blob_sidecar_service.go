@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/Giulio2002/bls"
@@ -47,8 +46,8 @@ type blobSidecarService struct {
 	ethClock          eth_clock.EthereumClock
 	emitters          *beaconevents.EventEmitter
 
-	blobSidecarsScheduledForLaterExecution sync.Map
-	test                                   bool
+	// blobSidecarsScheduledForLaterExecution sync.Map
+	test bool
 }
 
 type blobSidecarJob struct {
@@ -115,7 +114,7 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 
 	parentHeader, has := b.forkchoiceStore.GetHeader(msg.SignedBlockHeader.Header.ParentRoot)
 	if !has {
-		b.scheduleBlobSidecarForLaterExecution(msg)
+		//b.scheduleBlobSidecarForLaterExecution(msg)
 		return ErrIgnore
 	}
 	if msg.SignedBlockHeader.Header.Slot <= parentHeader.Slot {
@@ -195,17 +194,17 @@ func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaco
 	return nil
 }
 
-func (b *blobSidecarService) scheduleBlobSidecarForLaterExecution(blobSidecar *cltypes.BlobSidecar) {
-	blobSidecarJob := &blobSidecarJob{
-		blobSidecar:  blobSidecar,
-		creationTime: time.Now(),
-	}
-	blobSidecarHash, err := blobSidecar.HashSSZ()
-	if err != nil {
-		return
-	}
-	b.blobSidecarsScheduledForLaterExecution.Store(blobSidecarHash, blobSidecarJob)
-}
+// func (b *blobSidecarService) scheduleBlobSidecarForLaterExecution(blobSidecar *cltypes.BlobSidecar) {
+// 	blobSidecarJob := &blobSidecarJob{
+// 		blobSidecar:  blobSidecar,
+// 		creationTime: time.Now(),
+// 	}
+// 	blobSidecarHash, err := blobSidecar.HashSSZ()
+// 	if err != nil {
+// 		return
+// 	}
+// 	b.blobSidecarsScheduledForLaterExecution.Store(blobSidecarHash, blobSidecarJob)
+// }
 
 // // loop is the main loop of the block service
 // func (b *blobSidecarService) loop(ctx context.Context) {
