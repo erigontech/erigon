@@ -124,6 +124,9 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			}
 		}
 	}
+	if strings.Contains(fileName, "caplin/") {
+		return res, isStateFile, true
+	}
 	return res, isStateFile, isStateFile
 }
 
@@ -266,8 +269,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 		return res
 	}
 
-	// this is a lexical comparison (don't use enum)
-	return strings.Compare(f.Type.Name(), o.Type.Name())
+	return strings.Compare(f.name, o.name)
 }
 
 func (f FileInfo) As(t Type) FileInfo {

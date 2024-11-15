@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -172,12 +171,12 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if err != nil {
 			return nil, err
 		}
+		if len(v) == 0 {
+			continue
+		}
 		if maxResults > 0 && numberOfResults >= maxResults {
 			nextKey = append(nextKey[:0], k...)
 			break
-		}
-		if len(v) == 0 {
-			continue
 		}
 
 		if e := accounts.DeserialiseV3(&acc, v); e != nil {
@@ -191,7 +190,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			Storage:  make(map[string]string),
 		}
 		if acc.CodeHash != emptyCodeHash {
-			account.CodeHash = acc.CodeHash[:]
+			account.CodeHash = hexutility.Bytes(acc.CodeHash.Bytes())
 
 			if !excludeCode {
 				r, _, err := ttx.DomainGet(kv.CodeDomain, k, nil)
@@ -212,7 +211,6 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 	for i, addr := range addrList {
 		account := accountList[i]
-
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			nextAcc, _ := kv.NextSubtree(addr[:])
