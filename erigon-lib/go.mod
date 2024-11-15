@@ -5,7 +5,7 @@ go 1.22.0
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e
 	github.com/erigontech/interfaces v0.0.0-20241026045526-56f59523ec08
-	github.com/erigontech/mdbx-go v0.39.0-alpha.0.20240712123041-0a5eddeb5ee5
+	github.com/erigontech/mdbx-go v0.39.0-alpha.0.20241115023739-83e638089a5a
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
