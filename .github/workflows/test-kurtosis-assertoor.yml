@@ -186,19 +186,16 @@ jobs:
       - name: Run Kurtosis + assertoor tests
         id: kurtosis-test
         continue-on-error: true
-        uses: ethpandaops/kurtosis-assertoor-github-action@v1
-        with:
-            enclave_name: "kurtosis-run-${{ github.run_id }}"
-            ethereum_package_args: "./kurtosis_config.yaml"
-            #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
-            enclave_dump: false
-
-      - name: Save job output
-        if: always()
+        shell: bash
+        env:
+          KURTOSIS_EXTRA_ARGS: # --verbosity detailed --cli-log-level trace
         run: |
-          echo "::group::Kurtosis Test Output"
-          echo "${{ toJSON(steps.kurtosis-test.outputs) }}" > logs/kurtosis-outputs.json
-          echo "::endgroup::"
+          kurtosis-assertoor-github-action \
+            --enclave-name "kurtosis-run-${{ github.run_id }}" \
+            --ethereum-package-args "./kurtosis_config.yaml" \
+            --enclave-dump false \
+            $KURTOSIS_EXTRA_ARGS \
+            2>&1 | tee logs/kurtosis-test-output.log
 
       - name: Save Kurtosis test logs
         if: always()
@@ -206,7 +203,7 @@ jobs:
         with:
           name: kurtosis-test-logs
           path: |
-            logs/kurtosis-outputs.json
+            logs/kurtosis-test-output.log
             ./**/*.log
             kurtosis-logs/**
           retention-days: 14
