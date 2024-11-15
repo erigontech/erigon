@@ -267,6 +267,36 @@ func (p *TxPool) MarkForDiscardFromPendingBest(txHash common.Hash) {
 	}
 }
 
+func (p *TxPool) RemoveMinedTransactions(ids []common.Hash) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	toDelete := make([]*metaTx, 0)
+
+	p.all.ascendAll(func(mt *metaTx) bool {
+		for _, id := range ids {
+			if bytes.Equal(mt.Tx.IDHash[:], id[:]) {
+				toDelete = append(toDelete, mt)
+				switch mt.currentSubPool {
+				case PendingSubPool:
+					p.pending.Remove(mt)
+				case BaseFeeSubPool:
+					p.baseFee.Remove(mt)
+				case QueuedSubPool:
+					p.queued.Remove(mt)
+				default:
+					//already removed
+				}
+			}
+		}
+		return true
+	})
+
+	for _, mt := range toDelete {
+		p.discardLocked(mt, Mined)
+	}
+}
+
 // discards the transactions that are in overflowZkCoutners from pending
 // executes the discard function on them
 // deletes the tx from the sendersWithChangedState map

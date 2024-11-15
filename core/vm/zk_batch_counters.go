@@ -142,6 +142,10 @@ func (bcc *BatchCounterCollector) processBatchLevelData() error {
 
 // CheckForOverflow returns true in the case that any counter has less than 0 remaining
 func (bcc *BatchCounterCollector) CheckForOverflow(verifyMerkleProof bool) (bool, error) {
+	// unlimited counters shouldn't overflow
+	if bcc.unlimitedCounters {
+		return false, nil
+	}
 	combined, err := bcc.CombineCollectors(verifyMerkleProof)
 	if err != nil {
 		return false, err
