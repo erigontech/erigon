@@ -6,6 +6,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
+// This package as a whole gets plenty of test coverage in spectests, so we can skip unit testing here.
+
 // PublicKeyRegistry is a registry of public keys
 // It is used to store public keys and their indices
 type PublicKeyRegistry interface {
