@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -173,9 +172,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if err != nil {
 			return nil, err
 		}
+		println("k next is", base64.StdEncoding.EncodeToString(k), libcommon.BytesToAddress(k).Hex())
 		if maxResults > 0 && numberOfResults >= maxResults {
 			nextKey = append(nextKey[:0], k...)
-			println("k", base64.StdEncoding.EncodeToString(nextKey), libcommon.BytesToAddress(nextKey).Hex())
 			addr, err := base64.StdEncoding.DecodeString("7OccHV8SY/H0OL8pFdGA2HHH7Go=")
 			if err != nil {
 				return nil, err
@@ -183,19 +182,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			println("addr", libcommon.BytesToAddress(addr).Hex())
 			break
 		}
-		//println("addr in 1", libcommon.BytesToAddress(k).Hex())
-		//if maxResults > 0 && numberOfResults >= maxResults {
-		//	nextKey = make([]byte, len(k))
-		//	println("k", base64.StdEncoding.EncodeToString(k))
-		//	addr, err := base64.StdEncoding.DecodeString("7OccHV8SY/H0OL8pFdGA2HHH7Go=")
-		//	if err != nil {
-		//		return nil, err
-		//	}
-		//	println("addr", libcommon.BytesToAddress(addr).Hex())
-		//	copy(nextKey, k)
-		//	break
-		//}
+
 		if len(v) == 0 {
+			println("len(v) is zero")
 			continue
 		}
 
@@ -231,7 +220,6 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 	for i, addr := range addrList {
 		account := accountList[i]
-		println("address in list:", addr.Hex())
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			nextAcc, _ := kv.NextSubtree(addr[:])
