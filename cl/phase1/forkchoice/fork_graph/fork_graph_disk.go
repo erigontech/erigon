@@ -17,12 +17,12 @@
 package fork_graph
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 
+	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -125,8 +125,9 @@ type forkGraphDisk struct {
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// reusable buffers
-	sszBuffer       bytes.Buffer
-	sszSnappyBuffer bytes.Buffer
+	sszBuffer       []byte
+	sszSnappyWriter *snappy.Writer
+	sszSnappyReader *snappy.Reader
 
 	rcfg    beacon_router_configuration.RouterConfiguration
 	emitter *beaconevents.EventEmitter
@@ -161,6 +162,8 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
 
 	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
+	// preallocate buffer
+	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 	return f
 }
 
