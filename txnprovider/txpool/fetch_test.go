@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/direct"
@@ -288,4 +289,86 @@ func TestOnNewBlock(t *testing.T) {
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Equal(t, 3, len(minedTxs.Txs))
+}
+
+type MockSentry struct {
+	ctx context.Context
+	*sentryproto.MockSentryServer
+	streams      map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	peersStreams []sentryproto.Sentry_PeerEventsServer
+	StreamWg     sync.WaitGroup
+	lock         sync.RWMutex
+}
+
+func NewMockSentry(ctx context.Context, sentryServer *sentryproto.MockSentryServer) *MockSentry {
+	return &MockSentry{
+		ctx:              ctx,
+		MockSentryServer: sentryServer,
+	}
+}
+
+var peerID PeerID = gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}) // "12345"
+
+func (ms *MockSentry) Send(req *sentryproto.InboundMessage) (errs []error) {
+	ms.lock.RLock()
+	defer ms.lock.RUnlock()
+	for _, stream := range ms.streams[req.Id] {
+		if err := stream.Send(req); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
+
+func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
+	return &sentryproto.SetStatusReply{}, nil
+}
+func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
+	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH68}, nil
+}
+func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
+	ms.lock.Lock()
+	if ms.streams == nil {
+		ms.streams = map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer{}
+	}
+	for _, id := range req.Ids {
+		ms.streams[id] = append(ms.streams[id], stream)
+	}
+	ms.lock.Unlock()
+	ms.StreamWg.Done()
+	select {
+	case <-ms.ctx.Done():
+		return nil
+	case <-stream.Context().Done():
+		return nil
+	}
+}
+
+func (ms *MockSentry) PeerEvents(_ *sentryproto.PeerEventsRequest, stream sentryproto.Sentry_PeerEventsServer) error {
+	ms.lock.Lock()
+	ms.peersStreams = append(ms.peersStreams, stream)
+	ms.lock.Unlock()
+	ms.StreamWg.Done()
+	select {
+	case <-ms.ctx.Done():
+		return nil
+	case <-stream.Context().Done():
+		return nil
+	}
+}
+
+func testRlps(num int) [][]byte {
+	rlps := make([][]byte, num)
+	for i := 0; i < num; i++ {
+		rlps[i] = []byte{1}
+	}
+	return rlps
+}
+
+func toPeerIDs(h ...byte) (out []PeerID) {
+	for i := range h {
+		hash := [64]byte{h[i]}
+		out = append(out, gointerfaces.ConvertHashToH512(hash))
+	}
+	return out
 }
