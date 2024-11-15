@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bridge
 
 import (
@@ -18,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
-type snapshotStore struct {
+type SnapshotStore struct {
 	Store
 	snapshots              *heimdall.RoSnapshots
 	sprintLengthCalculator sprintLengthCalculator
@@ -28,11 +44,11 @@ type sprintLengthCalculator interface {
 	CalculateSprintLength(number uint64) uint64
 }
 
-func NewSnapshotStore(base Store, snapshots *heimdall.RoSnapshots, sprintLengthCalculator sprintLengthCalculator) *snapshotStore {
-	return &snapshotStore{base, snapshots, sprintLengthCalculator}
+func NewSnapshotStore(base Store, snapshots *heimdall.RoSnapshots, sprintLengthCalculator sprintLengthCalculator) *SnapshotStore {
+	return &SnapshotStore{base, snapshots, sprintLengthCalculator}
 }
 
-func (s *snapshotStore) Prepare(ctx context.Context) error {
+func (s *SnapshotStore) Prepare(ctx context.Context) error {
 	if err := s.Store.Prepare(ctx); err != nil {
 		return err
 	}
@@ -40,11 +56,11 @@ func (s *snapshotStore) Prepare(ctx context.Context) error {
 	return <-s.snapshots.Ready(ctx)
 }
 
-func (s *snapshotStore) WithTx(tx kv.Tx) Store {
-	return &snapshotStore{txStore{tx: tx}, s.snapshots, s.sprintLengthCalculator}
+func (s *SnapshotStore) WithTx(tx kv.Tx) Store {
+	return &SnapshotStore{txStore{tx: tx}, s.snapshots, s.sprintLengthCalculator}
 }
 
-func (s *snapshotStore) RangeExtractor() snaptype.RangeExtractor {
+func (s *SnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	type extractableStore interface {
 		RangeExtractor() snaptype.RangeExtractor
 	}
@@ -55,7 +71,7 @@ func (s *snapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return heimdall.Events.RangeExtractor()
 }
 
-func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {
+func (s *SnapshotStore) LastFrozenEventBlockNum() uint64 {
 	if s.snapshots == nil {
 		return 0
 	}
@@ -92,7 +108,7 @@ func (s *snapshotStore) LastFrozenEventBlockNum() uint64 {
 	return lastBlockNum
 }
 
-func (s *snapshotStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo, bool, error) {
+func (s *SnapshotStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo, bool, error) {
 	if blockInfo, ok, err := s.Store.LastProcessedBlockInfo(ctx); ok {
 		return blockInfo, ok, err
 	}
@@ -118,7 +134,7 @@ func (s *snapshotStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBl
 	}, true, nil
 }
 
-func (s *snapshotStore) LastEventId(ctx context.Context) (uint64, error) {
+func (s *SnapshotStore) LastEventId(ctx context.Context) (uint64, error) {
 	lastEventId, err := s.Store.LastEventId(ctx)
 
 	if err != nil {
@@ -133,7 +149,7 @@ func (s *snapshotStore) LastEventId(ctx context.Context) (uint64, error) {
 	return lastEventId, nil
 }
 
-func (s *snapshotStore) LastFrozenEventId() uint64 {
+func (s *SnapshotStore) LastFrozenEventId() uint64 {
 	if s.snapshots == nil {
 		return 0
 	}
@@ -169,7 +185,7 @@ func (s *snapshotStore) LastFrozenEventId() uint64 {
 	return lastEventId
 }
 
-func (s *snapshotStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
+func (s *SnapshotStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
 	lastEventId, err := s.Store.LastProcessedEventId(ctx)
 
 	if err != nil {
@@ -184,7 +200,7 @@ func (s *snapshotStore) LastProcessedEventId(ctx context.Context) (uint64, error
 	return lastEventId, nil
 }
 
-func (s *snapshotStore) EventTxnToBlockNum(ctx context.Context, txnHash libcommon.Hash) (uint64, bool, error) {
+func (s *SnapshotStore) EventTxnToBlockNum(ctx context.Context, txnHash libcommon.Hash) (uint64, bool, error) {
 	blockNum, ok, err := s.Store.EventTxnToBlockNum(ctx, txnHash)
 	if err != nil {
 		return 0, false, err
@@ -207,7 +223,7 @@ func (s *snapshotStore) EventTxnToBlockNum(ctx context.Context, txnHash libcommo
 	return blockNum, true, nil
 }
 
-func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
 	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(heimdall.Events.Enum())
 	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		return s.Store.(interface {
@@ -250,7 +266,7 @@ func (s *snapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 	return 0, 0, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
 }
 
-func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	if start > s.LastFrozenEventId() {
 		return s.Store.Events(ctx, start, end)
 	}
@@ -295,7 +311,7 @@ func (s *snapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	return result, nil
 }
 
-func (s *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (blockNum uint64, ok bool, err error) {
+func (s *SnapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (blockNum uint64, ok bool, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		idxBorTxnHash := sn.Src().Index()
@@ -325,7 +341,7 @@ func (s *snapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 	return
 }
 
-func (s *snapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
+func (s *SnapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
 	startEventId, _, err := s.BlockEventIdsRange(ctx, blockHeight)
 	if err != nil {
 		return 0, err
@@ -333,7 +349,7 @@ func (s *snapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash
 	return startEventId, nil
 }
 
-func (s *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	startEventId, endEventId, err := s.BlockEventIdsRange(ctx, blockHeight)
 	if err != nil {
 		return nil, err
@@ -350,7 +366,7 @@ func (s *snapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, 
 }
 
 // EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
-func (s *snapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+func (s *SnapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
 	segments := tx.Segments

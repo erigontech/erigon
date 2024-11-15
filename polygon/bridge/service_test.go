@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bridge
 
 import (
@@ -26,11 +42,11 @@ var defaultBorConfig = borcfg.BorConfig{
 	StateSyncConfirmationDelay: map[string]uint64{"0": 1},
 }
 
-func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockHeimdallClient, *Bridge) {
+func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockHeimdallClient, *Service) {
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlDebug)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	b := NewBridge(Config{
+	b := NewService(ServiceConfig{
 		Store:        NewMdbxStore(t.TempDir(), logger, false, 1),
 		Logger:       logger,
 		BorConfig:    &borConfig,
@@ -66,7 +82,7 @@ func getBlocks(t *testing.T, numBlocks int) []*types.Block {
 	return blocks
 }
 
-func TestBridge(t *testing.T) {
+func TestService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -124,7 +140,7 @@ func TestBridge(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(bridge Service) {
+	go func(bridge *Service) {
 		defer wg.Done()
 
 		err := bridge.Run(ctx)
@@ -194,7 +210,7 @@ func TestBridge(t *testing.T) {
 	wg.Wait()
 }
 
-func TestBridge_Unwind(t *testing.T) {
+func TestService_Unwind(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -244,7 +260,7 @@ func TestBridge_Unwind(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(bridge Service) {
+	go func(bridge *Service) {
 		defer wg.Done()
 
 		err := bridge.Run(ctx)
@@ -298,7 +314,7 @@ func TestBridge_Unwind(t *testing.T) {
 	wg.Wait()
 }
 
-func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorConfig, wg *sync.WaitGroup) *Bridge {
+func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorConfig, wg *sync.WaitGroup) *Service {
 	heimdallClient, b := setup(t, borConfig)
 	event1 := &heimdall.EventRecordWithTime{
 		EventRecord: heimdall.EventRecord{
@@ -343,7 +359,7 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*heimdall.EventRecordWithTime{}, nil).AnyTimes()
 	wg.Add(1)
 
-	go func(bridge Service) {
+	go func(bridge *Service) {
 		defer wg.Done()
 
 		err := bridge.Run(ctx)
@@ -378,7 +394,7 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 	return b
 }
 
-func TestBridge_ProcessNewBlocksWithOverride(t *testing.T) {
+func TestService_ProcessNewBlocksWithOverride(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -403,7 +419,7 @@ func TestBridge_ProcessNewBlocksWithOverride(t *testing.T) {
 	wg.Wait()
 }
 
-func TestBridge_ProcessNewBlocksWithZeroOverride(t *testing.T) {
+func TestService_ProcessNewBlocksWithZeroOverride(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 

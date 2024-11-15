@@ -1375,7 +1375,6 @@ func generateRandomKey(r *rndGen, size uint64) string {
 func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
-
 	return key
 }
 
@@ -1450,8 +1449,8 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	defer tx.Rollback()
 
 	d.historyLargeValues = false
-	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1511,13 +1510,106 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	}
 }
 
+func TestDomainRange(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	require, ctx := require.New(t), context.Background()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = false
+	d.History.compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
+	d.compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
+	d.filenameBase = kv.FileAccountDomain
+
+	dc := d.BeginFilesRo()
+	defer d.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	keySize1 := uint64(2)
+	keySize2 := uint64(2)
+	totalTx := uint64(300)
+	keyTxsLimit := uint64(2)
+	keyLimit := uint64(10)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.SetTxNum(updates[i].txNum)
+			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			require.NoError(err)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	writer.SetTxNum(totalTx)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(err)
+
+	// aggregate
+	collateAndMerge(t, db, tx, d, totalTx)
+	require.NoError(tx.Commit())
+
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	dc.Close()
+
+	dc = d.BeginFilesRo()
+	defer dc.Close()
+
+	{
+		it, err := dc.ht.WalkAsOf(ctx, 190, nil, nil, order.Asc, -1, tx)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(3, len(keys))
+		require.Equal(3, len(vals))
+	}
+
+	{
+		it, err := dc.DomainRangeLatest(tx, nil, nil, -1)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(5, len(keys))
+		require.Equal(5, len(vals))
+	}
+
+	{
+		it, err := dc.DomainRange(ctx, tx, []byte(""), nil, 190, order.Asc, -1)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(5, len(keys))
+		require.Equal(5, len(vals))
+	}
+
+	{
+		it, err := dc.DomainRange(ctx, tx, []byte(""), nil, 190, order.Asc, 4)
+		require.NoError(err)
+		keys, vals, err := stream.ToArrayKV(it)
+		require.NoError(err)
+		order.Asc.AssertList(keys)
+		require.Equal(4, len(keys))
+		require.Equal(4, len(vals))
+	}
+}
+
 func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 	t.Parallel()
 
-	aggStep := uint64(25)
+	aggStep, ctx := uint64(25), context.Background()
 	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -2028,10 +2120,10 @@ func TestDomain_Unwind(t *testing.T) {
 			uc := d.BeginFilesRo()
 			defer uc.Close()
 
-			et, err := ectx.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, etx, -1)
+			et, err := ectx.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, etx)
 			require.NoError(t, err)
 
-			ut, err := uc.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, utx, -1)
+			ut, err := uc.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, utx)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)

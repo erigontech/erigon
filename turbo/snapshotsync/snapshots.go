@@ -249,6 +249,9 @@ type DirtySegment struct {
 	refcount atomic.Int32
 
 	canDelete atomic.Bool
+
+	// only caplin state
+	filePath string
 }
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
@@ -272,6 +275,28 @@ func (s *VisibleSegment) Src() *DirtySegment {
 
 func (s *VisibleSegment) IsIndexed() bool {
 	return s.src.IsIndexed()
+}
+
+func (v *VisibleSegment) Get(globalId uint64) ([]byte, error) {
+	idxSlot := v.src.Index()
+
+	if idxSlot == nil {
+		return nil, nil
+	}
+	blockOffset := idxSlot.OrdinalLookup(globalId - idxSlot.BaseDataID())
+
+	gg := v.src.MakeGetter()
+	gg.Reset(blockOffset)
+	if !gg.HasNext() {
+		return nil, nil
+	}
+	var buf []byte
+	buf, _ = gg.Next(buf)
+	if len(buf) == 0 {
+		return nil, nil
+	}
+
+	return buf, nil
 }
 
 func DirtySegmentLess(i, j *DirtySegment) bool {

@@ -41,11 +41,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/txpool"
 	libtypes "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // The values in those tests are from the Transaction Tests

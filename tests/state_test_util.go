@@ -93,38 +93,18 @@ type stPostState struct {
 }
 
 type stTransaction struct {
-	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
-	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
-	Nonce                math.HexOrDecimal64   `json:"nonce"`
-	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
-	PrivateKey           hexutility.Bytes      `json:"secretKey"`
-	To                   string                `json:"to"`
-	Data                 []string              `json:"data"`
-	Value                []string              `json:"value"`
-	AccessLists          []*types2.AccessList  `json:"accessLists,omitempty"`
-	BlobGasFeeCap        *math.HexOrDecimal256 `json:"maxFeePerBlobGas,omitempty"`
-	Authorizations       []stAuthorization     `json:"authorizationList,omitempty"`
-}
-
-type stAuthorization struct {
-	ChainID *math.HexOrDecimal256 `json:"chainId"`
-	Address string                `json:"address"`
-	Nonce   *math.HexOrDecimal256 `json:"nonce"`
-	V       *math.HexOrDecimal256 `json:"v"`
-	R       *math.HexOrDecimal256 `json:"r"`
-	S       *math.HexOrDecimal256 `json:"s"`
-}
-
-func (a *stAuthorization) ToAuthorization() types.Authorization {
-	return types.Authorization{
-		ChainID: uint256.MustFromBig((*big.Int)(a.ChainID)),
-		Address: libcommon.HexToAddress(a.Address),
-		Nonce:   ((*big.Int)(a.Nonce)).Uint64(),
-		V:       *uint256.MustFromBig((*big.Int)(a.V)),
-		R:       *uint256.MustFromBig((*big.Int)(a.R)),
-		S:       *uint256.MustFromBig((*big.Int)(a.S)),
-	}
+	GasPrice             *math.HexOrDecimal256     `json:"gasPrice"`
+	MaxFeePerGas         *math.HexOrDecimal256     `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *math.HexOrDecimal256     `json:"maxPriorityFeePerGas"`
+	Nonce                math.HexOrDecimal64       `json:"nonce"`
+	GasLimit             []math.HexOrDecimal64     `json:"gasLimit"`
+	PrivateKey           hexutility.Bytes          `json:"secretKey"`
+	To                   string                    `json:"to"`
+	Data                 []string                  `json:"data"`
+	Value                []string                  `json:"value"`
+	AccessLists          []*types2.AccessList      `json:"accessLists,omitempty"`
+	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
+	Authorizations       []types.JsonAuthorization `json:"authorizationList,omitempty"`
 }
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
@@ -500,7 +480,10 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 	if len(tx.Authorizations) > 0 {
 		authorizations := make([]types.Authorization, len(tx.Authorizations))
 		for i, auth := range tx.Authorizations {
-			authorizations[i] = auth.ToAuthorization()
+			authorizations[i], err = auth.ToAuthorization()
+			if err != nil {
+				return nil, err
+			}
 		}
 		msg.SetAuthorizations(authorizations)
 	}

@@ -98,6 +98,7 @@ func StageLoop(
 			// continue
 		}
 
+		hook.LastNewBlockSeen(hd.Progress())
 		t := time.Now()
 		// Estimate the current top height seen from the peer
 		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, false, logger, blockReader, hook)
@@ -176,7 +177,10 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.RwDB, blockReader services.F
 		if blockReader.FrozenBlocks() > 0 {
 			if err := db.View(ctx, func(tx kv.Tx) (err error) {
 				finStageProgress, err = stages.GetStageProgress(tx, stages.Finish)
-				return err
+				if err != nil {
+					return err
+				}
+				return nil
 			}); err != nil {
 				return err
 			}
@@ -244,10 +248,8 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		defer txc.Tx.Rollback()
 	}
 
-	if hook != nil {
-		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
-			return err
-		}
+	if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
+		return err
 	}
 	_, err = sync.Run(db, txc, initialCycle, firstCycle)
 	if err != nil {
@@ -268,10 +270,8 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	}
 
 	// -- send notifications START
-	if hook != nil {
-		if err = hook.AfterRun(txc.Tx, finishProgressBefore); err != nil {
-			return err
-		}
+	if err = hook.AfterRun(txc.Tx, finishProgressBefore); err != nil {
+		return err
 	}
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
 		logger.Info("Commit cycle", "in", commitTime)
@@ -399,13 +399,25 @@ func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 	}
 	return nil
 }
+func (h *Hook) LastNewBlockSeen(n uint64) {
+	if h == nil || h.notifications == nil {
+		return
+	}
+	h.notifications.NewLastBlockSeen(n)
+}
 func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
+	if h == nil {
+		return nil
+	}
 	if tx == nil {
 		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.beforeRun(tx, inSync) })
 	}
 	return h.beforeRun(tx, inSync)
 }
 func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
+	if h == nil {
+		return nil
+	}
 	if tx == nil {
 		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.afterRun(tx, finishProgressBefore) })
 	}
@@ -807,6 +819,7 @@ func NewPolygonSyncStages(
 			stopNode,
 			config.LoopBlockLimit,
 			nil, /* userUnwindTypeOverrides */
+			notifications,
 		),
 		stagedsync.StageSendersCfg(db, chainConfig, config.Sync, false, config.Dirs.Tmp, config.Prune, blockReader, nil),
 		stagedsync.StageExecuteBlocksCfg(db, config.Prune, config.BatchSize, chainConfig, consensusEngine, &vm.Config{}, notifications, config.StateStream, false, false, config.ChaosMonkey, config.Dirs, blockReader, nil, config.Genesis, config.Sync, SilkwormForExecutionStage(silkworm, config)),

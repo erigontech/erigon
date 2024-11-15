@@ -49,7 +49,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 	}
 
 	numWorkers := runtime.NumCPU()
-	wp := threading.CreateWorkerPool(numWorkers)
+	wp := threading.NewParallelExecutor()
 	indiciesShards := make([][]uint64, numWorkers)
 	shardsJobSize := b.ValidatorLength() / numWorkers
 
@@ -71,7 +71,7 @@ func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
 		})
 	}
 
-	wp.WaitAndClose()
+	wp.Execute()
 	for i := 0; i < numWorkers; i++ {
 		indicies = append(indicies, indiciesShards[i]...)
 	}
@@ -273,10 +273,6 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 
 // GetBeaconCommitee grabs beacon committee using cache first
 func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	// var cacheKey [16]byte
-	// binary.BigEndian.PutUint64(cacheKey[:], slot)
-	// binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
-
 	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
 	indicies := b.GetActiveValidatorsIndices(epoch)

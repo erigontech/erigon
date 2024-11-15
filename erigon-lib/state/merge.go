@@ -556,7 +556,6 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	closeFiles = false
-	dt.d.stats.MergesCount++
 	return
 }
 
