@@ -9,6 +9,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/holiman/uint256"
 	"golang.org/x/net/context"
 
@@ -17,7 +18,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatch"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -46,7 +46,7 @@ type MiningExecCfg struct {
 }
 
 type TxPoolForMining interface {
-	YieldBest(n uint16, txs *types2.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
+	YieldBest(n uint16, txs *txpool.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
 }
 
 func StageMiningExecCfg(
@@ -189,7 +189,7 @@ func getNextTransactions(
 	alreadyYielded mapset.Set[[32]byte],
 	logger log.Logger,
 ) (types.TransactionsStream, int, error) {
-	txSlots := types2.TxsRlp{}
+	TxnSlots := txpool.TxsRlp{}
 	count := 0
 	if err := cfg.txPoolDB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error
@@ -200,7 +200,7 @@ func getNextTransactions(
 			remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
 		}
 
-		if _, count, err = cfg.txPool.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingBlobGas, alreadyYielded); err != nil {
+		if _, count, err = cfg.txPool.YieldBest(amount, &TxnSlots, poolTx, executionAt, remainingGas, remainingBlobGas, alreadyYielded); err != nil {
 			return err
 		}
 
@@ -210,8 +210,8 @@ func getNextTransactions(
 	}
 
 	var txs []types.Transaction //nolint:prealloc
-	for i := range txSlots.Txs {
-		transaction, err := types.DecodeWrappedTransaction(txSlots.Txs[i])
+	for i := range TxnSlots.Txs {
+		transaction, err := types.DecodeWrappedTransaction(TxnSlots.Txs[i])
 		if err == io.EOF {
 			continue
 		}
@@ -223,7 +223,7 @@ func getNextTransactions(
 		}
 
 		var sender libcommon.Address
-		copy(sender[:], txSlots.Senders.At(i))
+		copy(sender[:], TxnSlots.Senders.At(i))
 
 		// Check if tx nonce is too low
 		txs = append(txs, transaction)

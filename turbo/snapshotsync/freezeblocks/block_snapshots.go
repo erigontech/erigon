@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
@@ -49,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 type Range struct {
@@ -1513,9 +1513,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 	numBuf := make([]byte, 8)
 
-	parse := func(ctx *types2.TxParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
+	parse := func(ctx *txpool.TxParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
 		var sender [20]byte
-		slot := types2.TxSlot{}
+		slot := txpool.TxSlot{}
 
 		if _, err := ctx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
 			return valueBuf, err
@@ -1531,7 +1531,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		return valueBuf, nil
 	}
 
-	addSystemTx := func(ctx *types2.TxParseContext, tx kv.Tx, txId uint64) error {
+	addSystemTx := func(ctx *txpool.TxParseContext, tx kv.Tx, txId uint64) error {
 		binary.BigEndian.PutUint64(numBuf, txId)
 		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
@@ -1611,13 +1611,13 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		parsers.SetLimit(workers)
 
 		valueBufs := make([][]byte, workers)
-		parseCtxs := make([]*types2.TxParseContext, workers)
+		parseCtxs := make([]*txpool.TxParseContext, workers)
 
 		for i := 0; i < workers; i++ {
 			valueBuf := bufPool.Get().(*[16 * 4096]byte)
 			defer bufPool.Put(valueBuf)
 			valueBufs[i] = valueBuf[:]
-			parseCtxs[i] = types2.NewTxParseContext(*chainID)
+			parseCtxs[i] = txpool.NewTxParseContext(*chainID)
 		}
 
 		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxId); err != nil {

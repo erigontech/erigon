@@ -17,12 +17,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/crypto/cryptopool"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/holiman/uint256"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 func init() {
@@ -200,9 +200,9 @@ var (
 
 				chainId, _ := uint256.FromBig(chainConfig.ChainID)
 
-				parseCtx := types2.NewTxParseContext(*chainId)
+				parseCtx := txpool.NewTxParseContext(*chainId)
 				parseCtx.WithSender(false)
-				slot := types2.TxSlot{}
+				slot := txpool.TxSlot{}
 				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
 				defer d.EnableMadvNormal().DisableReadAhead()

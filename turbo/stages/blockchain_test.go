@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
-	types2 "github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus/ethash"
@@ -2057,7 +2056,7 @@ func TestEIP2718Transition(t *testing.T) {
 				},
 				GasPrice: gasPrice,
 			},
-			AccessList: types2.AccessList{{
+			AccessList: types.AccessList{{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}},
@@ -2144,7 +2143,7 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 		if i == 500 {
 			// One transaction to 0xAAAA
-			accesses := types2.AccessList{types2.AccessTuple{
+			accesses := types.AccessList{types.AccessTuple{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}}

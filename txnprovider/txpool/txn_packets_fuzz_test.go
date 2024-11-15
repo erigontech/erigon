@@ -1,6 +1,6 @@
 //go:build !nofuzz
 
-package types
+package txpool
 
 import (
 	"testing"
@@ -17,7 +17,7 @@ func FuzzPooledTransactions66(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte) {
 		t.Parallel()
 		ctx := NewTxParseContext(*u256.N1)
-		slots := TxSlots{}
+		slots := TxnSlots{}
 		reqId, _, err := ParsePooledTransactions66(in, 0, ctx, &slots, nil)
 		if err != nil {
 			t.Skip()

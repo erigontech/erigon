@@ -17,8 +17,6 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpool"
 	"github.com/erigontech/erigon-lib/kv"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -418,9 +416,9 @@ func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
 // Its the result of the `eth_createAccessList` RPC call.
 // It contains an error if the transaction itself failed.
 type accessListResult struct {
-	Accesslist *types2.AccessList `json:"accessList"`
-	Error      string             `json:"error,omitempty"`
-	GasUsed    hexutil.Uint64     `json:"gasUsed"`
+	Accesslist *types.AccessList `json:"accessList"`
+	Error      string            `json:"error,omitempty"`
+	GasUsed    hexutil.Uint64    `json:"gasUsed"`
 }
 
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
@@ -606,6 +604,6 @@ func optimizeWarmAddrInAccessList(accessList *accessListResult, addr libcommon.A
 	}
 }
 
-func removeIndex(s types2.AccessList, index int) types2.AccessList {
+func removeIndex(s types.AccessList, index int) types.AccessList {
 	return append(s[:index], s[index+1:]...)
 }

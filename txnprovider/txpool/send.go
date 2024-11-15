@@ -25,7 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
-	types2 "github.com/erigontech/erigon-lib/types"
+
+	// types2 "github.com/erigontech/erigon-lib/types"
 	"google.golang.org/grpc"
 )
 
@@ -70,7 +71,7 @@ func (f *Send) notifyTests() {
 }
 
 // Broadcast given RLPs to random peers
-func (f *Send) BroadcastPooledTxs(rlps [][]byte, maxPeers uint64) (txSentTo []int) {
+func (f *Send) BroadcastPooledTxns(rlps [][]byte, maxPeers uint64) (txSentTo []int) {
 	defer f.notifyTests()
 	if len(rlps) == 0 {
 		return
@@ -82,7 +83,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte, maxPeers uint64) (txSentTo []in
 		// Wait till the combined size of rlps so far is greater than a threshold and
 		// send them all at once. Then wait till end of array or this threshold hits again
 		if i == l-1 || size >= p2pTxPacketLimit {
-			txsData := types2.EncodeTransactions(rlps[prev:i+1], nil)
+			txsData := EncodeTransactions(rlps[prev:i+1], nil)
 			var txs66 *sentry.SendMessageToRandomPeersRequest
 			for _, sentryClient := range f.sentryClients {
 				if !sentryClient.Ready() {
@@ -99,7 +100,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte, maxPeers uint64) (txSentTo []in
 				}
 				peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, txs66)
 				if err != nil {
-					f.logger.Debug("[txpool.send] BroadcastPooledTxs", "err", err)
+					f.logger.Debug("[txpool.send] BroadcastPooledTxns", "err", err)
 				}
 				if peers != nil {
 					for j := prev; j <= i; j++ {
@@ -114,7 +115,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte, maxPeers uint64) (txSentTo []in
 	return
 }
 
-func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Hashes, maxPeers uint64) (hashSentTo []int) {
+func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, maxPeers uint64) (hashSentTo []int) {
 	defer f.notifyTests()
 	hashSentTo = make([]int, len(types))
 	if len(types) == 0 {
@@ -158,7 +159,7 @@ func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Has
 					}
 					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, req)
 					if err != nil {
-						f.logger.Debug("[txpool.send] AnnouncePooledTxs", "err", err)
+						f.logger.Debug("[txpool.send] AnnouncePooledTxns", "err", err)
 					}
 					if peers != nil {
 						for k := prevI; k < i; k += 32 {
@@ -178,7 +179,7 @@ func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Has
 					}
 					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, req)
 					if err != nil {
-						f.logger.Debug("[txpool.send] AnnouncePooledTxs68", "err", err)
+						f.logger.Debug("[txpool.send] AnnouncePooledTxns68", "err", err)
 					}
 					if peers != nil {
 						for k := prevJ; k < j; k++ {
@@ -195,7 +196,7 @@ func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Has
 	return
 }
 
-func (f *Send) PropagatePooledTxsToPeersList(peers []types2.PeerID, types []byte, sizes []uint32, hashes []byte) {
+func (f *Send) PropagatePooledTxnsToPeersList(peers []PeerID, types []byte, sizes []uint32, hashes []byte) {
 	defer f.notifyTests()
 
 	if len(types) == 0 {
@@ -242,7 +243,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []types2.PeerID, types []byte
 							},
 						}
 						if _, err := sentryClient.SendMessageById(f.ctx, req, &grpc.EmptyCallOption{}); err != nil {
-							f.logger.Debug("[txpool.send] PropagatePooledTxsToPeersList", "err", err)
+							f.logger.Debug("[txpool.send] PropagatePooledTxnsToPeersList", "err", err)
 						}
 					}
 				case direct.ETH68:
@@ -256,7 +257,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []types2.PeerID, types []byte
 							},
 						}
 						if _, err := sentryClient.SendMessageById(f.ctx, req, &grpc.EmptyCallOption{}); err != nil {
-							f.logger.Debug("[txpool.send] PropagatePooledTxsToPeersList68", "err", err)
+							f.logger.Debug("[txpool.send] PropagatePooledTxnsToPeersList68", "err", err)
 						}
 					}
 

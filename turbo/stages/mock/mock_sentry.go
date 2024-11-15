@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	libstate "github.com/erigontech/erigon-lib/state"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"
@@ -66,6 +65,7 @@ import (
 	stages2 "github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/turbo/trie"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -299,7 +299,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 	if !cfg.DeprecatedTxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
-		newTxs := make(chan types2.Announcements, 1024)
+		newTxs := make(chan txpool.Announcements, 1024)
 		if tb != nil {
 			tb.Cleanup(func() {
 				close(newTxs)

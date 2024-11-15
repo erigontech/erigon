@@ -24,20 +24,20 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/remote"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentry"
-	"github.com/erigontech/erigon-lib/kv"
+	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	typesproto "github.com/erigontech/erigon-lib/gointerfaces/types"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	erigonlibtypes "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestFetch(t *testing.T) {
@@ -46,75 +46,84 @@ func TestFetch(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	remoteKvClient := remote.NewMockKVClient(ctrl)
-	sentryServer := sentry.NewMockSentryServer(ctrl)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	pool := NewMockPool(ctrl)
 	pool.EXPECT().Started().Return(true)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
-	fetch := NewFetch(ctx, []direct.SentryClient{sentryClient}, pool, remoteKvClient, nil, nil, *u256.N1, log.New())
+	sentryClient := direct.NewSentryClientDirect(direct.ETH67, m)
 	var wg sync.WaitGroup
-	fetch.SetWaitGroup(&wg)
+	fetch := NewFetch(ctx, []direct.SentryClient{sentryClient}, pool, remoteKvClient, nil, nil, *u256.N1, log.New())
 	m.StreamWg.Add(2)
 	fetch.ConnectSentries()
 	m.StreamWg.Wait()
 	// Send one transaction id
 	wg.Add(1)
-	errs := m.Send(&sentry.InboundMessage{
-		Id:     sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+	errs := m.Send(&sentryproto.InboundMessage{
+		Id:     sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 		Data:   decodeHex("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"),
 		PeerId: peerID,
 	})
 	for i, err := range errs {
 		if err != nil {
-			t.Errorf("sending new pool tx hashes 66 (%d): %v", i, err)
+			t.Errorf("sending new pool txn hashes 66 (%d): %v", i, err)
 		}
 	}
 	wg.Wait()
 }
 
-func TestSendTxPropagate(t *testing.T) {
+func TestSendTxnPropagate(t *testing.T) {
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
 	t.Run("few remote byHash", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
-		sentryServer := sentry.NewMockSentryServer(ctrl)
+		sentryServer := sentryproto.NewMockSentryServer(ctrl)
 
 		times := 2
-		requests := make([]*sentry.SendMessageToRandomPeersRequest, 0, times)
+		requests := make([]*sentryproto.SendMessageToRandomPeersRequest, 0, times)
 		sentryServer.EXPECT().
 			SendMessageToRandomPeers(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(_ context.Context, r *sentry.SendMessageToRandomPeersRequest) (*sentry.SentPeers, error) {
+			DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
 				requests = append(requests, r)
 				return nil, nil
 			}).
 			Times(times)
 
+		sentryServer.EXPECT().PeerById(gomock.Any(), gomock.Any()).
+			DoAndReturn(
+				func(_ context.Context, r *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
+					return &sentryproto.PeerByIdReply{
+						Peer: &typesproto.PeerInfo{
+							Id:   r.PeerId.String(),
+							Caps: []string{"eth/68"},
+						}}, nil
+				}).AnyTimes()
+
 		m := NewMockSentry(ctx, sentryServer)
 		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
-		send.BroadcastPooledTxs(testRlps(2), 100)
-		send.AnnouncePooledTxs([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
+		send.BroadcastPooledTxns(testRlps(2), 100)
+		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
 		require.Equal(t, 2, len(requests))
 
-		txsMessage := requests[0].Data
-		assert.Equal(t, sentry.MessageId_TRANSACTIONS_66, txsMessage.Id)
-		assert.Equal(t, 3, len(txsMessage.Data))
+		txnsMessage := requests[0].Data
+		assert.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
+		assert.Equal(t, 3, len(txnsMessage.Data))
 
 		txnHashesMessage := requests[1].Data
-		assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
+		assert.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
 		assert.Equal(t, 76, len(txnHashesMessage.Data))
 	})
 
 	t.Run("much remote byHash", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
-		sentryServer := sentry.NewMockSentryServer(ctrl)
+		sentryServer := sentryproto.NewMockSentryServer(ctrl)
 
 		times := 2
-		requests := make([]*sentry.SendMessageToRandomPeersRequest, 0, times)
+		requests := make([]*sentryproto.SendMessageToRandomPeersRequest, 0, times)
 		sentryServer.EXPECT().
 			SendMessageToRandomPeers(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(_ context.Context, r *sentry.SendMessageToRandomPeersRequest) (*sentry.SentPeers, error) {
+			DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
 				requests = append(requests, r)
 				return nil, nil
 			}).
@@ -122,34 +131,34 @@ func TestSendTxPropagate(t *testing.T) {
 
 		m := NewMockSentry(ctx, sentryServer)
 		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
-		list := make(erigonlibtypes.Hashes, p2pTxPacketLimit*3)
+		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
 			copy(list[i:i+32], b)
 		}
-		send.BroadcastPooledTxs(testRlps(len(list)/32), 100)
-		send.AnnouncePooledTxs([]byte{0, 1, 2}, []uint32{10, 12, 14}, list, 100)
+		send.BroadcastPooledTxns(testRlps(len(list)/32), 100)
+		send.AnnouncePooledTxns([]byte{0, 1, 2}, []uint32{10, 12, 14}, list, 100)
 
 		require.Equal(t, 2, len(requests))
 
-		txsMessage := requests[0].Data
-		require.Equal(t, sentry.MessageId_TRANSACTIONS_66, txsMessage.Id)
-		require.True(t, len(txsMessage.Data) > 0)
+		txnsMessage := requests[0].Data
+		require.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
+		require.True(t, len(txnsMessage.Data) > 0)
 
 		txnHashesMessage := requests[1].Data
-		require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
+		require.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
 		require.True(t, len(txnHashesMessage.Data) > 0)
 	})
 
 	t.Run("few local byHash", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
-		sentryServer := sentry.NewMockSentryServer(ctrl)
+		sentryServer := sentryproto.NewMockSentryServer(ctrl)
 
 		times := 2
-		requests := make([]*sentry.SendMessageToRandomPeersRequest, 0, times)
+		requests := make([]*sentryproto.SendMessageToRandomPeersRequest, 0, times)
 		sentryServer.EXPECT().
 			SendMessageToRandomPeers(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(_ context.Context, r *sentry.SendMessageToRandomPeersRequest) (*sentry.SentPeers, error) {
+			DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
 				requests = append(requests, r)
 				return nil, nil
 			}).
@@ -157,43 +166,53 @@ func TestSendTxPropagate(t *testing.T) {
 
 		m := NewMockSentry(ctx, sentryServer)
 		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
-		send.BroadcastPooledTxs(testRlps(2), 100)
-		send.AnnouncePooledTxs([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
+		send.BroadcastPooledTxns(testRlps(2), 100)
+		send.AnnouncePooledTxns([]byte{0, 1}, []uint32{10, 15}, toHashes(1, 42), 100)
 
 		require.Equal(t, 2, len(requests))
 
-		txsMessage := requests[0].Data
-		assert.Equal(t, sentry.MessageId_TRANSACTIONS_66, txsMessage.Id)
-		assert.True(t, len(txsMessage.Data) > 0)
+		txnsMessage := requests[0].Data
+		assert.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
+		assert.True(t, len(txnsMessage.Data) > 0)
 
 		txnHashesMessage := requests[1].Data
-		assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
+		assert.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
 		assert.Equal(t, 76, len(txnHashesMessage.Data))
 	})
 
 	t.Run("sync with new peer", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
-		sentryServer := sentry.NewMockSentryServer(ctrl)
+		sentryServer := sentryproto.NewMockSentryServer(ctrl)
 
 		times := 3
-		requests := make([]*sentry.SendMessageByIdRequest, 0, times)
+		requests := make([]*sentryproto.SendMessageByIdRequest, 0, times)
 		sentryServer.EXPECT().
 			SendMessageById(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(_ context.Context, r *sentry.SendMessageByIdRequest) (*sentry.SentPeers, error) {
+			DoAndReturn(func(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 				requests = append(requests, r)
 				return nil, nil
 			}).
 			Times(times)
 
+		sentryServer.EXPECT().PeerById(gomock.Any(), gomock.Any()).
+			DoAndReturn(
+				func(_ context.Context, r *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
+					return &sentryproto.PeerByIdReply{
+						Peer: &typesproto.PeerInfo{
+							Id:   r.PeerId.String(),
+							Caps: []string{"eth/68"},
+						}}, nil
+				}).AnyTimes()
+
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)},nil, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
-		send.PropagatePooledTxsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
+		send.PropagatePooledTxnsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
 		require.Equal(t, 3, len(requests))
 		for i, req := range requests {
-			assert.Equal(t, expectPeers[i], erigonlibtypes.PeerID(req.PeerId))
-			assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, req.Data.Id)
+			assert.Equal(t, expectPeers[i], PeerID(req.PeerId))
+			assert.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, req.Data.Id)
 			assert.True(t, len(req.Data.Data) > 0)
 		}
 	})
@@ -206,10 +225,11 @@ func decodeHex(in string) []byte {
 	}
 	return payload
 }
+
 func TestOnNewBlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	coreDB, db := memdb.NewTestDB(t), memdb.NewTestDB(t)
+	coreDb, db := memdb.NewTestDB(t), memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
 
 	stream := remote.NewMockKV_StateChangesClient(ctrl)
@@ -226,9 +246,9 @@ func TestOnNewBlock(t *testing.T) {
 				ChangeBatch: []*remote.StateChange{
 					{
 						Txs: [][]byte{
-							decodeHex(erigonlibtypes.TxParseMainnetTests[0].PayloadStr),
-							decodeHex(erigonlibtypes.TxParseMainnetTests[1].PayloadStr),
-							decodeHex(erigonlibtypes.TxParseMainnetTests[2].PayloadStr),
+							decodeHex(TxnParseMainnetTests[0].PayloadStr),
+							decodeHex(TxnParseMainnetTests[1].PayloadStr),
+							decodeHex(TxnParseMainnetTests[2].PayloadStr),
 						},
 						BlockHeight: 1,
 						BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
@@ -255,26 +275,99 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		Times(3)
 
-	var minedTxs erigonlibtypes.TxSlots
+	var minedTxns TxnSlots
 	pool.EXPECT().
-		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(
-			func(
-				_ context.Context,
-				_ *remote.StateChangeBatch,
-				_ erigonlibtypes.TxSlots,
-				_ erigonlibtypes.TxSlots,
-				minedTxsArg erigonlibtypes.TxSlots,
-				_ kv.Tx,
-			) error {
-				minedTxs = minedTxsArg
-				return nil
-			},
-		).
+		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ *remote.StateChangeBatch, _ TxnSlots, _ TxnSlots, minedTxnsArg TxnSlots) error {
+			minedTxns = minedTxnsArg
+			return nil
+		}).
 		Times(1)
 
-	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDB, db, *u256.N1, log.New())
+	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDb, db, *u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
-	assert.Equal(t, 3, len(minedTxs.Txs))
+	assert.Equal(t, 3, len(minedTxns.Txs))
+}
+
+type MockSentry struct {
+	ctx context.Context
+	*sentryproto.MockSentryServer
+	streams      map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	peersStreams []sentryproto.Sentry_PeerEventsServer
+	StreamWg     sync.WaitGroup
+	lock         sync.RWMutex
+}
+
+func NewMockSentry(ctx context.Context, sentryServer *sentryproto.MockSentryServer) *MockSentry {
+	return &MockSentry{
+		ctx:              ctx,
+		MockSentryServer: sentryServer,
+	}
+}
+
+var peerID PeerID = gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}) // "12345"
+
+func (ms *MockSentry) Send(req *sentryproto.InboundMessage) (errs []error) {
+	ms.lock.RLock()
+	defer ms.lock.RUnlock()
+	for _, stream := range ms.streams[req.Id] {
+		if err := stream.Send(req); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
+
+func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
+	return &sentryproto.SetStatusReply{}, nil
+}
+func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
+	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH68}, nil
+}
+func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
+	ms.lock.Lock()
+	if ms.streams == nil {
+		ms.streams = map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer{}
+	}
+	for _, id := range req.Ids {
+		ms.streams[id] = append(ms.streams[id], stream)
+	}
+	ms.lock.Unlock()
+	ms.StreamWg.Done()
+	select {
+	case <-ms.ctx.Done():
+		return nil
+	case <-stream.Context().Done():
+		return nil
+	}
+}
+
+func (ms *MockSentry) PeerEvents(_ *sentryproto.PeerEventsRequest, stream sentryproto.Sentry_PeerEventsServer) error {
+	ms.lock.Lock()
+	ms.peersStreams = append(ms.peersStreams, stream)
+	ms.lock.Unlock()
+	ms.StreamWg.Done()
+	select {
+	case <-ms.ctx.Done():
+		return nil
+	case <-stream.Context().Done():
+		return nil
+	}
+}
+
+func testRlps(num int) [][]byte {
+	rlps := make([][]byte, num)
+	for i := 0; i < num; i++ {
+		rlps[i] = []byte{1}
+	}
+	return rlps
+}
+
+func toPeerIDs(h ...byte) (out []PeerID) {
+	for i := range h {
+		hash := [64]byte{h[i]}
+		out = append(out, gointerfaces.ConvertHashToH512(hash))
+	}
+	return out
 }

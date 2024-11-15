@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package types
+package txpool
 
 import (
 	"bytes"
@@ -868,18 +868,18 @@ func (h Addresses) AddressAt(i int) common.Address {
 func (h Addresses) At(i int) []byte { return h[i*length.Addr : (i+1)*length.Addr] }
 func (h Addresses) Len() int        { return len(h) / length.Addr }
 
-type TxSlots struct {
+type TxnSlots struct {
 	Txs     []*TxSlot
 	Senders Addresses
 	IsLocal []bool
 }
 
-func (s *TxSlots) Valid() error {
+func (s *TxnSlots) Valid() error {
 	if len(s.Txs) != len(s.IsLocal) {
-		return fmt.Errorf("TxSlots: expect equal len of isLocal=%d and txs=%d", len(s.IsLocal), len(s.Txs))
+		return fmt.Errorf("TxnSlots: expect equal len of isLocal=%d and txs=%d", len(s.IsLocal), len(s.Txs))
 	}
 	if len(s.Txs) != s.Senders.Len() {
-		return fmt.Errorf("TxSlots: expect equal len of senders=%d and txs=%d", s.Senders.Len(), len(s.Txs))
+		return fmt.Errorf("TxnSlots: expect equal len of senders=%d and txs=%d", s.Senders.Len(), len(s.Txs))
 	}
 	return nil
 }
@@ -887,7 +887,7 @@ func (s *TxSlots) Valid() error {
 var zeroAddr = make([]byte, 20)
 
 // Resize internal arrays to len=targetSize, shrinks if need. It rely on `append` algorithm to realloc
-func (s *TxSlots) Resize(targetSize uint) {
+func (s *TxnSlots) Resize(targetSize uint) {
 	for uint(len(s.Txs)) < targetSize {
 		s.Txs = append(s.Txs, nil)
 	}
@@ -912,7 +912,7 @@ func (s *TxSlots) Resize(targetSize uint) {
 		s.IsLocal[i] = false
 	}
 }
-func (s *TxSlots) Append(slot *TxSlot, sender []byte, isLocal bool) {
+func (s *TxnSlots) Append(slot *TxSlot, sender []byte, isLocal bool) {
 	n := len(s.Txs)
 	s.Resize(uint(len(s.Txs) + 1))
 	s.Txs[n] = slot
@@ -1003,7 +1003,7 @@ func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
 				enc[pos+1:], decodeLength)
 		}
 
-		nonce = bytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		nonce = common.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
 		pos += decodeLength + 1
 	}
 
@@ -1017,16 +1017,6 @@ func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
 		}
 
 		(&balance).SetBytes(enc[pos+1 : pos+decodeLength+1])
-	}
-	return
-}
-
-func bytesToUint64(buf []byte) (x uint64) {
-	for i, b := range buf {
-		x = x<<8 + uint64(b)
-		if i == 7 {
-			return
-		}
 	}
 	return
 }

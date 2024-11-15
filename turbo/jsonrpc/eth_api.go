@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	libstate "github.com/erigontech/erigon-lib/state"
-	types2 "github.com/erigontech/erigon-lib/types"
 
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus"
@@ -396,7 +395,7 @@ type RPCTransaction struct {
 	TransactionIndex    *hexutil.Uint64            `json:"transactionIndex"`
 	Value               *hexutil.Big               `json:"value"`
 	Type                hexutil.Uint64             `json:"type"`
-	Accesses            *types2.AccessList         `json:"accessList,omitempty"`
+	Accesses            *types.AccessList          `json:"accessList,omitempty"`
 	ChainID             *hexutil.Big               `json:"chainId,omitempty"`
 	MaxFeePerBlobGas    *hexutil.Big               `json:"maxFeePerBlobGas,omitempty"`
 	BlobVersionedHashes []common.Hash              `json:"blobVersionedHashes,omitempty"`
