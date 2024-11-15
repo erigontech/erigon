@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	batchSignatureVerificationThreshold = 300
+	batchSignatureVerificationThreshold = 50
 	reservedSize                        = 512
 )
 
@@ -154,7 +154,6 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 		if b.sentinel != nil && v.GossipData != nil {
 			if _, err := b.sentinel.PublishGossip(b.ctx, v.GossipData); err != nil {
 				log.Debug("failed to publish gossip", "err", err)
-				return err
 			}
 		}
 	}

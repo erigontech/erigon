@@ -1017,7 +1017,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.polygonDownloadSync = stagedsync.New(backend.config.Sync, stagedsync.DownloadSyncStages(
 			backend.sentryCtx, stagedsync.StageSnapshotsCfg(
 				backend.chainDB, *backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
-				blockReader, backend.notifications, backend.agg, false, false, backend.silkworm, config.Prune,
+				blockReader, backend.notifications, backend.agg, false, false, false, backend.silkworm, config.Prune,
 			)), nil, nil, backend.logger)
 
 		// these range extractors set the db to the local db instead of the chain db

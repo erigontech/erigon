@@ -69,7 +69,6 @@ func NewCommitteeSubscribeManagement(
 	netConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
 	sentinel sentinel.SentinelClient,
-	state *state.CachingBeaconState,
 	aggregationPool aggregation.AggregationPool,
 	syncedData *synced_data.SyncedDataManager,
 ) *CommitteeSubscribeMgmt {
@@ -79,7 +78,6 @@ func NewCommitteeSubscribeManagement(
 		netConfig:       netConfig,
 		ethClock:        ethClock,
 		sentinel:        sentinel,
-		state:           state,
 		aggregationPool: aggregationPool,
 		syncedData:      syncedData,
 		validatorSubs:   make(map[uint64]*validatorSub),
