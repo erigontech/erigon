@@ -24,7 +24,6 @@ import (
 	"math/big"
 	"testing"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,10 +31,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/types/typestest"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -43,7 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/types"
+	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -74,7 +73,7 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := types.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -956,50 +955,10 @@ func TestBlobTxReplacement(t *testing.T) {
 
 // Todo, make the txn more realistic with good values
 func makeBlobTx() TxSlot {
-
-	bodyRlp := hexutility.MustDecodeHex(BodyRlpHex)
-
-	blobsRlpPrefix := hexutility.MustDecodeHex("fa040008")
-	blobRlpPrefix := hexutility.MustDecodeHex("ba020000")
-
-	var blob0, blob1 = gokzg4844.Blob{}, gokzg4844.Blob{}
-	copy(blob0[:], hexutility.MustDecodeHex(ValidBlob1Hex))
-	copy(blob1[:], hexutility.MustDecodeHex(ValidBlob2Hex))
-
-	var err error
-	proofsRlpPrefix := hexutility.MustDecodeHex("f862")
-	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0, 0)
-	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1, 0)
-
-	proof0, err := kzg.Ctx().ComputeBlobKZGProof(blob0, commitment0, 0)
-	if err != nil {
-		fmt.Println("error", err)
-	}
-	proof1, err := kzg.Ctx().ComputeBlobKZGProof(blob1, commitment1, 0)
-	if err != nil {
-		fmt.Println("error", err)
-	}
-
-	wrapperRlp := hexutility.MustDecodeHex("03fa0401fe")
-	wrapperRlp = append(wrapperRlp, bodyRlp...)
-	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, blob0[:]...)
-	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, blob1[:]...)
-	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, 0xb0)
-	wrapperRlp = append(wrapperRlp, commitment0[:]...)
-	wrapperRlp = append(wrapperRlp, 0xb0)
-	wrapperRlp = append(wrapperRlp, commitment1[:]...)
-	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, 0xb0)
-	wrapperRlp = append(wrapperRlp, proof0[:]...)
-	wrapperRlp = append(wrapperRlp, 0xb0)
-	wrapperRlp = append(wrapperRlp, proof1[:]...)
-
+	wrapperRlp, commitments := typestest.MakeBlobTxRlp()
+	commitment0 := commitments[0]
+	commitment1 := commitments[1]
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
-
 	blobTx := TxSlot{}
 	tctx := NewTxParseContext(*uint256.NewInt(5))
 	tctx.WithSender(false)

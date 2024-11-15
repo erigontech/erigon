@@ -59,7 +59,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon-lib/types"
+	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -1874,7 +1875,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan Announceme
 							continue
 						}
 						// Strip away blob wrapper, if applicable
-						slotRlp, err2 := UnwrapTxPlayloadRlp(slotRlp)
+						slotRlp, err2 := types.UnwrapTxPlayloadRlp(slotRlp)
 						if err2 != nil {
 							continue
 						}
@@ -2436,7 +2437,7 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 	}
 	if cacheView.StateV3() {
 		var bp *uint256.Int
-		nonce, bp, _ = types.DecodeAccountBytesV3(encoded)
+		nonce, bp, _ = types2.DecodeAccountBytesV3(encoded)
 		balance = *bp
 	} else {
 		nonce, balance, err = DecodeSender(encoded)

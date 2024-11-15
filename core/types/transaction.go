@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -212,18 +213,30 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	return t, nil
 }
 
-// Remove everything but the payload body from the wrapper - this is not used, for reference only
-func UnwrapTxPlayloadRlp(blobTxRlp []byte) (retRlp []byte, err error) {
+// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
+// Doesn't change non-blob tx
+func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if blobTxRlp[0] != BlobTxType {
 		return blobTxRlp, nil
 	}
-	it, err := rlp.NewListIterator(blobTxRlp[1:])
+	dataposPrev, _, isList, err := rlp2.Prefix(blobTxRlp[1:], 0)
+	if err != nil || dataposPrev < 1 {
+		return nil, err
+	}
+	if !isList { // This is clearly not wrapped txn then
+		return blobTxRlp, nil
+	}
+
+	blobTxRlp = blobTxRlp[1:]
+	// Get to the wrapper list
+	datapos, datalen, err := rlp2.List(blobTxRlp, dataposPrev)
 	if err != nil {
 		return nil, err
 	}
-	it.Next()
-	retRlp = it.Value()
-	return
+	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // seekInFiles left an extra-bit
+	blobTxRlp[0] = 0x3
+	// Include the prefix part of the rlp
+	return blobTxRlp, nil
 }
 
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
