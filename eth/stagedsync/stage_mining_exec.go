@@ -65,7 +65,7 @@ type MiningExecCfg struct {
 }
 
 type TxPoolForMining interface {
-	YieldBest(n uint16, txs *txpool.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
+	YieldBest(n uint16, txs *txpool.TxnsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
 }
 
 func StageMiningExecCfg(
@@ -264,7 +264,7 @@ func getNextTransactions(
 	simStateWriter state.StateWriter,
 	logger log.Logger,
 ) (types.TransactionsStream, int, error) {
-	txSlots := txpool.TxsRlp{}
+	txSlots := txpool.TxnsRlp{}
 	count := 0
 	if err := cfg.txPoolDB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error

@@ -234,7 +234,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 	type CursorInfo struct {
 		bucket string
 		c      kv.Cursor
-		k, v   []byte //fields to save current position of cursor - used when Tx reopen
+		k, v   []byte //fields to save current position of cursor - used when TxnSlot reopen
 	}
 	cursors := map[uint32]*CursorInfo{}
 
@@ -255,7 +255,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 		select {
 		default:
 		case <-txTicker.C:
-			for _, c := range cursors { // save positions of cursor, will restore after Tx reopening
+			for _, c := range cursors { // save positions of cursor, will restore after TxnSlot reopening
 				k, v, err := c.c.Current()
 				if err != nil {
 					return fmt.Errorf("kvserver: %w", err)

@@ -956,7 +956,7 @@ func (s *PublicTransactionPoolAPI) SendRawTransaction(ctx context.Context, input
 // SignTransactionResult represents a RLP encoded signed transaction.
 type SignTransactionResult struct {
 	Raw hexutil.Bytes     `json:"raw"`
-	Tx  types.Transaction `json:"tx"`
+	TxnSlot  types.Transaction `json:"tx"`
 }
 
 // PublicDebugAPI is the collection of Ethereum APIs exposed over the public

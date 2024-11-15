@@ -139,7 +139,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address libcommon.Ad
 	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	r.defaultReceiver.Reset(rl, nil, false)
 	loader.SetStreamReceiver(r)
-	_, err = loader.CalcTrieRoot(db.(ethdb.HasTx).Tx().(ethdb.RwTx), []byte{}, nil)
+	_, err = loader.CalcTrieRoot(db.(ethdb.HasTx).TxnSlot().(ethdb.RwTx), []byte{}, nil)
 	if err != nil {
 		panic(err)
 	}

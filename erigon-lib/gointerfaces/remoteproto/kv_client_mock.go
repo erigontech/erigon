@@ -402,7 +402,7 @@ func (m *MockKVClient) Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxCl
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
-	ret := m.ctrl.Call(m, "Tx", varargs...)
+	ret := m.ctrl.Call(m, "TxnSlot", varargs...)
 	ret0, _ := ret[0].(KV_TxClient)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
@@ -412,7 +412,7 @@ func (m *MockKVClient) Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxCl
 func (mr *MockKVClientMockRecorder) Tx(ctx any, opts ...any) *MockKVClientTxCall {
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Tx", reflect.TypeOf((*MockKVClient)(nil).Tx), varargs...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TxnSlot", reflect.TypeOf((*MockKVClient)(nil).Tx), varargs...)
 	return &MockKVClientTxCall{Call: call}
 }
 

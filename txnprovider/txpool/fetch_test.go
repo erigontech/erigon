@@ -276,10 +276,10 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		Times(3)
 
-	var minedTxs TxSlots
+	var minedTxs TxnSlots
 	pool.EXPECT().
-		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ *remote.StateChangeBatch, _ TxSlots, _ TxSlots, minedTxsArg TxSlots, _ kv.Tx) error {
+		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ *remote.StateChangeBatch, _ TxnSlots, _ TxnSlots, minedTxsArg TxnSlots, _ kv.Tx) error {
 			minedTxs = minedTxsArg
 			return nil
 		}).

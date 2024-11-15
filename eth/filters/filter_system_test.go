@@ -539,7 +539,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 			}
 		}
 	case <-time.After(1 * time.Second):
-		t.Error("Tx sending loop hangs")
+		t.Error("TxnSlot sending loop hangs")
 	}
 }
 func flattenLogs(pl [][]*types.Log) []*types.Log {

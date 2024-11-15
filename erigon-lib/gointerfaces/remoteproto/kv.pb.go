@@ -838,7 +838,7 @@ type RangeReq struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .Tx()
+	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .TxnSlot()
 	// query params
 	Table       string `protobuf:"bytes,2,opt,name=table,proto3" json:"table,omitempty"`
 	FromPrefix  []byte `protobuf:"bytes,3,opt,name=from_prefix,json=fromPrefix,proto3" json:"from_prefix,omitempty"`
@@ -944,7 +944,7 @@ type DomainGetReq struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .Tx()
+	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .TxnSlot()
 	// query params
 	Table  string `protobuf:"bytes,2,opt,name=table,proto3" json:"table,omitempty"`
 	K      []byte `protobuf:"bytes,3,opt,name=k,proto3" json:"k,omitempty"`
@@ -1087,7 +1087,7 @@ type HistorySeekReq struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	TxId  uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .Tx()
+	TxId  uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .TxnSlot()
 	Table string `protobuf:"bytes,2,opt,name=table,proto3" json:"table,omitempty"`
 	K     []byte `protobuf:"bytes,3,opt,name=k,proto3" json:"k,omitempty"`
 	Ts    uint64 `protobuf:"varint,4,opt,name=ts,proto3" json:"ts,omitempty"`
@@ -1213,7 +1213,7 @@ type IndexRangeReq struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .Tx()
+	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .TxnSlot()
 	// query params
 	Table       string `protobuf:"bytes,2,opt,name=table,proto3" json:"table,omitempty"`
 	K           []byte `protobuf:"bytes,3,opt,name=k,proto3" json:"k,omitempty"`
@@ -1381,7 +1381,7 @@ type HistoryRangeReq struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .Tx()
+	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .TxnSlot()
 	// query params
 	Table       string `protobuf:"bytes,2,opt,name=table,proto3" json:"table,omitempty"`
 	FromTs      int64  `protobuf:"zigzag64,4,opt,name=from_ts,json=fromTs,proto3" json:"from_ts,omitempty"` // -1 means Inf
@@ -1486,7 +1486,7 @@ type DomainRangeReq struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .Tx()
+	TxId uint64 `protobuf:"varint,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"` // returned by .TxnSlot()
 	// query params
 	Table       string `protobuf:"bytes,2,opt,name=table,proto3" json:"table,omitempty"`
 	FromKey     []byte `protobuf:"bytes,3,opt,name=from_key,json=fromKey,proto3" json:"from_key,omitempty"` // nil means Inf
@@ -2082,7 +2082,7 @@ var file_remote_kv_proto_depIdxs = []int32{
 	24, // 7: remote.StateChange.block_hash:type_name -> types.H256
 	6,  // 8: remote.StateChange.changes:type_name -> remote.AccountChange
 	26, // 9: remote.KV.Version:input_type -> google.protobuf.Empty
-	3,  // 10: remote.KV.Tx:input_type -> remote.Cursor
+	3,  // 10: remote.KV.TxnSlot:input_type -> remote.Cursor
 	9,  // 11: remote.KV.StateChanges:input_type -> remote.StateChangeRequest
 	10, // 12: remote.KV.Snapshots:input_type -> remote.SnapshotsRequest
 	12, // 13: remote.KV.Range:input_type -> remote.RangeReq
@@ -2092,7 +2092,7 @@ var file_remote_kv_proto_depIdxs = []int32{
 	19, // 17: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
 	20, // 18: remote.KV.DomainRange:input_type -> remote.DomainRangeReq
 	27, // 19: remote.KV.Version:output_type -> types.VersionReply
-	4,  // 20: remote.KV.Tx:output_type -> remote.Pair
+	4,  // 20: remote.KV.TxnSlot:output_type -> remote.Pair
 	7,  // 21: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
 	11, // 22: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
 	21, // 23: remote.KV.Range:output_type -> remote.Pairs

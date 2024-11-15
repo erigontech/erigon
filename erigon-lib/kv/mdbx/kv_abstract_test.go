@@ -23,11 +23,12 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
+
+	"github.com/erigontech/erigon-lib/kv/order"
 
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -257,7 +258,7 @@ func TestRemoteKvRange(t *testing.T) {
 		}))
 		require.Equal(4, cnt)
 
-		// remote Tx must provide Snapshots-Isolation-Level: new updates are not visible for old readers
+		// remote TxnSlot must provide Snapshots-Isolation-Level: new updates are not visible for old readers
 		require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
 			require.NoError(tx.Put(kv.AccountChangeSet, []byte{4}, []byte{1}))
 			return nil
@@ -486,7 +487,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //		db := db
 //		msg := fmt.Sprintf("%T", db)
 //		t.Run("FillBuckets "+msg, func(t *testing.T) {
-//			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+//			if err := db.Update(ctx, func(tx ethdb.TxnSlot) error {
 //				c := tx.Cursor(dbutils.ChaindataTables[0])
 //				for i := uint8(0); i < 10; i++ {
 //					require.NoError(t, c.Put([]byte{i}, []byte{i}))
@@ -518,7 +519,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //		t.Run("MultipleBuckets "+msg, func(t *testing.T) {
 //			counter2, counter := 0, 0
 //			var key, value []byte
-//			err := db.View(ctx, func(tx ethdb.Tx) error {
+//			err := db.View(ctx, func(tx ethdb.TxnSlot) error {
 //				c := tx.Cursor(dbutils.ChaindataTables[0])
 //				for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 //					if err != nil {
@@ -564,7 +565,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //		db := db
 //		msg := fmt.Sprintf("%T", db)
 //		t.Run("GetAfterPut "+msg, func(t *testing.T) {
-//			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+//			if err := db.Update(ctx, func(tx ethdb.TxnSlot) error {
 //				c := tx.Cursor(dbutils.ChaindataTables[0])
 //				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
 //					require.NoError(t, c.Put([]byte{i}, []byte{i}))
@@ -603,7 +604,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //		})
 //
 //		t.Run("cursor put and delete"+msg, func(t *testing.T) {
-//			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+//			if err := db.Update(ctx, func(tx ethdb.TxnSlot) error {
 //				c3 := tx.Cursor(dbutils.ChaindataTables[2])
 //				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
 //					require.NoError(t, c3.Put([]byte{i}, []byte{i}))
@@ -620,7 +621,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //				t.Error(err)
 //			}
 //
-//			if err := db.Update(ctx, func(tx ethdb.Tx) error {
+//			if err := db.Update(ctx, func(tx ethdb.TxnSlot) error {
 //				c3 := tx.Cursor(dbutils.ChaindataTables[2])
 //				require.NoError(t, c3.Delete([]byte{5}, nil))
 //				v, err := tx.GetOne(dbutils.ChaindataTables[2], []byte{5})

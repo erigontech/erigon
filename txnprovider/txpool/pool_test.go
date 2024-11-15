@@ -82,12 +82,12 @@ func TestNonceFromAddress(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
 	{
-		var txSlots TxSlots
-		txSlot1 := &TxSlot{
+		var txSlots TxnSlots
+		txSlot1 := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -104,15 +104,15 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 
 	{
-		txSlots := TxSlots{}
-		txSlot2 := &TxSlot{
+		txSlots := TxnSlots{}
+		txSlot2 := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
 			Nonce:  4,
 		}
 		txSlot2.IDHash[0] = 2
-		txSlot3 := &TxSlot{
+		txSlot3 := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -132,8 +132,8 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	// test too expensive tx
 	{
-		var txSlots TxSlots
-		txSlot1 := &TxSlot{
+		var txSlots TxnSlots
+		txSlot1 := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(9 * common.Ether),
 			Gas:    100000,
@@ -150,8 +150,8 @@ func TestNonceFromAddress(t *testing.T) {
 
 	// test too low nonce
 	{
-		var txSlots TxSlots
-		txSlot1 := &TxSlot{
+		var txSlots TxnSlots
+		txSlot1 := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -204,12 +204,12 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
+		var txSlots TxnSlots
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -226,8 +226,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	// Bumped only feeCap, transaction not accepted
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
+		txSlots := TxnSlots{}
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(3000000),
 			Gas:    100000,
@@ -246,8 +246,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	// Bumped only tip, transaction not accepted
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
+		txSlots := TxnSlots{}
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(3000000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -266,8 +266,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	// Bumped both tip and feeCap by 10%, txn accepted
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
+		txSlots := TxnSlots{}
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(330000),
 			FeeCap: *uint256.NewInt(330000),
 			Gas:    100000,
@@ -323,12 +323,12 @@ func TestReverseNonces(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 	// 1. Send high fee transaction with nonce gap
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
+		var txSlots TxnSlots
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(500_000),
 			FeeCap: *uint256.NewInt(3_000_000),
 			Gas:    100000,
@@ -354,8 +354,8 @@ func TestReverseNonces(t *testing.T) {
 	}
 	// 2. Send low fee (below base fee) transaction without nonce gap
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
+		var txSlots TxnSlots
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(500_000),
 			FeeCap: *uint256.NewInt(500_000),
 			Gas:    100000,
@@ -381,8 +381,8 @@ func TestReverseNonces(t *testing.T) {
 	}
 
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
+		var txSlots TxnSlots
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(600_000),
 			FeeCap: *uint256.NewInt(3_000_000),
 			Gas:    100000,
@@ -449,13 +449,13 @@ func TestTxPoke(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
 	var idHash Hashes
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
+		var txSlots TxnSlots
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -482,8 +482,8 @@ func TestTxPoke(t *testing.T) {
 	}
 	// Send the same transaction, not accepted
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
+		txSlots := TxnSlots{}
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -511,8 +511,8 @@ func TestTxPoke(t *testing.T) {
 	}
 	// Send different transaction, but only with tip bumped
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
+		txSlots := TxnSlots{}
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(3000000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -541,8 +541,8 @@ func TestTxPoke(t *testing.T) {
 
 	// Send the same transaction, but as remote
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
+		txSlots := TxnSlots{}
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(300000),
 			FeeCap: *uint256.NewInt(300000),
 			Gas:    100000,
@@ -563,8 +563,8 @@ func TestTxPoke(t *testing.T) {
 	}
 	// Send different transaction, but only with tip bumped, as a remote
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
+		txSlots := TxnSlots{}
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(3000000),
 			FeeCap: *uint256.NewInt(3000000),
 			Gas:    100000,
@@ -723,7 +723,7 @@ func TestShanghaiValidateTx(t *testing.T) {
 			err = tx.Put(kv.PlainState, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes)
 			asrt.NoError(err)
 
-			txn := &TxSlot{
+			txn := &TxnSlot{
 				DataLen:  test.dataLen,
 				FeeCap:   *uint256.NewInt(21000),
 				Gas:      500000,
@@ -731,8 +731,8 @@ func TestShanghaiValidateTx(t *testing.T) {
 				Creation: test.creation,
 			}
 
-			txns := TxSlots{
-				Txs:     append([]*TxSlot{}, txn),
+			txns := TxnSlots{
+				Txs:     append([]*TxnSlot{}, txn),
 				Senders: Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 			}
 			err = pool.senders.registerNewSenders(&txns, logger)
@@ -772,7 +772,7 @@ func TestSetCodeTxValidationWithLargeAuthorizationValues(t *testing.T) {
 	err = tx.Put(kv.PlainState, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes)
 	assert.NoError(t, err)
 
-	txn := &TxSlot{
+	txn := &TxnSlot{
 		FeeCap:         *uint256.NewInt(21000),
 		Gas:            500000,
 		SenderID:       0,
@@ -784,8 +784,8 @@ func TestSetCodeTxValidationWithLargeAuthorizationValues(t *testing.T) {
 	txn.Authorizations[0].R.Set(maxUint256)
 	txn.Authorizations[0].S.Set(maxUint256)
 
-	txns := TxSlots{
-		Txs:     append([]*TxSlot{}, txn),
+	txns := TxnSlots{
+		Txs:     append([]*TxnSlot{}, txn),
 		Senders: Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 	}
 	err = pool.senders.registerNewSenders(&txns, logger)
@@ -838,14 +838,14 @@ func TestBlobTxReplacement(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
 
 	//add a blob txn to the pool
 	{
-		txSlots := TxSlots{}
+		txSlots := TxnSlots{}
 		blobTxn := makeBlobTx()
 
 		blobTxn.IDHash[0] = 0x00
@@ -861,7 +861,7 @@ func TestBlobTxReplacement(t *testing.T) {
 
 	{
 		// try to replace it with 5% extra blob gas, 2x higher txn fee - should fail
-		txSlots := TxSlots{}
+		txSlots := TxnSlots{}
 		blobTxn := makeBlobTx()
 		blobTxn.Nonce = 0x2
 		blobTxn.FeeCap.Mul(uint256.NewInt(2), feeCap)
@@ -879,9 +879,9 @@ func TestBlobTxReplacement(t *testing.T) {
 	}
 
 	{
-		txSlots := TxSlots{}
+		txSlots := TxnSlots{}
 		//try to replace it with a regular txn - should fail
-		regularTx := TxSlot{
+		regularTx := TxnSlot{
 			DataLen:    32,
 			FeeCap:     *uint256.NewInt(1).Mul(uint256.NewInt(10), feeCap), //10x the previous
 			Tip:        *uint256.NewInt(1).Mul(uint256.NewInt(10), tip),
@@ -908,7 +908,7 @@ func TestBlobTxReplacement(t *testing.T) {
 		origFee := blobTxn.FeeCap
 		blobTxn.Nonce = 0x2
 		blobTxn.IDHash[0] = 0x03
-		txSlots := TxSlots{}
+		txSlots := TxnSlots{}
 		txSlots.Append(&blobTxn, addr[:], true)
 
 		// Get the config of the pool for BlobPriceBump and bump prices
@@ -954,13 +954,13 @@ func TestBlobTxReplacement(t *testing.T) {
 }
 
 // Todo, make the txn more realistic with good values
-func makeBlobTx() TxSlot {
+func makeBlobTx() TxnSlot {
 	wrapperRlp, commitments := typestest.MakeBlobTxRlp()
 	commitment0 := commitments[0]
 	commitment1 := commitments[1]
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
-	blobTx := TxSlot{}
-	tctx := NewTxParseContext(*uint256.NewInt(5))
+	blobTx := TxnSlot{}
+	tctx := NewTxnParseContext(*uint256.NewInt(5))
 	tctx.WithSender(false)
 	tctx.ParseTransaction(wrapperRlp, 0, &blobTx, nil, false, true, nil)
 	blobTx.BlobHashes = make([]common.Hash, 2)
@@ -1019,12 +1019,12 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = txPool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = txPool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
-	// 1. Try Local Tx
+	// 1. Try Local TxnSlot
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
+		var txSlots TxnSlots
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(500_000),
 			FeeCap: *uint256.NewInt(3_000_000),
 			Gas:    100000,
@@ -1049,10 +1049,10 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 
 	}
 
-	// 2. Try same Tx, but as remote; txn must be dropped
+	// 2. Try same TxnSlot, but as remote; txn must be dropped
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
+		var txSlots TxnSlots
+		txSlot := &TxnSlot{
 			Tip:    *uint256.NewInt(500_000),
 			FeeCap: *uint256.NewInt(3_000_000),
 			Gas:    100000,
@@ -1128,12 +1128,12 @@ func TestBlobSlots(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
 	//Adding 20 blobs from 10 different accounts
 	for i := 0; i < int(cfg.TotalBlobPoolLimit/2); i++ {
-		txSlots := TxSlots{}
+		txSlots := TxnSlots{}
 		addr[0] = uint8(i + 1)
 		blobTxn := makeBlobTx() // makes a txn with 2 blobs
 		blobTxn.IDHash[0] = uint8(2*i + 1)
@@ -1147,7 +1147,7 @@ func TestBlobSlots(t *testing.T) {
 	}
 
 	// Adding another blob txn should reject
-	txSlots := TxSlots{}
+	txSlots := TxnSlots{}
 	addr[0] = 11
 	blobTxn := makeBlobTx()
 	blobTxn.IDHash[0] = uint8(21)
@@ -1199,11 +1199,11 @@ func TestGasLimitChanged(t *testing.T) {
 		Address: gointerfaces.ConvertAddressToH160(addr),
 		Data:    v,
 	})
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
-	var txSlots TxSlots
-	txSlot1 := &TxSlot{
+	var txSlots TxnSlots
+	txSlot1 := &TxnSlot{
 		Tip:    *uint256.NewInt(300000),
 		FeeCap: *uint256.NewInt(300000),
 		Gas:    100_000,
@@ -1224,14 +1224,24 @@ func TestGasLimitChanged(t *testing.T) {
 
 	change.ChangeBatch[0].Changes = nil
 	change.BlockGasLimit = 150_000
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
 	assert.NotZero(mtx.subPool&NotTooMuchGas, "Should now have block space for the tx")
 
 	change.BlockGasLimit = 50_000
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
 	assert.Zero(mtx.subPool&NotTooMuchGas, "Should now have block space (again) for the tx")
+}
+
+// sender - immutable structure which stores only nonce and balance of account
+type sender struct {
+	balance uint256.Int
+	nonce   uint64
+}
+
+func newSender(nonce uint64, balance uint256.Int) *sender {
+	return &sender{nonce: nonce, balance: balance}
 }

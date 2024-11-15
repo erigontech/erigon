@@ -14,35 +14,35 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !nofuzz
-
 package txpool
 
 import (
-	"testing"
+	"sync"
 
-	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
-// golang.org/s/draft-fuzzing-design
-//go doc testing
-//go doc testing.F
-//go doc testing.F.AddRemoteTxs
-//go doc testing.F.Fuzz
+type PeerID *typesproto.H512
 
-// go test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
+// recentlyConnectedPeers does buffer IDs of recently connected good peers
+// then sync of pooled Transaction can happen to all of then at once
+// DoS protection and performance saving
+// it doesn't track if peer disconnected, it's fine
+type recentlyConnectedPeers struct {
+	peers []PeerID
+	lock  sync.Mutex
+}
 
-//func init() {
-//	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-//}
+func (l *recentlyConnectedPeers) AddPeer(p PeerID) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	l.peers = append(l.peers, p)
+}
 
-func FuzzParseTx(f *testing.F) {
-	f.Add([]byte{1}, 0)
-	f.Fuzz(func(t *testing.T, in []byte, pos int) {
-		t.Parallel()
-		ctx := NewTxnParseContext(*u256.N1)
-		txn := &TxnSlot{}
-		sender := make([]byte, 20)
-		_, _ = ctx.ParseTransaction(in, pos, txn, sender, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
-	})
+func (l *recentlyConnectedPeers) GetAndClean() []PeerID {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	peers := l.peers
+	l.peers = nil
+	return peers
 }

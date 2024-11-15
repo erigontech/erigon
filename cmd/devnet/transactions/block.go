@@ -102,7 +102,7 @@ func searchBlockForHashes(
 
 		if blockCount == maxNumberOfEmptyBlockChecks {
 			for h := range hashmap {
-				logger.Error("Missing Tx", "txHash", h)
+				logger.Error("Missing TxnSlot", "txHash", h)
 			}
 
 			return nil, errors.New("timeout when searching for tx")

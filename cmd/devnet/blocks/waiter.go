@@ -163,7 +163,7 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 			tx := block.Transactions[i] // avoid implicit memory aliasing
 
 			if _, ok := c.waitHashes[tx.Hash]; ok {
-				c.logger.Info("Tx included into block", "txHash", tx.Hash, "blockNum", block.Number)
+				c.logger.Info("TxnSlot included into block", "txHash", tx.Hash, "blockNum", block.Number)
 				blockMap[tx.Hash] = block
 				delete(c.waitHashes, tx.Hash)
 

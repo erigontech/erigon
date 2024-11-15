@@ -23,8 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -87,7 +88,7 @@ func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
 	if deferral {
 		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
 		// So we add this data dependency as a trigger
-		//fmt.Printf("trigger[%d] sender [%x]<=%x\n", lastTxNum, *txTask.Sender, txTask.Tx.Hash())
+		//fmt.Printf("trigger[%d] sender [%x]<=%x\n", lastTxNum, *txTask.Sender, txTask.TxnSlot.Hash())
 		rs.triggers[lastTxNum] = txTask
 	}
 	//fmt.Printf("senderTxNums[%x]=%d\n", *txTask.Sender, txTask.TxNum)
