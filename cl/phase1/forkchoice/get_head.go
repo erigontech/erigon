@@ -62,8 +62,8 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 			startIdx = gen.Intn(sampleBasis)
 			step = sampleBasis + gen.Intn(sampleFactor)
 		}
-		for validatorIndex := startIdx; validatorIndex < len(f.latestMessages); validatorIndex += step {
-			message := f.latestMessages[validatorIndex]
+		for validatorIndex := startIdx; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex += step {
+			message, _ := f.latestMessages.get(int(validatorIndex))
 			v := auxilliaryState.ValidatorSet().Get(validatorIndex)
 			if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {
 				continue
@@ -79,7 +79,8 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 			votes[boostRoot] += (boost * auxilliaryState.BeaconConfig().ProposerScoreBoost) / 100
 		}
 	} else {
-		for validatorIndex, message := range f.latestMessages {
+		for validatorIndex := 0; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex++ {
+			message, _ := f.latestMessages.get(validatorIndex)
 			if message == (LatestMessage{}) {
 				continue
 			}
@@ -198,34 +199,6 @@ func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(c *checkpointSt
 		filtered = append(filtered, uint64(validatorIndex))
 	}
 	return filtered
-}
-
-// getWeight computes weight in head decision of canonical chain.
-func (f *ForkChoiceStore) getWeight(root libcommon.Hash, indicies []uint64, state *checkpointState) uint64 {
-	header, has := f.forkGraph.GetHeader(root)
-	if !has {
-		return 0
-	}
-	// Compute attestation score
-	var attestationScore uint64
-	for _, validatorIndex := range indicies {
-		if f.Ancestor(f.latestMessages[validatorIndex].Root, header.Slot) != root {
-			continue
-		}
-		attestationScore += state.balances[validatorIndex]
-	}
-
-	boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
-	if boostRoot == (libcommon.Hash{}) {
-		return attestationScore
-	}
-
-	// Boost is applied if root is an ancestor of proposer_boost_root
-	if f.Ancestor(boostRoot, header.Slot) == root {
-		committeeWeight := state.activeBalance / state.beaconConfig.SlotsPerEpoch
-		attestationScore += (committeeWeight * state.beaconConfig.ProposerScoreBoost) / 100
-	}
-	return attestationScore
 }
 
 // getFilteredBlockTree filters out dumb blocks.

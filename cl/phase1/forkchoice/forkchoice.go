@@ -105,7 +105,7 @@ type ForkChoiceStore struct {
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 
-	latestMessages    []LatestMessage
+	latestMessages    *latestMessagesStore
 	anchorPublicKeys  []byte
 	syncedDataManager *synced_data.SyncedDataManager
 	// We keep track of them so that we can forkchoice with EL.
@@ -237,7 +237,7 @@ func NewForkChoiceStore(
 	f := &ForkChoiceStore{
 		forkGraph:               forkGraph,
 		equivocatingIndicies:    make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:          make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:          newLatestMessagesStore(anchorState.ValidatorLength()),
 		eth2Roots:               eth2Roots,
 		engine:                  engine,
 		operationsPool:          operationsPool,
