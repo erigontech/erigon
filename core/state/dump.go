@@ -20,7 +20,6 @@
 package state
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -172,18 +171,11 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if err != nil {
 			return nil, err
 		}
-		println("k next is", base64.StdEncoding.EncodeToString(k), libcommon.BytesToAddress(k).Hex())
 		if len(v) == 0 {
-			println("len(v) is zero")
 			continue
 		}
 		if maxResults > 0 && numberOfResults >= maxResults {
 			nextKey = append(nextKey[:0], k...)
-			addr, err := base64.StdEncoding.DecodeString("7OccHV8SY/H0OL8pFdGA2HHH7Go=")
-			if err != nil {
-				return nil, err
-			}
-			println("addr", libcommon.BytesToAddress(addr).Hex())
 			break
 		}
 
