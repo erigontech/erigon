@@ -556,12 +556,12 @@ func (iit *InvertedIndexRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64) {
+func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64, err error) {
 	if len(iit.files) == 0 {
-		return false, 0
+		return false, 0, nil
 	}
 	if iit.files[len(iit.files)-1].endTxNum <= txNum {
-		return false, 0
+		return false, 0, nil
 	}
 
 	hi, lo := iit.hashKey(key)
@@ -576,10 +576,10 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		if ok && fromCache.requested <= txNum {
 			if txNum <= fromCache.found {
 				iit.seekInFilesCache.hit++
-				return true, fromCache.found
+				return true, fromCache.found, nil
 			} else if fromCache.found == 0 {
 				iit.seekInFilesCache.hit++
-				return false, 0
+				return false, 0, nil
 			}
 		}
 	}
@@ -603,17 +603,20 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		equalOrHigherTxNum, found = eliasfano32.Seek(eliasVal, txNum)
 
 		if found {
+			if equalOrHigherTxNum < iit.files[i].startTxNum || equalOrHigherTxNum >= iit.files[i].endTxNum {
+				return false, equalOrHigherTxNum, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d", iit.files[i].src.decompressor.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
+			}
 			if iit.seekInFilesCache != nil {
 				iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
 			}
-			return true, equalOrHigherTxNum
+			return true, equalOrHigherTxNum, nil
 		}
 	}
 
 	if iit.seekInFilesCache != nil {
 		iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: 0})
 	}
-	return false, 0
+	return false, 0, nil
 }
 
 // IdxRange - return range of txNums for given `key`
