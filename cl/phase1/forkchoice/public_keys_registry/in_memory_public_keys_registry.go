@@ -49,7 +49,7 @@ func (r *InMemoryPublicKeysRegistry) VerifyAggregateSignature(checkpoint solid.C
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if pubkeysIdxs.Length() == 0 {
-		return false, fmt.Errorf("no public keys provided")
+		return false, fmt.Errorf("no public keys provided, %d, %s", checkpoint.Epoch, checkpoint.Root)
 	}
 	basePublicKeyRegistryLength := uint64(len(r.basePublicKeyRegistry))
 	statePublicKeys, ok := r.statesRegistry[checkpoint]
