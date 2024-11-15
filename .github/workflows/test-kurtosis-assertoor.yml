@@ -180,6 +180,9 @@ jobs:
           wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/feat/assertor-testing/.github/workflows/kurtosis/config-pectra.properties
           sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.APPLICATION }}:${{ env.BUILD_VERSION }}#g' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
+      - name: Create logs directory
+        run: mkdir -p logs
+
       - name: Run Kurtosis + assertoor tests
         id: kurtosis-test
         continue-on-error: true
@@ -190,13 +193,21 @@ jobs:
             #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             enclave_dump: false
 
+      - name: Save job output
+        if: always()
+        run: |
+          echo "::group::Kurtosis Test Output"
+          echo "${{ toJSON(steps.kurtosis-test.outputs) }}" > logs/kurtosis-outputs.json
+          echo "::endgroup::"
+
       - name: Save Kurtosis test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kurtosis-test-logs
           path: |
-            .kurtosis/logs/**/*.log
+            logs/kurtosis-outputs.json
+            ./**/*.log
             kurtosis-logs/**
           retention-days: 14
 
