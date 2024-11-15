@@ -488,11 +488,15 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err != nil {
 		return err
 	}
+
 	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
-	if s.snapgen {
+	if s.stateSn != nil {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
 		}
+	}
+
+	if s.snapgen {
 
 		// Keep gnosis out for a bit
 		if s.currentState.BeaconConfig().ConfigName == "gnosis" {
