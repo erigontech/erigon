@@ -181,6 +181,8 @@ jobs:
           sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.APPLICATION }}:${{ env.BUILD_VERSION }}#g' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
       - name: Run Kurtosis + assertoor tests
+        id: kurtosis-test
+        continue-on-error: true
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
             enclave_name: "kurtosis-run-${{ github.run_id }}"
@@ -188,3 +190,16 @@ jobs:
             #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             enclave_dump: false
 
+      - name: Save Kurtosis test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kurtosis-test-logs
+          path: |
+            .kurtosis/logs/**/*.log
+            kurtosis-logs/**
+          retention-days: 14
+
+      - name: Check test result
+        if: steps.kurtosis-test.outcome == 'failure'
+        run: exit 1
