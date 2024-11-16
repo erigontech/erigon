@@ -50,7 +50,7 @@ func (m *MockKVClient) DomainGet(ctx context.Context, in *DomainGetReq, opts ...
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
-	ret := m.ctrl.Call(m, "DomainGet", varargs...)
+	ret := m.ctrl.Call(m, "GetLatest", varargs...)
 	ret0, _ := ret[0].(*DomainGetReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
@@ -60,7 +60,7 @@ func (m *MockKVClient) DomainGet(ctx context.Context, in *DomainGetReq, opts ...
 func (mr *MockKVClientMockRecorder) DomainGet(ctx, in any, opts ...any) *MockKVClientDomainGetCall {
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, in}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DomainGet", reflect.TypeOf((*MockKVClient)(nil).DomainGet), varargs...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatest", reflect.TypeOf((*MockKVClient)(nil).DomainGet), varargs...)
 	return &MockKVClientDomainGetCall{Call: call}
 }
 
@@ -94,7 +94,7 @@ func (m *MockKVClient) DomainRange(ctx context.Context, in *DomainRangeReq, opts
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
-	ret := m.ctrl.Call(m, "DomainRange", varargs...)
+	ret := m.ctrl.Call(m, "RangeAsOf", varargs...)
 	ret0, _ := ret[0].(*Pairs)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
@@ -104,7 +104,7 @@ func (m *MockKVClient) DomainRange(ctx context.Context, in *DomainRangeReq, opts
 func (mr *MockKVClientMockRecorder) DomainRange(ctx, in any, opts ...any) *MockKVClientDomainRangeCall {
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, in}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DomainRange", reflect.TypeOf((*MockKVClient)(nil).DomainRange), varargs...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RangeAsOf", reflect.TypeOf((*MockKVClient)(nil).DomainRange), varargs...)
 	return &MockKVClientDomainRangeCall{Call: call}
 }
 

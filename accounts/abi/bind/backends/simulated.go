@@ -30,6 +30,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -37,9 +38,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	types2 "github.com/erigontech/erigon-lib/types"
-
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/common/u256"
@@ -846,7 +844,7 @@ func (m callMsg) Tip() *uint256.Int                     { return m.CallMsg.Tip }
 func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
-func (m callMsg) AccessList() types2.AccessList         { return m.CallMsg.AccessList }
+func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
 func (m callMsg) IsFree() bool                          { return false }
 
