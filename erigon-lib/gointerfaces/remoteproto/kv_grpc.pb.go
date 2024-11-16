@@ -7,12 +7,13 @@
 package remoteproto
 
 import (
-	context "context"
-	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	grpc "google.golang.org/grpc"
-	codes "google.golang.org/grpc/codes"
-	status "google.golang.org/grpc/status"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	"context"
+
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
