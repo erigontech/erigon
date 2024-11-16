@@ -46,7 +46,7 @@ func TestFetch(t *testing.T) {
 	defer cancel()
 
 	ctrl := gomock.NewController(t)
-	remoteKvClient := remote.NewMockKVClient(ctrl)
+	remoteKvClient := remote.NewKVClient(ctrl)
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	pool := NewMockPool(ctrl)
 	pool.EXPECT().Started().Return(true)
