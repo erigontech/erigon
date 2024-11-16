@@ -174,7 +174,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		}
 
 		if !valid {
-			if v.GossipData == nil && alreadyBanned {
+			if v.GossipData == nil || alreadyBanned {
 				continue
 			}
 			log.Debug("[BatchVerifier] received invalid signature on the gossip", "topic", v.GossipData.Name)
