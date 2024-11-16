@@ -6,8 +6,6 @@ set +e # Disable exit on error
 disabled_tests=(
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
-    # Erigon bugs
-    debug_accountRange
     # changed in last commits
     debug_storageRangeAt/test_11.json
     # needs investigations
