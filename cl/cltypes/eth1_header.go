@@ -111,6 +111,7 @@ func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < h.EncodingSizeSSZ() {
 		return fmt.Errorf("[Eth1Header] err: %s", ssz.ErrLowBufferSize)
 	}
+	h.Extra = solid.NewExtraData()
 	return ssz2.UnmarshalSSZ(buf, version, h.getSchema()...)
 }
 
@@ -124,9 +125,6 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 
 	if h.version >= clparams.DenebVersion {
 		size += 8 * 2 // BlobGasUsed + ExcessBlobGas
-	}
-	if h.Extra == nil {
-		h.Extra = solid.NewExtraData()
 	}
 
 	return size + h.Extra.EncodingSizeSSZ()
