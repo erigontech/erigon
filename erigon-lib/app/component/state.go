@@ -20,7 +20,7 @@ const (
 // UnmarshalText implements the encoding.TextUnmarshaler interface for XML/JSON
 // deserialization.
 func (e *State) UnmarshalText(text []byte) (err error) {
-	*e, err = Parse(string(text))
+	*e, err = ParseState(string(text))
 	return err
 }
 
@@ -79,7 +79,7 @@ func (state State) String() string {
 	return "Unknown"
 }
 
-func Parse(stateName string) (State, error) {
+func ParseState(stateName string) (State, error) {
 	switch strings.ToUpper(stateName) {
 	case "INSTANTIATED":
 		return Instantiated, nil

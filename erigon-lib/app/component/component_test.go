@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon-lib/app/component"
 	liblog "github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v2"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -25,10 +26,12 @@ func TestCreateComponent(t *testing.T) {
 	require.NotNil(t, p)
 
 	c1, err := component.NewComponent[provider](context.Background(),
-		component.WithId("my-id"))
+		component.WithId("my-id"),
+		component.WithName("my name"))
 	require.Nil(t, err)
 	require.NotNil(t, c1)
 	require.Equal(t, "root:my-id", c1.Id().String())
+	require.Equal(t, "my name", c1.Name())
 
 	c2, err := component.NewComponent[provider](context.Background(),
 		component.WithId("my-id-2"),
@@ -408,6 +411,28 @@ func TestLogger(t *testing.T) {
 
 	c.Activate(context.Background())
 	c.AwaitState(context.Background(), component.Active)
+
+	liblog.Root().SetHandler(
+		liblog.FuncHandler(func(r *liblog.Record) error {
+			require.True(t, strings.HasPrefix(r.Msg, "[component:label]"))
+			require.False(t, strings.HasSuffix(r.Msg, " "))
+			require.Equal(t, "name", r.Ctx[0])
+			require.Equal(t, "value", r.Ctx[1])
+			require.Equal(t, liblog.LvlDebug, r.Lvl)
+			return nil
+		}))
+	c, err = component.NewComponent[provider](context.Background(),
+		component.WithLogLabels("label"),
+		component.WithLogCtx("name", "value"),
+		component.WithLogLevel(liblog.LvlDebug))
+
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:provider", c.Id().String())
+
+	c.Activate(context.Background())
+	c.AwaitState(context.Background(), component.Active)
+
 }
 
 type ctxprovider struct {
@@ -491,13 +516,371 @@ func TestContext(t *testing.T) {
 	require.Equal(t, component.Deactivated, c.State())
 }
 
-func TestFlags(t *testing.T) {
+type cfgprovider struct {
 }
+
+func (p cfgprovider) Configure(ctx context.Context, options ...app.Option) error {
+	app.ApplyOptions(&p, options)
+	return nil
+}
+
+func TestFlags(t *testing.T) {
+	var sflag *cli.StringFlag
+	var iflag *cli.IntFlag
+	var callcount int
+
+	c, err := component.NewComponent[ctxprovider](context.Background(),
+		component.WithId("c"),
+		component.WithFlag[*cli.StringFlag, cfgprovider](sflag,
+			func(f *cli.StringFlag, p *cfgprovider) bool {
+				require.Equal(t, f, sflag)
+				callcount++
+				return true
+			}),
+		component.WithFlag[*cli.IntFlag, cfgprovider](iflag,
+			func(f *cli.IntFlag, p *cfgprovider) bool {
+				require.Equal(t, f, iflag)
+				callcount++
+				return true
+			}),
+		component.WithProvider(&cfgprovider{}))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Len(t, c.Flags(), 2)
+	require.Equal(t, 0, callcount)
+	c.Configure(context.Background())
+	require.Equal(t, 2, callcount)
+
+	callcount = 0
+
+	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d"),
+		component.WithFlag[*cli.StringFlag, cfgprovider](sflag,
+			func(f *cli.StringFlag, p *cfgprovider) bool {
+				require.Equal(t, f, sflag)
+				callcount++
+				return true
+			}),
+		component.WithProvider(&cfgprovider{}))
+	require.Nil(t, err)
+	require.NotNil(t, d)
+	require.Equal(t, "root:d", d.Id().String())
+
+	c1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("c1"),
+		component.WithFlag[*cli.StringFlag, cfgprovider](sflag,
+			func(f *cli.StringFlag, p *cfgprovider) bool {
+				require.Equal(t, f, sflag)
+				callcount++
+				return true
+			}),
+		component.WithFlag[*cli.IntFlag, cfgprovider](iflag,
+			func(f *cli.IntFlag, p *cfgprovider) bool {
+				require.Equal(t, f, iflag)
+				callcount++
+				return true
+			}),
+		component.WithProvider(&cfgprovider{}),
+		component.WithDependencies(d))
+	require.Nil(t, err)
+	require.NotNil(t, c1)
+	require.Equal(t, "root:c1", c1.Id().String())
+	require.Len(t, c1.Flags(), 3)
+	require.Equal(t, 0, callcount)
+	c1.Configure(context.Background())
+	require.Equal(t, 3, callcount)
+}
+
+type eprovider struct {
+	callch chan string
+	s      string
+}
+
+func (e *eprovider) test(s string) {
+	e.s = s
+	e.callch <- s
+}
+
 func TestEvents(t *testing.T) {
+	c, err := component.NewComponent[eprovider](context.Background(),
+		component.WithId("c"),
+		component.WithProvider(&eprovider{}))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+
+	callch := make(chan string)
+	c.Provider().callch = callch
+
+	testfn := c.Provider().test
+	c.Register(
+		func(s string) {
+			callch <- s
+		},
+		testfn)
+
+	nocalls := c.Post("test")
+	require.Equal(t, 2, nocalls)
+	r := <-callch
+	require.Equal(t, "test", r)
+	r = <-callch
+	require.Equal(t, "test", r)
+	require.Equal(t, "test", c.Provider().s)
+
+	require.NoError(t, c.Unegister(testfn))
+
+	nocalls = c.Post("test-1")
+	require.Equal(t, 1, nocalls)
+	r = <-callch
+	require.Equal(t, "test-1", r)
+	require.Equal(t, "test", c.Provider().s)
+
+	bus := c.EventBus("tb")
+
+	bus.Register(c.Provider(),
+		func(s string) {
+			callch <- s
+		},
+		testfn,
+	)
+
+	nocalls = bus.Post("test-2")
+	require.Equal(t, 2, nocalls)
+	for i := 0; i < nocalls; i++ {
+		r = <-callch
+		require.Equal(t, "test-2", r)
+	}
+	require.Equal(t, "test-2", c.Provider().s)
+
+	bus.Unregister(c.Provider(), testfn)
+
+	nocalls = bus.Post("test-3")
+	require.Equal(t, 1, nocalls)
+	r = <-callch
+	require.Equal(t, "test-3", r)
+	require.Equal(t, "test-2", c.Provider().s)
+
+	bus.UnregisterAll(c.Provider())
+	nocalls = bus.Post("test-4")
+	require.Equal(t, 0, nocalls)
 }
 
 func TestMultipleDependents(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	c, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+
+	c1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("c1"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, c1)
+	require.Equal(t, "root:c1", c1.Id().String())
+
+	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d)
+	require.Equal(t, "root:d", d.Id().String())
+
+	d1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d1"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d)
+	require.Equal(t, "root:d1", d1.Id().String())
+
+	c.AddDependency(d)
+	c.AddDependency(d1)
+	c1.AddDependency(d)
+	c1.AddDependency(d1)
+
+	err = c.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err := c.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Active, d.State())
+	require.Equal(t, component.Active, d1.State())
+	require.Equal(t, component.Instantiated, c1.State())
+
+	err = c1.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c1.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Active, d.State())
+	require.Equal(t, component.Active, d1.State())
+	require.Equal(t, component.Active, c.State())
+
+	err = c.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Active, d.State())
+	require.Equal(t, component.Active, d1.State())
+	require.Equal(t, component.Active, c1.State())
+
+	err = c1.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c1.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Deactivated, d.State())
+	require.Equal(t, component.Deactivated, d1.State())
+	require.Equal(t, component.Deactivated, c1.State())
 }
 
 func TestAddRemoveDeps(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	c, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+
+	d, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d)
+	require.Equal(t, "root:d", d.Id().String())
+
+	d1, err := component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d1"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d)
+	require.Equal(t, "root:d1", d1.Id().String())
+
+	c.AddDependency(d)
+	c.AddDependency(d1)
+
+	err = c.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err := c.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Active, d.State())
+	require.Equal(t, component.Active, d1.State())
+	require.Equal(t, component.Active, c.State())
+
+	c.RemoveDependency(d1)
+
+	err = c.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Deactivated, d.State())
+	require.Equal(t, component.Active, d1.State())
+	require.Equal(t, component.Deactivated, c.State())
+
+	err = d1.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = d1.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Deactivated, d1.State())
+
+	c, err = component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:mockcomponentprovider", c.Id().String())
+
+	d, err = component.NewComponent[component.MockComponentProvider](context.Background(),
+		component.WithId("d"),
+		component.WithProvider(mockProvider(ctrl, 1)))
+	require.Nil(t, err)
+	require.NotNil(t, d)
+	require.Equal(t, "root:d", d.Id().String())
+
+	err = c.Activate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Instantiated, d.State())
+	require.Equal(t, component.Active, c.State())
+
+	c.AddDependency(d)
+
+	state, err = d.AwaitState(context.Background(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
+	require.Equal(t, component.Active, d.State())
+	require.Equal(t, component.Active, c.State())
+
+	err = c.Deactivate(context.Background())
+	require.Nil(t, err)
+
+	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	require.Nil(t, err)
+	require.Equal(t, component.Deactivated, state)
+	require.Equal(t, component.Deactivated, d.State())
+	require.Equal(t, component.Deactivated, c.State())
+
+	c1, err := component.NewComponent[provider](context.Background(),
+		component.WithProvider(&provider{}))
+	require.Nil(t, err)
+	require.NotNil(t, c1)
+	require.Equal(t, "root:provider", c1.Id().String())
+
+	d2, err := component.NewComponent[provider](context.Background(),
+		component.WithId("d2"),
+		component.WithProvider(&provider{}))
+	require.Nil(t, err)
+	require.NotNil(t, d2)
+	require.Equal(t, "root:d2", d2.Id().String())
+
+	c1.Configure(context.Background())
+	require.Equal(t, component.Configured, c1.State())
+
+	c1.AddDependency(d2)
+	require.Equal(t, component.Configured, c1.State())
+
+	c1, err = component.NewComponent[provider](context.Background(),
+		component.WithProvider(&provider{}))
+	require.Nil(t, err)
+	require.NotNil(t, c1)
+	require.Equal(t, "root:provider", c1.Id().String())
+
+	d2, err = component.NewComponent[provider](context.Background(),
+		component.WithId("d2"),
+		component.WithProvider(&provider{}))
+	require.Nil(t, err)
+	require.NotNil(t, d2)
+	require.Equal(t, "root:d2", d2.Id().String())
+
+	c1.Initialize(context.Background())
+	require.Equal(t, component.Initialised, c1.State())
+
+	c1.AddDependency(d2)
+	require.Equal(t, component.Initialised, c1.State())
+}
+
+func TestState(t *testing.T) {
+	for s := component.Unknown; s <= component.Failed; s++ {
+		s1, err := component.ParseState(s.String())
+		require.NoError(t, err)
+		require.Equal(t, s, s1)
+		var s2 component.State
+		txt, err := s.MarshalText()
+		require.NoError(t, err)
+		require.NoError(t, s2.UnmarshalText(txt))
+		require.Equal(t, s, s2)
+	}
 }

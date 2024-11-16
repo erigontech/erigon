@@ -62,14 +62,14 @@ func (bus *ManagedEventBus) Unregister(object interface{}, fn interface{}) error
 	return bus.eventBus.Unsubscribe(fn)
 }
 
-func (bus *ManagedEventBus) Post(args ...interface{}) {
-	bus.eventBus.Publish(args...)
+func (bus *ManagedEventBus) Post(args ...interface{}) int {
+	return bus.eventBus.Publish(args...)
 }
 
 var zero = reflect.Value{}
 
 func removeRegistration(registrations map[uintptr][]interface{}, objectPtr uintptr, idx int) {
-	if _, ok := registrations[objectPtr]; !ok {
+	if _, ok := registrations[objectPtr]; !ok || idx < 0 {
 		return
 	}
 	l := len(registrations[objectPtr])
@@ -82,7 +82,7 @@ func removeRegistration(registrations map[uintptr][]interface{}, objectPtr uintp
 func findRegistrationIndex(registrations map[uintptr][]interface{}, objectPtr uintptr, fn interface{}) int {
 	if _, ok := registrations[objectPtr]; ok {
 		for idx, subscription := range registrations[objectPtr] {
-			//fmt.Printf("%v=%v (%v)\n", subscription, fn, reflect.ValueOf(subscription) == reflect.ValueOf(fn))
+			//fmt.Printf("%v=%v (%v)\n", subscription, fn, reflect.ValueOf(subscription).Pointer() == reflect.ValueOf(fn).Pointer())
 			if reflect.ValueOf(subscription) == reflect.ValueOf(fn) {
 				return idx
 			}

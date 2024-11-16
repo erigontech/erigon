@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/app/util"
 	liblog "github.com/erigontech/erigon-lib/log/v3"
 	pkg_errors "github.com/pkg/errors"
+	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -37,6 +38,7 @@ type relation interface {
 	HasDependent(component relation) bool
 
 	Domain() ComponentDomain
+	Flags() []cli.Flag
 
 	isConfigurable() bool
 	isInitializable() bool
@@ -61,26 +63,12 @@ type Component[P any] interface {
 	Deactivate(ctx context.Context, handler ...ActivityHandler[P]) error
 
 	Provider() *P
-}
 
-func MakeResultChannels() (chan *component, chan error) {
-	return make(chan *component, 1), make(chan error, 1)
-}
+	Post(args ...interface{}) int
+	Register(fns ...interface{}) error
+	Unegister(fns ...interface{}) error
 
-func ReturnResultChannels(c *component, err error) (chan *component, chan error) {
-	cproc, cerr := make(chan *component, 1), make(chan error, 1)
-
-	if c != nil {
-		cproc <- c
-	}
-
-	if err != nil {
-		cerr <- err
-	}
-
-	close(cproc)
-	close(cerr)
-	return cproc, cerr
+	EventBus(key interface{}) *event.ManagedEventBus
 }
 
 type typedComponent[P any] struct {
@@ -114,30 +102,6 @@ func (c typedComponent[P]) Deactivate(ctx context.Context, handler ...ActivityHa
 			handler[0].OnActivity(ctx, c, c.state, err)
 		}
 	})
-}
-
-func AwaitComponent[T any](cres chan *component, cerr chan error) (result Component[T], err error) {
-	if cres == nil || cerr == nil {
-		return nil, fmt.Errorf("Await Component Failed: channels are undefined")
-	}
-
-	resolved := false
-	for !resolved {
-		select {
-		case res, ok := <-cres:
-			if ok {
-				result = typedComponent[T]{res}
-				resolved = true
-			}
-		case error, ok := <-cerr:
-			if ok {
-				err = error
-				resolved = true
-			}
-		}
-	}
-
-	return result, err
 }
 
 var deactivatoinWaiters = struct {
@@ -287,12 +251,29 @@ type component struct {
 	dependencies    relations
 	provider        interface{}
 	log             app.Logger
+	flags           []cli.Flag
+}
+
+func WithFlag[F cli.Flag, T any](flag F, setter func(f F, t *T) bool) app.Option {
+	return app.WithOption[any](
+		func(a *any) bool {
+			switch t := (*a).(type) {
+			case *component:
+				t.flags = append(t.flags, flag)
+				return false
+			case *T:
+				return setter(flag, t)
+			default:
+				return false
+			}
+		})
 }
 
 func WithName(name string) app.Option {
 	return app.WithOption[component](
-		func(c *component) {
+		func(c *component) bool {
 			c.name = name
+			return true
 		})
 }
 
@@ -308,8 +289,9 @@ func (f ProviderFactoryFunc[P]) New() *P {
 
 func WithProvider[P any](p *P) app.Option {
 	return app.WithOption[component](
-		func(c *component) {
+		func(c *component) bool {
 			c.provider = p
+			return true
 		})
 }
 
@@ -324,57 +306,65 @@ type componentOptions struct {
 
 func WithLogLevel(lvl liblog.Lvl) app.Option {
 	return app.WithOption[componentOptions](
-		func(c *componentOptions) {
+		func(c *componentOptions) bool {
 			c.logLvl = lvl
+			return true
 		})
 }
 
 func WithLogLabels(labels ...string) app.Option {
 	return app.WithOption[componentOptions](
-		func(c *componentOptions) {
+		func(c *componentOptions) bool {
 			c.logLabels = labels
+			return true
 		})
 }
 
 func WithLogCtx(ctx ...interface{}) app.Option {
 	return app.WithOption[componentOptions](
-		func(c *componentOptions) {
+		func(c *componentOptions) bool {
 			c.logCtx = ctx
+			return true
 		})
 }
 
 func WithId(id string) app.Option {
 	return app.WithOption[componentOptions](
-		func(c *componentOptions) {
+		func(c *componentOptions) bool {
 			c.id = id
+			return true
 		})
 }
 
 func WithDependencies(dependencies ...relation) app.Option {
 	return app.WithOption[componentOptions](
-		func(c *componentOptions) {
+		func(c *componentOptions) bool {
 			c.dependencies = append(c.dependencies, dependencies...)
+			return true
 		})
 }
 
 func WithDependent(dependent relation) app.Option {
 	return app.WithOption[componentOptions](
-		func(c *componentOptions) {
+		func(c *componentOptions) bool {
 			c.dependents = append(c.dependents, dependent)
+			return true
 		})
 }
 
 func WithDomain(dependent ComponentDomain) app.Option {
 	return app.WithOption[componentOptions](
-		func(c *componentOptions) {
+		func(c *componentOptions) bool {
 			c.dependents = append(c.dependents, dependent.(*componentDomain).component)
+			return true
 		})
 }
 
 func WithProviderFactory[P any](p ProviderFactory[P]) app.Option {
 	return app.WithOption[component](
-		func(c *component) {
+		func(c *component) bool {
 			c.provider = p.New()
+			return true
 		})
 }
 
@@ -587,27 +577,46 @@ func (c *component) RemoveDependency(dependency relation) {
 	c.removeDependency(asComponent(dependency), false)
 }
 
-func (component *component) Id() app.Id {
-	return component.id
+func (c *component) Id() app.Id {
+	return c.id
 }
 
-func (component *component) Name() string {
-	if component == nil {
+func (c *component) Name() string {
+	if c == nil {
 		return "nil"
 	}
 
-	if component.id == nil || len(component.id.String()) == 0 {
-		if component.provider != nil {
-			return fmt.Sprintf("%T(%p)", component, component)
-		}
-		return reflect.TypeOf(component).String()
+	if len(c.name) > 0 {
+		return c.name
 	}
 
-	return component.id.String()
+	if c.id == nil || len(c.id.String()) == 0 {
+		if c.provider != nil {
+			return fmt.Sprintf("%T(%p)", c, c)
+		}
+		return reflect.TypeOf(c).String()
+	}
+
+	return c.id.String()
 }
 
 func (c *component) InstanceId() string {
 	return app.LogInstance(c)
+}
+
+func (c *component) Flags() []cli.Flag {
+	c.RLock()
+	defer c.RUnlock()
+
+	var flags []cli.Flag
+
+	flags = append(flags, c.flags...)
+
+	for _, dependency := range c.dependencies {
+		flags = append(flags, dependency.Flags()...)
+	}
+
+	return flags
 }
 
 // lock to ensure that only one component collects and activates
@@ -1009,11 +1018,19 @@ func (c *component) deactivateDependencies(ctx context.Context, onActivity onAct
 		fmt.Printf("  %v:%v:%p\n", manager.Name(), dep.Name(), dep)
 	}*/
 
-	deactivationList := make([]*component, len(c.dependencies))
+	deactivationList := make([]*component, 0, len(c.dependencies))
 
 	c.RLock()
-	for i, component := range c.dependencies {
-		deactivationList[i] = asComponent(component)
+DEPENDENCIES:
+	for _, dependency := range c.dependencies {
+		dependency := asComponent(dependency)
+		for _, dependent := range dependency.dependents {
+			dependent := asComponent(dependent)
+			if !dependent.state.IsDeactivated() {
+				continue DEPENDENCIES
+			}
+		}
+		deactivationList = append(deactivationList, dependency)
 	}
 	c.RUnlock()
 
@@ -1092,12 +1109,16 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 	return nil
 }
 
-func (c *component) Post(args ...interface{}) {
-	c.ServiceBus().Post(args...)
+func (c *component) Post(args ...interface{}) int {
+	return c.ServiceBus().Post(args...)
 }
 
 func (c *component) Register(fns ...interface{}) (err error) {
 	return c.ServiceBus().Register(c, fns...)
+}
+
+func (c *component) Unegister(fns ...interface{}) (err error) {
+	return c.ServiceBus().Unregister(c, fns...)
 }
 
 func (c *component) EventBus(key interface{}) *event.ManagedEventBus {
@@ -1149,17 +1170,6 @@ func (c *component) setDomain(cm *componentDomain, domainLocked bool) error {
 					}
 				}
 			}
-
-			// TODO we may not want to do this - we should just not start until the
-			// component is configured (probably via a call in set component status)
-			// we'd then be better to add INITIALIZED - so that this is externally
-			// controllable i.e. when the state is set to initialized - it will then
-			// be started (rather than configured) (start does activate)
-			//
-			// need to check the domain state and bring the component inline
-			if c.State() == Instantiated || c.State() == Unknown {
-				//configure(false)
-			}
 		}
 	}
 
@@ -1190,6 +1200,17 @@ func (c *component) addDependent(dependent *component, parentLocked bool) error 
 	} else {
 		if c.Domain() != dependent.Domain() {
 			return c.setDomain(dependent.Domain().(*componentDomain), false)
+		}
+	}
+
+	if c.state != dependent.state {
+		switch {
+		case dependent.state.IsActivated():
+			c.activate(c.context, noopHanlder)
+		case dependent.state.IsInitialized():
+			c.initialize(c.context, false, noopHanlder)
+		case dependent.state.IsConfigured():
+			c.initialize(c.context, false, noopHanlder)
 		}
 	}
 
@@ -1257,8 +1278,15 @@ func (c *component) onComponentStateChanged(event *ComponentStateChanged) {
 				if event.Current() == Deactivated {
 					if state != Deactivated {
 						allDependenciesDeactivated = true
-						for _, dependent := range c.dependencies {
-							if dependent.State() != Deactivated {
+					DEPENDENCIES:
+						for _, dependency := range c.dependencies {
+							dependency := asComponent(dependency)
+							for _, dependent := range dependency.dependents {
+								if !asComponent(dependent).state.IsDeactivated() {
+									continue DEPENDENCIES
+								}
+							}
+							if dependency.state != Deactivated {
 								allDependenciesDeactivated = false
 								break
 							}

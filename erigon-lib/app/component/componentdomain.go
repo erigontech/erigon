@@ -49,8 +49,6 @@ type ComponentDomain interface {
 	Deactivate(ctx context.Context, handler ...ActivityHandler[ComponentDomain]) error
 
 	ServiceBus() *event.ServiceBus
-	Post(args ...interface{})
-	Register(fns ...interface{}) (err error)
 }
 
 type componentDomain struct {
@@ -72,15 +70,17 @@ type domainOptions struct {
 
 func WithDependentDomain(dependent ComponentDomain) app.Option {
 	return app.WithOption[domainOptions](
-		func(o *domainOptions) {
+		func(o *domainOptions) bool {
 			o.dependent = dependent.(*componentDomain)
+			return true
 		})
 }
 
 func WithExecPoolSize(execPoolSize int) app.Option {
 	return app.WithOption[domainOptions](
-		func(o *domainOptions) {
+		func(o *domainOptions) bool {
 			o.execPoolSize = &execPoolSize
+			return true
 		})
 }
 

@@ -245,7 +245,7 @@ func (bus *eventBus) doSubscribe(fn interface{}, handler *eventHandler) error {
 	}
 
 	if idx, _ := currentMap.findHandlerIdx(reflect.ValueOf(fn)); idx >= 0 {
-		return fmt.Errorf("Duplicate Subscribe")
+		return fmt.Errorf("duplicate subscribe")
 	}
 
 	currentMap.handlers = append(currentMap.handlers, handler)

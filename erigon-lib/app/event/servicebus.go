@@ -1,6 +1,7 @@
 package event
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -31,7 +32,6 @@ func (bus *ServiceBus) GetEventBus(key interface{}) *ManagedEventBus {
 
 	ebus := NewManagedEventBus(bus, key)
 	bus.busMap[key] = ebus
-	//ebus.Register(this);
 
 	return ebus
 }
@@ -50,7 +50,7 @@ func (bus *ServiceBus) Register(object interface{}, fns ...interface{}) (err err
 	bus.registrationLock.Lock()
 	for _, fn := range fns {
 		if reflect.TypeOf(fn).Kind() != reflect.Func {
-			return fmt.Errorf("Invalid type: %T should be func", fn)
+			return fmt.Errorf("invalid type: %T should be func", fn)
 		}
 		bus.registrations[objectPtr] = append(bus.registrations[objectPtr], fn)
 		err = bus.eventBus.SubscribeAsync(fn)
@@ -83,14 +83,28 @@ func (bus *ServiceBus) UnregisterAll(object interface{}) error {
 	return nil
 }
 
-func (bus *ServiceBus) Unregister(object interface{}, fn interface{}) error {
+func (bus *ServiceBus) Unregister(object interface{}, fns ...interface{}) error {
 	objectPtr := reflect.ValueOf(object).Pointer()
 	bus.registrationLock.Lock()
 	if registrations, ok := bus.registrations[objectPtr]; ok && len(registrations) > 0 {
-		removeRegistration(bus.registrations, objectPtr, findRegistrationIndex(bus.registrations, objectPtr, fn))
+		for _, fn := range fns {
+			removeRegistration(bus.registrations, objectPtr, findRegistrationIndex(bus.registrations, objectPtr, fn))
+		}
 	}
 	bus.registrationLock.Unlock()
-	return bus.eventBus.Unsubscribe(fn)
+
+	var errs []error
+	for _, fn := range fns {
+		if err := bus.eventBus.Unsubscribe(fn); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
 }
 
 func (bus *ServiceBus) Registrations(object interface{}) []interface{} {
@@ -100,6 +114,6 @@ func (bus *ServiceBus) Registrations(object interface{}) []interface{} {
 	return bus.registrations[objectPtr]
 }
 
-func (bus *ServiceBus) Post(args ...interface{}) {
-	bus.eventBus.Publish(args...)
+func (bus *ServiceBus) Post(args ...interface{}) int {
+	return bus.eventBus.Publish(args...)
 }
