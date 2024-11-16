@@ -112,7 +112,6 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, headSlot, uint64(3))
 	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	// last block
-	fmt.Println("X")
 	require.NoError(t, store.OnBlock(ctx, block0xd4, false, true, false))
 	require.Equal(t, store.Time(), uint64(36))
 	require.Equal(t, store.ProposerBoostRoot(), libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))

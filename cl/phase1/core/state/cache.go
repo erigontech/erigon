@@ -287,6 +287,7 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	if b.Version() >= clparams.Phase0Version {
 		return b._initializeValidatorsPhase0()
 	}
+
 	return nil
 }
 

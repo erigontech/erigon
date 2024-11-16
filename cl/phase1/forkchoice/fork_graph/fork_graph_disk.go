@@ -377,13 +377,13 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, out *state.CachingBea
 			}
 		}
 		blocksInTheWay = append(blocksInTheWay, block)
+
 		currentIteratorRoot = block.Block.ParentRoot
 	}
-
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
 		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], nil, false); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("GetState: %w, blockRoot; %x", err, blockRoot)
 		}
 	}
 	return copyReferencedState, nil
