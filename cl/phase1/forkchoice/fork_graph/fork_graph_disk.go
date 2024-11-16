@@ -194,7 +194,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, InvalidBlock, nil
 	}
 
-	newState, err := f.GetState(block.ParentRoot, false)
+	newState, err := f.GetState(block.ParentRoot, f.currentState, true)
 	if err != nil {
 		return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
 	}
@@ -324,14 +324,23 @@ func (f *forkGraphDisk) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaco
 	return obj.(*cltypes.SignedBeaconBlock), true
 }
 
-func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	if f.currentState != nil && !alwaysCopy {
+func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, out *state.CachingBeaconState, fallBackTopState bool) (*state.CachingBeaconState, error) {
+	if fallBackTopState && f.currentState != nil {
 		currentStateBlockRoot, err := f.currentState.BlockRoot()
 		if err != nil {
 			return nil, err
 		}
 		if currentStateBlockRoot == blockRoot {
 			return f.currentState, nil
+		}
+	}
+	if out != nil {
+		currentStateBlockRoot, err := out.BlockRoot()
+		if err != nil {
+			return nil, err
+		}
+		if currentStateBlockRoot == blockRoot {
+			return out, nil
 		}
 	}
 
@@ -348,7 +357,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
 			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
-				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
+				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot, out)
 				if err != nil {
 					log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
 					copyReferencedState = nil
@@ -359,7 +368,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 			return nil, nil
 		}
 		if block.Block.Slot%dumpSlotFrequency == 0 {
-			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
+			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot, out)
 			if err != nil {
 				log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
 			}
@@ -489,7 +498,7 @@ func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClien
 }
 
 func (f *forkGraphDisk) GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
-	st, err := f.GetState(blockRoot, true)
+	st, err := f.GetState(blockRoot, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +509,7 @@ func (f *forkGraphDisk) GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListS
 }
 
 func (f *forkGraphDisk) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
-	st, err := f.GetState(blockRoot, true)
+	st, err := f.GetState(blockRoot, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -535,7 +544,7 @@ func (f *forkGraphDisk) GetCurrentParticipationIndicies(blockRoot libcommon.Hash
 }
 
 func (f *forkGraphDisk) GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error) {
-	st, err := f.GetState(blockRoot, true)
+	st, err := f.GetState(blockRoot, nil, false)
 	if err != nil {
 		return nil, err
 	}

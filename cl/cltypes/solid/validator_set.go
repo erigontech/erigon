@@ -158,6 +158,7 @@ func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
 	}
 	v.expandBuffer(len(buf) / validatorSize)
 	copy(v.buffer, buf)
+	v.MerkleTree = nil
 	v.l = len(buf) / validatorSize
 	v.phase0Data = make([]Phase0Data, v.l)
 	v.attesterBits = make([]byte, v.l)
