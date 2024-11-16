@@ -162,6 +162,7 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 
 // we could locate failing signature with binary search but for now let's choose simplicity over optimisation.
 func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) {
+	alreadyBanned := false
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
@@ -173,12 +174,13 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		}
 
 		if !valid {
-			if v.GossipData == nil {
+			if v.GossipData == nil && alreadyBanned {
 				continue
 			}
 			log.Debug("[BatchVerifier] received invalid signature on the gossip", "topic", v.GossipData.Name)
 			if b.sentinel != nil && v.GossipData != nil && v.GossipData.Peer != nil {
 				b.sentinel.BanPeer(b.ctx, v.GossipData.Peer)
+				alreadyBanned = true
 			}
 			continue
 		}
