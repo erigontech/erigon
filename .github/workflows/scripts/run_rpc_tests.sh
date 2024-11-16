@@ -6,8 +6,6 @@ set +e # Disable exit on error
 disabled_tests=(
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
-    # changed in last commits
-    debug_storageRangeAt/test_11.json
     # needs investigations
     debug_getModifiedAccountsByHash
     debug_getModifiedAccountsByNumber
@@ -42,9 +40,7 @@ disabled_tests=(
     net_peerCount/test_1.json
     net_version/test_1.json
     txpool_status/test_1.json
-    web3_clientVersion/test_1.json
-    # broken by https://github.com/erigontech/erigon/pull/12642 (@AskAlexSharov will fix)
-    debug_storageRangeAt/test_11.json)
+    web3_clientVersion/test_1.json)
 
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")
