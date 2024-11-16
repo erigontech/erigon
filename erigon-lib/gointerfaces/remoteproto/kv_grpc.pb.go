@@ -26,11 +26,11 @@ const (
 	KV_StateChanges_FullMethodName = "/remote.KV/StateChanges"
 	KV_Snapshots_FullMethodName    = "/remote.KV/Snapshots"
 	KV_Range_FullMethodName        = "/remote.KV/Range"
-	KV_DomainGet_FullMethodName    = "/remote.KV/DomainGet"
+	KV_DomainGet_FullMethodName    = "/remote.KV/GetLatest"
 	KV_HistorySeek_FullMethodName  = "/remote.KV/HistorySeek"
 	KV_IndexRange_FullMethodName   = "/remote.KV/IndexRange"
 	KV_HistoryRange_FullMethodName = "/remote.KV/HistoryRange"
-	KV_DomainRange_FullMethodName  = "/remote.KV/DomainRange"
+	KV_DomainRange_FullMethodName  = "/remote.KV/RangeAsOf"
 )
 
 // KVClient is the client API for KV service.
@@ -267,7 +267,7 @@ func (UnimplementedKVServer) Range(context.Context, *RangeReq) (*Pairs, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Range not implemented")
 }
 func (UnimplementedKVServer) DomainGet(context.Context, *DomainGetReq) (*DomainGetReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DomainGet not implemented")
+	return nil, status.Errorf(codes.Unimplemented, "method GetLatest not implemented")
 }
 func (UnimplementedKVServer) HistorySeek(context.Context, *HistorySeekReq) (*HistorySeekReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HistorySeek not implemented")
@@ -279,7 +279,7 @@ func (UnimplementedKVServer) HistoryRange(context.Context, *HistoryRangeReq) (*P
 	return nil, status.Errorf(codes.Unimplemented, "method HistoryRange not implemented")
 }
 func (UnimplementedKVServer) DomainRange(context.Context, *DomainRangeReq) (*Pairs, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DomainRange not implemented")
+	return nil, status.Errorf(codes.Unimplemented, "method RangeAsOf not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 
@@ -505,7 +505,7 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KV_Range_Handler,
 		},
 		{
-			MethodName: "DomainGet",
+			MethodName: "GetLatest",
 			Handler:    _KV_DomainGet_Handler,
 		},
 		{
@@ -521,7 +521,7 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KV_HistoryRange_Handler,
 		},
 		{
-			MethodName: "DomainRange",
+			MethodName: "RangeAsOf",
 			Handler:    _KV_DomainRange_Handler,
 		},
 	},
