@@ -188,11 +188,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
 		return nil, BelowAnchor, nil
 	}
-	// Check if block being process right now was marked as invalid.
-	if _, ok := f.badBlocks.Load(libcommon.Hash(blockRoot)); ok {
-		log.Debug("block has invalid parent", "slot", block.Slot, "hash", libcommon.Hash(blockRoot))
-		return nil, InvalidBlock, nil
-	}
 
 	newState, err := f.GetState(block.ParentRoot, f.currentState, true)
 	if err != nil {
