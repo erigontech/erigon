@@ -351,7 +351,7 @@ func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot libcommon.Hash, alwaysCo
 		f.mu.RLock()
 		defer f.mu.RUnlock()
 	}
-	return f.forkGraph.GetState(blockRoot, nil, !alwaysCopy)
+	return f.forkGraph.GetState(blockRoot, alwaysCopy)
 }
 
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot libcommon.Hash) uint64 {

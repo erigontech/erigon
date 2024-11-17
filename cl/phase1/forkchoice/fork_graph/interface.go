@@ -37,7 +37,7 @@ import (
 type ForkGraph interface {
 	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool)
-	GetState(blockRoot libcommon.Hash, out *state.CachingBeaconState, fallbackTopState bool) (*state.CachingBeaconState, error)
+	GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)

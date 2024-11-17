@@ -39,10 +39,9 @@ func getBeaconStateCacheFilename(blockRoot libcommon.Hash) string {
 	return fmt.Sprintf("%x.cache", blockRoot)
 }
 
-func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *state.CachingBeaconState) (bs *state.CachingBeaconState, err error) {
+func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *state.CachingBeaconState, err error) {
 	var file afero.File
 	if err := f.busyWritingToDisk.Acquire(context.TODO(), 1); err != nil {
-		fmt.Println(err)
 		return nil, err
 	}
 	defer f.busyWritingToDisk.Release(1)
@@ -81,15 +80,8 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	f.sszBuffer = f.sszBuffer[:n]
-	if out == nil {
-		bs = state.New(f.beaconCfg)
-	} else {
-		// This a hack. decodeSSZ is borked somewhere but cannot figure out where (reuse object case).
-		// so i am going to avoid re-allocating the validator set and re-create the rest of the state.
-		vSet := out.ValidatorSet()
-		bs = state.New(f.beaconCfg)
-		bs.SetValidatorSet(vSet)
-	}
+	bs = state.New(f.beaconCfg)
+
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
 	}
