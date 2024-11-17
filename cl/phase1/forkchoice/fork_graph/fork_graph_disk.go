@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 )
 
-const dumpSlotFrequency = 16
+const dumpSlotFrequency = 4
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
@@ -133,7 +133,7 @@ type forkGraphDisk struct {
 	rcfg    beacon_router_configuration.RouterConfiguration
 	emitter *beaconevents.EventEmitter
 
-	busyWritingToDisk semaphore.Weighted
+	busyWritingToDisk *semaphore.Weighted
 }
 
 // Initialize fork graph with a new state
@@ -160,14 +160,14 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 		anchorSlot:        anchorState.Slot(),
 		rcfg:              rcfg,
 		emitter:           emitter,
-		busyWritingToDisk: *semaphore.NewWeighted(1),
+		busyWritingToDisk: semaphore.NewWeighted(1),
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
+	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 
 	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
 	// preallocate buffer
-	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 	return f
 }
 

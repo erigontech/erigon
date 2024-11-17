@@ -41,16 +41,17 @@ func getBeaconStateCacheFilename(blockRoot libcommon.Hash) string {
 
 func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *state.CachingBeaconState) (bs *state.CachingBeaconState, err error) {
 	var file afero.File
+	if err := f.busyWritingToDisk.Acquire(context.TODO(), 1); err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+	defer f.busyWritingToDisk.Release(1)
+
 	file, err = f.fs.Open(getBeaconStateFilename(blockRoot))
 	if err != nil {
 		return
 	}
 	defer file.Close()
-
-	if err := f.busyWritingToDisk.Acquire(context.TODO(), 1); err != nil {
-		return nil, err
-	}
-	defer f.busyWritingToDisk.Release(1)
 
 	if f.sszSnappyReader == nil {
 		f.sszSnappyReader = snappy.NewReader(file)
@@ -60,6 +61,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	// Read the version
 	v := []byte{0}
 	if _, err := f.sszSnappyReader.Read(v); err != nil {
+		fmt.Println(err)
 		return nil, fmt.Errorf("failed to read hard fork version: %w, root: %x", err, blockRoot)
 	}
 	// Read the length
@@ -67,15 +69,18 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	var n int
 	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
 	if err != nil {
+		fmt.Println(err)
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
 	if n != 8 {
+		fmt.Println(err)
 		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 
 	f.sszBuffer = f.sszBuffer[:binary.BigEndian.Uint64(lengthBytes)]
 	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
 	if err != nil {
+		fmt.Println(err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	f.sszBuffer = f.sszBuffer[:n]
@@ -85,16 +90,19 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 		bs = out
 	}
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
+		fmt.Println(err)
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
 	}
 	// decode the cache file
 	cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
 	if err != nil {
+		fmt.Println(err)
 		return
 	}
 	defer cacheFile.Close()
 
 	if err := bs.DecodeCaches(cacheFile); err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 
