@@ -506,7 +506,11 @@ func (f *ForkChoiceStore) GetInactivitiesScores(blockRoot libcommon.Hash) (solid
 }
 
 func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
-	return f.forkGraph.GetPreviousParticipationIndicies(blockRoot)
+	header, ok := f.GetHeader(blockRoot)
+	if !ok {
+		return nil, nil
+	}
+	return f.forkGraph.GetPreviousParticipationIndicies(header.Slot / f.beaconCfg.SlotsPerEpoch)
 }
 
 func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error) {
@@ -514,7 +518,11 @@ func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.Vali
 }
 
 func (f *ForkChoiceStore) GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
-	return f.forkGraph.GetCurrentParticipationIndicies(blockRoot)
+	header, ok := f.GetHeader(blockRoot)
+	if !ok {
+		return nil, nil
+	}
+	return f.forkGraph.GetCurrentParticipationIndicies(header.Slot / f.beaconCfg.SlotsPerEpoch)
 }
 
 func (f *ForkChoiceStore) IsRootOptimistic(root libcommon.Hash) bool {
