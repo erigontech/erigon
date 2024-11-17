@@ -107,7 +107,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex
 
 	if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
-		a.scheduleAggregateForLaterProcessing(aggregateAndProof)
+		//a.scheduleAggregateForLaterProcessing(aggregateAndProof)
 		return ErrIgnore
 	}
 

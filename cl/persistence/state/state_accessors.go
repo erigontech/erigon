@@ -142,6 +142,16 @@ func IncrementHistoricalSummariesTable(tx kv.RwTx, state *state.CachingBeaconSta
 	return nil
 }
 
+func ReadPublicKeyByIndexNoCopy(tx kv.Tx, index uint64) ([]byte, error) {
+	var pks []byte
+	var err error
+	key := base_encoding.Encode64ToBytes4(index)
+	if pks, err = tx.GetOne(kv.ValidatorPublicKeys, key); err != nil {
+		return nil, err
+	}
+	return pks, err
+}
+
 func ReadPublicKeyByIndex(tx kv.Tx, index uint64) (libcommon.Bytes48, error) {
 	var pks []byte
 	var err error
