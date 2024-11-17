@@ -106,7 +106,7 @@ type ForkChoiceStore struct {
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
 
-	latestMessages    []LatestMessage
+	latestMessages    *latestMessagesStore
 	syncedDataManager *synced_data.SyncedDataManager
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
@@ -229,7 +229,7 @@ func NewForkChoiceStore(
 	f := &ForkChoiceStore{
 		forkGraph:               forkGraph,
 		equivocatingIndicies:    make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:          make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:          newLatestMessagesStore(anchorState.ValidatorLength()),
 		eth2Roots:               eth2Roots,
 		engine:                  engine,
 		operationsPool:          operationsPool,
