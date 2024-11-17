@@ -433,5 +433,4 @@ func preCacheNextShuffledValidatorSet(ctx context.Context, logger log.Logger, cf
 		caches.ShuffledIndiciesCacheGlobal.Put(nextEpoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
 		log.Info("Pre-cached shuffled set", "epoch", nextEpoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
 	}()
-
 }
