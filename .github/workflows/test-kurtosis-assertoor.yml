@@ -193,13 +193,13 @@ jobs:
             #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             enclave_dump: false
 
-      - name: Save job output
+      - name: Save Kurtosis test output
         if: always()
         shell: bash
         run: |
-          echo "::group::kurtosis_test_output"
-          echo "${{ toJSON(steps.kurtosis-test.outputs) }}" > logs/kurtosis-outputs.json
-          echo "::endgroup::"
+          mkdir -p logs
+          echo '${{ toJSON(steps.kurtosis-test.outputs) }}' > logs/kurtosis-outputs.json
+
 
       - name: Save Kurtosis test logs
         if: always()
