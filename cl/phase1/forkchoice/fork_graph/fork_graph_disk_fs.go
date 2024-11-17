@@ -142,12 +142,6 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		return err
 	}
 
-	cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
-	if err != nil {
-		return err
-	}
-	defer cacheFile.Close()
-
 	b := bytes.NewBuffer(f.sszBuffer)
 	b.Reset()
 
@@ -162,6 +156,12 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 
 	f.stateDumpLock.Lock()
 	go func() {
+		cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+		if err != nil {
+			log.Error("failed to open cache file", "err", err)
+			return
+		}
+		defer cacheFile.Close()
 		defer f.stateDumpLock.Unlock()
 		if _, err = cacheFile.Write(b.Bytes()); err != nil {
 			log.Error("failed to write cache file", "err", err)
