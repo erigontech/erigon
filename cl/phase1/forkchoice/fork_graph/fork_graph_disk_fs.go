@@ -45,20 +45,15 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	}
 	defer file.Close()
 
-	if f.sszSnappyReader == nil {
-		f.sszSnappyReader = snappy.NewReader(file)
-	} else {
-		f.sszSnappyReader.Reset(file)
-	}
 	// Read the version
 	v := []byte{0}
-	if _, err := f.sszSnappyReader.Read(v); err != nil {
+	if _, err := file.Read(v); err != nil {
 		return nil, fmt.Errorf("failed to read hard fork version: %w, root: %x", err, blockRoot)
 	}
 	// Read the length
 	lengthBytes := make([]byte, 8)
 	var n int
-	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
+	n, err = io.ReadFull(file, lengthBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
@@ -66,17 +61,23 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 
-	f.sszBuffer = f.sszBuffer[:binary.BigEndian.Uint64(lengthBytes)]
-	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
+	f.sszSnappyBuffer = f.sszSnappyBuffer[:binary.BigEndian.Uint64(lengthBytes)]
+	n, err = io.ReadFull(file, f.sszSnappyBuffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
-	f.sszBuffer = f.sszBuffer[:n]
+	f.sszSnappyBuffer = f.sszSnappyBuffer[:n]
 	if out == nil {
 		bs = state.New(f.beaconCfg)
 	} else {
 		bs = out
 	}
+
+	f.sszBuffer, err = snappy.Decode(f.sszBuffer[:0], f.sszSnappyBuffer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode snappy buffer: %w, root: %x", err, blockRoot)
+	}
+
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
 	}
@@ -112,29 +113,23 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 	}
 	defer dumpedFile.Close()
 
-	if f.sszSnappyWriter == nil {
-		f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
-	} else {
-		f.sszSnappyWriter.Reset(dumpedFile)
-	}
+	f.sszSnappyBuffer = snappy.Encode(f.sszSnappyBuffer[:0], f.sszBuffer)
 
 	// First write the hard fork version
-	if _, err := f.sszSnappyWriter.Write([]byte{byte(bs.Version())}); err != nil {
+	if _, err := dumpedFile.Write([]byte{byte(bs.Version())}); err != nil {
 		return err
 	}
 	// Second write the length
 	length := make([]byte, 8)
-	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
-	if _, err := f.sszSnappyWriter.Write(length); err != nil {
+	binary.BigEndian.PutUint64(length, uint64(len(f.sszSnappyBuffer)))
+	if _, err := dumpedFile.Write(length); err != nil {
 		return err
 	}
 	// Lastly dump the state
-	if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
+	if _, err := dumpedFile.Write(f.sszSnappyBuffer); err != nil {
 		return err
 	}
-	if err = f.sszSnappyWriter.Flush(); err != nil {
-		return
-	}
+
 	if err = dumpedFile.Sync(); err != nil {
 		return
 	}
