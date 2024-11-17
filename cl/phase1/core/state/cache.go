@@ -272,13 +272,30 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	b.totalActiveBalanceCache = nil
 	b._refreshActiveBalancesIfNeeded()
 
-	b.publicKeyIndicies = make(map[[48]byte]uint64)
+	if b.publicKeyIndicies == nil {
+		b.publicKeyIndicies = make(map[[48]byte]uint64)
+		b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
+			b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
 
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
-
-		return true
-	})
+			return true
+		})
+	} else {
+		// Clear the map of invalid entries
+		for publicKey, validatorIndex := range b.publicKeyIndicies {
+			pk, _ := b.ValidatorPublicKey(int(validatorIndex))
+			if pk != publicKey {
+				delete(b.publicKeyIndicies, publicKey)
+			}
+		}
+		// Add new entries
+		b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
+			if _, ok := b.publicKeyIndicies[validator.PublicKey()]; ok {
+				return true
+			}
+			b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
+			return true
+		})
+	}
 
 	b.initCaches()
 	if err := b._updateProposerIndex(); err != nil {
