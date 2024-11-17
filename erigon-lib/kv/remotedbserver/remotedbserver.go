@@ -526,12 +526,12 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply *remote.DomainGetReply, err error) {
+func (s *KvServer) DomainGet(_ context.Context, req *remote.GetLatestReq) (reply *remote.GetLatestReply, err error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
 	}
-	reply = &remote.DomainGetReply{}
+	reply = &remote.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
@@ -659,7 +659,7 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 	return reply, nil
 }
 
-func (s *KvServer) DomainRange(_ context.Context, req *remote.DomainRangeReq) (*remote.Pairs, error) {
+func (s *KvServer) DomainRange(_ context.Context, req *remote.RangeAsOfReq) (*remote.Pairs, error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
