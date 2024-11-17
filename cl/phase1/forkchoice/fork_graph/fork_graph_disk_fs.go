@@ -76,7 +76,6 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	f.sszBuffer = f.sszBuffer[:binary.BigEndian.Uint64(lengthBytes)]
 	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
 	if err != nil {
-		fmt.Println(err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	f.sszBuffer = f.sszBuffer[:n]
@@ -88,7 +87,6 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	// decode the cache file
 	cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
 	if err != nil {
-		fmt.Println(err)
 		return
 	}
 	defer cacheFile.Close()
