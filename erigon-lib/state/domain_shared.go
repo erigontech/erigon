@@ -954,7 +954,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 // TemporalDomain satisfaction
-func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+func (sd *SharedDomains) GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
 	}
@@ -1002,7 +1002,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.DomainGet(domain, k1, k2)
+		prevVal, prevStep, err = sd.GetLatest(domain, k1, k2)
 		if err != nil {
 			return err
 		}
@@ -1038,7 +1038,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.DomainGet(domain, k1, k2)
+		prevVal, prevStep, err = sd.GetLatest(domain, k1, k2)
 		if err != nil {
 			return err
 		}
@@ -1180,7 +1180,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
 	var encAccount []byte
 	if sdc.limitReadAsOfTxNum == 0 {
-		encAccount, _, err = sdc.sharedDomains.DomainGet(kv.AccountsDomain, plainKey, nil)
+		encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey, nil)
 		if err != nil {
 			return nil, fmt.Errorf("GetAccount failed: %w", err)
 		}
@@ -1214,7 +1214,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 
 	var code []byte
 	if sdc.limitReadAsOfTxNum == 0 {
-		code, _, err = sdc.sharedDomains.DomainGet(kv.CodeDomain, plainKey, nil)
+		code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey, nil)
 	} else {
 		code, _, err = sdc.sharedDomains.getAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 	}
@@ -1242,7 +1242,7 @@ func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitme
 	// Look in the summary table first
 	var enc []byte
 	if sdc.limitReadAsOfTxNum == 0 {
-		enc, _, err = sdc.sharedDomains.DomainGet(kv.StorageDomain, plainKey, nil)
+		enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey, nil)
 	} else {
 		enc, _, err = sdc.sharedDomains.getAsOfFile(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 	}

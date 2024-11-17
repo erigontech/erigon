@@ -36,8 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
-
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -76,7 +75,7 @@ type Transaction interface {
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte
-	GetAccessList() types2.AccessList
+	GetAccessList() AccessList
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int
@@ -214,18 +213,30 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	return t, nil
 }
 
-// Remove everything but the payload body from the wrapper - this is not used, for reference only
-func UnwrapTxPlayloadRlp(blobTxRlp []byte) (retRlp []byte, err error) {
+// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
+// Doesn't change non-blob tx
+func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if blobTxRlp[0] != BlobTxType {
 		return blobTxRlp, nil
 	}
-	it, err := rlp.NewListIterator(blobTxRlp[1:])
+	dataposPrev, _, isList, err := rlp2.Prefix(blobTxRlp[1:], 0)
+	if err != nil || dataposPrev < 1 {
+		return nil, err
+	}
+	if !isList { // This is clearly not wrapped txn then
+		return blobTxRlp, nil
+	}
+
+	blobTxRlp = blobTxRlp[1:]
+	// Get to the wrapper list
+	datapos, datalen, err := rlp2.List(blobTxRlp, dataposPrev)
 	if err != nil {
 		return nil, err
 	}
-	it.Next()
-	retRlp = it.Value()
-	return
+	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // seekInFiles left an extra-bit
+	blobTxRlp[0] = 0x3
+	// Include the prefix part of the rlp
+	return blobTxRlp, nil
 }
 
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
@@ -408,7 +419,7 @@ type Message struct {
 	tip              uint256.Int
 	maxFeePerBlobGas uint256.Int
 	data             []byte
-	accessList       types2.AccessList
+	accessList       AccessList
 	checkNonce       bool
 	isFree           bool
 	blobHashes       []libcommon.Hash
@@ -416,7 +427,7 @@ type Message struct {
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
-	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool,
+	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	isFree bool, maxFeePerBlobGas *uint256.Int,
 ) Message {
 	m := Message{
@@ -454,7 +465,7 @@ func (m Message) Value() *uint256.Int             { return &m.amount }
 func (m Message) Gas() uint64                     { return m.gasLimit }
 func (m Message) Nonce() uint64                   { return m.nonce }
 func (m Message) Data() []byte                    { return m.data }
-func (m Message) AccessList() types2.AccessList   { return m.accessList }
+func (m Message) AccessList() AccessList          { return m.accessList }
 func (m Message) Authorizations() []Authorization { return m.authorizations }
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations

@@ -115,9 +115,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 }
 
 func (b *BeaconState) init() error {
-	if b.touchedLeaves == nil {
-		b.touchedLeaves = make([]atomic.Uint32, StateLeafSize)
-	}
+	b.touchedLeaves = make([]atomic.Uint32, StateLeafSize)
 	return nil
 }
 

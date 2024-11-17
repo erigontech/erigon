@@ -16,7 +16,6 @@ import (
 	remoteproto "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	kv "github.com/erigontech/erigon-lib/kv"
 	txpoolcfg "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	types "github.com/erigontech/erigon-lib/types"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -45,7 +44,7 @@ func (m *MockPool) EXPECT() *MockPoolMockRecorder {
 }
 
 // AddLocalTxs mocks base method.
-func (m *MockPool) AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error) {
+func (m *MockPool) AddLocalTxs(ctx context.Context, newTxs TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AddLocalTxs", ctx, newTxs, tx)
 	ret0, _ := ret[0].([]txpoolcfg.DiscardReason)
@@ -72,19 +71,19 @@ func (c *MockPoolAddLocalTxsCall) Return(arg0 []txpoolcfg.DiscardReason, arg1 er
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddLocalTxsCall) Do(f func(context.Context, types.TxSlots, kv.Tx) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxsCall {
+func (c *MockPoolAddLocalTxsCall) Do(f func(context.Context, TxSlots, kv.Tx) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddLocalTxsCall) DoAndReturn(f func(context.Context, types.TxSlots, kv.Tx) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxsCall {
+func (c *MockPoolAddLocalTxsCall) DoAndReturn(f func(context.Context, TxSlots, kv.Tx) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // AddNewGoodPeer mocks base method.
-func (m *MockPool) AddNewGoodPeer(peerID types.PeerID) {
+func (m *MockPool) AddNewGoodPeer(peerID PeerID) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "AddNewGoodPeer", peerID)
 }
@@ -108,19 +107,19 @@ func (c *MockPoolAddNewGoodPeerCall) Return() *MockPoolAddNewGoodPeerCall {
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddNewGoodPeerCall) Do(f func(types.PeerID)) *MockPoolAddNewGoodPeerCall {
+func (c *MockPoolAddNewGoodPeerCall) Do(f func(PeerID)) *MockPoolAddNewGoodPeerCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddNewGoodPeerCall) DoAndReturn(f func(types.PeerID)) *MockPoolAddNewGoodPeerCall {
+func (c *MockPoolAddNewGoodPeerCall) DoAndReturn(f func(PeerID)) *MockPoolAddNewGoodPeerCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // AddRemoteTxs mocks base method.
-func (m *MockPool) AddRemoteTxs(ctx context.Context, newTxs types.TxSlots) {
+func (m *MockPool) AddRemoteTxs(ctx context.Context, newTxs TxSlots) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "AddRemoteTxs", ctx, newTxs)
 }
@@ -144,22 +143,22 @@ func (c *MockPoolAddRemoteTxsCall) Return() *MockPoolAddRemoteTxsCall {
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddRemoteTxsCall) Do(f func(context.Context, types.TxSlots)) *MockPoolAddRemoteTxsCall {
+func (c *MockPoolAddRemoteTxsCall) Do(f func(context.Context, TxSlots)) *MockPoolAddRemoteTxsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddRemoteTxsCall) DoAndReturn(f func(context.Context, types.TxSlots)) *MockPoolAddRemoteTxsCall {
+func (c *MockPoolAddRemoteTxsCall) DoAndReturn(f func(context.Context, TxSlots)) *MockPoolAddRemoteTxsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // FilterKnownIdHashes mocks base method.
-func (m *MockPool) FilterKnownIdHashes(tx kv.Tx, hashes types.Hashes) (types.Hashes, error) {
+func (m *MockPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (Hashes, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FilterKnownIdHashes", tx, hashes)
-	ret0, _ := ret[0].(types.Hashes)
+	ret0, _ := ret[0].(Hashes)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -177,19 +176,19 @@ type MockPoolFilterKnownIdHashesCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockPoolFilterKnownIdHashesCall) Return(unknownHashes types.Hashes, err error) *MockPoolFilterKnownIdHashesCall {
+func (c *MockPoolFilterKnownIdHashesCall) Return(unknownHashes Hashes, err error) *MockPoolFilterKnownIdHashesCall {
 	c.Call = c.Call.Return(unknownHashes, err)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolFilterKnownIdHashesCall) Do(f func(kv.Tx, types.Hashes) (types.Hashes, error)) *MockPoolFilterKnownIdHashesCall {
+func (c *MockPoolFilterKnownIdHashesCall) Do(f func(kv.Tx, Hashes) (Hashes, error)) *MockPoolFilterKnownIdHashesCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolFilterKnownIdHashesCall) DoAndReturn(f func(kv.Tx, types.Hashes) (types.Hashes, error)) *MockPoolFilterKnownIdHashesCall {
+func (c *MockPoolFilterKnownIdHashesCall) DoAndReturn(f func(kv.Tx, Hashes) (Hashes, error)) *MockPoolFilterKnownIdHashesCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -273,7 +272,7 @@ func (c *MockPoolIdHashKnownCall) DoAndReturn(f func(kv.Tx, []byte) (bool, error
 }
 
 // OnNewBlock mocks base method.
-func (m *MockPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxs, unwindBlobTxs, minedTxs types.TxSlots, tx kv.Tx) error {
+func (m *MockPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxs, unwindBlobTxs, minedTxs TxSlots, tx kv.Tx) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "OnNewBlock", ctx, stateChanges, unwindTxs, unwindBlobTxs, minedTxs, tx)
 	ret0, _ := ret[0].(error)
@@ -299,13 +298,13 @@ func (c *MockPoolOnNewBlockCall) Return(arg0 error) *MockPoolOnNewBlockCall {
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolOnNewBlockCall) Do(f func(context.Context, *remoteproto.StateChangeBatch, types.TxSlots, types.TxSlots, types.TxSlots, kv.Tx) error) *MockPoolOnNewBlockCall {
+func (c *MockPoolOnNewBlockCall) Do(f func(context.Context, *remoteproto.StateChangeBatch, TxSlots, TxSlots, TxSlots, kv.Tx) error) *MockPoolOnNewBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remoteproto.StateChangeBatch, types.TxSlots, types.TxSlots, types.TxSlots, kv.Tx) error) *MockPoolOnNewBlockCall {
+func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remoteproto.StateChangeBatch, TxSlots, TxSlots, TxSlots, kv.Tx) error) *MockPoolOnNewBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
