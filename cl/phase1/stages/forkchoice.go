@@ -32,7 +32,6 @@ import (
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
 // It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
 func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
-	a := time.Now()
 	if err = cfg.syncedData.ViewHeadState(func(prevHeadState *state.CachingBeaconState) error {
 		// Get the current head of the fork choice
 		headRoot, headSlot, err = cfg.forkChoice.GetHead(prevHeadState)
@@ -83,7 +82,6 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		headRoot, headSlot); err2 != nil {
 		logger.Warn("Could not set status", "err", err2)
 	}
-	log.Debug("computeAndNotifyServicesOfNewForkChoice", "duration", time.Since(a))
 	return
 }
 
@@ -374,13 +372,11 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", err)
 	}
 
-	a := time.Now()
 	tx, err := cfg.indiciesDB.BeginRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
-	fmt.Println("tx begin", time.Since(a))
 	if err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg); err != nil {
 		return fmt.Errorf("failed to update canonical chain in the database: %w", err)
 	}
