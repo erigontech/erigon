@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -390,36 +391,47 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	return tx.Commit()
 }
 
+// we need to generate only one goroutine for pre-caching shuffled set
+var workingPreCacheNextShuffledValidatorSet atomic.Bool
+
 func preCacheNextShuffledValidatorSet(ctx context.Context, logger log.Logger, cfg *Cfg, b *state.CachingBeaconState) {
-	nextEpoch := state.Epoch(b) + 1
-	beaconConfig := cfg.beaconCfg
-
-	// Check if any action is needed
-	refSlot := ((nextEpoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1
-	if refSlot >= b.Slot() {
+	if workingPreCacheNextShuffledValidatorSet.Load() {
 		return
 	}
-	// Get the block root at the beginning of the previous epoch
-	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(refSlot)
-	if err != nil {
-		logger.Warn("failed to get block root at slot for pre-caching shuffled set", "err", err)
-		return
-	}
-	// Skip if the shuffled set is already pre-cached
-	if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(nextEpoch, blockRootAtBegginingPrevEpoch); ok {
-		return
-	}
+	workingPreCacheNextShuffledValidatorSet.Store(true)
+	go func() {
+		defer workingPreCacheNextShuffledValidatorSet.Store(false)
+		nextEpoch := state.Epoch(b) + 1
+		beaconConfig := cfg.beaconCfg
 
-	indicies := b.GetActiveValidatorsIndices(nextEpoch)
-	shuffledIndicies := make([]uint64, len(indicies))
-	mixPosition := (nextEpoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
-		beaconConfig.EpochsPerHistoricalVector
-	// Input for the seed hash.
-	mix := b.GetRandaoMix(int(mixPosition))
-	start := time.Now()
-	shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, nextEpoch*beaconConfig.SlotsPerEpoch)
-	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
+		// Check if any action is needed
+		refSlot := ((nextEpoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1
+		if refSlot >= b.Slot() {
+			return
+		}
+		// Get the block root at the beginning of the previous epoch
+		blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(refSlot)
+		if err != nil {
+			logger.Warn("failed to get block root at slot for pre-caching shuffled set", "err", err)
+			return
+		}
+		// Skip if the shuffled set is already pre-cached
+		if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(nextEpoch, blockRootAtBegginingPrevEpoch); ok {
+			return
+		}
 
-	caches.ShuffledIndiciesCacheGlobal.Put(nextEpoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
-	log.Info("Pre-cached shuffled set", "epoch", nextEpoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+		indicies := b.GetActiveValidatorsIndices(nextEpoch)
+		shuffledIndicies := make([]uint64, len(indicies))
+		mixPosition := (nextEpoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+			beaconConfig.EpochsPerHistoricalVector
+		// Input for the seed hash.
+		mix := b.GetRandaoMix(int(mixPosition))
+		start := time.Now()
+		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, nextEpoch*beaconConfig.SlotsPerEpoch)
+		shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
+
+		caches.ShuffledIndiciesCacheGlobal.Put(nextEpoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
+		log.Info("Pre-cached shuffled set", "epoch", nextEpoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+	}()
+
 }
