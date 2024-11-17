@@ -155,11 +155,12 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 		// current state data
 		currentState: anchorState,
 		// configuration
-		beaconCfg:   anchorState.BeaconConfig(),
-		genesisTime: anchorState.GenesisTime(),
-		anchorSlot:  anchorState.Slot(),
-		rcfg:        rcfg,
-		emitter:     emitter,
+		beaconCfg:         anchorState.BeaconConfig(),
+		genesisTime:       anchorState.GenesisTime(),
+		anchorSlot:        anchorState.Slot(),
+		rcfg:              rcfg,
+		emitter:           emitter,
+		busyWritingToDisk: *semaphore.NewWeighted(1),
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
