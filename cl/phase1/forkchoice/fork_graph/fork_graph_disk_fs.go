@@ -155,16 +155,16 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		log.Error("failed to encode caches", "err", err)
 		return err
 	}
+	if err = dumpedFile.Sync(); err != nil {
+		log.Error("failed to sync dumped file", "err", err)
+		return
+	}
 
 	f.stateDumpLock.Lock()
 	go func() {
 		defer f.stateDumpLock.Unlock()
 		if _, err = cacheFile.Write(b.Bytes()); err != nil {
 			log.Error("failed to write cache file", "err", err)
-			return
-		}
-		if err = dumpedFile.Sync(); err != nil {
-			log.Error("failed to sync dumped file", "err", err)
 			return
 		}
 		if err = cacheFile.Sync(); err != nil {
