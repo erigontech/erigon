@@ -322,10 +322,12 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 		return fmt.Errorf("failed to get state at block root: %w", err)
 	}
 	cfg.forkChoice.SetSynced(true) // Now we are synced
+	x := time.Now()
 	// Update the head state with the new head state
 	if err := cfg.syncedData.OnHeadState(headState); err != nil {
 		return fmt.Errorf("failed to set head state: %w", err)
 	}
+	fmt.Println("OnHeadState", time.Since(x))
 	start := time.Now()
 	defer func() {
 		logger.Debug("Post forkchoice operations", "duration", time.Since(start))
