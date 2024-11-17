@@ -17,7 +17,6 @@
 package fork_graph
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -41,10 +40,8 @@ func getBeaconStateCacheFilename(blockRoot libcommon.Hash) string {
 
 func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *state.CachingBeaconState, err error) {
 	var file afero.File
-	if err := f.busyWritingToDisk.Acquire(context.TODO(), 1); err != nil {
-		return nil, err
-	}
-	defer f.busyWritingToDisk.Release(1)
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
 
 	file, err = f.fs.Open(getBeaconStateFilename(blockRoot))
 	if err != nil {
@@ -103,9 +100,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 	if !forced && bs.Slot()%dumpSlotFrequency != 0 {
 		return
 	}
-	if err := f.busyWritingToDisk.Acquire(context.TODO(), 1); err != nil {
-		return err
-	}
+	f.stateDumpLock.Lock()
 	// Truncate and then grow the buffer to the size of the state.
 	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer[:0])
 	if err != nil {
@@ -113,7 +108,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 	}
 
 	go func() {
-		defer f.busyWritingToDisk.Release(1)
+		defer f.stateDumpLock.Unlock()
 
 		var dumpedFile afero.File
 		dumpedFile, err = f.fs.OpenFile(getBeaconStateFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)

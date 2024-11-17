@@ -24,7 +24,6 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
-	"golang.org/x/sync/semaphore"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -133,7 +132,7 @@ type forkGraphDisk struct {
 	rcfg    beacon_router_configuration.RouterConfiguration
 	emitter *beaconevents.EventEmitter
 
-	busyWritingToDisk *semaphore.Weighted
+	stateDumpLock sync.Mutex
 }
 
 // Initialize fork graph with a new state
@@ -155,12 +154,11 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, r
 		// current state data
 		currentState: anchorState,
 		// configuration
-		beaconCfg:         anchorState.BeaconConfig(),
-		genesisTime:       anchorState.GenesisTime(),
-		anchorSlot:        anchorState.Slot(),
-		rcfg:              rcfg,
-		emitter:           emitter,
-		busyWritingToDisk: semaphore.NewWeighted(1),
+		beaconCfg:   anchorState.BeaconConfig(),
+		genesisTime: anchorState.GenesisTime(),
+		anchorSlot:  anchorState.Slot(),
+		rcfg:        rcfg,
+		emitter:     emitter,
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
