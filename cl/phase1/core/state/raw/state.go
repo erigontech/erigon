@@ -114,6 +114,10 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 	return state
 }
 
+func (b *BeaconState) SetValidatorSet(validatorSet *solid.ValidatorSet) {
+	b.validators = validatorSet
+}
+
 func (b *BeaconState) init() error {
 	b.touchedLeaves = make([]atomic.Uint32, StateLeafSize)
 	return nil

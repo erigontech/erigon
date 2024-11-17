@@ -87,7 +87,11 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	if out == nil {
 		bs = state.New(f.beaconCfg)
 	} else {
-		bs = out
+		// This a hack. decodeSSZ is borked somewhere but cannot figure out where.
+		// so i am going to avoid re-allocating the validator set and re-create the rest of the state.
+		vSet := bs.ValidatorSet()
+		bs = state.New(f.beaconCfg)
+		bs.SetValidatorSet(vSet)
 	}
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
 		fmt.Println(err)
