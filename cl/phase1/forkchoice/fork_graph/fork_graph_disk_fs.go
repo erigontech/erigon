@@ -17,14 +17,17 @@
 package fork_graph
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 
+	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
@@ -44,15 +47,25 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	}
 	defer file.Close()
 
+	if err := f.busyWritingToDisk.Acquire(context.TODO(), 1); err != nil {
+		return nil, err
+	}
+	defer f.busyWritingToDisk.Release(1)
+
+	if f.sszSnappyReader == nil {
+		f.sszSnappyReader = snappy.NewReader(file)
+	} else {
+		f.sszSnappyReader.Reset(file)
+	}
 	// Read the version
 	v := []byte{0}
-	if _, err := file.Read(v); err != nil {
+	if _, err := f.sszSnappyReader.Read(v); err != nil {
 		return nil, fmt.Errorf("failed to read hard fork version: %w, root: %x", err, blockRoot)
 	}
 	// Read the length
 	lengthBytes := make([]byte, 8)
 	var n int
-	n, err = io.ReadFull(file, lengthBytes)
+	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
@@ -61,7 +74,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	}
 
 	f.sszBuffer = f.sszBuffer[:binary.BigEndian.Uint64(lengthBytes)]
-	n, err = io.ReadFull(file, f.sszBuffer)
+	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
@@ -93,51 +106,72 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 	if !forced && bs.Slot()%dumpSlotFrequency != 0 {
 		return
 	}
+	if err := f.busyWritingToDisk.Acquire(context.TODO(), 1); err != nil {
+		return err
+	}
 	// Truncate and then grow the buffer to the size of the state.
 	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer[:0])
 	if err != nil {
 		return
 	}
 
-	var dumpedFile afero.File
-	dumpedFile, err = f.fs.OpenFile(getBeaconStateFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
-	if err != nil {
-		return
-	}
-	defer dumpedFile.Close()
+	go func() {
+		defer f.busyWritingToDisk.Release(1)
 
-	// First write the hard fork version
-	if _, err := dumpedFile.Write([]byte{byte(bs.Version())}); err != nil {
-		return err
-	}
-	// Second write the length
-	length := make([]byte, 8)
-	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
-	if _, err := dumpedFile.Write(length); err != nil {
-		return err
-	}
-	// Lastly dump the state
-	if _, err := dumpedFile.Write(f.sszBuffer); err != nil {
-		return err
-	}
+		var dumpedFile afero.File
+		dumpedFile, err = f.fs.OpenFile(getBeaconStateFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+		if err != nil {
+			return
+		}
+		defer dumpedFile.Close()
 
-	if err = dumpedFile.Sync(); err != nil {
-		return
-	}
+		if f.sszSnappyWriter == nil {
+			f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
+		} else {
+			f.sszSnappyWriter.Reset(dumpedFile)
+		}
 
-	cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
-	if err != nil {
-		return
-	}
-	defer cacheFile.Close()
+		// First write the hard fork version
+		if _, err := f.sszSnappyWriter.Write([]byte{byte(bs.Version())}); err != nil {
+			log.Error("failed to write hard fork version", "err", err)
+			return
+		}
+		// Second write the length
+		length := make([]byte, 8)
+		binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
+		if _, err := f.sszSnappyWriter.Write(length); err != nil {
+			log.Error("failed to write length", "err", err)
+			return
+		}
+		// Lastly dump the state
+		if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
+			log.Error("failed to write ssz buffer", "err", err)
+			return
+		}
+		if err = f.sszSnappyWriter.Flush(); err != nil {
+			log.Error("failed to flush snappy writer", "err", err)
+			return
+		}
+		if err = dumpedFile.Sync(); err != nil {
+			log.Error("failed to sync dumped file", "err", err)
+			return
+		}
 
-	if err := bs.EncodeCaches(cacheFile); err != nil {
-		return err
-	}
+		cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+		if err != nil {
+			return
+		}
+		defer cacheFile.Close()
 
-	if err = cacheFile.Sync(); err != nil {
-		return
-	}
+		if err := bs.EncodeCaches(cacheFile); err != nil {
+			log.Error("failed to encode caches", "err", err)
+			return
+		}
+
+		if err = cacheFile.Sync(); err != nil {
+			return
+		}
+	}()
 
 	return
 }

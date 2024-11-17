@@ -22,7 +22,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/golang/snappy"
 	"github.com/spf13/afero"
+	"golang.org/x/sync/semaphore"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -37,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 )
 
-const dumpSlotFrequency = 16
+const dumpSlotFrequency = 4
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
@@ -124,10 +126,14 @@ type forkGraphDisk struct {
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// reusable buffers
-	sszBuffer []byte
+	sszBuffer       []byte
+	sszSnappyWriter *snappy.Writer
+	sszSnappyReader *snappy.Reader
 
 	rcfg    beacon_router_configuration.RouterConfiguration
 	emitter *beaconevents.EventEmitter
+
+	busyWritingToDisk semaphore.Weighted
 }
 
 // Initialize fork graph with a new state
