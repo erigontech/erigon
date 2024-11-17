@@ -61,7 +61,6 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	// Read the version
 	v := []byte{0}
 	if _, err := f.sszSnappyReader.Read(v); err != nil {
-		fmt.Println(err)
 		return nil, fmt.Errorf("failed to read hard fork version: %w, root: %x", err, blockRoot)
 	}
 	// Read the length
@@ -69,11 +68,9 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	var n int
 	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
 	if err != nil {
-		fmt.Println(err)
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
 	if n != 8 {
-		fmt.Println(err)
 		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 
@@ -94,7 +91,6 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 		bs.SetValidatorSet(vSet)
 	}
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
-		fmt.Println(err)
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
 	}
 	// decode the cache file
@@ -106,7 +102,6 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	defer cacheFile.Close()
 
 	if err := bs.DecodeCaches(cacheFile); err != nil {
-		fmt.Println(err)
 		return nil, err
 	}
 
