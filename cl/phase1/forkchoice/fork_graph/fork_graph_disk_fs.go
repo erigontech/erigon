@@ -106,6 +106,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 	if err != nil {
 		return
 	}
+	version := bs.Version()
 
 	go func() {
 		defer f.stateDumpLock.Unlock()
@@ -124,7 +125,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		}
 
 		// First write the hard fork version
-		if _, err := f.sszSnappyWriter.Write([]byte{byte(bs.Version())}); err != nil {
+		if _, err := f.sszSnappyWriter.Write([]byte{byte(version)}); err != nil {
 			log.Error("failed to write hard fork version", "err", err)
 			return
 		}
@@ -148,22 +149,22 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 			log.Error("failed to sync dumped file", "err", err)
 			return
 		}
-
-		cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
-		if err != nil {
-			return
-		}
-		defer cacheFile.Close()
-
-		if err := bs.EncodeCaches(cacheFile); err != nil {
-			log.Error("failed to encode caches", "err", err)
-			return
-		}
-
-		if err = cacheFile.Sync(); err != nil {
-			return
-		}
 	}()
+
+	cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	if err != nil {
+		return
+	}
+	defer cacheFile.Close()
+
+	if err := bs.EncodeCaches(cacheFile); err != nil {
+		log.Error("failed to encode caches", "err", err)
+		return err
+	}
+
+	if err = cacheFile.Sync(); err != nil {
+		return err
+	}
 
 	return
 }
