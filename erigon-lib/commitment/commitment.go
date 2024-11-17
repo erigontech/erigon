@@ -25,11 +25,13 @@ import (
 	"math/bits"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/holiman/uint256"
 
 	"github.com/google/btree"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
@@ -1155,6 +1157,72 @@ func (t *Updates) Close() {
 	if t.etl != nil {
 		t.etl.Close()
 	}
+}
+
+func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHashed) error {
+	if t.mode != ModeDirect {
+		return errors.New("parallel hashsort for indirect mode is not supported")
+	}
+	if !t.sortPerNibble {
+		return errors.New("sortPerNibble disabled")
+	}
+
+	mainLock := new(sync.Mutex)
+	foldAndFlush := func(prevByte byte) error {
+		c, d, err := pph.mounts[prevByte].foldMounted(int(prevByte))
+		if err != nil {
+			return err
+		}
+		_ = d
+		if err = pph.mounts[prevByte].branchEncoder.Load(pph.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+
+		mainLock.Lock()
+		defer mainLock.Unlock()
+
+		//fmt.Printf("\tmount d=%d n=%0x %s\n", d, prevByte, c.FullString())
+		pph.root.grid[0][prevByte] = c
+		pph.mounts[prevByte].Reset()
+		pph.mounts[prevByte].currentKeyLen = 0
+		if pph.mounts[prevByte].activeRows >= 0 {
+			pph.mounts[prevByte].depths[0] = 0
+			pph.mounts[prevByte].activeRows = 0
+			pph.mounts[prevByte].touchMap[0] = 0
+			pph.mounts[prevByte].afterMap[0] = 0
+		}
+
+		pph.root.touchMap[0] |= uint16(1) << prevByte
+		pph.root.afterMap[0] |= uint16(1) << prevByte
+		pph.root.depths[0] = 1
+		return nil
+	}
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(16)
+
+	for n := 0; n < len(t.nibbles); n++ {
+		nib := t.nibbles[n]
+		phnib := pph.mounts[n]
+		n = n
+
+		g.Go(func() error {
+			n = n
+			cnt := 0
+			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+				cnt++
+				return phnib.followAndUpdate(hashedKey, plainKey, nil)
+			}, etl.TransformArgs{Quit: ctx.Done()})
+			if err != nil {
+				return err
+			}
+			if cnt > 0 {
+				return foldAndFlush(byte(n))
+			}
+			return nil
+		})
+	}
+	return g.Wait()
 }
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.

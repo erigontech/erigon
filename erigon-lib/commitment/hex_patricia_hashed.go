@@ -2258,58 +2258,63 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 		return nil, err
 	}
 
-	foldAndFlush := func(prevByte, curByte byte) error {
-		c, d, err := p.mounts[prevByte].foldMounted(int(prevByte))
-		if err != nil {
-			return err
-		}
-		_ = d
+	// foldAndFlush := func(prevByte, curByte byte) error {
+	// 	c, d, err := p.mounts[prevByte].foldMounted(int(prevByte))
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	_ = d
 
-		//fmt.Printf("\tmount d=%d n=%0x %s\n", d, prevByte, c.FullString())
-		p.root.grid[0][prevByte] = c
-		if err = p.mounts[prevByte].branchEncoder.Load(p.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-			return err
-		}
-		p.mounts[prevByte].Reset()
-		p.mounts[prevByte].currentKeyLen = 0
-		if p.mounts[prevByte].activeRows >= 0 {
-			p.mounts[prevByte].depths[0] = 0
-			p.mounts[prevByte].activeRows = 0
-			p.mounts[prevByte].touchMap[0] = 0
-			p.mounts[prevByte].afterMap[0] = 0
-		}
+	// 	//fmt.Printf("\tmount d=%d n=%0x %s\n", d, prevByte, c.FullString())
+	// 	p.root.grid[0][prevByte] = c
+	// 	if err = p.mounts[prevByte].branchEncoder.Load(p.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	// 		return err
+	// 	}
+	// 	p.mounts[prevByte].Reset()
+	// 	p.mounts[prevByte].currentKeyLen = 0
+	// 	if p.mounts[prevByte].activeRows >= 0 {
+	// 		p.mounts[prevByte].depths[0] = 0
+	// 		p.mounts[prevByte].activeRows = 0
+	// 		p.mounts[prevByte].touchMap[0] = 0
+	// 		p.mounts[prevByte].afterMap[0] = 0
+	// 	}
 
-		p.root.touchMap[0] |= uint16(1) << prevByte
-		p.root.afterMap[0] |= uint16(1) << prevByte
-		p.root.depths[0] = 1
-		return nil
-	}
+	// 	p.root.touchMap[0] |= uint16(1) << prevByte
+	// 	p.root.afterMap[0] |= uint16(1) << prevByte
+	// 	p.root.depths[0] = 1
+	// 	return nil
+	// }
 
-	var prevByte byte
-	var prevset bool
+	// var prevByte byte
+	// var prevset bool
 
-	err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		err = p.mounts[hashedKey[0]].followAndUpdate(hashedKey, plainKey, stateUpdate)
-		if err != nil {
-			return err
-		}
-		if !prevset {
-			prevByte = hashedKey[0]
-			prevset = true
-		}
-		if prevByte != hashedKey[0] {
-			if err := foldAndFlush(prevByte, hashedKey[0]); err != nil {
-				return err
-			}
-			prevByte = hashedKey[0]
-		}
-		return nil
-	})
+	// err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
+	// 	err = p.mounts[hashedKey[0]].followAndUpdate(hashedKey, plainKey, stateUpdate)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if !prevset {
+	// 		prevByte = hashedKey[0]
+	// 		prevset = true
+	// 	}
+	// 	if prevByte != hashedKey[0] {
+	// 		if err := foldAndFlush(prevByte, hashedKey[0]); err != nil {
+	// 			return err
+	// 		}
+	// 		prevByte = hashedKey[0]
+	// 	}
+	// 	return nil
+	// })
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// if err := foldAndFlush(prevByte, 0); err != nil {
+	// 	return nil, err
+	// }
+	//
+	err = updates.ParallelHashSort(ctx, p)
 	if err != nil {
-		return nil, err
-	}
-
-	if err := foldAndFlush(prevByte, 0); err != nil {
 		return nil, err
 	}
 

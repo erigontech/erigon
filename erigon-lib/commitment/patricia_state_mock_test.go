@@ -410,6 +410,21 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	return
 }
 
+func WrapKeyUpdatesParallel(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
+	tb.Helper()
+
+	upd := NewUpdates(mode, tb.TempDir(), hasher)
+	upd.SetConcurrentCommitment()
+	for i, key := range keys {
+		upd.TouchPlainKey(key, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = key
+			c.hashedKey = hasher(key)
+			c.update = &updates[i]
+		})
+	}
+	return upd
+}
+
 func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
 	tb.Helper()
 

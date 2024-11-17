@@ -192,7 +192,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		err := msTwo.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwoR.hashAndNibblizeKey, plainKeys, updates)
+		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, trieTwoR.hashAndNibblizeKey, plainKeys, updates)
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
 		rh, err := trieTwo.Process(ctx, updsTwo, "")
@@ -234,7 +234,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		err := msTwo.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwoR.hashAndNibblizeKey, plainKeys, updates)
+		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, trieTwoR.hashAndNibblizeKey, plainKeys, updates)
 
 		rh, err := trieTwo.Process(ctx, updsTwo, "")
 		require.NoError(t, err)
