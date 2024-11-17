@@ -195,7 +195,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	newState, err := f.GetState(block.ParentRoot, f.currentState, true)
 	if err != nil {
-		f.currentState = nil // recover from error
 		return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
 	}
 	if newState == nil {
