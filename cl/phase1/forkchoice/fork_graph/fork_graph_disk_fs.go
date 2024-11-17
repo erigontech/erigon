@@ -17,11 +17,11 @@
 package fork_graph
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
@@ -109,59 +109,64 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 	}
 	version := bs.Version()
 
+	dumpedFile, err := f.fs.OpenFile(getBeaconStateFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	if err != nil {
+		return
+	}
+	defer dumpedFile.Close()
+
+	if f.sszSnappyWriter == nil {
+		f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
+	} else {
+		f.sszSnappyWriter.Reset(dumpedFile)
+	}
+
+	// First write the hard fork version
+	if _, err := f.sszSnappyWriter.Write([]byte{byte(version)}); err != nil {
+		log.Error("failed to write hard fork version", "err", err)
+		return err
+	}
+	// Second write the length
+	length := make([]byte, 8)
+	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
+	if _, err := f.sszSnappyWriter.Write(length); err != nil {
+		log.Error("failed to write length", "err", err)
+		return err
+	}
+	// Lastly dump the state
+	if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
+		log.Error("failed to write ssz buffer", "err", err)
+		return err
+	}
+	if err = f.sszSnappyWriter.Flush(); err != nil {
+		log.Error("failed to flush snappy writer", "err", err)
+		return
+	}
+
 	cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
 	if err != nil {
 		return
 	}
 	defer cacheFile.Close()
 
-	if err := bs.EncodeCaches(cacheFile); err != nil {
+	b := bytes.NewBuffer(f.sszBuffer)
+	b.Reset()
+
+	if err := bs.EncodeCaches(b); err != nil {
 		log.Error("failed to encode caches", "err", err)
 		return err
 	}
 
 	go func() {
 		defer f.stateDumpLock.Unlock()
-		a := time.Now()
-		var dumpedFile afero.File
-		dumpedFile, err = f.fs.OpenFile(getBeaconStateFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
-		if err != nil {
-			return
-		}
-		defer dumpedFile.Close()
-
-		if f.sszSnappyWriter == nil {
-			f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
-		} else {
-			f.sszSnappyWriter.Reset(dumpedFile)
-		}
-
-		// First write the hard fork version
-		if _, err := f.sszSnappyWriter.Write([]byte{byte(version)}); err != nil {
-			log.Error("failed to write hard fork version", "err", err)
-			return
-		}
-		// Second write the length
-		length := make([]byte, 8)
-		binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
-		if _, err := f.sszSnappyWriter.Write(length); err != nil {
-			log.Error("failed to write length", "err", err)
-			return
-		}
-		// Lastly dump the state
-		if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
-			log.Error("failed to write ssz buffer", "err", err)
-			return
-		}
-		if err = f.sszSnappyWriter.Flush(); err != nil {
-			log.Error("failed to flush snappy writer", "err", err)
+		if _, err = cacheFile.Write(b.Bytes()); err != nil {
+			log.Error("failed to write cache file", "err", err)
 			return
 		}
 		if err = dumpedFile.Sync(); err != nil {
 			log.Error("failed to sync dumped file", "err", err)
 			return
 		}
-		log.Info("dumped beacon state on disk", "root", blockRoot, "time", time.Since(a))
 		if err = cacheFile.Sync(); err != nil {
 			log.Error("failed to sync cache file", "err", err)
 			return
