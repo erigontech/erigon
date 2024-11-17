@@ -163,6 +163,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		}
 		defer cacheFile.Close()
 		defer f.stateDumpLock.Unlock()
+
 		if _, err = cacheFile.Write(b.Bytes()); err != nil {
 			log.Error("failed to write cache file", "err", err)
 			return
