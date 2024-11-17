@@ -77,10 +77,6 @@ func (r ChainSegmentInsertionResult) String() string {
 	}
 }
 
-type savedStateRecord struct {
-	slot uint64
-}
-
 func convertHashSliceToHashList(in [][32]byte) solid.HashVectorSSZ {
 	out := solid.NewHashVector(len(in))
 	for i, v := range in {
