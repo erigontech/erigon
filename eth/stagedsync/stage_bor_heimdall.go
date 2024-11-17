@@ -251,7 +251,8 @@ func BorHeimdallForward(
 	// this becomes more prevalent this will need to be re-thought
 	var skipCount int
 
-	// allow commit every N blocks to avoid long transactions and lost progress
+	// allow committing every N blocks to avoid long transaction and potential progress lost when running `./build/bin/integration stage_bor_heimdall` forward operation manually,
+	// for more details see the use case: https://github.com/erigontech/erigon/pull/12706#issuecomment-2477818677,
 	// N=1000 is not verified to be most optimal value, but works fine in unit tests
 	var commitBatchLimit = 1_000
 	var commitCnt int
@@ -443,43 +444,36 @@ func BorHeimdallForward(
 		syncEventTime = syncEventTime + time.Since(syncEventStart)
 
 		commitCnt++
-		if (commitCnt >= commitBatchLimit && !useExternalTx) || blockNum == headNumber {
-			newTx = true
-			if err = s.Update(tx, blockNum); err != nil {
-				return err
+		if !useExternalTx {
+			if commitCnt >= commitBatchLimit || blockNum == headNumber {
+				if err = s.Update(tx, blockNum); err != nil {
+					return err
+				}
+				lastStateSyncEventID, _, _ = cfg.blockReader.LastEventId(ctx, tx)
+				if err = tx.Commit(); err != nil {
+					return err
+				}
+				commitCnt = 0
+				newTx = true
 			}
-			lastStateSyncEventID, _, _ = cfg.blockReader.LastEventId(ctx, tx)
-
-			if err = tx.Commit(); err != nil {
-				return err
-			}
-
-			logger.Info(
-				fmt.Sprintf("[%s] Sync events", s.LogPrefix()),
-				"progress", blockNum-1,
-				"lastSpanID", lastSpanID,
-				"lastSpanID", lastSpanID,
-				"lastCheckpointId", lastCheckpointId,
-				"lastMilestoneId", lastMilestoneId,
-				"lastStateSyncEventID", lastStateSyncEventID,
-				"total records", eventRecords,
-				"sync event time", syncEventTime,
-				"fetch time", fetchTime,
-				"snap time", snapTime,
-				"waypoint time", waypointTime,
-				"process time", time.Since(processStart),
-			)
-
-			// reset metrics
-			commitCnt = 0
-			eventRecords = 0
-			syncEventTime = time.Duration(0)
-			fetchTime = time.Duration(0)
-			snapTime = time.Duration(0)
-			waypointTime = time.Duration(0)
-			processStart = time.Now()
 		}
 	}
+
+	logger.Info(
+		fmt.Sprintf("[%s] Sync events", s.LogPrefix()),
+		"progress", blockNum-1,
+		"lastSpanID", lastSpanID,
+		"lastSpanID", lastSpanID,
+		"lastCheckpointId", lastCheckpointId,
+		"lastMilestoneId", lastMilestoneId,
+		"lastStateSyncEventID", lastStateSyncEventID,
+		"total records", eventRecords,
+		"sync event time", syncEventTime,
+		"fetch time", fetchTime,
+		"snap time", snapTime,
+		"waypoint time", waypointTime,
+		"process time", time.Since(processStart),
+	)
 	return
 }
 
