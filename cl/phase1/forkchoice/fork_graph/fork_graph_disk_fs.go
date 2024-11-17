@@ -22,7 +22,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -61,23 +60,17 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 
-	f.sszSnappyBuffer = f.sszSnappyBuffer[:binary.BigEndian.Uint64(lengthBytes)]
-	n, err = io.ReadFull(file, f.sszSnappyBuffer)
+	f.sszBuffer = f.sszBuffer[:binary.BigEndian.Uint64(lengthBytes)]
+	n, err = io.ReadFull(file, f.sszBuffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
-	f.sszSnappyBuffer = f.sszSnappyBuffer[:n]
+	f.sszBuffer = f.sszBuffer[:n]
 	if out == nil {
 		bs = state.New(f.beaconCfg)
 	} else {
 		bs = out
 	}
-
-	f.sszBuffer, err = snappy.Decode(f.sszBuffer[:0], f.sszSnappyBuffer)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode snappy buffer: %w, root: %x", err, blockRoot)
-	}
-
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
 	}
@@ -113,20 +106,18 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 	}
 	defer dumpedFile.Close()
 
-	f.sszSnappyBuffer = snappy.Encode(f.sszSnappyBuffer[:0], f.sszBuffer)
-
 	// First write the hard fork version
 	if _, err := dumpedFile.Write([]byte{byte(bs.Version())}); err != nil {
 		return err
 	}
 	// Second write the length
 	length := make([]byte, 8)
-	binary.BigEndian.PutUint64(length, uint64(len(f.sszSnappyBuffer)))
+	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
 	if _, err := dumpedFile.Write(length); err != nil {
 		return err
 	}
 	// Lastly dump the state
-	if _, err := dumpedFile.Write(f.sszSnappyBuffer); err != nil {
+	if _, err := dumpedFile.Write(f.sszBuffer); err != nil {
 		return err
 	}
 

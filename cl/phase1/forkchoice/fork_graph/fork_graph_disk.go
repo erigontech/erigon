@@ -124,8 +124,7 @@ type forkGraphDisk struct {
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// reusable buffers
-	sszBuffer       []byte
-	sszSnappyBuffer []byte
+	sszBuffer []byte
 
 	rcfg    beacon_router_configuration.RouterConfiguration
 	emitter *beaconevents.EventEmitter
