@@ -30,7 +30,7 @@ func init() {
 
 	execPool := workerpool.New(poolSize)
 	rootComponentDomain = &componentDomain{nil, nil, execPool, nil}
-	rootComponentDomain.serviceBus = event.NewServiceBus(rootComponentDomain)
+	rootComponentDomain.sbus = event.NewServiceBus(rootComponentDomain)
 	rootComponentDomain.Domain, _ = app.NewNamedDomain[string]("root",
 		app.WithIdGenerator(app.PassThroughGenerator[string]()))
 	component, _ := NewComponent[ComponentDomain](context.Background(),
@@ -48,14 +48,14 @@ type ComponentDomain interface {
 	Activate(ctx context.Context, handler ...ActivityHandler[ComponentDomain]) error
 	Deactivate(ctx context.Context, handler ...ActivityHandler[ComponentDomain]) error
 
-	ServiceBus() *event.ServiceBus
+	serviceBus() *event.ServiceBus
 }
 
 type componentDomain struct {
 	*component
 	app.Domain
-	execPool   *workerpool.WorkerPool
-	serviceBus *event.ServiceBus
+	execPool *workerpool.WorkerPool
+	sbus     *event.ServiceBus
 }
 
 type serviceManager interface {
@@ -149,7 +149,7 @@ func NewComponentDomain(context context.Context, id string, options ...app.Optio
 
 	cd.Domain, _ = app.NewNamedDomain[string](id,
 		app.WithIdGenerator(app.PassThroughGenerator[string]()))
-	cd.serviceBus = event.NewServiceBus(cd)
+	cd.sbus = event.NewServiceBus(cd)
 
 	component, err := NewComponent[ComponentDomain](context,
 		append(options,
@@ -235,7 +235,7 @@ func (cd *componentDomain) deactivate() {
 			"component", cd.Id().String())
 	}
 
-	if err := cd.ServiceBus().UnregisterAll(cd); err != nil {
+	if err := cd.serviceBus().UnregisterAll(cd); err != nil {
 		if log.DebugEnabled() {
 			log.Debug("Unregister from Service Bus failed",
 				"component", cd.Id().String(),
@@ -243,12 +243,12 @@ func (cd *componentDomain) deactivate() {
 		}
 	}
 
-	if cd.serviceBus != nil {
+	if cd.sbus != nil {
 		if log.DebugEnabled() {
 			log.Debug("Deactivating Service Bus",
 				"component", cd.Id().String())
 		}
-		cd.ServiceBus().Deactivate()
+		cd.serviceBus().Deactivate()
 	}
 
 	if cd.execPool != nil {
@@ -261,9 +261,9 @@ func (cd *componentDomain) deactivate() {
 	}
 }
 
-func (cd *componentDomain) ServiceBus() *event.ServiceBus {
-	if cd.serviceBus != nil {
-		return cd.serviceBus
+func (cd *componentDomain) serviceBus() *event.ServiceBus {
+	if cd.sbus != nil {
+		return cd.sbus
 	}
 
 	if parent, ok := cd.component.Domain().(serviceManager); ok {

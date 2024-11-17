@@ -2,6 +2,7 @@ package component_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -21,6 +22,7 @@ func TestCreateComponent(t *testing.T) {
 	require.Nil(t, err)
 	require.NotNil(t, c)
 	require.Equal(t, "root:provider", c.Id().String())
+	require.Equal(t, "component_test.provider", c.Name())
 
 	var p *provider = c.Provider()
 	require.NotNil(t, p)
@@ -883,4 +885,116 @@ func TestState(t *testing.T) {
 		require.NoError(t, s2.UnmarshalText(txt))
 		require.Equal(t, s, s2)
 	}
+}
+
+type errprovider struct {
+	failAt component.State
+}
+
+func (p errprovider) Configure(ctx context.Context, options ...app.Option) error {
+	if p.failAt == component.Configured {
+		return fmt.Errorf("configure failed")
+	}
+	return nil
+}
+
+func (p errprovider) Initialize(ctx context.Context, options ...app.Option) error {
+	if p.failAt == component.Initialised {
+		return fmt.Errorf("initialize failed")
+	}
+	return nil
+}
+
+func (p errprovider) Recover(ctx context.Context) error {
+	if p.failAt == component.Recovering {
+		return fmt.Errorf("recover failed")
+	}
+	return nil
+}
+
+func (p errprovider) Activate(ctx context.Context) error {
+	if p.failAt == component.Activating {
+		return fmt.Errorf("activate failed")
+	}
+	return nil
+}
+
+func (p errprovider) Deactivate(ctx context.Context) error {
+	if p.failAt == component.Deactivating {
+		return fmt.Errorf("deactivate failed")
+	}
+	return nil
+}
+
+func TestFails(t *testing.T) {
+	c, err := component.NewComponent[errprovider](context.Background(),
+		component.WithProvider(&errprovider{component.Configured}))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:errprovider", c.Id().String())
+
+	err = c.Activate(context.Background())
+	require.NotNil(t, err)
+	require.Equal(t, "configure failed", err.Error())
+
+	c, err = component.NewComponent[errprovider](context.Background(),
+		component.WithProvider(&errprovider{component.Initialised}))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:errprovider", c.Id().String())
+
+	err = c.Activate(context.Background())
+	require.NotNil(t, err)
+	require.Equal(t, "initialize failed", err.Error())
+
+	c, err = component.NewComponent[errprovider](context.Background(),
+		component.WithProvider(&errprovider{component.Activating}))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:errprovider", c.Id().String())
+
+	err = c.Activate(context.Background(), component.ActivityHandlerFunc[errprovider](
+		func(ctx context.Context, c component.Component[errprovider], state component.State, err error) {
+			switch state {
+			case component.Configured,
+				component.Initialised,
+				component.Activating:
+				require.NoError(t, err)
+			case component.Failed:
+				require.NotNil(t, err)
+				require.Equal(t, "activate failed", err.Error())
+			default:
+				t.Fatalf("unexpected state: %s", state)
+			}
+		}))
+	require.Nil(t, err)
+
+	c.AwaitState(context.Background(), component.Failed)
+
+	c, err = component.NewComponent[errprovider](context.Background(),
+		component.WithProvider(&errprovider{component.Deactivating}))
+	require.Nil(t, err)
+	require.NotNil(t, c)
+	require.Equal(t, "root:errprovider", c.Id().String())
+
+	err = c.Activate(context.Background())
+	require.Nil(t, err)
+
+	c.AwaitState(context.Background(), component.Active)
+
+	err = c.Deactivate(context.Background(), component.ActivityHandlerFunc[errprovider](
+		func(ctx context.Context, c component.Component[errprovider], state component.State, err error) {
+			switch state {
+			case component.Deactivating:
+				require.NoError(t, err)
+			case component.Failed:
+				require.NotNil(t, err)
+				require.Equal(t, "deactivate failed", err.Error())
+			default:
+				t.Fatalf("unexpected state: %s", state)
+			}
+		}))
+	require.Nil(t, err)
+
+	c.AwaitState(context.Background(), component.Failed)
 }

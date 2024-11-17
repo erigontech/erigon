@@ -510,7 +510,7 @@ func (c *component) setState(state State, locked bool) {
 		if c.log.DebugEnabled() {
 			c.log.Debug("", "provider", app.LogInstance(c.provider), "state", state.String())
 		}
-		c.ServiceBus().Post(newComponentStateChanged(c, state, previousState))
+		c.serviceBus().Post(newComponentStateChanged(c, state, previousState))
 	}
 }
 
@@ -535,12 +535,12 @@ func (c *component) AwaitState(ctx context.Context, state State) (State, error) 
 		if sourceComponent == c && event.Current() == state {
 			//fmt.Printf("%p Await Received Component State Changed [%v->%v]\n",
 			//	c, event.Previous(), event.Current())
-			_ = c.ServiceBus().Unregister(c, subscriber)
+			_ = c.serviceBus().Unregister(c, subscriber)
 			statechan <- state
 		}
 	}
 
-	err := c.ServiceBus().Register(c, subscriber)
+	err := c.serviceBus().Register(c, subscriber)
 
 	if err != nil {
 		return Unknown, err
@@ -1013,11 +1013,6 @@ func (c *component) deactivate(ctx context.Context, onActivity onActivity) error
 }
 
 func (c *component) deactivateDependencies(ctx context.Context, onActivity onActivity) {
-	/*fmt.Printf("%s Deactivate Deps\n", manager.Name())
-	for _, dep := range manager.dependents {
-		fmt.Printf("  %v:%v:%p\n", manager.Name(), dep.Name(), dep)
-	}*/
-
 	deactivationList := make([]*component, 0, len(c.dependencies))
 
 	c.RLock()
@@ -1110,27 +1105,27 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 }
 
 func (c *component) Post(args ...interface{}) int {
-	return c.ServiceBus().Post(args...)
+	return c.serviceBus().Post(args...)
 }
 
 func (c *component) Register(fns ...interface{}) (err error) {
-	return c.ServiceBus().Register(c, fns...)
+	return c.serviceBus().Register(c, fns...)
 }
 
 func (c *component) Unegister(fns ...interface{}) (err error) {
-	return c.ServiceBus().Unregister(c, fns...)
+	return c.serviceBus().Unregister(c, fns...)
 }
 
 func (c *component) EventBus(key interface{}) *event.ManagedEventBus {
-	return c.ServiceBus().GetEventBus(key)
+	return c.serviceBus().GetEventBus(key)
 }
 
-func (c *component) ServiceBus() *event.ServiceBus {
+func (c *component) serviceBus() *event.ServiceBus {
 	if domain, isDomain := (c.provider.(ComponentDomain)); isDomain {
-		return domain.ServiceBus()
+		return domain.serviceBus()
 	}
 	if c.componentDomain != nil {
-		return c.componentDomain.ServiceBus()
+		return c.componentDomain.serviceBus()
 	}
 	return nil
 }
@@ -1140,8 +1135,8 @@ func (c *component) setDomain(cm *componentDomain, domainLocked bool) error {
 		var registrations []interface{}
 
 		if c.componentDomain != nil {
-			registrations = c.ServiceBus().Registrations(c)
-			if err := c.ServiceBus().UnregisterAll(c); err != nil {
+			registrations = c.serviceBus().Registrations(c)
+			if err := c.serviceBus().UnregisterAll(c); err != nil {
 				return err
 			}
 			c.componentDomain.removeDependency(c, domainLocked)
@@ -1159,7 +1154,7 @@ func (c *component) setDomain(cm *componentDomain, domainLocked bool) error {
 				cm.addDependency(c, domainLocked)
 			}
 
-			if err := cm.ServiceBus().Register(c, registrations...); err != nil {
+			if err := cm.serviceBus().Register(c, registrations...); err != nil {
 				return err
 			}
 
@@ -1225,7 +1220,7 @@ func (c *component) removeDependent(dependent *component, dependentLocked bool) 
 
 func (component *component) registerSubscriptions() error {
 	if domain, ok := component.provider.(*componentDomain); ok {
-		if serviceBus := domain.ServiceBus(); serviceBus != nil {
+		if serviceBus := domain.serviceBus(); serviceBus != nil {
 			return serviceBus.Register(component, component.onComponentStateChanged)
 		}
 	}
@@ -1234,7 +1229,7 @@ func (component *component) registerSubscriptions() error {
 		return nil
 	}
 
-	if serviceBus := component.Domain().ServiceBus(); serviceBus != nil {
+	if serviceBus := component.Domain().serviceBus(); serviceBus != nil {
 		return serviceBus.Register(component, component.onComponentStateChanged)
 	}
 
