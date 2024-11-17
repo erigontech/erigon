@@ -1730,9 +1730,20 @@ func (dt *DomainRoTx) closeValsCursor() {
 }
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
-	if dt.valsC != nil {
+	if dt.valsC != nil { // run in assert mode only
+		fmt.Printf("cmp e1=%x e2=%x s=%x d=%s\n", eface[0], eface[1], dt.vcParentPtr.Load(), dt.d.filenameBase)
 		if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
+			//if sd, ok := tx.(kv.TemporalPutDel); ok {
+			//	if stx, ok := sd.(*SharedDomains); ok {
+			//		ttx := stx.Tx()
+			//		eface := *(*[2]uintptr)(unsafe.Pointer(&ttx))
+			//		if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
+			//			panic(fmt.Errorf("%w: cursor parent tx %x; current sd tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
+			//		}
+			//	}
+			//} else {
 			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
+			//}
 		}
 		return dt.valsC, nil
 	}
@@ -1740,6 +1751,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if !dt.vcParentPtr.CompareAndSwap(0, eface[1]) {
 		panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
 	}
+	fmt.Printf("set e1=%x e2=%x d=%s\n", eface[0], eface[1], dt.d.filenameBase)
 
 	if dt.d.largeVals {
 		dt.valsC, err = tx.Cursor(dt.d.valsTable)
