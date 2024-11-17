@@ -332,28 +332,41 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	}()
 
 	return cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		x := time.Now()
 		// Produce and cache attestation data for validator node (this is not an expensive operation so we can do it for all nodes)
 		if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
 			logger.Warn("failed to produce and cache attestation data", "err", err)
 		}
+		fmt.Println("ProduceAndCacheAttestationData", time.Since(x))
 
+		x = time.Now()
 		// Run indexing routines for the database
 		if err := runIndexingRoutines(ctx, tx, cfg, headState); err != nil {
 			return fmt.Errorf("failed to run indexing routines: %w", err)
 		}
+		fmt.Println("runIndexingRoutines", time.Since(x))
 
+		x = time.Now()
 		// Dump the head state on disk for ease of chain reorgs
 		if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
 			return fmt.Errorf("failed to dump beacon state on disk: %w", err)
 		}
+		fmt.Println("DumpBeaconStateOnDisk", time.Since(x))
 
+		x = time.Now()
 		// Save the head state on disk for eventual node restarts without checkpoint sync
 		if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
 			return fmt.Errorf("failed to save head state on disk: %w", err)
 		}
+		fmt.Println("saveHeadStateOnDiskIfNeeded", time.Since(x))
+
+		x = time.Now()
 		// Lastly, emit the head event
 		emitHeadEvent(cfg, headSlot, headRoot, headState)
+		fmt.Println("emitHeadEvent", time.Since(x))
+		x = time.Now()
 		emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
+		fmt.Println("emitNextPaylodAttributesEvent", time.Since(x))
 
 		// Shuffle validator set for the next epoch
 		preCacheNextShuffledValidatorSet(ctx, logger, cfg, headState)
