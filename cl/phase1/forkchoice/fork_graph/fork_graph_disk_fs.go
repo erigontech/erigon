@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
@@ -161,10 +162,11 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		log.Error("failed to encode caches", "err", err)
 		return err
 	}
-
+	a := time.Now()
 	if err = cacheFile.Sync(); err != nil {
 		return err
 	}
+	log.Debug("sync cache file", "time", time.Since(a))
 
 	return
 }
