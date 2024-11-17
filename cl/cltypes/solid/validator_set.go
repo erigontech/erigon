@@ -55,8 +55,6 @@ type ValidatorSet struct {
 	// We have phase0 data below
 	phase0Data   []Phase0Data
 	attesterBits []byte
-
-	hashBuf
 }
 
 func NewValidatorSet(c int) *ValidatorSet {
