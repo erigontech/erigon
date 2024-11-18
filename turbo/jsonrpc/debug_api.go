@@ -93,7 +93,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return StorageRangeResult{}, err
 	}
 	if number == nil {
-		return StorageRangeResult{}, errors.New("block not found")
+		return StorageRangeResult{}, nil
 	}
 	minTxNum, err := txNumsReader.Min(tx, *number)
 	if err != nil {
@@ -322,7 +322,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		return nil, err
 	}
 	ttx := tx.(kv.TemporalTx)
-	v, ok, err := ttx.DomainGetAsOf(kv.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
+	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +339,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash
 
-	code, _, err := ttx.DomainGetAsOf(kv.CodeDomain, address[:], nil, minTxNum+txIndex)
+	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], nil, minTxNum+txIndex)
 	if err != nil {
 		return nil, err
 	}

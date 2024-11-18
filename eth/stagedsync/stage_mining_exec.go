@@ -31,12 +31,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/kv"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -65,7 +65,7 @@ type MiningExecCfg struct {
 }
 
 type TxPoolForMining interface {
-	YieldBest(n uint16, txs *types2.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
+	YieldBest(n uint16, txs *txpool.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error)
 }
 
 func StageMiningExecCfg(
@@ -264,7 +264,7 @@ func getNextTransactions(
 	simStateWriter state.StateWriter,
 	logger log.Logger,
 ) (types.TransactionsStream, int, error) {
-	txSlots := types2.TxsRlp{}
+	txSlots := txpool.TxsRlp{}
 	count := 0
 	if err := cfg.txPoolDB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error
