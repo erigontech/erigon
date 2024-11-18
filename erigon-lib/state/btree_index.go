@@ -873,6 +873,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		if len(idx.data[pos:]) == 0 {
 			idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
 			idx.bplus.cursorGetter = idx.newCursor
+			idx.bplus.dataLookupFuncCursor = idx.dataLookupCursor
 			// fallback for files without nodes encoded
 		} else {
 			nodes, err := decodeListNodes(idx.data[pos:])
@@ -881,6 +882,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 			}
 			idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
 			idx.bplus.cursorGetter = idx.newCursor
+			idx.bplus.dataLookupFuncCursor = idx.dataLookupCursor
 		}
 	default:
 		idx.alloc = newBtAlloc(idx.ef.Count(), M, false, idx.dataLookup, idx.keyCmp)
@@ -891,6 +893,26 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 
 	validationPassed = true
 	return idx, nil
+}
+
+func (b *BtIndex) dataLookupCursor(di uint64, g *seg.Reader, c *Cursor) error {
+	if di >= b.ef.Count() {
+		return fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, b.FileName())
+	}
+
+	offset := b.ef.Get(di)
+	g.Reset(offset)
+	if !g.HasNext() {
+		return fmt.Errorf("pair %d/%d key not found, file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
+	}
+
+	c.key, _ = g.Next(c.key[:0])
+	if !g.HasNext() {
+		return fmt.Errorf("pair %d/%d value not found, file: %s/%s", di, b.ef.Count(), b.FileName(), g.FileName())
+	}
+	c.value, _ = g.Next(c.value[:0])
+	c.d, c.getter = di, g
+	return nil
 }
 
 // dataLookup fetches key and value from data file by di (data index)

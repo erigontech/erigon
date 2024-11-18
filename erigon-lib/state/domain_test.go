@@ -1079,7 +1079,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	// Check index
 	require.Equal(t, 3, int(sf.valuesBt.KeyCount()))
 	for i := 0; i < len(words); i += 2 {
-		c, _ := sf.valuesBt.Seek(g, []byte(words[i]))
+		c, err := sf.valuesBt.Seek(g, []byte(words[i]))
+		require.NoError(t, err)
+		require.NotNil(t, c)
 		require.Equal(t, words[i], string(c.Key()))
 		require.Equal(t, words[i+1], string(c.Value()))
 	}

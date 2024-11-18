@@ -325,6 +325,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	ir := NewMockIndexReader(efi)
 	bp := NewBpsTree(g, efi, uint64(M), ir.dataLookup, ir.keyCmp)
 	bp.cursorGetter = ir.newCursor
+	bp.dataLookupFuncCursor = ir.dataLookupIntoCursor
 	bp.trace = false
 
 	for i := 0; i < len(keys); i++ {
@@ -358,6 +359,27 @@ func (b *mockIndexReader) newCursor(k, v []byte, di uint64, g *seg.Reader) *Curs
 		value:  common.Copy(v),
 		d:      di,
 	}
+}
+
+func (b *mockIndexReader) dataLookupIntoCursor(di uint64, g *seg.Reader, c *Cursor) error {
+	if di >= b.ef.Count() {
+		return fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di, g.FileName())
+	}
+
+	offset := b.ef.Get(di)
+	g.Reset(offset)
+	if !g.HasNext() {
+		return fmt.Errorf("pair %d/%d key not found, file: %s", di, b.ef.Count(), g.FileName())
+	}
+
+	c.key, _ = g.Next(c.key[:0])
+	if !g.HasNext() {
+		return fmt.Errorf("pair %d/%d value not found, file: %s", di, b.ef.Count(), g.FileName())
+	}
+	c.value, _ = g.Next(c.value[:0])
+	c.d = di
+	c.getter = g
+	return nil
 }
 
 func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint64, err error) {

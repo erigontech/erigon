@@ -50,6 +50,7 @@ type indexSeekerIterator interface {
 }
 
 type dataLookupFunc func(di uint64, g *seg.Reader) ([]byte, []byte, uint64, error)
+type dataLookupFuncCursor func(di uint64, g *seg.Reader, c *Cursor) error
 type keyCmpFunc func(k []byte, di uint64, g *seg.Reader, copyBuf []byte) (int, []byte, error)
 
 // M limits amount of child for tree node.
@@ -92,9 +93,11 @@ type BpsTree struct {
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
 
-	dataLookupFunc dataLookupFunc
-	keyCmpFunc     keyCmpFunc
-	cursorGetter   cursorGetter
+	dataLookupFunc       dataLookupFunc
+	dataLookupFuncCursor dataLookupFuncCursor
+
+	keyCmpFunc   keyCmpFunc
+	cursorGetter cursorGetter
 }
 
 type cursorGetter func(k, v []byte, di uint64, g *seg.Reader) *Cursor
@@ -336,12 +339,13 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, er
 		m = l
 	}
 
-	key, value, _, err = b.dataLookupFunc(m, g)
-	cmp = bytes.Compare(key, seekKey)
+	cur := b.cursorGetter(nil, nil, m, g)
+	err = b.dataLookupFuncCursor(m, g, cur)
+	cmp = bytes.Compare(cur.Key(), seekKey)
 	if err != nil || cmp < 0 {
 		return nil, false, err
 	}
-	return b.cursorGetter(key, value, l, g), cmp == 0, nil
+	return cur, cmp == 0, nil
 }
 
 // returns first key which is >= key.
