@@ -295,13 +295,16 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, er
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
 	}
-	var key, value []byte
+	var key []byte
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
-		key, value, _, err = b.dataLookupFunc(0, g)
+		cur := b.cursorGetter(nil, nil, 0, g)
+		err = b.dataLookupFuncCursor(0, g, cur)
+		// key, value, _, err = b.dataLookupFunc(0, g)
 		if err != nil {
 			return nil, false, err
 		}
-		return b.cursorGetter(key, value, 0, g), true, nil
+		return cur, true, nil
+		// return b.cursorGetter(key, value, 0, g), true, nil
 	}
 
 	n, l, r := b.bs(seekKey) // l===r when key is found
