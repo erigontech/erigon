@@ -324,20 +324,21 @@ func TestBpsTree_Seek(t *testing.T) {
 
 	ir := NewMockIndexReader(efi)
 	bp := NewBpsTree(g, efi, uint64(M), ir.dataLookup, ir.keyCmp)
+	bp.cursorGetter = ir.newCursor
 	bp.trace = false
 
 	for i := 0; i < len(keys); i++ {
 		sk := keys[i]
-		k, _, di, found, err := bp.Seek(g, sk[:len(sk)/2])
-		_ = di
-		_ = found
+		c, found, err := bp.Seek(g, sk[:len(sk)/2])
+		// _ = found
 		require.NoError(t, err)
-		require.NotNil(t, k)
+		require.NotNil(t, c)
+		require.NotNil(t, c.Key())
 		require.False(t, found) // we are looking up by half of key, while FOUND=true when exact match found.
 
 		//k, _, err := it.KVFromGetter(g)
 		//require.NoError(t, err)
-		require.EqualValues(t, keys[i], k)
+		require.EqualValues(t, keys[i], c.Key())
 	}
 }
 
@@ -347,6 +348,16 @@ func NewMockIndexReader(ef *eliasfano32.EliasFano) *mockIndexReader {
 
 type mockIndexReader struct {
 	ef *eliasfano32.EliasFano
+}
+
+func (b *mockIndexReader) newCursor(k, v []byte, di uint64, g *seg.Reader) *Cursor {
+	return &Cursor{
+		btt:    nil,
+		getter: g,
+		key:    common.Copy(k),
+		value:  common.Copy(v),
+		d:      di,
+	}
 }
 
 func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) (k, v []byte, offset uint64, err error) {

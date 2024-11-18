@@ -94,7 +94,10 @@ type BpsTree struct {
 
 	dataLookupFunc dataLookupFunc
 	keyCmpFunc     keyCmpFunc
+	cursorGetter   cursorGetter
 }
+
+type cursorGetter func(k, v []byte, di uint64, g *seg.Reader) *Cursor
 
 type BpsTreeIterator struct {
 	t *BpsTree
@@ -284,18 +287,18 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 // If key is nil, returns first key and found=true
 // If found item.key has a prefix of key, returns found=false and item.key
 // if key is greater than all keys, returns nil, found=false
-func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (key, value []byte, di uint64, found bool, err error) {
+func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, err error) {
 	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
 	}
+	var key, value []byte
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
 		key, value, _, err = b.dataLookupFunc(0, g)
 		if err != nil {
-			return nil, nil, 0, false, err
+			return nil, false, err
 		}
-		//return key, value, 0, bytes.Compare(key, seekKey) >= 0, nil
-		return key, value, 0, bytes.Equal(key, seekKey), nil
+		return b.cursorGetter(key, value, 0, g), true, nil
 	}
 
 	n, l, r := b.bs(seekKey) // l===r when key is found
@@ -313,7 +316,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (key, value []byte, di uin
 
 		cmp, key, err = b.keyCmpFunc(seekKey, m, g, key[:0])
 		if err != nil {
-			return nil, nil, 0, false, err
+			return nil, false, err
 		}
 		if b.trace {
 			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, key)
@@ -327,17 +330,18 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (key, value []byte, di uin
 		} else {
 			l = m + 1
 		}
-
 	}
 
 	if l == r {
 		m = l
 	}
+
 	key, value, _, err = b.dataLookupFunc(m, g)
-	if err != nil {
-		return nil, nil, 0, false, err
+	cmp = bytes.Compare(key, seekKey)
+	if err != nil || cmp < 0 {
+		return nil, false, err
 	}
-	return key, value, l, bytes.Equal(key, seekKey), nil
+	return b.cursorGetter(key, value, l, g), cmp == 0, nil
 }
 
 // returns first key which is >= key.

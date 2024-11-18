@@ -872,6 +872,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	case true:
 		if len(idx.data[pos:]) == 0 {
 			idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
+			idx.bplus.cursorGetter = idx.newCursor
 			// fallback for files without nodes encoded
 		} else {
 			nodes, err := decodeListNodes(idx.data[pos:])
@@ -879,6 +880,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 				return nil, err
 			}
 			idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
+			idx.bplus.cursorGetter = idx.newCursor
 		}
 	default:
 		idx.alloc = newBtAlloc(idx.ef.Count(), M, false, idx.dataLookup, idx.keyCmp)
@@ -1044,17 +1046,23 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 		return nil, nil
 	}
 	if UseBpsTree {
-		k, v, dt, _, err := b.bplus.Seek(g, x)
+		c, found, err := b.bplus.Seek(g, x)
+		if !found {
+			return nil, nil
+		}
+
+		// k, v, dt, _, err := b.bplus.Seek(g, x)
 		if err != nil /*|| !found*/ {
 			if errors.Is(err, ErrBtIndexLookupBounds) {
 				return nil, nil
 			}
 			return nil, err
 		}
-		if bytes.Compare(k, x) >= 0 {
-			return b.newCursor(k, v, dt, g), nil
-		}
-		return nil, nil
+		return c, nil
+		// if bytes.Compare(k, x) >= 0 {
+		// 	return b.newCursor(k, v, dt, g), nil
+		// }
+		// return nil, nil
 	}
 
 	_, dt, found, err := b.alloc.Seek(g, x)
