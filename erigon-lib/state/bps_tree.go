@@ -271,6 +271,9 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 		case -1:
 			l = m + 1
 			dl = n.di
+			if dl < dr {
+				dl++
+			}
 		}
 	}
 	return n, dl, dr
