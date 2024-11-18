@@ -205,17 +205,17 @@ func (s *L1Syncer) RunQueryBlocks(lastCheckedBlock uint64) {
 
 func (s *L1Syncer) GetHeader(number uint64) (*ethTypes.Header, error) {
 	em := s.getNextEtherman()
-	return em.HeaderByNumber(context.Background(), new(big.Int).SetUint64(number))
+	return em.HeaderByNumber(s.ctx, new(big.Int).SetUint64(number))
 }
 
 func (s *L1Syncer) GetBlock(number uint64) (*ethTypes.Block, error) {
 	em := s.getNextEtherman()
-	return em.BlockByNumber(context.Background(), new(big.Int).SetUint64(number))
+	return em.BlockByNumber(s.ctx, new(big.Int).SetUint64(number))
 }
 
 func (s *L1Syncer) GetTransaction(hash common.Hash) (ethTypes.Transaction, bool, error) {
 	em := s.getNextEtherman()
-	return em.TransactionByHash(context.Background(), hash)
+	return em.TransactionByHash(s.ctx, hash)
 }
 
 func (s *L1Syncer) GetPreElderberryAccInputHash(ctx context.Context, addr *common.Address, batchNum uint64) (common.Hash, error) {

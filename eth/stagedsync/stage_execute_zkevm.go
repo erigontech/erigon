@@ -39,7 +39,7 @@ import (
 func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	if cfg.historyV3 {
 		if err = ExecBlockV3(s, u, wrap.TxContainer{Tx: tx}, toBlock, ctx, cfg, initialCycle, log.New()); err != nil {
-			return err
+			return fmt.Errorf("ExecBlockV3: %w", err)
 		}
 		return nil
 	}
@@ -59,16 +59,15 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
+		if tx, err = cfg.db.BeginRw(context.Background()); err != nil {
+			return fmt.Errorf("beginRw: %w", err)
 		}
 		defer tx.Rollback()
 	}
 
 	nextStageProgress, err := stages.GetStageProgress(tx, stages.HashState)
 	if err != nil {
-		return err
+		return fmt.Errorf("getStageProgress: %w", err)
 	}
 	nextStagesExpectData := nextStageProgress > 0 // Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 
@@ -87,19 +86,19 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 	}()
 
 	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, s.LogPrefix()); err != nil {
-		return err
+		return fmt.Errorf("UpdateZkEVMBlockCfg: %w", err)
 	}
 
 	eridb := erigon_db.NewErigonDb(tx)
 
 	prevBlockRoot, prevBlockHash, err := getBlockHashValues(cfg, ctx, tx, s.BlockNumber)
 	if err != nil {
-		return err
+		return fmt.Errorf("getBlockHashValues: %w", err)
 	}
 
 	to, total, err := getExecRange(cfg, tx, s.BlockNumber, toBlock, s.LogPrefix())
 	if err != nil {
-		return err
+		return fmt.Errorf("getExecRange: %w", err)
 	}
 
 	log.Info(fmt.Sprintf("[%s] Blocks execution", s.LogPrefix()), "from", s.BlockNumber, "to", to)
@@ -126,7 +125,7 @@ Loop:
 		//fetch values pre execute
 		datastreamBlockHash, block, senders, err := getPreexecuteValues(cfg, ctx, tx, blockNum, prevBlockHash)
 		if err != nil {
-			stoppedErr = err
+			stoppedErr = fmt.Errorf("getPreexecuteValues: %w", err)
 			break
 		}
 
@@ -143,7 +142,7 @@ Loop:
 					cfg.hd.ReportBadHeaderPoS(datastreamBlockHash, block.ParentHash())
 				}
 				if cfg.badBlockHalt {
-					return err
+					return fmt.Errorf("executeBlockZk: %w", err)
 				}
 			}
 			u.UnwindTo(blockNum-1, UnwindReason{Block: &datastreamBlockHash})
@@ -152,7 +151,7 @@ Loop:
 
 		if execRs.BlockInfoTree != nil {
 			if err = hermezDb.WriteBlockInfoRoot(blockNum, *execRs.BlockInfoTree); err != nil {
-				return err
+				return fmt.Errorf("WriteBlockInfoRoot: %w", err)
 			}
 		}
 
@@ -174,20 +173,19 @@ Loop:
 			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
 			currentStateGas = 0
 			if err = s.Update(batch, stageProgress); err != nil {
-				return err
+				return fmt.Errorf("s.Update: %w", err)
 			}
 			if err = batch.Flush(ctx, tx); err != nil {
-				return err
+				return fmt.Errorf("batch.Flush: %w", err)
 			}
 			if !useExternalTx {
 				if err = tx.Commit(); err != nil {
-					return err
+					return fmt.Errorf("tx.Commit: %w", err)
 				}
 				tx, err = cfg.db.BeginRw(context.Background())
 				if err != nil {
-					return err
+					return fmt.Errorf("cfg.db.BeginRw: %w", err)
 				}
-				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 				eridb = erigon_db.NewErigonDb(tx)
 				logger.SetTx(tx)
@@ -198,41 +196,40 @@ Loop:
 
 		//commit values post execute
 		if err := postExecuteCommitValues(s.LogPrefix(), cfg, tx, eridb, batch, datastreamBlockHash, block, senders); err != nil {
-			return err
+			return fmt.Errorf("postExecuteCommitValues: %w", err)
 		}
 	}
 
 	if err = s.Update(batch, stageProgress); err != nil {
-		return err
+		return fmt.Errorf("s.Update: %w", err)
 	}
 
 	// we need to artificially update the headers stage here as well to ensure that notifications
 	// can fire at the end of the stage loop and inform RPC subscriptions of new blocks for example
 	if err = stages.SaveStageProgress(tx, stages.Headers, stageProgress); err != nil {
-		return err
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	if err = batch.Flush(ctx, tx); err != nil {
-		return fmt.Errorf("batch commit: %w", err)
+		return fmt.Errorf("batch.Flush: %w", err)
 	}
 
-	_, err = rawdb.IncrementStateVersionByBlockNumberIfNeeded(tx, stageProgress) // stageProgress is latest processsed block number
-	if err != nil {
-		return fmt.Errorf("writing plain state version: %w", err)
+	// stageProgress is latest processsed block number
+	if _, err = rawdb.IncrementStateVersionByBlockNumberIfNeeded(tx, stageProgress); err != nil {
+		return fmt.Errorf("IncrementStateVersionByBlockNumberIfNeeded: %w", err)
 	}
 
 	if !useExternalTx {
 		log.Info(fmt.Sprintf("[%s] Commiting DB transaction...", s.LogPrefix()), "block", stageProgress)
 
 		if err = tx.Commit(); err != nil {
-			return err
+			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
 
 	log.Info(fmt.Sprintf("[%s] Completed on", s.LogPrefix()), "block", stageProgress)
 
-	err = stoppedErr
-	return err
+	return stoppedErr
 }
 
 // returns the block's blockHash and header stateroot
@@ -254,7 +251,7 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 	if cfg.zk.DebugLimit > 0 {
 		prevStageProgress, err := stages.GetStageProgress(tx, stages.Senders)
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, fmt.Errorf("getStageProgress: %w", err)
 		}
 		to := prevStageProgress
 		if cfg.zk.DebugLimit < to {
@@ -266,11 +263,11 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 
 	shouldShortCircuit, noProgressTo, err := utils.ShouldShortCircuitExecution(tx, logPrefix, cfg.zk.L2ShortCircuitToVerifiedBatch)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("ShouldShortCircuitExecution: %w", err)
 	}
 	prevStageProgress, err := stages.GetStageProgress(tx, stages.Senders)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("getStageProgress: %w", err)
 	}
 
 	// skip if no progress
@@ -296,12 +293,12 @@ func getExecRange(cfg ExecuteBlockCfg, tx kv.RwTx, stageProgress, toBlock uint64
 func getPreexecuteValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, blockNum uint64, prevBlockHash common.Hash) (common.Hash, *types.Block, []common.Address, error) {
 	preExecuteHeaderHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
-		return common.Hash{}, nil, nil, err
+		return common.Hash{}, nil, nil, fmt.Errorf("ReadCanonicalHash: %w", err)
 	}
 
 	block, senders, err := cfg.blockReader.BlockWithSenders(ctx, tx, preExecuteHeaderHash, blockNum)
 	if err != nil {
-		return common.Hash{}, nil, nil, err
+		return common.Hash{}, nil, nil, fmt.Errorf("BlockWithSenders: %w", err)
 	}
 
 	if block == nil {
@@ -313,7 +310,7 @@ func getPreexecuteValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, b
 	if cfg.chainConfig.IsLondon(blockNum) {
 		parentHeader, err := cfg.blockReader.Header(ctx, tx, prevBlockHash, blockNum-1)
 		if err != nil {
-			return common.Hash{}, nil, nil, err
+			return common.Hash{}, nil, nil, fmt.Errorf("cfg.blockReader.Header: %w", err)
 		}
 		block.HeaderNoCopy().BaseFee = misc.CalcBaseFeeZk(cfg.chainConfig, parentHeader)
 	}
@@ -341,29 +338,29 @@ func postExecuteCommitValues(
 			log.Warn(fmt.Sprintf("[%s] Blockhash mismatch", logPrefix), "blockNumber", blockNum, "datastreamBlockHash", datastreamBlockHash, "calculatedBlockHash", blockHash)
 		}
 		if err := rawdbZk.DeleteSenders(tx, datastreamBlockHash, blockNum); err != nil {
-			return fmt.Errorf("failed to delete senders: %v", err)
+			return fmt.Errorf("DeleteSenders: %w", err)
 		}
 		if err := rawdbZk.DeleteHeader(tx, datastreamBlockHash, blockNum); err != nil {
-			return fmt.Errorf("failed to delete header: %v", err)
+			return fmt.Errorf("DeleteHeader: %w", err)
 		}
 
 		bodyForStorage, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockNum, datastreamBlockHash))
 		if err != nil {
-			return err
+			return fmt.Errorf("ReadBodyForStorageByKey: %w", err)
 		}
 
 		if err := rawdb.DeleteBodyAndTransactions(tx, blockNum, datastreamBlockHash); err != nil {
-			return err
+			return fmt.Errorf("DeleteBodyAndTransactions: %w", err)
 		}
 		if err := rawdb.WriteBodyAndTransactions(tx, blockHash, blockNum, block.Transactions(), bodyForStorage); err != nil {
-			return err
+			return fmt.Errorf("WriteBodyAndTransactions: %w", err)
 		}
 
 		// [zkevm] senders were saved in stage_senders for headerHashes based on incomplete headers
 		// in stage execute we complete the headers and senders should be moved to the correct headerHash
 		// also we should delete other data based on the old hash, since it is unaccessable now
 		if err := rawdb.WriteSenders(tx, blockHash, blockNum, senders); err != nil {
-			return fmt.Errorf("failed to write senders: %v", err)
+			return fmt.Errorf("failed to write senders: %w", err)
 		}
 	}
 
@@ -388,13 +385,13 @@ func postExecuteCommitValues(
 		 later.
 	*/
 	if err := rawdb.WriteHeader_zkEvm(tx, header); err != nil {
-		return fmt.Errorf("failed to write header: %v", err)
+		return fmt.Errorf("WriteHeader_zkEvm: %w", err)
 	}
 	if err := rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
-		return err
+		return fmt.Errorf("WriteHeadHeaderHash: %w", err)
 	}
 	if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
-		return fmt.Errorf("failed to write header: %v", err)
+		return fmt.Errorf("WriteCanonicalHash: %w", err)
 	}
 	// if err := eridb.WriteBody(block.Number(), blockHash, block.Transactions()); err != nil {
 	// 	return fmt.Errorf("failed to write body: %v", err)
@@ -402,7 +399,7 @@ func postExecuteCommitValues(
 
 	// write the new block lookup entries
 	if err := rawdb.WriteTxLookupEntries_zkEvm(tx, block); err != nil {
-		return fmt.Errorf("failed to write tx lookup entries: %v", err)
+		return fmt.Errorf("WriteTxLookupEntries_zkEvm: %w", err)
 	}
 
 	return nil
@@ -421,12 +418,12 @@ func executeBlockZk(
 	initialCycle bool,
 	stateStream bool,
 	roHermezDb state.ReadOnlyHermezDb,
-) (*core.EphemeralExecResultZk, error) {
+) (execRs *core.EphemeralExecResultZk, err error) {
 	blockNum := block.NumberU64()
 
 	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, cfg.blockReader, stateStream)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("newStateReaderWriter: %w", err)
 	}
 
 	// where the magic happens
@@ -445,20 +442,19 @@ func executeBlockZk(
 	vmConfig.Tracer = callTracer
 
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
-	execRs, err := core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer, roHermezDb, prevBlockRoot)
-	if err != nil {
-		return nil, err
+	if execRs, err = core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer, roHermezDb, prevBlockRoot); err != nil {
+		return nil, fmt.Errorf("ExecuteBlockEphemerallyZk: %w", err)
 	}
 
 	if writeReceipts {
 		if err := rawdb.AppendReceipts(tx, blockNum, execRs.Receipts); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("AppendReceipts: %w", err)
 		}
 
 		stateSyncReceipt := execRs.StateSyncReceipt
 		if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusSuccessful {
 			if err := rawdb.WriteBorReceipt(tx, block.NumberU64(), stateSyncReceipt); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("WriteBorReceipt: %w", err)
 			}
 		}
 	}
@@ -470,7 +466,7 @@ func executeBlockZk(
 	}
 	if writeCallTraces {
 		if err := callTracer.WriteToDb(tx, block, *cfg.vmConfig); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("WriteToDb: %w", err)
 		}
 	}
 	return execRs, nil
@@ -482,9 +478,8 @@ func UnwindExecutionStageZk(u *UnwindState, s *StageState, tx kv.RwTx, ctx conte
 	}
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
+		if tx, err = cfg.db.BeginRw(context.Background()); err != nil {
+			return fmt.Errorf("beginRw: %w", err)
 		}
 		defer tx.Rollback()
 	}
@@ -492,24 +487,24 @@ func UnwindExecutionStageZk(u *UnwindState, s *StageState, tx kv.RwTx, ctx conte
 
 	logger := log.New()
 	if err = unwindExecutionStage(u, s, wrap.TxContainer{Tx: tx}, ctx, cfg, initialCycle, logger); err != nil {
-		return err
+		return fmt.Errorf("unwindExecutionStage: %w", err)
 	}
 	if err = UnwindExecutionStageDbWrites(ctx, u, s, tx); err != nil {
-		return err
+		return fmt.Errorf("UnwindExecutionStageDbWrites: %w", err)
 	}
 
 	// update the headers stage as we mark progress there as part of execution
 	if err = stages.SaveStageProgress(tx, stages.Headers, u.UnwindPoint); err != nil {
-		return err
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	if err = u.Done(tx); err != nil {
-		return err
+		return fmt.Errorf("u.Done: %w", err)
 	}
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return err
+			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
 	return nil
@@ -522,9 +517,8 @@ func UnwindExecutionStageErigon(u *UnwindState, s *StageState, tx kv.RwTx, ctx c
 func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
+		if tx, err = cfg.db.BeginRw(ctx); err != nil {
+			return fmt.Errorf("beginRw: %w", err)
 		}
 		defer tx.Rollback()
 	}
@@ -536,48 +530,43 @@ func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx c
 		cfg.agg.SetTx(tx)
 		if initialCycle {
 			if err = cfg.agg.Prune(ctx, config3.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
-				return err
+				return fmt.Errorf("cfg.agg.prune: %w", err)
 			}
 		} else {
 			if err = cfg.agg.PruneWithTiemout(ctx, 1*time.Second); err != nil { // prune part of retired data, before commit
-				return err
+				return fmt.Errorf("cfg.agg.PruneWithTiemout: %w", err)
 			}
 		}
 	} else {
 		if cfg.prune.History.Enabled() {
 			if err = rawdb.PruneTableDupSort(tx, kv.AccountChangeSet, s.LogPrefix(), cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
-				return err
+				return fmt.Errorf("PruneTableDupSort: %w", err)
 			}
 			if err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSet, s.LogPrefix(), cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
-				return err
+				return fmt.Errorf("PruneTableDupSort: %w", err)
 			}
 		}
 
 		if cfg.prune.Receipts.Enabled() {
-			if err = rawdb.PruneTable(tx, kv.Receipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
-				return err
-			}
-			if err = rawdb.PruneTable(tx, kv.BorReceipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxUint32); err != nil {
-				return err
-			}
-			// LogIndex.Prune will read everything what not pruned here
-			if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
-				return err
+			for _, table := range []string{kv.Receipts, kv.BorReceipts, kv.Log} {
+				if err = rawdb.PruneTable(tx, table, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
+					return fmt.Errorf("rawdb.PruneTable %s: %w", table, err)
+				}
 			}
 		}
 		if cfg.prune.CallTraces.Enabled() {
 			if err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, s.LogPrefix(), cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
-				return err
+				return fmt.Errorf("PruneTableDupSort: %w", err)
 			}
 		}
 	}
 
 	if err = s.Done(tx); err != nil {
-		return err
+		return fmt.Errorf("s.Done: %w", err)
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return err
+			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
 	return nil
@@ -588,9 +577,11 @@ func UnwindExecutionStageDbWrites(ctx context.Context, u *UnwindState, s *StageS
 	// TODO: check for other missing value like - WriteHeader_zkEvm, WriteHeadHeaderHash, WriteCanonicalHash, WriteBody, WriteSenders, WriteTxLookupEntries_zkEvm
 	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 	if err != nil {
-		return err
+		return fmt.Errorf("ReadCanonicalHash: %w", err)
 	}
-	rawdb.WriteHeadHeaderHash(tx, hash)
+	if err := rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
+		return fmt.Errorf("WriteHeadHeaderHash: %w", err)
+	}
 
 	/*
 		unwind EffectiveGasPricePercentage here although it is written in stage batches (RPC) or stage execute (Sequencer)
@@ -601,34 +592,34 @@ func UnwindExecutionStageDbWrites(ctx context.Context, u *UnwindState, s *StageS
 
 	transactions, err := eriDb.GetBodyTransactions(u.UnwindPoint+1, s.BlockNumber)
 	if err != nil {
-		return fmt.Errorf("get body transactions error: %v", err)
+		return fmt.Errorf("GetBodyTransactions: %w", err)
 	}
 	transactionHashes := make([]common.Hash, 0, len(*transactions))
 	for _, tx := range *transactions {
 		transactionHashes = append(transactionHashes, tx.Hash())
 	}
 	if err := hermezDb.DeleteEffectiveGasPricePercentages(&transactionHashes); err != nil {
-		return fmt.Errorf("delete effective gas price percentages error: %v", err)
+		return fmt.Errorf("DeleteEffectiveGasPricePercentages: %w", err)
 	}
 
 	if err = rawdbZk.TruncateSenders(tx, u.UnwindPoint+1, s.BlockNumber); err != nil {
-		return fmt.Errorf("delete senders: %w", err)
+		return fmt.Errorf("TruncateSenders: %w", err)
 	}
 	if err = rawdb.TruncateTxLookupEntries_zkEvm(tx, u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("delete tx lookup entires: %w", err)
 	}
 	if err = rawdb.TruncateBlocks(ctx, tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("delete blocks: %w", err)
+		return fmt.Errorf("dTruncateBlocks: %w", err)
 	}
 	if err = rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, true); err != nil {
-		return fmt.Errorf("delete cannonical hash with headers: %w", err)
+		return fmt.Errorf("TruncateCanonicalHash: %w", err)
 	}
 	if err = rawdb.TruncateStateVersion(tx, u.UnwindPoint+1); err != nil {
-		return err
+		return fmt.Errorf("TruncateStateVersion: %w", err)
 	}
 
 	if err = hermezDb.DeleteBlockInfoRoots(u.UnwindPoint+1, s.BlockNumber); err != nil {
-		return fmt.Errorf("delete block info roots: %w", err)
+		return fmt.Errorf("DeleteBlockInfoRoots: %w", err)
 	}
 
 	return nil
