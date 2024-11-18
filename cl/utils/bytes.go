@@ -160,15 +160,41 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 	return true
 }
 
-func IsOverlappingBitlist(a, b []byte) bool {
+// IsOverlappingSSZBitlist checks if bitlist 'a' and bitlist 'b' have any overlapping bits
+// However, it ignores the last bits in the last byte.
+func IsOverlappingSSZBitlist(a, b []byte) bool {
 	length := min(len(a), len(b))
 	for i := range length {
+
 		if a[i]&b[i] != 0 {
-			return true
+			if i != length-1 {
+				return true
+			}
+			var foundOverlap bool
+			// check the overlap bit by bit
+			for j := 0; j < 8; j++ {
+				if (a[i]>>j)&(b[i]>>j)&1 == 1 {
+					if foundOverlap {
+						return true
+					}
+					foundOverlap = true
+				}
+			}
 		}
 	}
 	return false
+
 }
+
+// func IsOverlappingBitlist(a, b []byte) bool {
+// 	length := min(len(a), len(b))
+// 	for i := range length {
+// 		if a[i]&b[i] != 0 {
+// 			return true
+// 		}
+// 	}
+// 	return false
+// }
 
 func BitsOnCount(b []byte) int {
 	count := 0

@@ -16,7 +16,7 @@
 
 //go:build !nofuzz
 
-package types
+package txpool
 
 import (
 	"testing"

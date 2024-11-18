@@ -14,7 +14,61 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package txpool
+package typestest
+
+import (
+	"fmt"
+
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto/kzg"
+)
+
+func MakeBlobTxRlp() ([]byte, []gokzg4844.KZGCommitment) {
+	bodyRlp := hexutility.MustDecodeHex(BodyRlpHex)
+
+	blobsRlpPrefix := hexutility.MustDecodeHex("fa040008")
+	blobRlpPrefix := hexutility.MustDecodeHex("ba020000")
+
+	var blob0, blob1 = gokzg4844.Blob{}, gokzg4844.Blob{}
+	copy(blob0[:], hexutility.MustDecodeHex(ValidBlob1Hex))
+	copy(blob1[:], hexutility.MustDecodeHex(ValidBlob2Hex))
+
+	var err error
+	proofsRlpPrefix := hexutility.MustDecodeHex("f862")
+	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0, 0)
+	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1, 0)
+
+	proof0, err := kzg.Ctx().ComputeBlobKZGProof(blob0, commitment0, 0)
+	if err != nil {
+		fmt.Println("error", err)
+	}
+	proof1, err := kzg.Ctx().ComputeBlobKZGProof(blob1, commitment1, 0)
+	if err != nil {
+		fmt.Println("error", err)
+	}
+
+	wrapperRlp := hexutility.MustDecodeHex("03fa0401fe")
+	wrapperRlp = append(wrapperRlp, bodyRlp...)
+	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob0[:]...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob1[:]...)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment1[:]...)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, proof0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, proof1[:]...)
+
+	return wrapperRlp, []gokzg4844.KZGCommitment{commitment0, commitment1}
+}
 
 const (
 

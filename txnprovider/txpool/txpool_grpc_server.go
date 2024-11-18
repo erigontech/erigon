@@ -42,20 +42,19 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
 )
 
 // TxPoolAPIVersion
-var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
+var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 type txPool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
-	PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error)
+	PeekBest(n uint16, txs *TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error)
+	AddLocalTxs(ctx context.Context, newTxs TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
@@ -71,7 +70,7 @@ type GrpcDisabled struct {
 	txpool_proto.UnimplementedTxpoolServer
 }
 
-func (*GrpcDisabled) Version(ctx context.Context, empty *emptypb.Empty) (*types2.VersionReply, error) {
+func (*GrpcDisabled) Version(ctx context.Context, empty *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return nil, ErrPoolDisabled
 }
 func (*GrpcDisabled) FindUnknown(ctx context.Context, hashes *txpool_proto.TxHashes) (*txpool_proto.TxHashes, error) {
@@ -114,7 +113,7 @@ func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, chainID uint2
 	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, NewSlotsStreams: &NewSlotsStreams{}, chainID: chainID, logger: logger}
 }
 
-func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
+func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return TxPoolAPIVersion, nil
 }
 func convertSubPoolType(t SubPoolType) txpool_proto.AllReply_TxnType {
@@ -155,7 +154,7 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_pro
 	defer tx.Rollback()
 	reply := &txpool_proto.PendingReply{}
 	reply.Txs = make([]*txpool_proto.PendingReply_Tx, 0, 32)
-	txSlots := types.TxsRlp{}
+	txSlots := TxsRlp{}
 	if _, err := s.txPool.PeekBest(math.MaxInt16, &txSlots, tx, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */); err != nil {
 		return nil, err
 	}
@@ -182,8 +181,8 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	}
 	defer tx.Rollback()
 
-	var slots types.TxSlots
-	parseCtx := types.NewTxParseContext(s.chainID).ChainIDRequired()
+	var slots TxSlots
+	parseCtx := NewTxParseContext(s.chainID).ChainIDRequired()
 	parseCtx.ValidateRLP(s.txPool.ValidateSerializedTxn)
 
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
@@ -191,19 +190,19 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	for i := 0; i < len(in.RlpTxs); i++ {
 		j := len(slots.Txs) // some incoming txs may be rejected, so - need second index
 		slots.Resize(uint(j + 1))
-		slots.Txs[j] = &types.TxSlot{}
+		slots.Txs[j] = &TxSlot{}
 		slots.IsLocal[j] = true
 		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txs[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
 			if known, _ := s.txPool.IdHashKnown(tx, hash); known {
-				return types.ErrAlreadyKnown
+				return ErrAlreadyKnown
 			}
 			return nil
 		}); err != nil {
-			slots.Resize(uint(j))                      // remove erroneous transaction
-			if errors.Is(err, types.ErrAlreadyKnown) { // Noop, but need to handle to not count these
+			slots.Resize(uint(j))                // remove erroneous transaction
+			if errors.Is(err, ErrAlreadyKnown) { // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.AlreadyKnown.String()
 				reply.Imported[i] = txpool_proto.ImportResult_ALREADY_EXISTS
-			} else if errors.Is(err, types.ErrRlpTooBig) { // Noop, but need to handle to not count these
+			} else if errors.Is(err, ErrRlpTooBig) { // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
 				reply.Imported[i] = txpool_proto.ImportResult_INVALID
 			} else {
