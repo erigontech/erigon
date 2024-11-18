@@ -603,6 +603,19 @@ func (e *eprovider) test(s string) {
 	e.callch <- s
 }
 
+type handler struct {
+	ch chan string
+}
+
+func (h *handler) H1(s string) {
+	h.ch <- s
+}
+
+func (h *handler) H2(s0 string, s1 string) {
+	h.ch <- s0
+	h.ch <- s1
+}
+
 func TestEvents(t *testing.T) {
 	c, err := component.NewComponent[eprovider](context.Background(),
 		component.WithId("c"),
@@ -613,14 +626,17 @@ func TestEvents(t *testing.T) {
 	callch := make(chan string)
 	c.Provider().callch = callch
 
+	bus := c.EventBus("t")
+
 	testfn := c.Provider().test
-	c.Register(
+	bus.Register(
+		&c,
 		func(s string) {
 			callch <- s
 		},
 		testfn)
 
-	nocalls := c.Post("test")
+	nocalls := bus.Post("test")
 	require.Equal(t, 2, nocalls)
 	r := <-callch
 	require.Equal(t, "test", r)
@@ -628,15 +644,15 @@ func TestEvents(t *testing.T) {
 	require.Equal(t, "test", r)
 	require.Equal(t, "test", c.Provider().s)
 
-	require.NoError(t, c.Unegister(testfn))
+	require.NoError(t, bus.Unregister(&c, testfn))
 
-	nocalls = c.Post("test-1")
+	nocalls = bus.Post("test-1")
 	require.Equal(t, 1, nocalls)
 	r = <-callch
 	require.Equal(t, "test-1", r)
 	require.Equal(t, "test", c.Provider().s)
 
-	bus := c.EventBus("tb")
+	bus = c.EventBus("tb")
 
 	bus.Register(c.Provider(),
 		func(s string) {
@@ -664,6 +680,20 @@ func TestEvents(t *testing.T) {
 	bus.UnregisterAll(c.Provider())
 	nocalls = bus.Post("test-4")
 	require.Equal(t, 0, nocalls)
+
+	bus = c.EventBus("tc")
+	h := &handler{callch}
+	bus.Register(h)
+	nocalls = bus.Post("test-5")
+	require.Equal(t, 1, nocalls)
+	r = <-callch
+	require.Equal(t, "test-5", r)
+	nocalls = bus.Post("test-6", "test-7")
+	require.Equal(t, 1, nocalls)
+	r = <-callch
+	require.Equal(t, "test-6", r)
+	r = <-callch
+	require.Equal(t, "test-7", r)
 }
 
 func TestMultipleDependents(t *testing.T) {

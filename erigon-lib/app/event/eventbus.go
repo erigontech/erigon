@@ -69,72 +69,74 @@ func (hmap *handlerMap) publish(bus *eventBus, args []interface{}, argIndex int)
 		}
 	}
 
-	if handlers := hmap.handlers; len(handlers) > 0 {
-		// Handlers slice may be changed by removeHandler and Unsubscribe during iteration,
-		// so make a copy and iterate the copied slice.
-		copyHandlers := make([]*eventHandler, 0, len(handlers))
-		copyHandlers = append(copyHandlers, handlers...)
+	if argIndex == len(args) {
+		if handlers := hmap.handlers; len(handlers) > 0 {
+			// Handlers slice may be changed by removeHandler and Unsubscribe during iteration,
+			// so make a copy and iterate the copied slice.
+			copyHandlers := make([]*eventHandler, 0, len(handlers))
+			copyHandlers = append(copyHandlers, handlers...)
 
-		for i, handler := range copyHandlers {
-			pubcount++
-			if handler.flagOnce {
-				hmap.removeHandler(i)
-			}
-
-			logEnabled := log.TraceEnabled()
-
-			if !handler.async {
-				handler.doPublish(handler.bus, logEnabled, args...)
-			} else {
-				asyncHandler := handler
-				bus.wg.Add(1)
-
-				if log.TraceEnabled() {
-					log.Trace("Exec handler func",
-						"handler", fmt.Sprint(asyncHandler),
-						"bus", app.LogInstance(asyncHandler.bus),
-						"poolSize", bus.execPool.PoolSize(),
-						"queueSize", bus.execPool.QueueSize(),
-						"args", fmt.Sprint(args...))
+			for i, handler := range copyHandlers {
+				pubcount++
+				if handler.flagOnce {
+					hmap.removeHandler(i)
 				}
 
-				bus.execPool.Exec(func() {
-					bus.lock.RLock()
-					handlerBus := asyncHandler.bus
-					bus.lock.RUnlock()
-					if handlerBus != nil {
-						asyncHandler.doPublish(handlerBus, logEnabled, args...)
-					} else {
-						if logEnabled {
-							log.Trace("Ignoring callback",
-								"handler", fmt.Sprint(asyncHandler),
-								"bus", app.LogInstance(handlerBus),
-								"args", fmt.Sprint(args...))
-						}
-					}
-					bus.wg.Done()
-				})
+				logEnabled := log.TraceEnabled()
 
-				queueSize := bus.execPool.QueueSize()
+				if !handler.async {
+					handler.doPublish(handler.bus, logEnabled, args...)
+				} else {
+					asyncHandler := handler
+					bus.wg.Add(1)
 
-				if queueSize > 0 {
-					if queueSize > bus.prevQueueSize {
-						if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
-							log.Debug("Execpool overflowing",
-								"bus", app.LogInstance(bus),
-								"poolSize", bus.execPool.PoolSize(),
-								"queueSize", bus.execPool.QueueSize())
-						}
-					} else if queueSize < bus.prevQueueSize {
-						if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
-							log.Debug("Execpool overflow recovering",
-								"bus", app.LogInstance(bus),
-								"poolSize", bus.execPool.PoolSize(),
-								"queueSize", bus.execPool.QueueSize())
-						}
+					if log.TraceEnabled() {
+						log.Trace("Exec handler func",
+							"handler", fmt.Sprint(asyncHandler),
+							"bus", app.LogInstance(asyncHandler.bus),
+							"poolSize", bus.execPool.PoolSize(),
+							"queueSize", bus.execPool.QueueSize(),
+							"args", fmt.Sprint(args...))
 					}
 
-					bus.prevQueueSize = queueSize
+					bus.execPool.Exec(func() {
+						bus.lock.RLock()
+						handlerBus := asyncHandler.bus
+						bus.lock.RUnlock()
+						if handlerBus != nil {
+							asyncHandler.doPublish(handlerBus, logEnabled, args...)
+						} else {
+							if logEnabled {
+								log.Trace("Ignoring callback",
+									"handler", fmt.Sprint(asyncHandler),
+									"bus", app.LogInstance(handlerBus),
+									"args", fmt.Sprint(args...))
+							}
+						}
+						bus.wg.Done()
+					})
+
+					queueSize := bus.execPool.QueueSize()
+
+					if queueSize > 0 {
+						if queueSize > bus.prevQueueSize {
+							if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
+								log.Debug("Execpool overflowing",
+									"bus", app.LogInstance(bus),
+									"poolSize", bus.execPool.PoolSize(),
+									"queueSize", bus.execPool.QueueSize())
+							}
+						} else if queueSize < bus.prevQueueSize {
+							if queueSize == 10 || queueSize == 20 || queueSize == 50 || queueSize%100 == 0 {
+								log.Debug("Execpool overflow recovering",
+									"bus", app.LogInstance(bus),
+									"poolSize", bus.execPool.PoolSize(),
+									"queueSize", bus.execPool.QueueSize())
+							}
+						}
+
+						bus.prevQueueSize = queueSize
+					}
 				}
 			}
 		}

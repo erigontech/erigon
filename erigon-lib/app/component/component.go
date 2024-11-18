@@ -64,10 +64,6 @@ type Component[P any] interface {
 
 	Provider() *P
 
-	Post(args ...interface{}) int
-	Register(fns ...interface{}) error
-	Unegister(fns ...interface{}) error
-
 	EventBus(key interface{}) *event.ManagedEventBus
 }
 
@@ -1102,18 +1098,6 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 		}
 	}
 	return nil
-}
-
-func (c *component) Post(args ...interface{}) int {
-	return c.serviceBus().Post(args...)
-}
-
-func (c *component) Register(fns ...interface{}) (err error) {
-	return c.serviceBus().Register(c, fns...)
-}
-
-func (c *component) Unegister(fns ...interface{}) (err error) {
-	return c.serviceBus().Unregister(c, fns...)
 }
 
 func (c *component) EventBus(key interface{}) *event.ManagedEventBus {

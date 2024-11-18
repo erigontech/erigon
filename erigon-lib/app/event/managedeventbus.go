@@ -23,7 +23,16 @@ func (bus *ManagedEventBus) String() string {
 }
 
 func (bus *ManagedEventBus) Register(object interface{}, fns ...interface{}) (err error) {
-	objectPtr := reflect.ValueOf(object).Pointer()
+	objectVal := reflect.ValueOf(object)
+	if len(fns) == 0 {
+		for i := 0; i < objectVal.NumMethod(); i++ {
+			if method := objectVal.Method(i); method.Type().NumIn() > 0 && method.Type().NumOut() == 0 {
+				fns = append(fns, method.Interface())
+			}
+		}
+	}
+	objectPtr := objectVal.Pointer()
+
 	bus.registrationLock.Lock()
 	for _, fn := range fns {
 		bus.registrations[objectPtr] = append(bus.registrations[objectPtr], fn)
