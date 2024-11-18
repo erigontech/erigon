@@ -110,7 +110,7 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 	diffBlocks := max(int(outputBlockNum)-int(p.prevOutputBlockNum)+1, 0)
 
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
-		"inMem", inMemExec, "blk", outputBlockNum,
+		"blk", outputBlockNum,
 		"blks", diffBlocks,
 		"blk/s", fmt.Sprintf("%.1f", float64(diffBlocks)/interval.Seconds()),
 		"txs", txCount-p.prevTxCount,
@@ -122,6 +122,7 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 		"buf", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.HistoryV3AggregationStep)),
+		"inMem", inMemExec,
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 
@@ -309,7 +310,7 @@ func ExecV3(ctx context.Context,
 
 	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"inMem", inMemExec, "from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
