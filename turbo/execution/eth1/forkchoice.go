@@ -306,8 +306,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, blockHas
 			return
 		}
 	}
+	tx.Commit()
 	// Run the forkchoice
-	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, false); err != nil {
+	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: nil}, false); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
