@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -81,6 +82,16 @@ type Cursor struct {
 	key    []byte
 	value  []byte
 	d      uint64
+}
+
+func (c *Cursor) Close() {
+	if c == nil {
+		return
+	}
+	c.key = c.key[:0]
+	c.value = c.value[:0]
+	c.getter = nil
+	c.btt.pool.Put(c)
 }
 
 // getter should be alive all the time of cursor usage
@@ -727,6 +738,7 @@ type BtIndex struct {
 	size     int64
 	modTime  time.Time
 	filePath string
+	pool     sync.Pool
 }
 
 // Decompressor should be managed by caller (could be closed after index is built). When index is built, external getter should be passed to seekInFiles function
@@ -863,6 +875,11 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	}
 
 	idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
+	idx.pool = sync.Pool{
+		New: func() any {
+			return &Cursor{btt: idx}
+		},
+	}
 
 	defer kv.EnableMadvNormal().DisableReadAhead()
 	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
@@ -958,13 +975,11 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int
 // getter should be alive all the time of cursor usage
 // Key and value is valid until cursor.Next is called
 func (b *BtIndex) newCursor(k, v []byte, d uint64, g *seg.Reader) *Cursor {
-	return &Cursor{
-		getter: g,
-		key:    common.Copy(k),
-		value:  common.Copy(v),
-		d:      d,
-		btt:    b,
-	}
+	c := b.pool.Get().(*Cursor)
+	c.d, c.getter = d, g
+	c.key = append(c.key[:0], k...)
+	c.value = append(c.value[:0], v...)
+	return c
 }
 
 func (b *BtIndex) Size() int64 { return b.size }

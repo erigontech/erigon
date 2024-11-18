@@ -135,12 +135,14 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		require.EqualValues(t, keys[i], k)
 		c.Next()
 	}
+	c.Close()
 
 	for i := 0; i < len(keys); i++ {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoErrorf(t, err, "i=%d", i)
 		require.EqualValuesf(t, keys[i], cur.key, "i=%d", i)
 		require.NotEmptyf(t, cur.Value(), "i=%d", i)
+		cur.Close()
 		// require.EqualValues(t, uint64(i), cur.Value())
 	}
 	for i := 1; i < len(keys); i++ {
@@ -154,6 +156,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.EqualValues(t, keys[i], cur.Key())
+		cur.Close()
 	}
 }
 
@@ -191,10 +194,13 @@ func Test_BtreeIndex_Build(t *testing.T) {
 		}
 		c.Next()
 	}
+	c.Close()
+
 	for i := 0; i < 10000; i++ {
 		c, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.EqualValues(t, keys[i], c.Key())
+		c.Close()
 	}
 }
 

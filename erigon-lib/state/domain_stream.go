@@ -200,6 +200,8 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 					if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
 						heap.Push(hi.h, ci1)
 					}
+				} else {
+					ci1.btCursor.Close()
 				}
 			case DB_CURSOR:
 				if hi.largeVals {

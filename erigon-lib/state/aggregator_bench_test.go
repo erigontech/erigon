@@ -163,6 +163,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 		require.NoErrorf(b, err, "i=%d", i)
 		require.EqualValues(b, keys[p], cur.Key())
 		require.NotEmptyf(b, cur.Value(), "i=%d", i)
+		cur.Close()
 	}
 }
 
@@ -203,6 +204,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			require.NoError(b, err)
 
 			require.EqualValues(b, keys[p], cur.key)
+			cur.Close()
 		}
 	})
 
@@ -235,7 +237,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 			if i%1000 == 0 {
 				fmt.Printf("next_access_last[of %d keys] %v\n", nextKeys, ntimer/time.Duration(nextKeys))
 			}
-
+			cur.Close()
 		}
 	})
 }
