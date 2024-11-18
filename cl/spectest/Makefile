@@ -2,11 +2,12 @@
 
 
 tests:
-	wget https://github.com/ethereum/consensus-spec-tests/releases/download/v1.4.0-beta.5/mainnet.tar.gz
+	wget https://github.com/ethereum/consensus-spec-tests/releases/download/v1.5.0-alpha.8/mainnet.tar.gz
 	tar xf mainnet.tar.gz
 	rm mainnet.tar.gz
 	# not needed for now
 	rm -rf tests/mainnet/eip6110
+
 clean:
 	rm -rf tests
 

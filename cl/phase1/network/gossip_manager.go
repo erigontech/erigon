@@ -335,7 +335,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 		select {
 		case ch <- data:
 		default:
-			log.Debug("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
+			log.Trace("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
 		}
 	}
 

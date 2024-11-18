@@ -10,6 +10,7 @@ import (
 
 var (
 	_ solid.EncodableHashableSSZ = (*ExecutionRequests)(nil)
+	_ ssz2.SizedObjectSSZ        = (*ExecutionRequests)(nil)
 )
 
 // class ExecutionRequests(Container):
@@ -52,4 +53,8 @@ func (e *ExecutionRequests) Clone() clonable.Clonable {
 
 func (e *ExecutionRequests) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(e.Deposits, e.Withdrawals, e.Consolidations)
+}
+
+func (e *ExecutionRequests) Static() bool {
+	return false
 }
