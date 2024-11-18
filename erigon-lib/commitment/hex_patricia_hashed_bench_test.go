@@ -48,8 +48,10 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	err := ms.applyPlainUpdates(pk, updates)
 	require.NoError(b, err)
 
-	hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
-	upds := WrapKeyUpdates(b, ModeDirect, hph.hashAndNibblizeKey, nil, nil)
+	hphR := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
+	hph, err := NewParallelPatriciaHashed(hphR, ms, ms.TempDir())
+	require.NoError(b, err)
+	upds := WrapKeyUpdatesParallel(b, ModeDirect, hphR.hashAndNibblizeKey, nil, nil)
 	defer upds.Close()
 
 	b.ResetTimer()

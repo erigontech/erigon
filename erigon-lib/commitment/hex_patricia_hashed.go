@@ -1520,7 +1520,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 }
 
 func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
-	fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
+	// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
 		if err := hph.fold(); err != nil {
@@ -1555,14 +1555,15 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 }
 
 func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, int, error) {
-	hph.trace = true
-	if hph.activeRows == 0 {
-		return hph.root, 0, nil
-	}
+	uptoroot := hph.activeRows == 0
 	for hph.activeRows > 0 {
 		if err := hph.fold(); err != nil {
+			panic(err)
 			return cell{}, 0, fmt.Errorf("final fold: %w", err)
 		}
+	}
+	if uptoroot {
+		return hph.root, 0, nil
 	}
 	_ = nib
 	return hph.grid[0][hph.mountedNib], 1, nil
@@ -2227,6 +2228,7 @@ func (p *ParallelPatriciaHashed) unfoldRoot() error {
 
 func NewParallelPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext, tmpdir string) (*ParallelPatriciaHashed, error) {
 	p := &ParallelPatriciaHashed{root: root}
+
 	for i := range p.mounts {
 		hph := NewHexPatriciaHashed(length.Addr, ctx, tmpdir)
 		hph.mountedNib = i
@@ -2322,7 +2324,7 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 		p.root.activeRows = 1
 	}
 
-	p.root.trace = true
+	// p.root.trace = true
 	for p.root.activeRows > 0 {
 		if err = p.root.fold(); err != nil {
 			return nil, err

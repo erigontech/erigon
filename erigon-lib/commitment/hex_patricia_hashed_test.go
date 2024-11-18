@@ -268,6 +268,98 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 	return pks, upds
 }
 
+func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	uniqTest := func(t *testing.T, sortHashedKeys bool, trace bool) {
+		t.Helper()
+
+		stateSeq := NewMockState(t)
+		stateBatch := NewMockState(t)
+
+		plainKeys, updates := NewUpdateBuilder().
+			Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
+			Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
+			Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
+			Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
+			// Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+			// Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
+			// Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
+			// Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
+			// Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
+			// Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 100000).
+			// Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
+			// Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
+			// Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
+			// Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
+			Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
+			// Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
+			// Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
+			// Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
+			// Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
+			Build()
+
+		keyLen := 20
+		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq, stateSeq.TempDir())
+		trieBatchR := NewHexPatriciaHashed(keyLen, stateBatch, stateBatch.TempDir())
+		trieBatch, err := NewParallelPatriciaHashed(trieBatchR, stateBatch, stateBatch.TempDir())
+		require.NoError(t, err)
+
+		if sortHashedKeys {
+			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+		}
+
+		trieSequential.SetTrace(trace)
+		trieBatch.SetTrace(trace)
+
+		var rSeq, rBatch []byte
+		{
+			fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
+			for i := 0; i < len(updates); i++ {
+				err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
+				require.NoError(t, err)
+
+				updsOne := WrapKeyUpdates(t, ModeDirect, trieSequential.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+
+				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
+				require.NoError(t, err)
+
+				t.Logf("sequential root @%d hash %x\n", i, sequentialRoot)
+				rSeq = common.Copy(sequentialRoot)
+
+				updsOne.Close()
+			}
+		}
+		{
+			fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
+			err := stateBatch.applyPlainUpdates(plainKeys, updates)
+			require.NoError(t, err)
+
+			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, trieBatchR.hashAndNibblizeKey, plainKeys, updates)
+
+			rh, err := trieBatch.Process(ctx, updsTwo, "")
+			require.NoError(t, err)
+			t.Logf("batch of %d root hash %x\n", len(updates), rh)
+
+			rBatch = common.Copy(rh)
+			updsTwo.Close()
+		}
+		require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
+	}
+
+	// Same PLAIN prefix is not necessary while HASHED CPL>0 is required
+	t.Run("InsertStorageWhenCPL==0", func(t *testing.T) {
+		// ordering of keys differs
+		uniqTest(t, true, true)
+	})
+	t.Run("InsertStorageWhenCPL>0", func(t *testing.T) {
+		// ordering of keys differs
+		uniqTest(t, false, false)
+	})
+}
+
 func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 	t.Parallel()
 
