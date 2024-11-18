@@ -275,7 +275,7 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	var compatErr error
 	var compatTx kv.Tx
 	if compatTx, compatErr = db.BeginRo(ctx); compatErr != nil {
-		return fmt.Errorf("open Ro TxnSlot for DB schema compability check: %w", compatErr)
+		return fmt.Errorf("open Ro Tx for DB schema compability check: %w", compatErr)
 	}
 	defer compatTx.Rollback()
 	major, minor, patch, ok, err := rawdb.ReadDBSchemaVersion(compatTx)

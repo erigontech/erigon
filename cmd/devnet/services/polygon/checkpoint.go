@@ -443,9 +443,9 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 		// fetch side txs sigs
 		decoder := helper.GetTxDecoder(authTypes.ModuleCdc)
 
-		stdTx, err := decoder(tx.TxnSlot)
+		stdTx, err := decoder(tx.Tx)
 		if err != nil {
-			h.logger.Error("Error while decoding checkpoint tx", "txHash", tx.TxnSlot.Hash(), "error", err)
+			h.logger.Error("Error while decoding checkpoint tx", "txHash", tx.Tx.Hash(), "error", err)
 			return err
 		}
 
@@ -453,7 +453,7 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 
 		sideMsg, ok := cmsg.(hmTypes.SideTxMsg)
 		if !ok {
-			h.logger.Error("Invalid side-tx msg", "txHash", tx.TxnSlot.Hash())
+			h.logger.Error("Invalid side-tx msg", "txHash", tx.Tx.Hash())
 			return err
 		}
 	*/
@@ -490,7 +490,7 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 		sideTxData := checkpoint.GetSideSignBytes()
 
 		// get sigs
-		sigs /*, err*/ := [][3]*big.Int{} //helper.FetchSideTxSigs(cp.httpClient, height, tx.TxnSlot.Hash(), sideTxData)
+		sigs /*, err*/ := [][3]*big.Int{} //helper.FetchSideTxSigs(cp.httpClient, height, tx.Tx.Hash(), sideTxData)
 
 		/*
 			if err != nil {

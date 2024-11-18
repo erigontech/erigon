@@ -1060,8 +1060,8 @@ var file_txpool_txpool_proto_goTypes = []any{
 	(*StatusReply)(nil),             // 13: txpool.StatusReply
 	(*NonceRequest)(nil),            // 14: txpool.NonceRequest
 	(*NonceReply)(nil),              // 15: txpool.NonceReply
-	(*AllReply_Tx)(nil),             // 16: txpool.AllReply.TxnSlot
-	(*PendingReply_Tx)(nil),         // 17: txpool.PendingReply.TxnSlot
+	(*AllReply_Tx)(nil),             // 16: txpool.AllReply.Tx
+	(*PendingReply_Tx)(nil),         // 17: txpool.PendingReply.Tx
 	(*typesproto.H256)(nil),         // 18: types.H256
 	(*typesproto.H160)(nil),         // 19: types.H160
 	(*emptypb.Empty)(nil),           // 20: google.protobuf.Empty
@@ -1071,12 +1071,12 @@ var file_txpool_txpool_proto_depIdxs = []int32{
 	18, // 0: txpool.TxHashes.hashes:type_name -> types.H256
 	0,  // 1: txpool.AddReply.imported:type_name -> txpool.ImportResult
 	18, // 2: txpool.TransactionsRequest.hashes:type_name -> types.H256
-	16, // 3: txpool.AllReply.txs:type_name -> txpool.AllReply.TxnSlot
-	17, // 4: txpool.PendingReply.txs:type_name -> txpool.PendingReply.TxnSlot
+	16, // 3: txpool.AllReply.txs:type_name -> txpool.AllReply.Tx
+	17, // 4: txpool.PendingReply.txs:type_name -> txpool.PendingReply.Tx
 	19, // 5: txpool.NonceRequest.address:type_name -> types.H160
-	1,  // 6: txpool.AllReply.TxnSlot.txn_type:type_name -> txpool.AllReply.TxnType
-	19, // 7: txpool.AllReply.TxnSlot.sender:type_name -> types.H160
-	19, // 8: txpool.PendingReply.TxnSlot.sender:type_name -> types.H160
+	1,  // 6: txpool.AllReply.Tx.txn_type:type_name -> txpool.AllReply.TxnType
+	19, // 7: txpool.AllReply.Tx.sender:type_name -> types.H160
+	19, // 8: txpool.PendingReply.Tx.sender:type_name -> types.H160
 	20, // 9: txpool.Txpool.Version:input_type -> google.protobuf.Empty
 	2,  // 10: txpool.Txpool.FindUnknown:input_type -> txpool.TxHashes
 	3,  // 11: txpool.Txpool.Add:input_type -> txpool.AddRequest

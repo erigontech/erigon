@@ -53,19 +53,19 @@ func compareBlocks(b, bg *EthBlockByNumber) bool {
 	for i, txn := range r.Transactions {
 		txg := rg.Transactions[i]
 		if txn.From != txg.From {
-			fmt.Printf("TxnSlot %d different From: %x %x\n", i, txn.From, txg.From)
+			fmt.Printf("Tx %d different From: %x %x\n", i, txn.From, txg.From)
 			return false
 		}
 		if (txn.To == nil && txg.To != nil) || (txn.To != nil && txg.To == nil) {
-			fmt.Printf("TxnSlot %d different To nilness: %t %t\n", i, txn.To == nil, txg.To == nil)
+			fmt.Printf("Tx %d different To nilness: %t %t\n", i, txn.To == nil, txg.To == nil)
 			return false
 		}
 		if txn.To != nil && txg.To != nil && *txn.To != *txg.To {
-			fmt.Printf("TxnSlot %d different To: %x %x\n", i, *txn.To, *txg.To)
+			fmt.Printf("Tx %d different To: %x %x\n", i, *txn.To, *txg.To)
 			return false
 		}
 		if txn.Hash != txg.Hash {
-			fmt.Printf("TxnSlot %x different Hash: %s %s\n", i, txn.Hash, txg.Hash)
+			fmt.Printf("Tx %x different Hash: %s %s\n", i, txn.Hash, txg.Hash)
 			return false
 		}
 	}
@@ -813,55 +813,55 @@ func compareBlockTransactions(b, bg *OtsBlockTransactions) bool {
 	for i, txn := range r.FullBlock.Transactions {
 		txg := rg.FullBlock.Transactions[i]
 		if txn.From != txg.From {
-			fmt.Printf("TxnSlot %d different From: %x %x\n", i, txn.From, txg.From)
+			fmt.Printf("Tx %d different From: %x %x\n", i, txn.From, txg.From)
 			return false
 		}
 		if (txn.To == nil && txg.To != nil) || (txn.To != nil && txg.To == nil) {
-			fmt.Printf("TxnSlot %d different To nilness: %t %t\n", i, txn.To == nil, txg.To == nil)
+			fmt.Printf("Tx %d different To nilness: %t %t\n", i, txn.To == nil, txg.To == nil)
 			return false
 		}
 		if txn.To != nil && txg.To != nil && *txn.To != *txg.To {
-			fmt.Printf("TxnSlot %d different To: %x %x\n", i, *txn.To, *txg.To)
+			fmt.Printf("Tx %d different To: %x %x\n", i, *txn.To, *txg.To)
 			return false
 		}
 		if txn.Hash != txg.Hash {
-			fmt.Printf("TxnSlot %d different Hash: %s %s\n", i, txn.Hash, txg.Hash)
+			fmt.Printf("Tx %d different Hash: %s %s\n", i, txn.Hash, txg.Hash)
 			return false
 		}
 		if txn.BlockHash.String() != txg.BlockHash.String() {
-			fmt.Printf("TxnSlot %d different BlockHash: %s %s\n", i, txn.BlockHash.String(), txg.BlockHash.String())
+			fmt.Printf("Tx %d different BlockHash: %s %s\n", i, txn.BlockHash.String(), txg.BlockHash.String())
 			return false
 		}
 		if txn.BlockNumber.String() != txg.BlockNumber.String() {
-			fmt.Printf("TxnSlot %d different TransactionHash: %s %s\n", i, txn.BlockNumber.String(), txg.BlockNumber.String())
+			fmt.Printf("Tx %d different TransactionHash: %s %s\n", i, txn.BlockNumber.String(), txg.BlockNumber.String())
 			return false
 		}
 		if txn.Gas.ToInt().Cmp(txg.Gas.ToInt()) != 0 {
-			fmt.Printf("TxnSlot %d different Gas: %d %d\n", i, txn.Gas.ToInt(), txg.Gas.ToInt())
+			fmt.Printf("Tx %d different Gas: %d %d\n", i, txn.Gas.ToInt(), txg.Gas.ToInt())
 			return false
 		}
 		if txn.GasPrice.ToInt().Cmp(txg.GasPrice.ToInt()) != 0 {
-			fmt.Printf("TxnSlot %d different GasPrice: %d %d\n", i, txn.GasPrice.ToInt(), txg.GasPrice.ToInt())
+			fmt.Printf("Tx %d different GasPrice: %d %d\n", i, txn.GasPrice.ToInt(), txg.GasPrice.ToInt())
 			return false
 		}
 		if txn.Input.String() != txg.Input.String() {
-			fmt.Printf("TxnSlot %d different Input: %s %s\n", i, txn.Input.String(), txg.Input.String())
+			fmt.Printf("Tx %d different Input: %s %s\n", i, txn.Input.String(), txg.Input.String())
 			return false
 		}
 		if txn.TransactionIndex.String() != txg.TransactionIndex.String() {
-			fmt.Printf("TxnSlot %d different TransactionIndex: %s %s\n", i, txn.TransactionIndex.String(), txg.TransactionIndex.String())
+			fmt.Printf("Tx %d different TransactionIndex: %s %s\n", i, txn.TransactionIndex.String(), txg.TransactionIndex.String())
 			return false
 		}
 		if txn.Value.ToInt().Cmp(txg.Value.ToInt()) != 0 {
-			fmt.Printf("TxnSlot %d different Value: %d %d\n", i, txn.Value.ToInt(), txg.Value.ToInt())
+			fmt.Printf("Tx %d different Value: %d %d\n", i, txn.Value.ToInt(), txg.Value.ToInt())
 			return false
 		}
 		if txn.Type.ToInt().Cmp(txg.Type.ToInt()) != 0 {
-			fmt.Printf("TxnSlot %d different Type: %d %d\n", i, txn.Type.ToInt(), txg.Type.ToInt())
+			fmt.Printf("Tx %d different Type: %d %d\n", i, txn.Type.ToInt(), txg.Type.ToInt())
 			return false
 		}
 		if txn.ChainId.ToInt().Cmp(txg.ChainId.ToInt()) != 0 {
-			fmt.Printf("TxnSlot %d different ChainId: %d %d\n", i, txn.ChainId.ToInt(), txg.ChainId.ToInt())
+			fmt.Printf("Tx %d different ChainId: %d %d\n", i, txn.ChainId.ToInt(), txg.ChainId.ToInt())
 			return false
 		}
 	}

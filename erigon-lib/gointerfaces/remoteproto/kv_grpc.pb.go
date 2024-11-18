@@ -23,7 +23,7 @@ const _ = grpc.SupportPackageIsVersion8
 
 const (
 	KV_Version_FullMethodName      = "/remote.KV/Version"
-	KV_Tx_FullMethodName           = "/remote.KV/TxnSlot"
+	KV_Tx_FullMethodName           = "/remote.KV/Tx"
 	KV_StateChanges_FullMethodName = "/remote.KV/StateChanges"
 	KV_Snapshots_FullMethodName    = "/remote.KV/Snapshots"
 	KV_Range_FullMethodName        = "/remote.KV/Range"
@@ -256,7 +256,7 @@ func (UnimplementedKVServer) Version(context.Context, *emptypb.Empty) (*typespro
 	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
 }
 func (UnimplementedKVServer) Tx(KV_TxServer) error {
-	return status.Errorf(codes.Unimplemented, "method TxnSlot not implemented")
+	return status.Errorf(codes.Unimplemented, "method Tx not implemented")
 }
 func (UnimplementedKVServer) StateChanges(*StateChangeRequest, KV_StateChangesServer) error {
 	return status.Errorf(codes.Unimplemented, "method StateChanges not implemented")
@@ -528,7 +528,7 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "TxnSlot",
+			StreamName:    "Tx",
 			Handler:       _KV_Tx_Handler,
 			ServerStreams: true,
 			ClientStreams: true,

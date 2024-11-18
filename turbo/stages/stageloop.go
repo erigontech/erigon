@@ -259,7 +259,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	//var tableSizes []interface{}
 	var commitTime time.Duration
 	if canRunCycleInOneTransaction && !externalTx {
-		//tableSizes = stagedsync.CollectDBMetrics(db, txc.TxnSlot) // Need to do this before commit to access tx
+		//tableSizes = stagedsync.CollectDBMetrics(db, txc.Tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
 		errTx := txc.Tx.Commit()
 		txc.Tx = nil

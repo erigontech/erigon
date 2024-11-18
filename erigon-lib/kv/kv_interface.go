@@ -48,7 +48,7 @@ import (
 
 //Abstraction Layers:
 // LowLevel:
-//    1. DB/TxnSlot - low-level key-value database
+//    1. DB/Tx - low-level key-value database
 //    2. Snapshots/FrozenData - immutable files with historical data. May be downloaded at first App
 //         start or auto-generate by moving old data from DB to Snapshots.
 //         Most important difference between DB and Snapshots: creation of
@@ -307,7 +307,7 @@ type RoDB interface {
 //
 // Common pattern for short-living transactions:
 //
-//	 if err := db.View(ctx, func(tx ethdb.TxnSlot) error {
+//	 if err := db.View(ctx, func(tx ethdb.Tx) error {
 //	    ... code which uses database in transaction
 //	 }); err != nil {
 //			return err

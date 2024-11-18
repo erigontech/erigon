@@ -370,7 +370,7 @@ func TestAPI(t *testing.T) {
 		fmt.Printf("done4: \n")
 	}()
 	// TODO: Used in other places too cant modify this.
-	// err := db.View(context.Background(), func(tx kv.TxnSlot) error {
+	// err := db.View(context.Background(), func(tx kv.Tx) error {
 	// 	_, err := AssertCheckValues(context.Background(), tx, c)
 	// 	require.NoError(err)
 	// 	return nil

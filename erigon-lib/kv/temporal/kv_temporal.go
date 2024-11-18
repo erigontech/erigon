@@ -43,7 +43,7 @@ import (
 
 //Abstraction Layers:
 // LowLevel:
-//      1. DB/TxnSlot - low-level key-value database
+//      1. DB/Tx - low-level key-value database
 //      2. Snapshots/Freeze - immutable files with historical data. May be downloaded at first App
 //              start or auto-generate by moving old data from DB to Snapshots.
 // MediumLevel:

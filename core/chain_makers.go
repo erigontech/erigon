@@ -557,7 +557,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	return hashRoot, nil
 
 	//var root libcommon.Hash
-	//rootB, err := tx.(*temporal.TxnSlot).Agg().ComputeCommitment(false, false)
+	//rootB, err := tx.(*temporal.Tx).Agg().ComputeCommitment(false, false)
 	//if err != nil {
 	//	return root, err
 	//}

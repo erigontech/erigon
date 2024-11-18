@@ -288,7 +288,7 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 
 	// is the txn entry still not fully initialized?
 	if currentEntry.TxHash == nil {
-		// CaptureStart creates the entry for a new TxnSlot, but doesn't have access to EVM data, like the txn Hash
+		// CaptureStart creates the entry for a new Tx, but doesn't have access to EVM data, like the txn Hash
 		// here we ASSUME that the txn entry was recently created by CaptureStart
 		// AND that this is the first CaptureState that has happened since then
 		// AND that both Captures are for the same transaction
@@ -656,7 +656,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			if t.TxHash != nil {
 				ths = t.TxHash.String()
 			}
-			fmt.Fprintf(ot.fsumWriter, "TxnSlot FAULT\tb=%d opF=%s\tTxF=%s\ttaddr=%s\ttx=%s\n", blockNum, t.OpcodeFault, t.Fault, t.TxnAddr, ths)
+			fmt.Fprintf(ot.fsumWriter, "Tx FAULT\tb=%d opF=%s\tTxF=%s\ttaddr=%s\ttx=%s\n", blockNum, t.OpcodeFault, t.Fault, t.TxnAddr, ths)
 		}
 		if chanBblocksIsBlocking {
 			log.Debug("Channel for bblocks got full and caused some blocking", "block", blockNum)
