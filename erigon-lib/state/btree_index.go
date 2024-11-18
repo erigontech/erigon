@@ -19,7 +19,6 @@ package state
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -78,25 +77,14 @@ type node struct {
 
 type Cursor struct {
 	btt    *BtIndex
-	ctx    context.Context
 	getter *seg.Reader
 	key    []byte
 	value  []byte
 	d      uint64
 }
 
-//getter should be alive all the time of cursor usage
-//Key and value is valid until cursor.Next is called
-//func NewCursor(ctx context.Context, k, v []byte, d uint64, g ArchiveGetter) *Cursor {
-//	return &Cursor{
-//		ctx:    ctx,
-//		getter: g,
-//		key:    common.Copy(k),
-//		value:  common.Copy(v),
-//		d:      d,
-//	}
-//}
-
+// getter should be alive all the time of cursor usage
+// Key and value is valid until cursor.Next is called
 func (c *Cursor) Key() []byte {
 	return c.key
 }
@@ -609,7 +597,7 @@ func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter
 	return btw, nil
 }
 
-func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
+func (btw *BtIndexWriter) AddKey(key []byte, offset uint64, keep bool) error {
 	if btw.built {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
@@ -619,7 +607,7 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 		btw.maxOffset = offset
 	}
 
-	keepKey := false
+	keepKey := keep
 	if btw.keysWritten > 0 {
 		delta := offset - btw.prevOffset
 		if btw.keysWritten == 1 || delta < btw.minDelta {
@@ -799,9 +787,15 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	key := make([]byte, 0, 64)
 	var pos uint64
 
+	var b0 [256]bool
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
-		err = iw.AddKey(key, pos)
+		keep := false
+		if !b0[key[0]] {
+			b0[key[0]] = true
+			keep = true
+		}
+		err = iw.AddKey(key, pos, keep)
 		if err != nil {
 			return err
 		}
@@ -939,9 +933,8 @@ func (b *BtIndex) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int
 
 // getter should be alive all the time of cursor usage
 // Key and value is valid until cursor.Next is called
-func (b *BtIndex) newCursor(ctx context.Context, k, v []byte, d uint64, g *seg.Reader) *Cursor {
+func (b *BtIndex) newCursor(k, v []byte, d uint64, g *seg.Reader) *Cursor {
 	return &Cursor{
-		ctx:    ctx,
 		getter: g,
 		key:    common.Copy(k),
 		value:  common.Copy(v),
@@ -1059,7 +1052,7 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 			return nil, err
 		}
 		if bytes.Compare(k, x) >= 0 {
-			return b.newCursor(context.Background(), k, v, dt, g), nil
+			return b.newCursor(k, v, dt, g), nil
 		}
 		return nil, nil
 	}
@@ -1079,7 +1072,7 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 		}
 		return nil, err
 	}
-	return b.newCursor(context.Background(), k, v, dt, g), nil
+	return b.newCursor(k, v, dt, g), nil
 }
 
 func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
@@ -1087,7 +1080,7 @@ func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 	if err != nil {
 		return nil
 	}
-	return b.newCursor(context.Background(), k, v, i, getter)
+	return b.newCursor(k, v, i, getter)
 }
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
 func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }
