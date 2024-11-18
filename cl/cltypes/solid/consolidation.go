@@ -4,15 +4,17 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 var (
-	_ ssz.EncodableSSZ = (*ConsolidationRequest)(nil)
-	_ ssz.HashableSSZ  = (*PendingConsolidation)(nil)
+	_ EncodableHashableSSZ = (*ConsolidationRequest)(nil)
+	_ ssz2.SizedObjectSSZ  = (*ConsolidationRequest)(nil)
+
+	_ EncodableHashableSSZ = (*PendingConsolidation)(nil)
+	_ ssz2.SizedObjectSSZ  = (*PendingConsolidation)(nil)
 )
 
 const (
@@ -31,7 +33,7 @@ func (p *ConsolidationRequest) EncodingSizeSSZ() int {
 }
 
 func (p *ConsolidationRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.SourceAddress, p.SourcePubKey, p.TargetPubKey)
+	return ssz2.MarshalSSZ(buf, p.SourceAddress[:], p.SourcePubKey[:], p.TargetPubKey[:])
 }
 
 func (p *ConsolidationRequest) DecodeSSZ(buf []byte, version int) error {
@@ -43,7 +45,11 @@ func (p *ConsolidationRequest) Clone() clonable.Clonable {
 }
 
 func (p *ConsolidationRequest) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.SourceAddress, p.SourcePubKey, p.TargetPubKey)
+	return merkle_tree.HashTreeRoot(p.SourceAddress[:], p.SourcePubKey[:], p.TargetPubKey[:])
+}
+
+func (p *ConsolidationRequest) Static() bool {
+	return true
 }
 
 type PendingConsolidation struct {
@@ -56,7 +62,7 @@ func (p *PendingConsolidation) EncodingSizeSSZ() int {
 }
 
 func (p *PendingConsolidation) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.SourceIndex, p.TargetIndex)
+	return ssz2.MarshalSSZ(buf, &p.SourceIndex, &p.TargetIndex)
 }
 
 func (p *PendingConsolidation) DecodeSSZ(buf []byte, version int) error {
@@ -68,7 +74,11 @@ func (p *PendingConsolidation) Clone() clonable.Clonable {
 }
 
 func (p *PendingConsolidation) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.SourceIndex, p.TargetIndex)
+	return merkle_tree.HashTreeRoot(&p.SourceIndex, &p.TargetIndex)
+}
+
+func (p *PendingConsolidation) Static() bool {
+	return true
 }
 
 func NewPendingConsolidationList(cfg *clparams.BeaconChainConfig) *ListSSZ[*PendingConsolidation] {

@@ -118,7 +118,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		stateRoots:                   solid.NewHashVector(int(cfg.SlotsPerHistoricalRoot)),
 		randaoMixes:                  solid.NewHashVector(int(cfg.EpochsPerHistoricalVector)),
 		validators:                   solid.NewValidatorSet(int(cfg.ValidatorRegistryLimit)),
-		leaves:                       make([]byte, 32*32),
+		leaves:                       make([]byte, StateLeafSize*32),
 		pendingDeposits:              solid.NewPendingDepositList(cfg),
 		pendingPartialWithdrawals:    solid.NewPendingWithdrawalList(cfg),
 		pendingConsolidations:        solid.NewPendingConsolidationList(cfg),

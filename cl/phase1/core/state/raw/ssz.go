@@ -55,6 +55,8 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		return 2736653
 	case clparams.DenebVersion:
 		return 2736653
+	case clparams.ElectraVersion:
+		return 2736653
 	default:
 		// ?????
 		panic("tf is that")
@@ -84,7 +86,7 @@ func (b *BeaconState) getSchema() []interface{} {
 	if b.version >= clparams.ElectraVersion {
 		// Electra fields
 		s = append(s, &b.depositRequestsStartIndex, &b.depositBalanceToConsume, &b.exitBalanceToConsume, &b.earliestExitEpoch, &b.consolidationBalanceToConsume,
-			b.earliestConsolidationEpoch, b.pendingDeposits, b.pendingPartialWithdrawals, b.pendingConsolidations)
+			&b.earliestConsolidationEpoch, b.pendingDeposits, b.pendingPartialWithdrawals, b.pendingConsolidations)
 	}
 	return s
 }

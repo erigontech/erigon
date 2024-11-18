@@ -11,7 +11,10 @@ import (
 
 var (
 	_ EncodableHashableSSZ = (*DepositRequest)(nil)
+	_ ssz2.SizedObjectSSZ  = (*DepositRequest)(nil)
+
 	_ EncodableHashableSSZ = (*PendingDeposit)(nil)
+	_ ssz2.SizedObjectSSZ  = (*PendingDeposit)(nil)
 )
 
 const (
@@ -32,7 +35,7 @@ func (p *DepositRequest) EncodingSizeSSZ() int {
 }
 
 func (p *DepositRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Index)
+	return ssz2.MarshalSSZ(buf, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Index)
 }
 
 func (p *DepositRequest) DecodeSSZ(buf []byte, version int) error {
@@ -44,7 +47,11 @@ func (p *DepositRequest) Clone() clonable.Clonable {
 }
 
 func (p *DepositRequest) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Index)
+	return merkle_tree.HashTreeRoot(p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Index)
+}
+
+func (p *DepositRequest) Static() bool {
+	return true
 }
 
 type PendingDeposit struct {
@@ -60,7 +67,7 @@ func (p *PendingDeposit) EncodingSizeSSZ() int {
 }
 
 func (p *PendingDeposit) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Slot)
+	return ssz2.MarshalSSZ(buf, p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Slot)
 }
 
 func (p *PendingDeposit) DecodeSSZ(buf []byte, version int) error {
@@ -72,7 +79,11 @@ func (p *PendingDeposit) Clone() clonable.Clonable {
 }
 
 func (p *PendingDeposit) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.PubKey, p.WithdrawalCredentials, p.Amount, p.Signature, p.Slot)
+	return merkle_tree.HashTreeRoot(p.PubKey[:], p.WithdrawalCredentials[:], &p.Amount, p.Signature[:], &p.Slot)
+}
+
+func (p *PendingDeposit) Static() bool {
+	return true
 }
 
 func NewPendingDepositList(cfg *clparams.BeaconChainConfig) *ListSSZ[*PendingDeposit] {

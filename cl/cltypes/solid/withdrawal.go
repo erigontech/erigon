@@ -11,7 +11,10 @@ import (
 
 var (
 	_ EncodableHashableSSZ = (*WithdrawalRequest)(nil)
+	_ ssz2.SizedObjectSSZ  = (*WithdrawalRequest)(nil)
+
 	_ EncodableHashableSSZ = (*PendingPartialWithdrawal)(nil)
+	_ ssz2.SizedObjectSSZ  = (*PendingPartialWithdrawal)(nil)
 )
 
 const (
@@ -30,7 +33,7 @@ func (p *WithdrawalRequest) EncodingSizeSSZ() int {
 }
 
 func (p *WithdrawalRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.SourceAddress, p.ValidatorPubKey, p.Amount)
+	return ssz2.MarshalSSZ(buf, p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
 }
 
 func (p *WithdrawalRequest) DecodeSSZ(buf []byte, version int) error {
@@ -42,7 +45,11 @@ func (p *WithdrawalRequest) Clone() clonable.Clonable {
 }
 
 func (p *WithdrawalRequest) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.SourceAddress, p.ValidatorPubKey, p.Amount)
+	return merkle_tree.HashTreeRoot(p.SourceAddress[:], p.ValidatorPubKey[:], &p.Amount)
+}
+
+func (p *WithdrawalRequest) Static() bool {
+	return true
 }
 
 type PendingPartialWithdrawal struct {
@@ -56,7 +63,7 @@ func (p *PendingPartialWithdrawal) EncodingSizeSSZ() int {
 }
 
 func (p *PendingPartialWithdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, p.Index, p.Amount, p.WithdrawableEpoch)
+	return ssz2.MarshalSSZ(buf, &p.Index, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) DecodeSSZ(buf []byte, version int) error {
@@ -68,7 +75,11 @@ func (p *PendingPartialWithdrawal) Clone() clonable.Clonable {
 }
 
 func (p *PendingPartialWithdrawal) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.Index, p.Amount, p.WithdrawableEpoch)
+	return merkle_tree.HashTreeRoot(&p.Index, &p.Amount, &p.WithdrawableEpoch)
+}
+
+func (p *PendingPartialWithdrawal) Static() bool {
+	return true
 }
 
 func NewPendingWithdrawalList(cfg *clparams.BeaconChainConfig) *ListSSZ[*PendingPartialWithdrawal] {
