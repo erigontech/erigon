@@ -2052,16 +2052,6 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	return sb.String(), nil
 }
 
-//func bytesToUint64(buf []byte) (x uint64) {
-//	for i, b := range buf {
-//		x = x<<8 + uint64(b)
-//		if i == 7 {
-//			return
-//		}
-//	}
-//	return
-//}
-
 func hexToCompact(key []byte) []byte {
 	zeroByte, keyPos, keyLen := makeCompactZeroByte(key)
 	bufLen := keyLen/2 + 1 // always > 0

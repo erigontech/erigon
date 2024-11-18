@@ -43,7 +43,13 @@ func (b *CachingBeaconState) copyCachesInto(bs *CachingBeaconState) error {
 	if bs.publicKeyIndicies == nil {
 		bs.publicKeyIndicies = make(map[[48]byte]uint64)
 	}
-	for k := range bs.publicKeyIndicies {
+	for k, idx := range bs.publicKeyIndicies {
+		if otherIdx, ok := b.publicKeyIndicies[k]; ok {
+			if idx != otherIdx {
+				delete(bs.publicKeyIndicies, k)
+			}
+			continue
+		}
 		delete(bs.publicKeyIndicies, k)
 	}
 	for pk, index := range b.publicKeyIndicies {

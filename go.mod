@@ -14,7 +14,7 @@ replace github.com/erigontech/erigon-lib => ./erigon-lib
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.48
-	github.com/Giulio2002/bls v0.0.0-20241013174947-019133587795
+	github.com/Giulio2002/bls v0.0.0-20241116091023-2ddcc8954ec0
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/alecthomas/kong v0.8.1
@@ -172,7 +172,7 @@ require (
 	github.com/go-logr/logr v1.3.0 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
-	github.com/go-stack/stack v1.8.1 // indirect
+	github.com/go-stack/stack v1.8.1
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect

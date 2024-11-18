@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -210,7 +211,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
-		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0), blobStorage, validatorMonitor, false)
+		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0), blobStorage, validatorMonitor, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 

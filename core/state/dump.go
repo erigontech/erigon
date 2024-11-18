@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -162,7 +161,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	}
 
 	var nextKey []byte
-	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
+	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
 	if err != nil {
 		return nil, err
 	}
@@ -172,12 +171,12 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if err != nil {
 			return nil, err
 		}
+		if len(v) == 0 {
+			continue
+		}
 		if maxResults > 0 && numberOfResults >= maxResults {
 			nextKey = append(nextKey[:0], k...)
 			break
-		}
-		if len(v) == 0 {
-			continue
 		}
 
 		if e := accounts.DeserialiseV3(&acc, v); e != nil {
@@ -191,10 +190,10 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			Storage:  make(map[string]string),
 		}
 		if acc.CodeHash != emptyCodeHash {
-			account.CodeHash = acc.CodeHash[:]
+			account.CodeHash = hexutility.Bytes(acc.CodeHash.Bytes())
 
 			if !excludeCode {
-				r, _, err := ttx.DomainGet(kv.CodeDomain, k, nil)
+				r, _, err := ttx.GetLatest(kv.CodeDomain, k, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -212,11 +211,10 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 	for i, addr := range addrList {
 		account := accountList[i]
-
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			nextAcc, _ := kv.NextSubtree(addr[:])
-			r, err := ttx.DomainRange(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
+			r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 			}

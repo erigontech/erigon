@@ -198,8 +198,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
 		return g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
-		obj := &cltypes.SignedContributionAndProof{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := &cltypes.SignedContributionAndProofWithGossipData{
+			GossipData:                 copyOfSentinelData(data),
+			SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
+		}
+		if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
@@ -252,7 +255,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			// The background checks above are enough for now.
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
-			msg := &cltypes.SyncCommitteeMessageWithGossipData{}
+			msg := &cltypes.SyncCommitteeMessageWithGossipData{
+				GossipData:           copyOfSentinelData(data),
+				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
+			}
 			if err := msg.SyncCommitteeMessage.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}

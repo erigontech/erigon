@@ -201,10 +201,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logArgs = append(logArgs,
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
-					"frozenBlocks", cfg.engine.FrozenBlocks(ctx),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"snapshots", cfg.sn.SegmentsMax(),
 				)
+				if cfg.engine != nil && cfg.engine.SupportInsertion() {
+					logArgs = append(logArgs, "frozenBlocks", cfg.engine.FrozenBlocks(ctx))
+				}
 				logMsg := "Node is still syncing... downloading past blocks"
 				if isBackfilling.Load() {
 					logMsg = "Node has finished syncing... full history is being downloaded for archiving purposes"

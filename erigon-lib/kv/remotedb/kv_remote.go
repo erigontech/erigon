@@ -625,25 +625,25 @@ func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) { return c.pre
 func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.lastDup() }
 
 // Temporal Methods
-func (tx *tx) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.DomainGet(tx.ctx, &remote.DomainGetReq{TxId: tx.id, Table: name.String(), K: k, K2: k2, Ts: ts})
+func (tx *tx) GetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
+	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, K2: k2, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
 	return reply.V, reply.Ok, nil
 }
 
-func (tx *tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
-	reply, err := tx.db.remoteKV.DomainGet(tx.ctx, &remote.DomainGetReq{TxId: tx.id, Table: name.String(), K: k, K2: k2, Latest: true})
+func (tx *tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, K2: k2, Latest: true})
 	if err != nil {
 		return nil, 0, err
 	}
 	return reply.V, 0, nil
 }
 
-func (tx *tx) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
+func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
-		reply, err := tx.db.remoteKV.DomainRange(tx.ctx, &remote.DomainRangeReq{TxId: tx.id, Table: name.String(), FromKey: fromKey, ToKey: toKey, Ts: ts, OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})
+		reply, err := tx.db.remoteKV.RangeAsOf(tx.ctx, &remote.RangeAsOfReq{TxId: tx.id, Table: name.String(), FromKey: fromKey, ToKey: toKey, Ts: ts, OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})
 		if err != nil {
 			return nil, nil, "", err
 		}
