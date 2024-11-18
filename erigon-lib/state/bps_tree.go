@@ -375,6 +375,9 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (k []byte, ok bool, i uint64, e
 	var m uint64
 	for l < r {
 		m = (l + r) >> 1
+		if r-l <= DefaultBtreeStartSkip {
+			m = l
+		}
 		cmp, k, err = b.keyCmpFunc(key, m, g, k[:0])
 		if err != nil {
 			return nil, false, 0, err
