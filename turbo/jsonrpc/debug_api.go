@@ -93,7 +93,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return StorageRangeResult{}, err
 	}
 	if number == nil {
-		return StorageRangeResult{}, errors.New("block not found")
+		return StorageRangeResult{}, nil
 	}
 	minTxNum, err := txNumsReader.Min(tx, *number)
 	if err != nil {
