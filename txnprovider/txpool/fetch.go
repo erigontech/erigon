@@ -368,7 +368,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if len(txs.Txs) == 0 {
 			return nil
 		}
-		f.pool.AddRemoteTxs(ctx, txs)
+		f.pool.AddRemoteTxns(ctx, txs)
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
 	}

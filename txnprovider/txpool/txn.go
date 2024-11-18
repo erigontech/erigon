@@ -37,6 +37,19 @@ import (
 	"github.com/erigontech/erigon-lib/rlp"
 )
 
+const (
+	LegacyTxType     byte = 0
+	AccessListTxType byte = 1 // EIP-2930
+	DynamicFeeTxType byte = 2 // EIP-1559
+	BlobTxType       byte = 3 // EIP-4844
+	SetCodeTxType    byte = 4 // EIP-7702
+)
+
+var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
+var ErrRejected = errors.New("rejected")
+var ErrAlreadyKnown = errors.New("already known")
+var ErrRlpTooBig = errors.New("txn rlp too big")
+
 type TxnParseConfig struct {
 	ChainID uint256.Int
 }
@@ -78,20 +91,6 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 	ctx.cfg.ChainID.Set(&chainID)
 	return ctx
 }
-
-const (
-	LegacyTxType     byte = 0
-	AccessListTxType byte = 1 // EIP-2930
-	DynamicFeeTxType byte = 2 // EIP-1559
-	BlobTxType       byte = 3 // EIP-4844
-	SetCodeTxType    byte = 4 // EIP-7702
-)
-
-var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
-
-var ErrRejected = errors.New("rejected")
-var ErrAlreadyKnown = errors.New("already known")
-var ErrRlpTooBig = errors.New("txn rlp too big")
 
 // Set the RLP validate function
 func (ctx *TxnParseContext) ValidateRLP(f func(txnRlp []byte) error) { ctx.validateRlp = f }
@@ -764,26 +763,26 @@ func (h Addresses) Len() int {
 }
 
 type TxnsRlp struct {
-	Txs     [][]byte
+	Txns    [][]byte
 	Senders Addresses
 	IsLocal []bool
 }
 
 // Resize internal arrays to len=targetSize, shrinks if need. It rely on `append` algorithm to realloc
-func (s *TxnsRlp) Resize(targetSize uint) {
-	for uint(len(s.Txs)) < targetSize {
-		s.Txs = append(s.Txs, nil)
+func (r *TxnsRlp) Resize(targetSize uint) {
+	for uint(len(r.Txns)) < targetSize {
+		r.Txns = append(r.Txns, nil)
 	}
-	for uint(s.Senders.Len()) < targetSize {
-		s.Senders = append(s.Senders, addressesGrowth...)
+	for uint(r.Senders.Len()) < targetSize {
+		r.Senders = append(r.Senders, addressesGrowth...)
 	}
-	for uint(len(s.IsLocal)) < targetSize {
-		s.IsLocal = append(s.IsLocal, false)
+	for uint(len(r.IsLocal)) < targetSize {
+		r.IsLocal = append(r.IsLocal, false)
 	}
 	//todo: set nil to overflow txs
-	s.Txs = s.Txs[:targetSize]
-	s.Senders = s.Senders[:length.Addr*targetSize]
-	s.IsLocal = s.IsLocal[:targetSize]
+	r.Txns = r.Txns[:targetSize]
+	r.Senders = r.Senders[:length.Addr*targetSize]
+	r.IsLocal = r.IsLocal[:targetSize]
 }
 
 var addressesGrowth = make([]byte, length.Addr)

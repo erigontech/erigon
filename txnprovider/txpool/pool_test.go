@@ -96,7 +96,7 @@ func TestNonceFromAddress(t *testing.T) {
 		txSlot1.IDHash[0] = 1
 		txSlots.Append(txSlot1, addr[:], true)
 
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -121,7 +121,7 @@ func TestNonceFromAddress(t *testing.T) {
 		txSlot3.IDHash[0] = 3
 		txSlots.Append(txSlot2, addr[:], true)
 		txSlots.Append(txSlot3, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -141,7 +141,7 @@ func TestNonceFromAddress(t *testing.T) {
 		}
 		txSlot1.IDHash[0] = 4
 		txSlots.Append(txSlot1, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.InsufficientFunds, reason, reason.String())
@@ -159,7 +159,7 @@ func TestNonceFromAddress(t *testing.T) {
 		}
 		txSlot1.IDHash[0] = 5
 		txSlots.Append(txSlot1, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.NonceTooLow, reason, reason.String())
@@ -218,7 +218,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -235,7 +235,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		}
 		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
@@ -255,7 +255,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		}
 		txSlot.IDHash[0] = 3
 		txSlots.Append(txSlot, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
@@ -275,7 +275,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		}
 		txSlot.IDHash[0] = 4
 		txSlots.Append(txSlot, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -337,7 +337,7 @@ func TestReverseNonces(t *testing.T) {
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -364,7 +364,7 @@ func TestReverseNonces(t *testing.T) {
 		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
 
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -391,7 +391,7 @@ func TestReverseNonces(t *testing.T) {
 		txSlot.IDHash[0] = 3
 		txSlots.Append(txSlot, addr[:], true)
 
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -465,7 +465,7 @@ func TestTxPoke(t *testing.T) {
 		idHash = append(idHash, txSlot.IDHash[:]...)
 		txSlots.Append(txSlot, addr[:], true)
 
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -491,7 +491,7 @@ func TestTxPoke(t *testing.T) {
 		}
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.DuplicateHash, reason, reason.String())
@@ -520,7 +520,7 @@ func TestTxPoke(t *testing.T) {
 		}
 		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
@@ -550,7 +550,7 @@ func TestTxPoke(t *testing.T) {
 		}
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
-		pool.AddRemoteTxs(ctx, txSlots)
+		pool.AddRemoteTxns(ctx, txSlots)
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
 		assert.Equal(uint64(2), nonce)
@@ -572,7 +572,7 @@ func TestTxPoke(t *testing.T) {
 		}
 		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
-		pool.AddRemoteTxs(ctx, txSlots)
+		pool.AddRemoteTxns(ctx, txSlots)
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
 		assert.Equal(uint64(2), nonce)
@@ -851,7 +851,7 @@ func TestBlobTxReplacement(t *testing.T) {
 		blobTxn.IDHash[0] = 0x00
 		blobTxn.Nonce = 0x2
 		txSlots.Append(&blobTxn, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		t.Logf("Reasons %v", reasons)
 		for _, reason := range reasons {
@@ -870,7 +870,7 @@ func TestBlobTxReplacement(t *testing.T) {
 		blobTxn.BlobFeeCap.Add(blobFeeCap, uint256.NewInt(1).Div(blobFeeCap, uint256.NewInt(10)))
 		blobTxn.IDHash[0] = 0x01
 		txSlots.Append(&blobTxn, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		t.Logf("Reasons %v", reasons)
 		for _, reason := range reasons {
@@ -893,7 +893,7 @@ func TestBlobTxReplacement(t *testing.T) {
 		}
 		regularTx.IDHash[0] = 0x02
 		txSlots.Append(&regularTx, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		t.Logf("Reasons %v", reasons)
 		for _, reason := range reasons {
@@ -916,38 +916,38 @@ func TestBlobTxReplacement(t *testing.T) {
 
 		// Bump the tip only
 		blobTxn.Tip.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
 
 		// Bump the fee + tip
 		blobTxn.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
-		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err = pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
 
 		// Bump only Feecap
 		blobTxn.Tip = origTip
-		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err = pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
 
 		// Bump fee cap + blobFee cap
 		blobTxn.BlobFeeCap.MulDivOverflow(blobFeeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
-		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err = pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
 
 		// Bump only blobFee cap
 		blobTxn.FeeCap = origFee
-		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err = pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
 
 		// Bump all prices
 		blobTxn.Tip.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
 		blobTxn.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
-		reasons, err = pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err = pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		assert.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
 	}
@@ -1033,7 +1033,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 
-		reasons, err := txPool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := txPool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -1061,12 +1061,12 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 
-		txPool.AddRemoteTxs(ctx, txSlots)
+		txPool.AddRemoteTxns(ctx, txSlots)
 	}
 
-	// empty because AddRemoteTxs logic is intentionally empty
+	// empty because AddRemoteTxns logic is intentionally empty
 	assert.Equal(0, len(txPool.unprocessedRemoteByHash))
-	assert.Equal(0, len(txPool.unprocessedRemoteTxs.Txs))
+	assert.Equal(0, len(txPool.unprocessedRemoteTxns.Txs))
 
 	assert.NoError(txPool.processRemoteTxs(ctx))
 
@@ -1078,7 +1078,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 			return true
 		}
 	}
-	// no announcement because unprocessedRemoteTxs is already empty
+	// no announcement because unprocessedRemoteTxns is already empty
 	assert.True(checkAnnouncementEmpty())
 }
 
@@ -1139,7 +1139,7 @@ func TestBlobSlots(t *testing.T) {
 		blobTxn.IDHash[0] = uint8(2*i + 1)
 		blobTxn.Nonce = 0
 		txSlots.Append(&blobTxn, addr[:], true)
-		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		reasons, err := pool.AddLocalTxns(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
@@ -1154,7 +1154,7 @@ func TestBlobSlots(t *testing.T) {
 	blobTxn.Nonce = 0
 
 	txSlots.Append(&blobTxn, addr[:], true)
-	reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+	reasons, err := pool.AddLocalTxns(ctx, txSlots)
 	assert.NoError(err)
 	for _, reason := range reasons {
 		assert.Equal(txpoolcfg.BlobPoolOverflow, reason, reason.String())
@@ -1212,7 +1212,7 @@ func TestGasLimitChanged(t *testing.T) {
 	txSlot1.IDHash[0] = 1
 	txSlots.Append(txSlot1, addr[:], true)
 
-	reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+	reasons, err := pool.AddLocalTxns(ctx, txSlots)
 	assert.NoError(err)
 	for _, reason := range reasons {
 		assert.Equal(txpoolcfg.Success, reason, reason.String())

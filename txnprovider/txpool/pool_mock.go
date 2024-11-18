@@ -42,41 +42,41 @@ func (m *MockPool) EXPECT() *MockPoolMockRecorder {
 	return m.recorder
 }
 
-// AddLocalTxs mocks base method.
-func (m *MockPool) AddLocalTxs(arg0 context.Context, arg1 TxnSlots, arg2 kv.Tx) ([]txpoolcfg.DiscardReason, error) {
+// AddLocalTxns mocks base method.
+func (m *MockPool) AddLocalTxns(arg0 context.Context, arg1 TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AddLocalTxs", arg0, arg1, arg2)
+	ret := m.ctrl.Call(m, "AddLocalTxns", arg0, arg1)
 	ret0, _ := ret[0].([]txpoolcfg.DiscardReason)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// AddLocalTxs indicates an expected call of AddLocalTxs.
-func (mr *MockPoolMockRecorder) AddLocalTxs(arg0, arg1, arg2 any) *MockPoolAddLocalTxsCall {
+// AddLocalTxns indicates an expected call of AddLocalTxns.
+func (mr *MockPoolMockRecorder) AddLocalTxns(arg0, arg1 any) *MockPoolAddLocalTxnsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddLocalTxs", reflect.TypeOf((*MockPool)(nil).AddLocalTxs), arg0, arg1, arg2)
-	return &MockPoolAddLocalTxsCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddLocalTxns", reflect.TypeOf((*MockPool)(nil).AddLocalTxns), arg0, arg1)
+	return &MockPoolAddLocalTxnsCall{Call: call}
 }
 
-// MockPoolAddLocalTxsCall wrap *gomock.Call
-type MockPoolAddLocalTxsCall struct {
+// MockPoolAddLocalTxnsCall wrap *gomock.Call
+type MockPoolAddLocalTxnsCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockPoolAddLocalTxsCall) Return(arg0 []txpoolcfg.DiscardReason, arg1 error) *MockPoolAddLocalTxsCall {
+func (c *MockPoolAddLocalTxnsCall) Return(arg0 []txpoolcfg.DiscardReason, arg1 error) *MockPoolAddLocalTxnsCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddLocalTxsCall) Do(f func(context.Context, TxnSlots, kv.Tx) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxsCall {
+func (c *MockPoolAddLocalTxnsCall) Do(f func(context.Context, TxnSlots) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddLocalTxsCall) DoAndReturn(f func(context.Context, TxnSlots, kv.Tx) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxsCall {
+func (c *MockPoolAddLocalTxnsCall) DoAndReturn(f func(context.Context, TxnSlots) ([]txpoolcfg.DiscardReason, error)) *MockPoolAddLocalTxnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -117,38 +117,38 @@ func (c *MockPoolAddNewGoodPeerCall) DoAndReturn(f func(PeerID)) *MockPoolAddNew
 	return c
 }
 
-// AddRemoteTxs mocks base method.
-func (m *MockPool) AddRemoteTxs(arg0 context.Context, arg1 TxnSlots) {
+// AddRemoteTxns mocks base method.
+func (m *MockPool) AddRemoteTxns(arg0 context.Context, arg1 TxnSlots) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "AddRemoteTxs", arg0, arg1)
+	m.ctrl.Call(m, "AddRemoteTxns", arg0, arg1)
 }
 
-// AddRemoteTxs indicates an expected call of AddRemoteTxs.
-func (mr *MockPoolMockRecorder) AddRemoteTxs(arg0, arg1 any) *MockPoolAddRemoteTxsCall {
+// AddRemoteTxns indicates an expected call of AddRemoteTxns.
+func (mr *MockPoolMockRecorder) AddRemoteTxns(arg0, arg1 any) *MockPoolAddRemoteTxnsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxs", reflect.TypeOf((*MockPool)(nil).AddRemoteTxs), arg0, arg1)
-	return &MockPoolAddRemoteTxsCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxns", reflect.TypeOf((*MockPool)(nil).AddRemoteTxns), arg0, arg1)
+	return &MockPoolAddRemoteTxnsCall{Call: call}
 }
 
-// MockPoolAddRemoteTxsCall wrap *gomock.Call
-type MockPoolAddRemoteTxsCall struct {
+// MockPoolAddRemoteTxnsCall wrap *gomock.Call
+type MockPoolAddRemoteTxnsCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockPoolAddRemoteTxsCall) Return() *MockPoolAddRemoteTxsCall {
+func (c *MockPoolAddRemoteTxnsCall) Return() *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.Return()
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddRemoteTxsCall) Do(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxsCall {
+func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddRemoteTxsCall) DoAndReturn(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxsCall {
+func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
