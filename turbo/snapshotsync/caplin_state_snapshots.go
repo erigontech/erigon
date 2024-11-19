@@ -454,7 +454,7 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	// 	}
 	// }
 	s.visible.Range(func(_, v interface{}) bool {
-		segs := v.(VisibleSegments)
+		segs := v.([]*VisibleSegment)
 		if len(segs) == 0 {
 			min = 0
 			return false
@@ -543,7 +543,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	// 	v.roTxs[k] = segments.BeginRo()
 	// }
 	s.visible.Range(func(k, val interface{}) bool {
-		v.roTxs[k.(string)] = val.(VisibleSegments).BeginRo()
+		v.roTxs[k.(string)] = VisibleSegments(val.([]*VisibleSegment)).BeginRo()
 		return true
 	})
 	return v
@@ -572,7 +572,7 @@ func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
 		return nil
 	}
 	if val, ok := v.s.visible.Load(tbl); ok {
-		return val.(VisibleSegments)
+		return val.([]*VisibleSegment)
 	}
 	return nil
 }
