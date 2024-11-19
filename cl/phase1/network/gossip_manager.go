@@ -255,7 +255,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			// The background checks above are enough for now.
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
-			msg := &cltypes.SyncCommitteeMessageWithGossipData{}
+			msg := &cltypes.SyncCommitteeMessageWithGossipData{
+				GossipData:           copyOfSentinelData(data),
+				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
+			}
 			if err := msg.SyncCommitteeMessage.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}

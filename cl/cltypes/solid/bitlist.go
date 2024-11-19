@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
-// Bitlist is like a dynamic binary string. It's like a flipbook of 1s and 0s!
+// BitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!
 // And just like a flipbook, we can add (Append), remove (Pop), or look at any bit (Get) we want.
 type BitList struct {
 	// the underlying bytes that store the data
