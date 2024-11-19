@@ -9,50 +9,78 @@ env:
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
-  KEEP_IMAGES: 100
+  ## KEEP_IMAGES: 100 ### see step 'Define variables"
+  RUNNER: "ubuntu-latest"
 
 on:
   push:
     branches:
       - 'main'
+      - 'docker_pectra'
     paths-ignore:
       - '.github/**'
   workflow_dispatch:
+    inputs:
+      checkout_ref:
+        required: false
+        type: string
+        default: ''
+        description: 'The branch to checkout and build artifacts from in case of manual run. Default is "" .'
 
 jobs:
-  define_matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      os: ${{ steps.os.outputs.os }}
-
-    steps:
-     - name: Define os
-       id: os
-       run: echo 'os=ubuntu-latest' >> "$GITHUB_OUTPUT"
-
   Build:
-    needs: define_matrix
-    runs-on: ${{ needs.define_matrix.outputs.os }}
+    runs-on: ${{ env.RUNNER }}
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
 
     steps:
-      - name: Fast checkout git repository
+      - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 1
-          ref: ${{ env.CHECKOUT_REF }}
+          ref: ${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}
           path: 'erigon'
 
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
           go-version: '>=1.22'
-          go-version-file: 'erigon/go.mod'
           cache-dependency-path: |
             erigon/go.sum
+
+      - name: Define variables
+        id: def_docker_vars
+        ## Idea is:
+        ##   latest image:    erigontech/erigon:${tag_name}${latest_suffix}
+        ##   commit id image: erigontech/erigon:${tag_name}-${short_commit_id}
+        run: |
+          case '${{ inputs.checkout_ref }}' in
+            'main' )
+              export tag_name='main';
+              export keep_images=100;
+              export latest_suffix='-latest'
+              export binaries="erigon integration rpcdaemon"
+              ;;
+            'docker_pectra' )
+              export tag_name='docker_pectra';
+              export keep_images=5;
+              export latest_suffix='';
+              export binaries="erigon"
+              ;;
+            * )
+              # use last string after last slash '/' by default if branch contains slash:
+              export tag_name=$(echo ${{ inputs.checkout_ref }} | sed -e  's/.*\///g' );
+              export keep_images=0;
+              export latest_suffix='-latest'
+              export binaries="erigon"
+              ;;
+          esac
+          echo "tag_name=${tag_name}" >> $GITHUB_OUTPUT
+          echo "keep_images=${keep_images}" >> $GITHUB_OUTPUT
+          echo "latest_suffix=${latest_suffix}" >> $GITHUB_OUTPUT
+          echo "Debug ${tag_name} ${keep_images} ${latest_suffix}"
 
       - name: Get commit id
         id: getCommitId
@@ -96,9 +124,10 @@ jobs:
           ${{ env.BUILDER_IMAGE }} \
           -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo erigon integration rpcdaemon"
 
-      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
+      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
         env:
-          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.def_docker_vars.outputs.latest_suffix }}"
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
@@ -113,7 +142,7 @@ jobs:
           --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
           --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
-          --tag ${{ env.DOCKER_URL }}:main-latest \
+          --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION_LATEST }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
           --label org.opencontainers.image.url="https://github.com/erigontech/erigon/blob/main/Dockerfile" \
@@ -169,9 +198,9 @@ jobs:
             done
 
   run-kurtosis-assertoor:
-    needs: [define_matrix, Build]
+    needs: [ Build]
     uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
     with:
       checkout_ref: ${{ github.sha }}
-      os: ${{ needs.define_matrix.outputs.os }}
+      os: ${{ env.RUNNER }}
       docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}
