@@ -44,7 +44,7 @@ func writePprofProfile(w http.ResponseWriter, profile string) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "aplication/profile")
+	w.Header().Set("Content-Type", "application/profile")
 	err := p.WriteTo(w, 0)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to write profile: %v", err), http.StatusInternalServerError)
