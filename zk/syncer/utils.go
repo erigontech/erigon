@@ -108,7 +108,9 @@ func DecodeSequenceBatchesCalldata(data []byte) (calldata interface{}, err error
 	case contracts.SequenceBatchesIdv6_6:
 		if method.Name == sequenceBatchesMethodName {
 			return decodeElderberryBatchesCallData(unpackedCalldata), nil
-		} else {
+		}
+	case contracts.SequenceBatchesValidiumElderBerry:
+		if method.Name == sequenceBatchesValidiumMethodName {
 			return decodeElderberryBatchesValidiumCallData(unpackedCalldata), nil
 		}
 	case contracts.SequenceBatchesBanana:
@@ -120,6 +122,8 @@ func DecodeSequenceBatchesCalldata(data []byte) (calldata interface{}, err error
 	default:
 		return nil, fmt.Errorf("no decoder found for method signature: %s", methodSig)
 	}
+
+	return nil, fmt.Errorf("no decoder found for method signature: %s", methodSig)
 }
 
 type SequencedBatchBanana struct {
