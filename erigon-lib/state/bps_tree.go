@@ -392,8 +392,9 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte, putV []byte) (v []byte, ok bool
 			}
 			//v, _ = g.Next(v[:0])
 			putV, _ = g.Next(putV[:0])
+			v = append(v[:0], putV...)
 		}
-		return putV, cmp, offt, nil
+		return v, cmp, offt, nil
 	}
 
 	var cmp int
