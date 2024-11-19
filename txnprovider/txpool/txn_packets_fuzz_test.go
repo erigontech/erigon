@@ -32,8 +32,8 @@ func FuzzPooledTransactions66(f *testing.F) {
 	f.Add(hexutility.MustDecodeHex("e8bfffffffffffffffffffffffff71e866666666955ef90c91f9fa08f96ebfbfbf007d765059effe33"))
 	f.Fuzz(func(t *testing.T, in []byte) {
 		t.Parallel()
-		ctx := NewTxParseContext(*u256.N1)
-		slots := TxSlots{}
+		ctx := NewTxnParseContext(*u256.N1)
+		slots := TxnSlots{}
 		reqId, _, err := ParsePooledTransactions66(in, 0, ctx, &slots, nil)
 		if err != nil {
 			t.Skip()

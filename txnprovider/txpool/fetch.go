@@ -47,8 +47,8 @@ type Fetch struct {
 	db                       kv.RwDB
 	stateChangesClient       StateChangesClient
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
-	stateChangesParseCtx     *TxParseContext
-	pooledTxsParseCtx        *TxParseContext
+	stateChangesParseCtx     *TxnParseContext
+	pooledTxsParseCtx        *TxnParseContext
 	sentryClients            []sentry.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxsParseCtxLock    sync.Mutex
@@ -71,8 +71,8 @@ func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Poo
 		coreDB:               coreDB,
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
-		stateChangesParseCtx: NewTxParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
-		pooledTxsParseCtx:    NewTxParseContext(chainID).ChainIDRequired(),
+		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
+		pooledTxsParseCtx:    NewTxnParseContext(chainID).ChainIDRequired(),
 		logger:               logger,
 	}
 	f.pooledTxsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
@@ -85,13 +85,13 @@ func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
 	f.wg = wg
 }
 
-func (f *Fetch) threadSafeParsePooledTxn(cb func(*TxParseContext) error) error {
+func (f *Fetch) threadSafeParsePooledTxn(cb func(*TxnParseContext) error) error {
 	f.pooledTxsParseCtxLock.Lock()
 	defer f.pooledTxsParseCtxLock.Unlock()
 	return cb(f.pooledTxsParseCtx)
 }
 
-func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxParseContext) error) error {
+func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxnParseContext) error) error {
 	f.stateChangesParseCtxLock.Lock()
 	defer f.stateChangesParseCtxLock.Unlock()
 	return cb(f.stateChangesParseCtx)
@@ -318,8 +318,8 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return err
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66:
-		txs := TxSlots{}
-		if err := f.threadSafeParsePooledTxn(func(parseContext *TxParseContext) error {
+		txs := TxnSlots{}
+		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 			return nil
 		}); err != nil {
 			return err
@@ -327,7 +327,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 
 		switch req.Id {
 		case sentry.MessageId_TRANSACTIONS_66:
-			if err := f.threadSafeParsePooledTxn(func(parseContext *TxParseContext) error {
+			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, err := ParseTransactions(req.Data, 0, parseContext, &txs, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
@@ -345,7 +345,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 				return err
 			}
 		case sentry.MessageId_POOLED_TRANSACTIONS_66:
-			if err := f.threadSafeParsePooledTxn(func(parseContext *TxParseContext) error {
+			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txs, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
@@ -368,7 +368,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if len(txs.Txs) == 0 {
 			return nil
 		}
-		f.pool.AddRemoteTxs(ctx, txs)
+		f.pool.AddRemoteTxns(ctx, txs)
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
 	}
@@ -472,13 +472,13 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 }
 
 func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.StateChangeBatch) error {
-	var unwindTxs, unwindBlobTxs, minedTxs TxSlots
+	var unwindTxs, unwindBlobTxs, minedTxs TxnSlots
 	for _, change := range req.ChangeBatch {
 		if change.Direction == remote.Direction_FORWARD {
 			minedTxs.Resize(uint(len(change.Txs)))
 			for i := range change.Txs {
-				minedTxs.Txs[i] = &TxSlot{}
-				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxParseContext) error {
+				minedTxs.Txs[i] = &TxnSlot{}
+				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
 					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 					return err
 				}); err != nil && !errors.Is(err, context.Canceled) {
@@ -488,8 +488,8 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 			}
 		} else if change.Direction == remote.Direction_UNWIND {
 			for i := range change.Txs {
-				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxParseContext) error {
-					utx := &TxSlot{}
+				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
+					utx := &TxnSlot{}
 					sender := make([]byte, 20)
 					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 					if err != nil {
@@ -509,9 +509,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 		}
 	}
 
-	if err := f.db.View(ctx, func(tx kv.Tx) error {
-		return f.pool.OnNewBlock(ctx, req, unwindTxs, unwindBlobTxs, minedTxs, tx)
-	}); err != nil && !errors.Is(err, context.Canceled) {
+	if err := f.pool.OnNewBlock(ctx, req, unwindTxs, unwindBlobTxs, minedTxs); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
 	return nil
