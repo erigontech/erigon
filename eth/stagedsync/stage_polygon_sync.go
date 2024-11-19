@@ -1541,9 +1541,7 @@ func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(ctx co
 	}
 
 	if e.cachedForkChoice.state == forkChoiceConnected {
-		if err := e.executeForkChoice(tx); err != nil {
-			return err
-		}
+		return e.executeForkChoice(tx)
 	}
 
 	if e.cachedForkChoice.state == forkChoiceExecuted {
