@@ -881,7 +881,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	return compPath
 }
 
-func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {
+func testDbAndAggregatorv3(t testing.TB, aggStep uint64) (kv.RwDB, *Aggregator) {
 	t.Helper()
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
