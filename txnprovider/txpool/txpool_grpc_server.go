@@ -54,9 +54,9 @@ var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
 type txPool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
-	PeekBest(n uint16, txs *TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error)
+	PeekBest(n uint16, txns *TxnsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	AddLocalTxns(ctx context.Context, newTxs TxnSlots) ([]txpoolcfg.DiscardReason, error)
+	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
@@ -156,17 +156,17 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_pro
 	defer tx.Rollback()
 	reply := &txpool_proto.PendingReply{}
 	reply.Txs = make([]*txpool_proto.PendingReply_Tx, 0, 32)
-	TxnSlots := TxsRlp{}
-	if _, err := s.txPool.PeekBest(math.MaxInt16, &TxnSlots, tx, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */); err != nil {
+	txnsRlp := TxnsRlp{}
+	if _, err := s.txPool.PeekBest(math.MaxInt16, &txnsRlp, tx, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */); err != nil {
 		return nil, err
 	}
 	var senderArr [20]byte
-	for i := range TxnSlots.Txs {
-		copy(senderArr[:], TxnSlots.Senders.At(i)) // TODO: optimize
+	for i := range txnsRlp.Txns {
+		copy(senderArr[:], txnsRlp.Senders.At(i)) // TODO: optimize
 		reply.Txs = append(reply.Txs, &txpool_proto.PendingReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(senderArr),
-			RlpTx:   TxnSlots.Txs[i],
-			IsLocal: TxnSlots.IsLocal[i],
+			RlpTx:   txnsRlp.Txns[i],
+			IsLocal: txnsRlp.IsLocal[i],
 		})
 	}
 	return reply, nil
@@ -184,17 +184,17 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	defer tx.Rollback()
 
 	var slots TxnSlots
-	parseCtx := NewTxParseContext(s.chainID).ChainIDRequired()
+	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired()
 	parseCtx.ValidateRLP(s.txPool.ValidateSerializedTxn)
 
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
 	for i := 0; i < len(in.RlpTxs); i++ {
-		j := len(slots.Txs) // some incoming txs may be rejected, so - need second index
+		j := len(slots.Txns) // some incoming txs may be rejected, so - need second index
 		slots.Resize(uint(j + 1))
-		slots.Txs[j] = &TxSlot{}
+		slots.Txns[j] = &TxnSlot{}
 		slots.IsLocal[j] = true
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txs[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
+		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txns[j], slots.Senders.At(j), false /* hasEnvelope */, true /* wrappedWithBlobs */, func(hash []byte) error {
 			if known, _ := s.txPool.IdHashKnown(tx, hash); known {
 				return ErrAlreadyKnown
 			}

@@ -205,7 +205,7 @@ func TestSendTxnPropagate(t *testing.T) {
 				}).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)},nil, log.New())
+		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH68, m)}, nil, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
 		send.PropagatePooledTxnsToPeersList(expectPeers, []byte{0, 1}, []uint32{10, 15}, toHashes(1, 42))
 
@@ -287,7 +287,7 @@ func TestOnNewBlock(t *testing.T) {
 	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDb, db, *u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
-	assert.Equal(t, 3, len(minedTxns.Txs))
+	assert.Equal(t, 3, len(minedTxns.Txns))
 }
 
 type MockSentry struct {

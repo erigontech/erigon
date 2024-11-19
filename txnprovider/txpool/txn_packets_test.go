@@ -143,14 +143,14 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestID, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxParseContext(*uint256.NewInt(tt.chainID))
+			ctx := NewTxnParseContext(*uint256.NewInt(tt.chainID))
 			slots := &TxnSlots{}
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
-			require.Equal(len(tt.txs), len(slots.Txs))
+			require.Equal(len(tt.txs), len(slots.Txns))
 			for i, txn := range tt.txs {
-				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txs[i].Rlp))
+				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txns[i].Rlp))
 			}
 		})
 	}
@@ -162,12 +162,12 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			chainID := uint256.NewInt(tt.chainID)
-			ctx := NewTxParseContext(*chainID)
+			ctx := NewTxnParseContext(*chainID)
 			slots := &TxnSlots{}
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
-			require.Equal(0, len(slots.Txs))
+			require.Equal(0, len(slots.Txns))
 			require.Equal(0, slots.Senders.Len())
 			require.Equal(0, len(slots.IsLocal))
 		})
@@ -203,13 +203,13 @@ func TestTransactionsPacket(t *testing.T) {
 			encodeBuf = EncodeTransactions(tt.txs, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxParseContext(*uint256.NewInt(tt.chainID))
+			ctx := NewTxnParseContext(*uint256.NewInt(tt.chainID))
 			slots := &TxnSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
-			require.Equal(len(tt.txs), len(slots.Txs))
+			require.Equal(len(tt.txs), len(slots.Txns))
 			for i, txn := range tt.txs {
-				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txs[i].Rlp))
+				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txns[i].Rlp))
 			}
 		})
 	}
@@ -221,11 +221,11 @@ func TestTransactionsPacket(t *testing.T) {
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			chainID := uint256.NewInt(tt.chainID)
-			ctx := NewTxParseContext(*chainID)
+			ctx := NewTxnParseContext(*chainID)
 			slots := &TxnSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
-			require.Equal(0, len(slots.Txs))
+			require.Equal(0, len(slots.Txns))
 			require.Equal(0, slots.Senders.Len())
 			require.Equal(0, len(slots.IsLocal))
 		})
