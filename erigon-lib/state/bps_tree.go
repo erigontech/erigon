@@ -405,7 +405,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			if !g.HasNext() {
 				return nil, false, 0, fmt.Errorf("offset %d value not found in %s", offset, g.FileName())
 			}
-			v, _ = g.Next(v[:0])
+			v, _ = g.Next(v)
 			//return v, true, m, nil
 			return v, true, offset, nil
 		} else if cmp > 0 {
@@ -425,7 +425,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	if !g.HasNext() {
 		return nil, false, 0, fmt.Errorf("offset %d value not found in %s", offset, g.FileName())
 	}
-	v, _ = g.Next(v[:0])
+	v, _ = g.Next(v)
 	//return v, true, l, nil
 	return v, true, offset, nil
 }
