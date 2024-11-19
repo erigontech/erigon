@@ -459,3 +459,24 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		}
 	}
 }
+
+func TestWithdrawalEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandWithdrawal()
+		buf.Reset()
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		dec := &Withdrawal{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		checkWithdrawals(t, enc, dec)
+	}
+}
