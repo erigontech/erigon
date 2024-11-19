@@ -354,7 +354,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, er
 // returns first key which is >= key.
 // If key is nil, returns first key
 // if key is greater than all keys, returns nil
-func (b *BpsTree) Get(g *seg.Reader, key []byte, putV []byte) (v []byte, ok bool, offset uint64, err error) {
+func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint64, err error) {
 	if b.trace {
 		fmt.Printf("get   %x\n", key)
 	}
@@ -363,7 +363,6 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte, putV []byte) (v []byte, ok bool
 		if err != nil || k0 != nil {
 			return nil, false, 0, err
 		}
-		putV = append(putV[:0], v0...)
 		return v0, true, 0, nil
 	}
 
@@ -390,9 +389,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte, putV []byte) (v []byte, ok bool
 			if !g.HasNext() {
 				return nil, 0, 0, fmt.Errorf("pair %d/%d value not found in %s", di, b.offt.Count(), g.FileName())
 			}
-			//v, _ = g.Next(v[:0])
-			putV, _ = g.Next(putV[:0])
-			v = append(v[:0], putV...)
+			v, _ = g.Next(nil)
 		}
 		return v, cmp, offt, nil
 	}

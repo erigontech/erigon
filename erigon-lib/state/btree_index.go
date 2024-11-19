@@ -1044,7 +1044,7 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 		// since fetching k and v from data file is required to use Getter.
 		// Why to do Getter.Reset twice when we can get kv right there.
 
-		v, found, index, err = b.bplus.Get(gr, lookup, v)
+		v, found, index, err = b.bplus.Get(gr, lookup)
 		if err != nil {
 			if errors.Is(err, ErrBtIndexLookupBounds) {
 				return k, v, offsetInFile, false, nil
