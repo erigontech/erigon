@@ -28,7 +28,7 @@ Here is a pie chart showing the proportional time spent on each stage (it was
 taken from the full sync). It is by all means just an estimation, but it gives
 an idea.
 
-![Full sync breakdown](/docs/stagedsync_proportions.png)
+![Full sync breakdown](/docs/assets/stagedsync_proportions.png)
 
 ## Reorgs / Unwinds
 
@@ -61,7 +61,7 @@ This optimization sometimes leads to dramatic (orders of magnitude) write speed 
 ## What happens after the Merge?
 
 In the Proof-of-Stake world staged sync becomes somewhat more complicated, as the following diagram shows.
-![Staged Sync in PoS](/docs/pos_downloader.png)
+![Staged Sync in PoS](/docs/assets/pos_downloader.png)
 
 ## Stages (for the up to date list see [`stages.go`](/eth/stagedsync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go))
 
