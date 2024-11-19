@@ -155,6 +155,7 @@ const (
 	HeimdallDB      Label = 6
 	DiagnosticsDB   Label = 7
 	PolygonBridgeDB Label = 8
+	CaplinDB        Label = 9
 )
 
 func (l Label) String() string {
@@ -177,6 +178,8 @@ func (l Label) String() string {
 		return "diagnostics"
 	case PolygonBridgeDB:
 		return "polygon-bridge"
+	case CaplinDB:
+		return "caplin"
 	default:
 		return "unknown"
 	}
@@ -201,6 +204,8 @@ func UnmarshalLabel(s string) Label {
 		return DiagnosticsDB
 	case "polygon-bridge":
 		return PolygonBridgeDB
+	case "caplin":
+		return CaplinDB
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", s))
 	}
