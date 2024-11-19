@@ -766,15 +766,16 @@ func (s *Sync) sync(
 	blockDownload blockDownloadFunc,
 ) (syncToTipResult, error) {
 	var waypoint heimdall.Waypoint
+	var err error
 
 	for {
-		newWaypoint, err := waypointSync(ctx)
+		waypoint, err = waypointSync(ctx)
 		if err != nil {
 			return syncToTipResult{}, err
 		}
 
 		// notify about latest waypoint end block so that eth_syncing API doesn't flicker on initial sync
-		s.notifications.NewLastBlockSeen(newWaypoint.EndBlock().Uint64())
+		s.notifications.NewLastBlockSeen(waypoint.EndBlock().Uint64())
 
 		newTip, err := blockDownload(ctx, tip.Number.Uint64()+1)
 		if err != nil {
@@ -794,7 +795,6 @@ func (s *Sync) sync(
 		}
 
 		tip = newTip
-		waypoint = newWaypoint
 	}
 
 	return syncToTipResult{latestTip: tip, latestWaypoint: waypoint}, nil
