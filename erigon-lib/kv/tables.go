@@ -126,7 +126,7 @@ AccountsHistory and StorageHistory - indices designed to serve next 2 type of re
 1. what is smallest block number >= X where account A changed
 2. get last shard of A - to append there new block numbers
 
-Task 1. is part of "get historical state" operation (see `core/state:GetAsOf`):
+Task 1. is part of "get historical state" operation (see `core/state:DomainGetAsOf`):
 If `db.seekInFiles(A+bigEndian(X))` returns non-last shard -
 
 	then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
@@ -485,7 +485,6 @@ var (
 	PlainStateVersion = []byte("PlainStateVersion")
 
 	HighestFinalizedKey = []byte("HighestFinalized")
-	LastNewBlockSeen    = []byte("LastNewBlockSeen") // last seen block hash
 
 	StatesProcessingKey          = []byte("StatesProcessing")
 	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
@@ -863,14 +862,6 @@ const (
 	CommitmentDomain Domain = 3
 	ReceiptDomain    Domain = 4
 	DomainLen        Domain = 5
-)
-
-const (
-	AccountsHistory   History = "AccountsHistory"
-	StorageHistory    History = "StorageHistory"
-	CodeHistory       History = "CodeHistory"
-	CommitmentHistory History = "CommitmentHistory"
-	ReceiptHistory    History = "ReceiptHistory"
 )
 
 const (

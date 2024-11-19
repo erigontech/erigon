@@ -124,6 +124,9 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			}
 		}
 	}
+	if strings.Contains(fileName, "caplin/") {
+		return res, isStateFile, true
+	}
 	return res, isStateFile, isStateFile
 }
 
@@ -152,6 +155,8 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		return
 	}
 	res.To = to * 1_000
+	res.TypeString = parts[3]
+
 	res.Type, ok = ParseFileType(parts[3])
 	if !ok {
 		return res, ok
@@ -243,6 +248,7 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
+	TypeString      string // This is for giulio's generic snapshots
 }
 
 func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
@@ -263,8 +269,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 		return res
 	}
 
-	// this is a lexical comparison (don't use enum)
-	return strings.Compare(f.Type.Name(), o.Type.Name())
+	return strings.Compare(f.name, o.name)
 }
 
 func (f FileInfo) As(t Type) FileInfo {

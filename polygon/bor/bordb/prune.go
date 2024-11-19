@@ -103,7 +103,7 @@ func UnwindHeimdall(ctx context.Context, heimdallStore heimdall.Store, bridgeSto
 		}
 	}
 
-	if !unwindCfg.KeepEventProcessedBlocks {
+	if !unwindCfg.KeepEventProcessedBlocks && unwindCfg.Astrid {
 		if err := bridge.UnwindEventProcessedBlocks(tx, unwindPoint); err != nil {
 			return err
 		}

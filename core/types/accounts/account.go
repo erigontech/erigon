@@ -62,16 +62,6 @@ func NewAccount() Account {
 	}
 }
 
-func bytesToUint64(buf []byte) (x uint64) {
-	for i, b := range buf {
-		x = x<<8 + uint64(b)
-		if i == 7 {
-			return
-		}
-	}
-	return
-}
-
 func (a *Account) EncodingLengthForStorage() uint {
 	var structLength uint = 1 // 1 byte for fieldset
 
@@ -475,7 +465,7 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 				enc[pos+1:], decodeLength)
 		}
 
-		a.Nonce = bytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		a.Nonce = libcommon.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
 		pos += decodeLength + 1
 	}
 
@@ -501,7 +491,7 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 				enc[pos+1:], decodeLength)
 		}
 
-		a.Incarnation = bytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		a.Incarnation = libcommon.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
 		pos += decodeLength + 1
 	}
 
@@ -568,7 +558,7 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 				enc[pos+1:], decodeLength)
 		}
 
-		incarnation := bytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		incarnation := libcommon.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
 		return incarnation, nil
 	}
 
@@ -639,7 +629,7 @@ func DeserialiseV3(a *Account, enc []byte) error {
 	nonceBytes := int(enc[pos])
 	pos++
 	if nonceBytes > 0 {
-		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
+		a.Nonce = libcommon.BytesToUint64(enc[pos : pos+nonceBytes])
 		pos += nonceBytes
 	}
 	balanceBytes := int(enc[pos])
@@ -660,7 +650,7 @@ func DeserialiseV3(a *Account, enc []byte) error {
 	incBytes := int(enc[pos])
 	pos++
 	if incBytes > 0 {
-		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
+		a.Incarnation = libcommon.BytesToUint64(enc[pos : pos+incBytes])
 	}
 	return nil
 }

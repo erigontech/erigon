@@ -179,6 +179,8 @@ type Config struct {
 	TmpDir string
 
 	MetricsEnabled bool
+
+	DiscoveryDNS []string
 }
 
 func (config *Config) ListenPort() int {

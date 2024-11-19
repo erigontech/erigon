@@ -31,6 +31,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon-lib/kv/order"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -63,7 +65,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	blockReader := m.BlockReader
 	borConsensusDB := memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
-	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
+	heimdallClient := heimdall.NewMockClient(ctrl)
 	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
 	bridgeStore := bridge.NewDbStore(m.DB)
 	heimdallStore := heimdall.NewDbStore(m.DB)
@@ -179,7 +181,7 @@ type Harness struct {
 	miningSync                 *stagedsync.Sync
 	miningState                stagedsync.MiningState
 	bhCfg                      stagedsync.BorHeimdallCfg
-	heimdallClient             *heimdall.MockHeimdallClient
+	heimdallClient             *heimdall.MockClient
 	heimdallNextMockSpan       *heimdall.Span
 	heimdallLastEventID        uint64
 	heimdallLastEventHeaderNum uint64
@@ -291,7 +293,7 @@ func (h *Harness) SetMiningBlockEmptyHeader(ctx context.Context, t *testing.T, p
 
 func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		spanIter, err := tx.Range(kv.BorSpans, nil, nil)
+		spanIter, err := tx.Range(kv.BorSpans, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -326,7 +328,7 @@ func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, 
 
 func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uint64, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		eventsIter, err := tx.Range(kv.BorEvents, nil, nil)
+		eventsIter, err := tx.Range(kv.BorEvents, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -352,7 +354,7 @@ func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uin
 func (h *Harness) ReadLastStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
 	nums = map[uint64]uint64{}
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil)
+		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}

@@ -42,7 +42,7 @@ func (m *MockSyncContributionService) EXPECT() *MockSyncContributionServiceMockR
 }
 
 // ProcessMessage mocks base method.
-func (m *MockSyncContributionService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedContributionAndProof) error {
+func (m *MockSyncContributionService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedContributionAndProofWithGossipData) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
@@ -68,13 +68,13 @@ func (c *MockSyncContributionServiceProcessMessageCall) Return(arg0 error) *Mock
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSyncContributionServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SignedContributionAndProof) error) *MockSyncContributionServiceProcessMessageCall {
+func (c *MockSyncContributionServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SignedContributionAndProofWithGossipData) error) *MockSyncContributionServiceProcessMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSyncContributionServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedContributionAndProof) error) *MockSyncContributionServiceProcessMessageCall {
+func (c *MockSyncContributionServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedContributionAndProofWithGossipData) error) *MockSyncContributionServiceProcessMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -288,6 +289,21 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		defer tx.Rollback()
 	}
 	blockFrom := s.PruneProgress
+	if blockFrom == 0 {
+		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
+		if err != nil {
+			return err
+		}
+		if firstNonGenesisHeader != nil {
+			blockFrom = binary.BigEndian.Uint64(firstNonGenesisHeader)
+		} else {
+			execProgress, err := stageProgress(tx, nil, stages.Senders)
+			if err != nil {
+				return err
+			}
+			blockFrom = execProgress
+		}
+	}
 	var blockTo uint64
 
 	var pruneBor bool
@@ -307,10 +323,20 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 
 	if blockFrom < blockTo {
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
 		t := time.Now()
 		var pruneBlockNum = blockFrom
 		for ; pruneBlockNum < blockTo; pruneBlockNum++ {
-			if err = deleteTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger); err != nil {
+			select {
+			case <-logEvery.C:
+				logger.Info(fmt.Sprintf("[%s] progress", logPrefix), "blockNum", pruneBlockNum)
+			default:
+			}
+
+			err = deleteTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger)
+			if err != nil {
 				return fmt.Errorf("prune TxLookUp: %w", err)
 			}
 			if err = deleteTxNumLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger); err != nil {

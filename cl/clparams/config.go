@@ -913,6 +913,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
+	cfg.MaxBlobsPerBlock = 2
+	cfg.MinEpochsForBlobsSidecarsRequest = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
@@ -944,6 +946,10 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.MaxWithdrawalsPerPayload = 8
+	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
+	cfg.MaxBlobsPerBlock = 2
+	cfg.MinEpochsForBlobsSidecarsRequest = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
@@ -1134,8 +1140,8 @@ func EmbeddedSupported(id uint64) bool {
 	return id == 1 ||
 		id == 17000 ||
 		id == 11155111 ||
-		id == 100 // ||
-	//id == 10200
+		id == 100 ||
+		id == 10200
 }
 
 // Subset of supported networks where embedded CL is stable enough
@@ -1148,6 +1154,7 @@ func SupportBackfilling(networkId uint64) bool {
 	return networkId == uint64(MainnetNetwork) ||
 		networkId == uint64(SepoliaNetwork) ||
 		networkId == uint64(GnosisNetwork) ||
+		networkId == uint64(ChiadoNetwork) ||
 		networkId == uint64(HoleskyNetwork)
 }
 

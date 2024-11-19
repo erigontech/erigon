@@ -51,8 +51,8 @@ type ForkGraph interface {
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
 	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
-	GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
-	GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error)
+	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
+	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	DumpBeaconStateOnDisk(blockRoot libcommon.Hash, state *state.CachingBeaconState, forced bool) error
 }

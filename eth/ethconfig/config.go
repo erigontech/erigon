@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
@@ -44,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
@@ -105,6 +105,8 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
+
+	ChaosMonkey: false,
 }
 
 func init() {
@@ -258,6 +260,8 @@ type Config struct {
 	SilkwormRpcJsonCompatibility bool
 
 	DisableTxPoolGossip bool
+
+	ChaosMonkey bool
 }
 
 type Sync struct {
