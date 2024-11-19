@@ -243,7 +243,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 	blockFrom := s.PruneProgress
 	if blockFrom == 0 {
-		k, err := kv.FirstKey(tx, kv.HeaderCanonical)
+		k, err := kv.FirstKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
