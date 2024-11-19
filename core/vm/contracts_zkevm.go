@@ -303,10 +303,8 @@ func (c *bigModExp_zkevm) RequiredGas(input []byte) uint64 {
 	// Retrieve the operands and execute the exponentiation
 	var (
 		base       = new(big.Int).SetBytes(getData(input, 0, baseLen.Uint64()))
-		exp        = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), expLen.Uint64()))
 		mod        = new(big.Int).SetBytes(getData(input, baseLen.Uint64()+expLen.Uint64(), modLen.Uint64()))
 		baseBitLen = base.BitLen()
-		expBitLen  = exp.BitLen()
 		modBitLen  = mod.BitLen()
 	)
 
@@ -314,17 +312,16 @@ func (c *bigModExp_zkevm) RequiredGas(input []byte) uint64 {
 	// - if mod = 0 we consume gas as normal
 	// - if base is 0 and mod < 8192 we consume gas as normal
 	// - if neither of the above are true we check for reverts and return 0 gas fee
-
-	if modBitLen == 0 {
+	if baseLen.Uint64() > 1024 || expLen.Uint64() > 1024 || modLen.Uint64() > 1024 {
+		return 0
+	} else if modBitLen == 0 {
 		// consume as normal - will return 0
 	} else if baseBitLen == 0 {
-		if modBitLen > 8192 {
+		if modLen.Uint64() > 1024 {
 			return 0
 		} else {
 			// consume as normal - will return 0
 		}
-	} else if baseBitLen > 8192 || expBitLen > 8192 || modBitLen > 8192 {
-		return 0
 	}
 
 	// Retrieve the head 32 bytes of exp for the adjusted exponent length
@@ -423,25 +420,24 @@ func (c *bigModExp_zkevm) Run(input []byte) ([]byte, error) {
 	var (
 		v          []byte
 		baseBitLen = base.BitLen()
-		expBitLen  = exp.BitLen()
 		modBitLen  = mod.BitLen()
 	)
+
+	// limit to 8192 bits for base, exp, and mod in ZK
+	if baseLen > 1024 || expLen > 1024 || modLen > 1024 {
+		return nil, ErrExecutionReverted
+	}
 
 	if modBitLen == 0 {
 		return common.LeftPadBytes([]byte{}, int(modLen)), nil
 	}
 
 	if baseBitLen == 0 {
-		if modBitLen > 8192 {
+		if modLen > 1024 {
 			return nil, ErrExecutionReverted
 		} else {
 			return common.LeftPadBytes([]byte{}, int(modLen)), nil
 		}
-	}
-
-	// limit to 8192 bits for base, exp, and mod in ZK
-	if baseBitLen > 8192 || expBitLen > 8192 || modBitLen > 8192 {
-		return nil, ErrExecutionReverted
 	}
 
 	switch {
