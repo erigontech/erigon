@@ -799,20 +799,24 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	key := make([]byte, 0, 64)
 	var pos uint64
 
-	var b0 [256]bool
+	var b0 [256][256]bool
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
 		keep := false
-		if !b0[key[0]] {
-			b0[key[0]] = true
+		if len(key) >= 2 && !b0[key[0]][key[1]] {
+			b0[key[0]][key[1]] = true
 			keep = true
 		}
+		hi, _ := murmur3.Sum128WithSeed(key, salt)
+		bloom.AddHash(hi)
+		if keep {
+			key = key[:2]
+		}
+
 		err = iw.AddKey(key, pos, keep)
 		if err != nil {
 			return err
 		}
-		hi, _ := murmur3.Sum128WithSeed(key, salt)
-		bloom.AddHash(hi)
 		pos, _ = getter.Skip()
 
 		p.Processed.Add(1)
