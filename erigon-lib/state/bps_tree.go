@@ -373,7 +373,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	}
 
 	maxDi := b.offt.Count()
-	check := func(di uint64) (cmp int, offt uint64, err error) {
+	check := func(di uint64, v []byte) (cmp int, offt uint64, err error) {
 		if di >= maxDi {
 			return 0, 0, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.offt.Count(), di, g.FileName())
 		}
@@ -401,7 +401,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		if r-l <= DefaultBtreeStartSkip {
 			m = l
 		}
-		cmp, offset, err = check(m)
+		cmp, offset, err = check(m, v)
 		if err != nil {
 			return nil, false, 0, err
 		}
@@ -417,7 +417,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	cmp, offset, err = check(l)
+	cmp, offset, err = check(l, v)
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
