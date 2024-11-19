@@ -62,11 +62,12 @@ func NewHistoricalStatesReader(
 	shuffledIndiciesCache := lru.NewWithTTL[uint64, []uint64]("shuffledIndiciesCacheReader", 64, 2*time.Minute)
 
 	return &HistoricalStatesReader{
-		cfg:            cfg,
-		blockReader:    blockReader,
-		genesisState:   genesisState,
-		validatorTable: validatorTable,
-		stateSn:        stateSn,
+		cfg:                   cfg,
+		blockReader:           blockReader,
+		genesisState:          genesisState,
+		validatorTable:        validatorTable,
+		stateSn:               stateSn,
+		shuffledIndiciesCache: shuffledIndiciesCache,
 	}
 }
 
