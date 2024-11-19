@@ -530,7 +530,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		consensusConfig = &config.Ethash
 	}
 
-	var heimdallClient heimdall.HeimdallClient
+	var heimdallClient heimdall.Client
 	var polygonBridge *bridge.Service
 	var heimdallService *heimdall.Service
 	var bridgeRPC *bridge.BackendServer
@@ -538,7 +538,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
-			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
+			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger)
 		}
 
 		if config.PolygonSync {
