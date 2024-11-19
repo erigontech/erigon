@@ -883,9 +883,8 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator) {
 	tb.Helper()
-	require := require.New(tb)
+	require, logger := require.New(tb), log.New()
 	dirs := datadir.New(tb.TempDir())
-	logger := log.New()
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
