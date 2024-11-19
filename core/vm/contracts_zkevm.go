@@ -395,9 +395,9 @@ func (c *bigModExp_zkevm) Run(input []byte) ([]byte, error) {
 		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
 		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
 		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
-		base = big.NewInt(0)
-		exp = big.NewInt(0)
-		mod = big.NewInt(0)
+		base    = new(big.Int).SetBytes(getData(input, 0, baseLen))
+		exp     = new(big.Int).SetBytes(getData(input, baseLen, expLen))
+		mod     = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
 	)
 
 	// Extract `base`, `exp`, and `mod` with padding as needed
