@@ -42,7 +42,7 @@ func (b *BitVector) BitCap() int {
 }
 
 func (b *BitVector) Static() bool {
-	return false
+	return true
 }
 
 func (b *BitVector) GetBitAt(i int) bool {
@@ -127,12 +127,18 @@ func (b *BitVector) EncodeSSZ(dst []byte) ([]byte, error) {
 	// allocate enough space
 	if cap(dst) < b.EncodingSizeSSZ() {
 		dst = make([]byte, 0, b.EncodingSizeSSZ())
+		for i := 0; i < b.EncodingSizeSSZ(); i++ {
+			dst[i] = byte(0)
+		}
 	}
-	dst = append(dst, b.container...)
-	// pad with zeros
-	for i := len(b.container); i < (b.bitCap+7)/8; i++ {
-		dst = append(dst, 0)
-	}
+	copy(dst[:], b.container[:])
+	/*
+		dst = append(dst, b.container...)
+		// pad with zeros
+		for i := len(b.container); i < (b.bitCap+7)/8; i++ {
+			dst = append(dst, 0)
+		}
+	*/
 	return dst, nil
 }
 

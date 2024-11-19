@@ -72,9 +72,9 @@ func (a *Attestation) Copy() *Attestation {
 func (a *Attestation) EncodingSizeSSZ() (size int) {
 	if a.CommitteeBits != nil {
 		// Electra case
-		return 4 + AttestationDataSize + length.Bytes96 + 4 +
-			a.AggregationBits.EncodingSizeSSZ() +
-			a.CommitteeBits.EncodingSizeSSZ()
+		return 4 + AttestationDataSize + length.Bytes96 +
+			a.CommitteeBits.EncodingSizeSSZ() +
+			a.AggregationBits.EncodingSizeSSZ()
 	}
 	// Deneb case
 	size = AttestationDataSize + length.Bytes96

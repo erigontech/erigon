@@ -47,7 +47,12 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 	for i := 0; i < len(b.leaves); i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
-	return merkle_tree.MerkleProof(5, 22, schema...)
+	depth := 5
+	if b.Version() >= clparams.ElectraVersion {
+		depth = 6
+	}
+
+	return merkle_tree.MerkleProof(depth, 22, schema...)
 }
 
 func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
