@@ -1151,12 +1151,12 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 	return nil, 0, false, nil
 }
 
-func (r *BlockReader) txnIDByHash(txnHash common.Hash, segments []*VisibleSegment) (txnId uint64, found bool) {
+func (r *BlockReader) txnIDByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment) (txnId uint64, found bool) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 
-		idxTxnHash := sn.src.Index(coresnaptype.Indexes.TxnHash)
-		idxTxnHash2BlockNum := sn.src.Index(coresnaptype.Indexes.TxnHash2BlockNum)
+		idxTxnHash := sn.Src().Index(coresnaptype.Indexes.TxnHash)
+		idxTxnHash2BlockNum := sn.Src().Index(coresnaptype.Indexes.TxnHash2BlockNum)
 
 		if idxTxnHash == nil || idxTxnHash2BlockNum == nil {
 			continue
@@ -1254,7 +1254,7 @@ func (r *BlockReader) TxnNumLookup(_ context.Context, tx kv.Getter, txnHash comm
 	txns := r.sn.ViewType(coresnaptype.Transactions)
 	defer txns.Close()
 
-	txID, ok := r.txnIDByHash(txnHash, txns.VisibleSegments)
+	txID, ok := r.txnIDByHash(txnHash, txns.Segments)
 
 	return txID, ok, nil
 }
