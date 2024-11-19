@@ -312,7 +312,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 		}
 
 		trieSequential.SetTrace(trace)
-		trieBatch.SetTrace(trace)
+		trieBatch.SetParticularTrace(trace, 8)
 
 		var rSeq, rBatch []byte
 		{

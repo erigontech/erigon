@@ -2254,6 +2254,12 @@ func (p *ParallelPatriciaHashed) SetTrace(b bool) {
 		p.mounts[i].SetTrace(b)
 	}
 }
+func (p *ParallelPatriciaHashed) SetParticularTrace(b bool, n int) {
+	p.root.SetTrace(b)
+	if n < len(p.mounts) && n >= 0 {
+		p.mounts[n].SetTrace(b)
+	}
+}
 
 func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	if err = p.unfoldRoot(); err != nil {
