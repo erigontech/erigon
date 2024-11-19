@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -243,12 +244,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 	blockFrom := s.PruneProgress
 	if blockFrom == 0 {
-		k, err := kv.FirstKey(tx, kv.Headers)
+		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
-		if k != nil {
-			blockFrom = binary.BigEndian.Uint64(k)
+		if firstNonGenesisHeader != nil {
+			blockFrom = binary.BigEndian.Uint64(firstNonGenesisHeader)
 		}
 	}
 	var blockTo uint64
