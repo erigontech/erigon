@@ -77,7 +77,7 @@ tx_hashes, pending_pool, queued_pool, local_transactions => pending_pool`, queue
 
 where modified pending pool and queued pool, and local transactions do not contain given transaction hashes anymore.
 
-In code can find production of such event by `p.newPendingTxs <-`, and handling of this event by `announcements := <-newTxs` [here](/txnprovider/txpool/pool.go#L1429)
+In code can find production of such event by `p.newPendingTxs <-`, and handling of this event by `announcements := <-newTxs` [here](pool.go#L1429)
 
 ## Reinject transactions into the transaction pool on unwinding a block
 This can be thought of a reverse operation from the one described before. When a block that was deemed "the best" of its height, is no longer deemed "the best", the transactions contained in it, are now viable for inclusion in other blocks, and therefore should be returned into the transaction pool. We can describe this function as:
