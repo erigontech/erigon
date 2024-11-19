@@ -373,25 +373,27 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	}
 
 	maxDi := b.offt.Count()
-	check := func(di uint64, v []byte) (vb []byte, cmp int, offt uint64, err error) {
+	v = make([]byte, 0, 8192)
+	check := func(di uint64, v []byte) ([]byte, int, uint64, error) {
 		if di >= maxDi {
 			return nil, 0, 0, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.offt.Count(), di, g.FileName())
 		}
 
-		offt = b.offt.Get(di)
+		offt := b.offt.Get(di)
 		g.Reset(offt)
 		if !g.HasNext() {
 			return nil, 0, 0, fmt.Errorf("pair %d/%d key not found in %s", di, b.offt.Count(), g.FileName())
 		}
 		//v, _ = g.Next(v[:0])
 		//if cmp = bytes.Compare(v, key); cmp == 0 {
-		if cmp = g.MatchCmp(key) * -1; cmp == 0 {
+		cmp := g.MatchCmp(key) * -1
+		if cmp == 0 {
 			if !g.HasNext() {
 				return nil, 0, 0, fmt.Errorf("pair %d/%d value not found in %s", di, b.offt.Count(), g.FileName())
 			}
-			vb, _ = g.Next(v[:0])
+			v, _ = g.Next(v[:0])
 		}
-		return vb, cmp, offt, nil
+		return v, cmp, offt, nil
 	}
 
 	var cmp int
@@ -401,7 +403,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		if r-l <= DefaultBtreeStartSkip {
 			m = l
 		}
-		v, cmp, offset, err = check(m, v)
+		v, cmp, offset, err = check(m, v[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}
@@ -418,7 +420,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	v, cmp, offset, err = check(l, v)
+	v, cmp, offset, err = check(l, v[:0])
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
