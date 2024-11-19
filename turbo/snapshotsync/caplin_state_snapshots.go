@@ -135,8 +135,9 @@ type CaplinStateSnapshots struct {
 	dirtyLock sync.RWMutex                            // guards `dirty` field
 	dirty     map[string]*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
 
-	visibleLock sync.RWMutex               // guards  `visible` field
-	visible     map[string]VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
+	visibleLock sync.RWMutex // guards  `visible` field
+	visible     sync.Map
+	//visible     map[string]VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
 
 	snapshotTypes SnapshotTypes
 
@@ -181,11 +182,11 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	for k := range snapshotTypes.KeyValueGetters {
 		dirty[k] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	visible := make(map[string]VisibleSegments)
+
+	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, dirty: dirty, logger: logger, beaconCfg: beaconCfg}
 	for k := range snapshotTypes.KeyValueGetters {
-		visible[k] = make(VisibleSegments, 0)
+		c.visible.Store(k, make(VisibleSegments, 0))
 	}
-	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, visible: visible, dirty: dirty, logger: logger, beaconCfg: beaconCfg}
 	c.recalcVisibleFiles()
 	return c
 }
@@ -430,9 +431,13 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 		return newVisibleSegments
 	}
 
-	for k := range s.visible {
-		s.visible[k] = getNewVisibleSegments(s.dirty[k])
-	}
+	// for k := range s.visible {
+	// 	s.visible[k] = getNewVisibleSegments(s.dirty[k])
+	// }
+	s.visible.Range(func(k, v interface{}) bool {
+		s.visible.Store(k, getNewVisibleSegments(s.dirty[k.(string)]))
+		return true
+	})
 }
 
 func (s *CaplinStateSnapshots) idxAvailability() uint64 {
@@ -440,14 +445,25 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	defer s.visibleLock.RUnlock()
 
 	min := uint64(math.MaxUint64)
-	for _, segs := range s.visible {
+	// for _, segs := range s.visible {
+	// 	if len(segs) == 0 {
+	// 		return 0
+	// 	}
+	// 	if segs[len(segs)-1].to < min {
+	// 		min = segs[len(segs)-1].to
+	// 	}
+	// }
+	s.visible.Range(func(_, v interface{}) bool {
+		segs := v.(VisibleSegments)
 		if len(segs) == 0 {
-			return 0
+			min = 0
+			return false
 		}
 		if segs[len(segs)-1].to < min {
 			min = segs[len(segs)-1].to
 		}
-	}
+		return true
+	})
 	if min == math.MaxUint64 {
 		return 0
 	}
@@ -523,9 +539,13 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	s.dirtySegmentsLock.RLock()
 	defer s.dirtySegmentsLock.RUnlock()
 
-	for k, segments := range s.visible {
-		v.roTxs[k] = segments.BeginRo()
-	}
+	// for k, segments := range s.visible {
+	// 	v.roTxs[k] = segments.BeginRo()
+	// }
+	s.visible.Range(func(k, val interface{}) bool {
+		v.roTxs[k.(string)] = val.(VisibleSegments).BeginRo()
+		return true
+	})
 	return v
 }
 
@@ -544,10 +564,17 @@ func (v *CaplinStateView) Close() {
 }
 
 func (v *CaplinStateView) VisibleSegments(tbl string) []*VisibleSegment {
-	if v.s == nil || v.s.visible[tbl] == nil {
+	// if v.s == nil || v.s.visible[tbl] == nil {
+	// 	return nil
+	// }
+	// return v.s.visible[tbl]
+	if v.s == nil {
 		return nil
 	}
-	return v.s.visible[tbl]
+	if val, ok := v.s.visible.Load(tbl); ok {
+		return val.(VisibleSegments)
+	}
+	return nil
 }
 
 func (v *CaplinStateView) VisibleSegment(slot uint64, tbl string) (*VisibleSegment, bool) {
