@@ -269,7 +269,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		for ; pruneBlockNum < blockTo; pruneBlockNum++ {
 			select {
 			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s] pruning tx lookup periodic progress", logPrefix), "blockNum", pruneBlockNum)
+				logger.Info(fmt.Sprintf("[%s] progress", logPrefix), "blockNum", pruneBlockNum)
 			default:
 			}
 
