@@ -81,6 +81,13 @@ func (g *Reader) MatchPrefix(prefix []byte) bool {
 	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
+func (g *Reader) MatchCmp(prefix []byte) int {
+	if g.c&CompressKeys != 0 {
+		return g.Getter.MatchCmp(prefix)
+	}
+	return g.Getter.MatchCmpUncompressed(prefix)
+}
+
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
 	fl := CompressKeys
 	if g.nextValue {
