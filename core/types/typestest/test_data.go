@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 )
 
-func MakeBlobTxRlp() ([]byte, []gokzg4844.KZGCommitment) {
+func MakeBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {
 	bodyRlp := hexutility.MustDecodeHex(BodyRlpHex)
 
 	blobsRlpPrefix := hexutility.MustDecodeHex("fa040008")
