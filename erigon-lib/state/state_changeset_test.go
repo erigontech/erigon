@@ -17,12 +17,9 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/stretchr/testify/require"
 )
 
