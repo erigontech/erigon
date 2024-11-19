@@ -36,8 +36,8 @@ func TestParseTransactionRLP(t *testing.T) {
 		testSet := testSet
 		t.Run(strconv.Itoa(int(testSet.chainID.Uint64())), func(t *testing.T) {
 			require := require.New(t)
-			ctx := NewTxParseContext(testSet.chainID)
-			tx, txSender := &TxSlot{}, [20]byte{}
+			ctx := NewTxnParseContext(testSet.chainID)
+			tx, txSender := &TxnSlot{}, [20]byte{}
 			for i, tt := range testSet.tests {
 				tt := tt
 				t.Run(strconv.Itoa(i), func(t *testing.T) {
@@ -72,10 +72,10 @@ func TestParseTransactionRLP(t *testing.T) {
 
 func TestTransactionSignatureValidity1(t *testing.T) {
 	chainId := new(uint256.Int).SetUint64(1)
-	ctx := NewTxParseContext(*chainId)
+	ctx := NewTxnParseContext(*chainId)
 	ctx.WithAllowPreEip2s(true)
 
-	tx, txSender := &TxSlot{}, [20]byte{}
+	tx, txSender := &TxnSlot{}, [20]byte{}
 	validTxn := hexutility.MustDecodeHex("f83f800182520894095e7baea6a6c7c4c2dfeb977efac326af552d870b801ba048b55bfa915ac795c431978d8a6a992b628d557da5ff759b307d495a3664935301")
 	_, err := ctx.ParseTransaction(validTxn, 0, tx, txSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 	assert.NoError(t, err)
@@ -96,8 +96,8 @@ func TestTransactionSignatureValidity1(t *testing.T) {
 // Problematic txn included in a bad block on Görli
 func TestTransactionSignatureValidity2(t *testing.T) {
 	chainId := new(uint256.Int).SetUint64(5)
-	ctx := NewTxParseContext(*chainId)
-	slot, sender := &TxSlot{}, [20]byte{}
+	ctx := NewTxnParseContext(*chainId)
+	slot, sender := &TxnSlot{}, [20]byte{}
 	rlp := hexutility.MustDecodeHex("02f8720513844190ab00848321560082520894cab441d2f45a3fee83d15c6b6b6c36a139f55b6288054607fc96a6000080c001a0dffe4cb5651e663d0eac8c4d002de734dd24db0f1109b062d17da290a133cc02a0913fb9f53f7a792bcd9e4d7cced1b8545d1ab82c77432b0bc2e9384ba6c250c5")
 	_, err := ctx.ParseTransaction(rlp, 0, slot, sender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 	assert.Error(t, err)
@@ -110,7 +110,7 @@ func TestTransactionSignatureValidity2(t *testing.T) {
 
 func TestTxSlotsGrowth(t *testing.T) {
 	assert := assert.New(t)
-	s := &TxSlots{}
+	s := &TxnSlots{}
 	s.Resize(11)
 	assert.Equal(11, len(s.Txs))
 	assert.Equal(11, s.Senders.Len())
@@ -118,7 +118,7 @@ func TestTxSlotsGrowth(t *testing.T) {
 	assert.Equal(23, len(s.Txs))
 	assert.Equal(23, s.Senders.Len())
 
-	s = &TxSlots{Txs: make([]*TxSlot, 20), Senders: make(Addresses, 20*20)}
+	s = &TxnSlots{Txs: make([]*TxnSlot, 20), Senders: make(Addresses, 20*20)}
 	s.Resize(20)
 	assert.Equal(20, len(s.Txs))
 	assert.Equal(20, s.Senders.Len())
@@ -200,10 +200,10 @@ func TestBlobTxParsing(t *testing.T) {
 	bodyEnvelope = append(bodyEnvelope, BlobTxType)
 	bodyEnvelope = append(bodyEnvelope, bodyRlp...)
 
-	ctx := NewTxParseContext(*uint256.NewInt(5))
+	ctx := NewTxnParseContext(*uint256.NewInt(5))
 	ctx.withSender = false
 
-	var thinTx TxSlot // only txn body, no blobs
+	var thinTx TxnSlot // only txn body, no blobs
 	txType, err := PeekTransactionType(bodyEnvelope)
 	require.NoError(t, err)
 	assert.Equal(t, BlobTxType, txType)
@@ -256,7 +256,7 @@ func TestBlobTxParsing(t *testing.T) {
 	wrapperRlp = append(wrapperRlp, 0xb0)
 	wrapperRlp = append(wrapperRlp, proof1[:]...)
 
-	var fatTx TxSlot // with blobs/commitments/proofs
+	var fatTx TxnSlot // with blobs/commitments/proofs
 	txType, err = PeekTransactionType(wrapperRlp)
 	require.NoError(t, err)
 	assert.Equal(t, BlobTxType, txType)
@@ -298,10 +298,10 @@ func TestSetCodeTxParsing(t *testing.T) {
 	bodyRlx := hexutility.MustDecodeHex(bodyRlxHex)
 
 	hasEnvelope := false
-	ctx := NewTxParseContext(*uint256.NewInt(1))
+	ctx := NewTxnParseContext(*uint256.NewInt(1))
 	ctx.withSender = false
 
-	var tx TxSlot
+	var tx TxnSlot
 	txType, err := PeekTransactionType(bodyRlx)
 	require.NoError(t, err)
 	assert.Equal(t, SetCodeTxType, txType)
@@ -314,9 +314,9 @@ func TestSetCodeTxParsing(t *testing.T) {
 	// test empty authorizations
 	bodyRlxHex = "0x04f903420188db1b29114eba96ab887145908699cc1f3488987b96c0c55fced7886b85e4937b481442949a60a150fda306891ad7aff6d47584c8a0e1571788c5f7682286d452e0b9021164b57ad1f652639f5d44536f1b868437787082df48b3e2a684742d0eafcfda5336e7a958afb22ae57aad8e9a271528f9aa1f4a34e29491a8929732e22c04a438578b2b8510862572dd36b5304a9c3b6668b7c8f818be8411c07866ccb1fbe34586f80a1ace62753b918139acefc71f92d0c4679c0a56bb6c8ae38bc37a7ee8f348255c8ada95e842b52d4bd2b2447789a8543beda9f3bc8e27f28d51373ef9b1494c3d21adc6b0416444088ed08834eb5736d48566da000356bbcd7d78b118c39d15a56874fd254dcfcc172cd7a82e36621b964ebc54fdaa64de9e381b1545cfc7c4ea1cfccff829f0dfa395ef5f750b79689e5c8e3f6c7de9afe34d05f599dac8e3ae999f7acb32f788991425a7d8b36bf92a7dc14d913c3cc5854e580f48d507bf06018f3d012155791e1930791afccefe46f268b59e023ddacaf1e8278026a4c962f9b968f065e7c33d98d2aea49e8885ac77bfcc952e322c5e414cb5b4e7477829c0a4b8b0964fc28d202bca1b3bedca34f3fe12d62629b30a4764121440d0ea0f50f26579c486070d00309a44c14f6c3347c5d14b520eca8a399a1cd3c421f28ae5485e96b4c500a411754a78f558701d1a9788d22e6d2f02fefd1c45c2d427b518adda66a34432c3f94b4b3811e2d063dca2917f403033b0400e4e9dc3fd327b10a43a15229332596671d0392e501c39f43b23f814e95b093e981418091f9e2a32013ab8fa7a409d5636b52fded6f8d5f794de688ae4be9a54b20eb5366903223863de2bc895e1a0f5ecb3956919b8e9e9956c20c89b523e71c5803592c99871b7d5ee025e402941f89b94ae16863cc3bf6e6946f186d0f63d77343f81363ef884a0b09afe54c0376e3e3091473edb4e2bf43f08530356a2c9236bf373869b79c8d0a0ec2c57ca577173865f340a7cd13cf0051e52229722e3a529f851d4b74e315c8ca00bbe5f1a1ef2e5830d0c5cb8e93a05d4d29b4d7bf244ceea432888c4fbd5d5d5a0823b7ceaeba3a4cd70572c2ccc560d588ffeed638aec7c0cc364afa7dbf1c51cc0018818848492f65ca7bd88ea2017dc526fff7f"
 	bodyRlx = hexutility.MustDecodeHex(bodyRlxHex)
-	ctx = NewTxParseContext(*uint256.NewInt(1))
+	ctx = NewTxnParseContext(*uint256.NewInt(1))
 	ctx.withSender = false
-	var tx2 TxSlot
+	var tx2 TxnSlot
 
 	txType, err = PeekTransactionType(bodyRlx)
 	require.NoError(t, err)
@@ -396,10 +396,10 @@ func TestSetCodeTxParsingWithLargeAuthorizationValues(t *testing.T) {
 	bodyRlxHex := "0x04f90546018820d75f30c9812472883efdaaf328683c8f88791ecd238942f142882f6a9ebaec6c1af49484d85e90da36f0392202193df1101863eb895d498883bf224e11f95355b902540e61088a043ef305b21d1bab6e4c14edeae66b3c0d6c183e423324c562b33b98ca2900d6a0adc2c13fdce4835debb623bf9f02860959bf589e88392a98a57db341a182e7d063945aaa4153010dd1d58d508d27ddd07e82b2f95af341b76b3acfbe00fde8d890867b6794ac95a4096dccbfaf9f92f446d6e4f3a718185f875ce49308ad24cf8b7316f1a73da7fb626e92e7d45d3b6ffeb2e3d153e92bc2499ccd8a43a6295db0be96dffcb857ed409b3e4f29a126e38982bf927efa9e637f670f631b36795dc158cb32069e846f28e4721b9d3004c6951075bf14f27e9f81dfa409e344e713143da8b8b35bd5ebfbc2b5c1e6909fadc7a5681ca63ecd387b745bbd3fff1169308a02e313671f2e5e5e914e8085236112fe12ae52403f54a95230c5807e5697b34bea0bf932a8cd45b6bf7ac1b318c594de85c523b1b82358ee8fce4f94d04bc30369c5a5482668a354bb36bb0f6e8943662be124cc3650f8e563a9c62808fb65444f425ff274974cd6cce771e67c2d45a95431a731ae0db60ef83793d9c257d48a24dae64e43870ecaf56a7f3e95415cdaacee3da94ad569e430ba4cdf5f0ac7cd8bd2e5507a1d0f16849e1d1823fcce1670c861b591051170c60883a32c23bc0a552415203baad7d1a6d44e3229956387ae014e944dbd7b918fa1c52fc7a4ee1ea813f1ba4a1bdedd7a23b4a93faca01eb1127d51953603eae70499d485dc3c8633b778dbae199158e03977b003a9da717ae8f31780949c53f82c5d09dd7428747426f77e39349dcd4fb8e3793d6a46cd4e9be6d6614b285d79e772bae41fb8a1625d23b38cef14911092e78c86f901f0f85994e805c10b96ec670ff8d6b684ed413eb71babf735f842a0e1b6f8621d3f4513ac7d491849fdcf3a8264e6cf4a1503357414a38682662555a027d3e5a0f5e7478629ef06e831162a8e99c4d9cd973919e21c162d29ac1410e6f87a94a5bfb70f5ffb19b2b2173e2d80a1bbfb6ff10dc4f863a0e129afdd8d7ac6e5c52708e658ded4859b06f1b483497e0474f6599b72dd2f75a0a7169872faa1fdfc3c2d80c207bc64ae817301b4087979563ef690b02b0d7964a0fe009fc656d1f0fcfc1c7c93b7ab67bdc9dd06f06a37fdaecbd43ed5d1423a11f87a94feae80b40ef29bdd926061a9000c1b0875cb0be3f863a0a5a381867886a9780e6f955d62cf73849e338918751dba1442d632fccb8d52a8a0ee8501f7bbc25d0dde1f60771167abc421be099cf0ec07636f4e5092f8f6b66ba0660a025a421dd73f4747e3a262a726ab8ff76b893c23e4d595ac50c86b9ae8c0f89b94d94f45974bbdb5d2e27419b5202fd2eec115fe26f884a04ee78854a71d2c0965a62080f2cff53b788a3dc0f8c6a55bf0535e0197a8ba77a08eb0010ea0fbe6e9251421dcbc26d83abe55bc24c6466b1833365dd87b253623a0040fa96b15c24f6a6e6dfd1e7be34b7fb58e8cfc26e4ed16b45d8eb567b60089a0cbfa955cc7c5435e0b6694e1a3d64d773a8baa3c4a85d6eddad407dbff5e645df8a4f8a2a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff942d9986714cb0a7f215d435013a08af34c42406be88ffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01886417de6405dde7ee88813b5026c7af887a"
 	bodyRlx := hexutility.MustDecodeHex(bodyRlxHex)
 
-	ctx := NewTxParseContext(*uint256.NewInt(1))
+	ctx := NewTxnParseContext(*uint256.NewInt(1))
 	ctx.withSender = false
 
-	var tx TxSlot
+	var tx TxnSlot
 	txType, err := PeekTransactionType(bodyRlx)
 	require.NoError(t, err)
 	assert.Equal(t, SetCodeTxType, txType)

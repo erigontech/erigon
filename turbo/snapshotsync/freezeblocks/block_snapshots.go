@@ -586,9 +586,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 	numBuf := make([]byte, 8)
 
-	parse := func(ctx *txpool.TxParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
+	parse := func(ctx *txpool.TxnParseContext, v, valueBuf []byte, senders []common2.Address, j int) ([]byte, error) {
 		var sender [20]byte
-		slot := txpool.TxSlot{}
+		slot := txpool.TxnSlot{}
 
 		if _, err := ctx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, false /* wrappedWithBlobs */, nil); err != nil {
 			return valueBuf, err
@@ -604,7 +604,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		return valueBuf, nil
 	}
 
-	addSystemTx := func(ctx *txpool.TxParseContext, tx kv.Tx, txId types.BaseTxnID) error {
+	addSystemTx := func(ctx *txpool.TxnParseContext, tx kv.Tx, txId types.BaseTxnID) error {
 		binary.BigEndian.PutUint64(numBuf, txId.U64())
 		tv, err := tx.GetOne(kv.EthTx, numBuf)
 		if err != nil {
@@ -684,13 +684,13 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		parsers.SetLimit(workers)
 
 		valueBufs := make([][]byte, workers)
-		parseCtxs := make([]*txpool.TxParseContext, workers)
+		parseCtxs := make([]*txpool.TxnParseContext, workers)
 
 		for i := 0; i < workers; i++ {
 			valueBuf := bufPool.Get().(*[16 * 4096]byte)
 			defer bufPool.Put(valueBuf)
 			valueBufs[i] = valueBuf[:]
-			parseCtxs[i] = txpool.NewTxParseContext(*chainID)
+			parseCtxs[i] = txpool.NewTxnParseContext(*chainID)
 		}
 
 		if err := addSystemTx(parseCtxs[0], tx, body.BaseTxnID); err != nil {
