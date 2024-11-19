@@ -658,6 +658,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		storedV, _, found, err := ac.GetLatest(kv.StorageDomain, key[:length.Addr], key[length.Addr:], newTx)
 		require.NoError(t, err)
 		require.True(t, found)
+		require.NotEmpty(t, storedV)
 		_ = key[0]
 		_ = storedV[0]
 		require.EqualValues(t, key[0], storedV[0])

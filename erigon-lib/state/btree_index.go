@@ -799,15 +799,15 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	key := make([]byte, 0, 64)
 	var pos uint64
 
-	var b0 [256]bool
+	//var b0 [256]bool
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
-		keep := false
-		if !b0[key[0]] {
-			b0[key[0]] = true
-			keep = true
-		}
-		err = iw.AddKey(key, pos, keep)
+		//keep := false
+		//if !b0[key[0]] {
+		//	b0[key[0]] = true
+		//	keep = true
+		//}
+		err = iw.AddKey(key, pos, false)
 		if err != nil {
 			return err
 		}
@@ -1040,13 +1040,18 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 		if b.bplus == nil {
 			panic(fmt.Errorf("Get: `b.bplus` is nil: %s", gr.FileName()))
 		}
-		// v is actual value, not offset.
-
 		// weak assumption that k will be ignored and used lookup instead.
 		// since fetching k and v from data file is required to use Getter.
 		// Why to do Getter.Reset twice when we can get kv right there.
 
-		k, found, index, err = b.bplus.Get(gr, lookup)
+		v, found, offsetInFile, err = b.bplus.Get(gr, lookup)
+		if err != nil {
+			if errors.Is(err, ErrBtIndexLookupBounds) {
+				return k, v, offsetInFile, false, nil
+			}
+			return lookup, v, offsetInFile, false, err
+		}
+		return lookup, v, offsetInFile, found, nil
 	} else {
 		if b.alloc == nil {
 			return k, v, 0, false, err
@@ -1060,10 +1065,6 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 		return nil, nil, 0, false, err
 	}
 
-	// this comparation should be done by index get method, and in case of mismatch, key is not found
-	//if !bytes.Equal(k, lookup) {
-	//	return k, v, false, nil
-	//}
 	k, v, offsetInFile, err = b.dataLookup(index, gr)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
