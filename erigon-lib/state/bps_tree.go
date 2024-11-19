@@ -385,7 +385,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 		v, _ = g.Next(v[:0])
 		if cmp = bytes.Compare(v, key); cmp == 0 {
-			//if cmp = g.MatchCmp(key) * -1; cmp == 0 {
+			//if cmp = g.MatchCmp(key) * -1; cmp == 0 { // ends up with gas mismatch
 			if !g.HasNext() {
 				return nil, 0, 0, fmt.Errorf("value for %d/%d key not found in %s", di, b.offt.Count(), g.FileName())
 			}
