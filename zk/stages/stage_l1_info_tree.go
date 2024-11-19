@@ -42,18 +42,18 @@ func SpawnL1InfoTreeStage(
 		var err error
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("cfg.db.BeginRw: %w", err)
 		}
 		defer tx.Rollback()
 	}
 
 	if err := cfg.updater.WarmUp(tx); err != nil {
-		return err
+		return fmt.Errorf("cfg.updater.WarmUp: %w", err)
 	}
 
 	allLogs, err := cfg.updater.CheckForInfoTreeUpdates(logPrefix, tx)
 	if err != nil {
-		return err
+		return fmt.Errorf("CheckForInfoTreeUpdates: %w", err)
 	}
 
 	var latestIndex uint64
@@ -65,7 +65,7 @@ func SpawnL1InfoTreeStage(
 
 	if freshTx {
 		if funcErr = tx.Commit(); funcErr != nil {
-			return funcErr
+			return fmt.Errorf("tx.Commit: %w", funcErr)
 		}
 	}
 

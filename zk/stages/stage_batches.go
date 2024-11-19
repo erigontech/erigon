@@ -137,7 +137,7 @@ func SpawnStageBatches(
 		var err error
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to open tx, %w", err)
+			return fmt.Errorf("cfg.db.BeginRw, %w", err)
 		}
 		defer tx.Rollback()
 	}
@@ -147,7 +147,7 @@ func SpawnStageBatches(
 
 	stageProgressBlockNo, err := stages.GetStageProgress(tx, stages.Batches)
 	if err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("GetStageProgress: %w", err)
 	}
 
 	//// BISECT ////
@@ -167,20 +167,20 @@ func SpawnStageBatches(
 	// get batch for batches progress
 	stageProgressBatchNo, err := hermezDb.GetBatchNoByL2Block(stageProgressBlockNo)
 	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
-		return fmt.Errorf("get batch no by l2 block error: %v", err)
+		return fmt.Errorf("GetBatchNoByL2Block: %w", err)
 	}
 
 	startSyncTime := time.Now()
 
 	latestForkId, err := stages.GetStageProgress(tx, stages.ForkId)
 	if err != nil {
-		return err
+		return fmt.Errorf("GetStageProgress: %w", err)
 	}
 
 	dsQueryClient, stopDsClient, err := newStreamClient(ctx, cfg, latestForkId)
 	if err != nil {
 		log.Warn(fmt.Sprintf("[%s] %s", logPrefix, err))
-		return err
+		return fmt.Errorf("newStreamClient: %w", err)
 	}
 	defer stopDsClient()
 
@@ -192,8 +192,7 @@ func SpawnStageBatches(
 			return nil
 		default:
 		}
-		highestDSL2Block, err = dsQueryClient.GetLatestL2Block()
-		if err != nil {
+		if highestDSL2Block, err = dsQueryClient.GetLatestL2Block(); err != nil {
 			// if we return error, stage will replay and block all other stages
 			log.Warn(fmt.Sprintf("[%s] Failed to get latest l2 block from datastream: %v", logPrefix, err))
 			return nil
@@ -219,7 +218,7 @@ func SpawnStageBatches(
 	if highestDSL2Block.L2BlockNumber < stageProgressBlockNo {
 		log.Info(fmt.Sprintf("[%s] Datastream behind, unwinding", logPrefix))
 		if _, err := unwindFn(highestDSL2Block.L2BlockNumber); err != nil {
-			return err
+			return fmt.Errorf("unwindFn: %w", err)
 		}
 		return nil
 	}
@@ -233,12 +232,12 @@ func SpawnStageBatches(
 
 	_, highestL1InfoTreeIndex, err := hermezDb.GetLatestBlockL1InfoTreeIndexProgress()
 	if err != nil {
-		return fmt.Errorf("failed to get highest used l1 info index, %w", err)
+		return fmt.Errorf("GetLatestBlockL1InfoTreeIndexProgress: %w", err)
 	}
 
 	stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
-		return fmt.Errorf("failed to get stage exec progress, %w", err)
+		return fmt.Errorf("GetStageProgress: %w", err)
 	}
 
 	// just exit the stage early if there is more execution work to do
@@ -251,12 +250,12 @@ func SpawnStageBatches(
 
 	lastProcessedBlockHash, err := eriDb.ReadCanonicalHash(stageProgressBlockNo)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical hash for block %d: %w", stageProgressBlockNo, err)
+		return fmt.Errorf("ReadCanonicalHash %d: %w", stageProgressBlockNo, err)
 	}
 
 	batchProcessor, err := NewBatchesProcessor(ctx, logPrefix, tx, hermezDb, eriDb, cfg.zkCfg.SyncLimit, cfg.zkCfg.DebugLimit, cfg.zkCfg.DebugStepAfter, cfg.zkCfg.DebugStep, stageProgressBlockNo, stageProgressBatchNo, lastProcessedBlockHash, dsQueryClient, progressChan, cfg.chainConfig, cfg.miningConfig, unwindFn)
 	if err != nil {
-		return err
+		return fmt.Errorf("NewBatchesProcessor: %w", err)
 	}
 
 	// start routine to download blocks and push them in a channel
@@ -282,7 +281,7 @@ func SpawnStageBatches(
 				if err == ErrorTriggeredUnwind {
 					return nil
 				}
-				return err
+				return fmt.Errorf("ProcessEntry: %w", err)
 			}
 			dsClientProgress.Store(batchProcessor.LastBlockHeight())
 		case <-ctx.Done():
@@ -301,10 +300,10 @@ func SpawnStageBatches(
 		// commit progress from time to time
 		if batchProcessor.TotalBlocksWritten() != prevAmountBlocksWritten && batchProcessor.TotalBlocksWritten()%STAGE_PROGRESS_SAVE == 0 {
 			if err = saveStageProgress(tx, logPrefix, batchProcessor.HighestHashableL2BlockNo(), batchProcessor.HighestSeenBatchNumber(), batchProcessor.LastBlockHeight(), batchProcessor.LastForkId()); err != nil {
-				return err
+				return fmt.Errorf("saveStageProgress: %w", err)
 			}
 			if err := hermezDb.WriteBlockL1InfoTreeIndexProgress(batchProcessor.LastBlockHeight(), highestL1InfoTreeIndex); err != nil {
-				return err
+				return fmt.Errorf("WriteBlockL1InfoTreeIndexProgress: %w", err)
 			}
 
 			if freshTx {
@@ -331,10 +330,10 @@ func SpawnStageBatches(
 	}
 
 	if err = saveStageProgress(tx, logPrefix, batchProcessor.HighestHashableL2BlockNo(), batchProcessor.HighestSeenBatchNumber(), batchProcessor.LastBlockHeight(), batchProcessor.LastForkId()); err != nil {
-		return err
+		return fmt.Errorf("saveStageProgress: %w", err)
 	}
 	if err := hermezDb.WriteBlockL1InfoTreeIndexProgress(batchProcessor.LastBlockHeight(), highestL1InfoTreeIndex); err != nil {
-		return err
+		return fmt.Errorf("WriteBlockL1InfoTreeIndexProgress: %w", err)
 	}
 
 	// stop printing blocks written progress routine
@@ -343,7 +342,7 @@ func SpawnStageBatches(
 
 	if freshTx {
 		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("failed to commit tx, %w", err)
+			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
 
@@ -354,27 +353,27 @@ func saveStageProgress(tx kv.RwTx, logPrefix string, highestHashableL2BlockNo, h
 	var err error
 	// store the highest hashable block number
 	if err := stages.SaveStageProgress(tx, stages.HighestHashableL2BlockNo, highestHashableL2BlockNo); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, highestSeenBatchNo); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	// store the highest seen forkid
 	if err := stages.SaveStageProgress(tx, stages.ForkId, lastForkId); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	// save the latest verified batch number as well just in case this node is upgraded
 	// to a sequencer in the future
 	if err := stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, highestSeenBatchNo); err != nil {
-		return fmt.Errorf("save stage progress error: %w", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	log.Info(fmt.Sprintf("[%s] Saving stage progress", logPrefix), "lastBlockHeight", lastBlockHeight)
 	if err := stages.SaveStageProgress(tx, stages.Batches, lastBlockHeight); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	return nil
@@ -385,9 +384,8 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
+		if tx, err = cfg.db.BeginRw(ctx); err != nil {
+			return fmt.Errorf("cfg.db.BeginRw: %w", err)
 		}
 		defer tx.Rollback()
 	}
@@ -404,20 +402,20 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	//////////////////////////////////
 	highestVerifiedBatch, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
 	if err != nil {
-		return errors.New("could not retrieve l1 verifications batch no progress")
+		return fmt.Errorf("GetStageProgress: %w", err)
 	}
 
 	fromBatchPrev, err := hermezDb.GetBatchNoByL2Block(fromBlock - 1)
 	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
-		return fmt.Errorf("get batch no by l2 block error: %v", err)
+		return fmt.Errorf("GetBatchNoByL2Block: %w", err)
 	}
 	fromBatch, err := hermezDb.GetBatchNoByL2Block(fromBlock)
 	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
-		return fmt.Errorf("get fromBatch no by l2 block error: %v", err)
+		return fmt.Errorf("GetBatchNoByL2Block: %w", err)
 	}
 	toBatch, err := hermezDb.GetBatchNoByL2Block(toBlock)
 	if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
-		return fmt.Errorf("get toBatch no by l2 block error: %v", err)
+		return fmt.Errorf("GetBatchNoByL2Block: %w", err)
 	}
 
 	// if previous block has different batch, delete the "fromBlock" one
@@ -429,16 +427,16 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 
 	if fromBatch <= toBatch {
 		if err := hermezDb.DeleteForkIds(fromBatch, toBatch); err != nil {
-			return fmt.Errorf("delete fork ids error: %v", err)
+			return fmt.Errorf("DeleteForkIds: %w", err)
 		}
 		if err := hermezDb.DeleteBatchGlobalExitRoots(fromBatch); err != nil {
-			return fmt.Errorf("delete batch global exit roots error: %v", err)
+			return fmt.Errorf("DeleteBatchGlobalExitRoots: %w", err)
 		}
 	}
 
 	if highestVerifiedBatch >= fromBatch {
 		if err := rawdb.DeleteForkchoiceFinalized(tx); err != nil {
-			return fmt.Errorf("delete forkchoice finalized error: %v", err)
+			return fmt.Errorf("DeleteForkchoiceFinalized: %w", err)
 		}
 	}
 	/////////////////////////////////////////
@@ -448,19 +446,19 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	// cannot unwind EffectiveGasPricePercentage here although it is written in stage batches, because we have already deleted the transactions
 
 	if err := hermezDb.DeleteStateRoots(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete state roots error: %v", err)
+		return fmt.Errorf("DeleteStateRoots: %w", err)
 	}
 	if err := hermezDb.DeleteIntermediateTxStateRoots(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete intermediate tx state roots error: %v", err)
+		return fmt.Errorf("DeleteIntermediateTxStateRoots: %w", err)
 	}
 	if err = rawdb.TruncateBlocks(ctx, tx, fromBlock); err != nil {
-		return fmt.Errorf("delete blocks: %w", err)
+		return fmt.Errorf("TruncateBlocks: %w", err)
 	}
 	if err := hermezDb.DeleteBlockBatches(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete block batches error: %v", err)
+		return fmt.Errorf("DeleteBlockBatches: %w", err)
 	}
 	if err := hermezDb.DeleteForkIdBlock(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete fork id block error: %v", err)
+		return fmt.Errorf("DeleteForkIdBlock: %w", err)
 	}
 
 	//////////////////////////////////////////////////////
@@ -469,31 +467,31 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	//////////////////////////////////////////////////////
 	gers, err := hermezDb.GetBlockGlobalExitRoots(fromBlock, toBlock)
 	if err != nil {
-		return fmt.Errorf("get block global exit roots error: %v", err)
+		return fmt.Errorf("GetBlockGlobalExitRoots: %w", err)
 	}
 
 	if err := hermezDb.DeleteGlobalExitRoots(&gers); err != nil {
-		return fmt.Errorf("delete global exit roots error: %v", err)
+		return fmt.Errorf("DeleteGlobalExitRoots: %w", err)
 	}
 
 	if err = hermezDb.DeleteLatestUsedGers(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete latest used gers error: %v", err)
+		return fmt.Errorf("DeleteLatestUsedGers: %w", err)
 	}
 
 	if err := hermezDb.DeleteBlockGlobalExitRoots(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete block global exit roots error: %v", err)
+		return fmt.Errorf("DeleteBlockGlobalExitRoots: %w", err)
 	}
 
 	if err := hermezDb.DeleteBlockL1BlockHashes(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete block l1 block hashes error: %v", err)
+		return fmt.Errorf("DeleteBlockL1BlockHashes: %w", err)
 	}
 
 	if err = hermezDb.DeleteReusedL1InfoTreeIndexes(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("write reused l1 info tree index error: %w", err)
+		return fmt.Errorf("DeleteReusedL1InfoTreeIndexes: %w", err)
 	}
 
 	if err = hermezDb.DeleteBatchEnds(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete batch ends error: %v", err)
+		return fmt.Errorf("DeleteBatchEnds: %w", err)
 	}
 	///////////////////////////////////////////////////////
 
@@ -504,7 +502,7 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 		stageprogress = fromBlock - 1
 	}
 	if err := stages.SaveStageProgress(tx, stages.Batches, stageprogress); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	log.Info(fmt.Sprintf("[%s] Saving stage progress", logPrefix), "fromBlock", stageprogress)
@@ -516,15 +514,15 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	// this is the last block of the previous batch and the highest hashable block for verifications
 	lastBatchHighestBlock, _, err := hermezDb.GetHighestBlockInBatch(fromBatchPrev - 1)
 	if err != nil {
-		return fmt.Errorf("get batch highest block error: %w", err)
+		return fmt.Errorf("GetHighestBlockInBatch: %w", err)
 	}
 
 	if err := stages.SaveStageProgress(tx, stages.HighestHashableL2BlockNo, lastBatchHighestBlock); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, fromBatchPrev); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	/////////////////////////////////////////////////////
@@ -536,10 +534,10 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	//////////////////////////////////
 	forkId, err := hermezDb.GetForkId(fromBatchPrev)
 	if err != nil {
-		return fmt.Errorf("get fork id error: %v", err)
+		return fmt.Errorf("GetForkId: %w", err)
 	}
 	if err := stages.SaveStageProgress(tx, stages.ForkId, forkId); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 	/////////////////////////////////////////
 	// finish store the highest seen forkid//
@@ -554,7 +552,7 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	}
 
 	if err := hermezDb.DeleteBlockL1InfoTreeIndexes(fromBlock, toBlock); err != nil {
-		return fmt.Errorf("delete block l1 block hashes error: %v", err)
+		return fmt.Errorf("DeleteBlockL1InfoTreeIndexes: %w", err)
 	}
 
 	////////////////////////////////////////////////
@@ -562,15 +560,15 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	////////////////////////////////////////////////
 
 	if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, fromBatchPrev); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
 	if err := u.Done(tx); err != nil {
-		return err
+		return fmt.Errorf("u.Done: %w", err)
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
-			return err
+			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
 	return nil
@@ -582,7 +580,7 @@ func PruneBatchesStage(s *stagedsync.PruneState, tx kv.RwTx, cfg BatchesCfg, ctx
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("cfg.db.BeginRw: %w", err)
 		}
 		defer tx.Rollback()
 	}
@@ -594,26 +592,32 @@ func PruneBatchesStage(s *stagedsync.PruneState, tx kv.RwTx, cfg BatchesCfg, ctx
 
 	toBlock, err := stages.GetStageProgress(tx, stages.Batches)
 	if err != nil {
-		return fmt.Errorf("get stage datastream progress error: %v", err)
+		return fmt.Errorf("GetStageProgress: %w", err)
 	}
 
 	if err = rawdb.TruncateBlocks(ctx, tx, 1); err != nil {
-		return fmt.Errorf("delete blocks: %w", err)
+		return fmt.Errorf("TruncateBlocks: %w", err)
 	}
 
-	hermezDb.DeleteForkIds(0, toBlock)
-	hermezDb.DeleteBlockBatches(0, toBlock)
-	hermezDb.DeleteBlockGlobalExitRoots(0, toBlock)
+	if err := hermezDb.DeleteForkIds(0, toBlock); err != nil {
+		return fmt.Errorf("DeleteForkIds: %w", err)
+	}
+	if err := hermezDb.DeleteBlockBatches(0, toBlock); err != nil {
+		return fmt.Errorf("DeleteBlockBatches: %w", err)
+	}
+	if hermezDb.DeleteBlockGlobalExitRoots(0, toBlock); err != nil {
+		return fmt.Errorf("DeleteBlockGlobalExitRoots: %w", err)
+	}
 
 	log.Info(fmt.Sprintf("[%s] Deleted headers, bodies, forkIds and blockBatches.", logPrefix))
 	log.Info(fmt.Sprintf("[%s] Saving stage progress", logPrefix), "stageProgress", 0)
 	if err := stages.SaveStageProgress(tx, stages.Batches, 0); err != nil {
-		return fmt.Errorf("save stage progress error: %v", err)
+		return fmt.Errorf("SaveStageProgress: %v", err)
 	}
 
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
-			return err
+			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
 	return nil
@@ -635,17 +639,17 @@ func rollback(
 	dsQueryClient.PrepUnwind()
 	ancestorBlockNum, ancestorBlockHash, err := findCommonAncestor(eriDb, hermezDb, dsQueryClient, latestDSBlockNum)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("findCommonAncestor: %w", err)
 	}
 	log.Debug(fmt.Sprintf("[%s] The common ancestor for datastream and db is block %d (%s)", logPrefix, ancestorBlockNum, ancestorBlockHash))
 
 	unwindBlockNum, unwindBlockHash, batchNum, err := getUnwindPoint(eriDb, hermezDb, ancestorBlockNum, ancestorBlockHash)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("getUnwindPoint: %w", err)
 	}
 
 	if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, batchNum-1); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("SaveStageProgress: %w", err)
 	}
 	log.Warn(fmt.Sprintf("[%s] Unwinding to block %d (%s)", logPrefix, unwindBlockNum, unwindBlockHash))
 
@@ -681,17 +685,17 @@ func findCommonAncestor(
 		if err != nil &&
 			// the required block might not be in the data stream, so ignore that error
 			!errors.Is(err, types.ErrBadFromBookmark) {
-			return 0, emptyHash, fmt.Errorf("GetL2BlockByNumber: failed to get l2 block %d from datastream: %w", midBlockNum, err)
+			return 0, emptyHash, fmt.Errorf("GetL2BlockByNumber block %d: %w", midBlockNum, err)
 		}
 
 		midBlockDbHash, err := db.ReadCanonicalHash(midBlockNum)
 		if err != nil {
-			return 0, emptyHash, fmt.Errorf("ReadCanonicalHash: failed to get canonical hash for block %d: %w", midBlockNum, err)
+			return 0, emptyHash, fmt.Errorf("ReadCanonicalHash block %d: %w", midBlockNum, err)
 		}
 
 		dbBatchNum, err := hermezDb.GetBatchNoByL2Block(midBlockNum)
 		if err != nil {
-			return 0, emptyHash, fmt.Errorf("GetBatchNoByL2Block: failed to get batch number for block %d: %w", midBlockNum, err)
+			return 0, emptyHash, fmt.Errorf("GetBatchNoByL2Block block %d: %w", midBlockNum, err)
 		}
 
 		if midBlockDataStream != nil &&
@@ -717,7 +721,7 @@ func findCommonAncestor(
 func getUnwindPoint(eriDb erigon_db.ReadOnlyErigonDb, hermezDb state.ReadOnlyHermezDb, blockNum uint64, blockHash common.Hash) (uint64, common.Hash, uint64, error) {
 	batchNum, err := hermezDb.GetBatchNoByL2Block(blockNum)
 	if err != nil {
-		return 0, emptyHash, 0, err
+		return 0, emptyHash, 0, fmt.Errorf("GetBatchNoByL2Block: block %d (%s): %w", blockNum, blockHash, err)
 	}
 
 	if batchNum == 0 {
@@ -727,12 +731,12 @@ func getUnwindPoint(eriDb erigon_db.ReadOnlyErigonDb, hermezDb state.ReadOnlyHer
 
 	unwindBlockNum, _, err := hermezDb.GetHighestBlockInBatch(batchNum - 1)
 	if err != nil {
-		return 0, emptyHash, 0, fmt.Errorf("GetHighestBlockInBatch: batch %d: %w", batchNum-1, err)
+		return 0, emptyHash, 0, fmt.Errorf("GetHighestBlockInBatch batch %d: %w", batchNum-1, err)
 	}
 
 	unwindBlockHash, err := eriDb.ReadCanonicalHash(unwindBlockNum)
 	if err != nil {
-		return 0, emptyHash, 0, fmt.Errorf("ReadCanonicalHash: block %d: %w", unwindBlockNum, err)
+		return 0, emptyHash, 0, fmt.Errorf("ReadCanonicalHash block %d: %w", unwindBlockNum, err)
 	}
 
 	return unwindBlockNum, unwindBlockHash, batchNum, nil

@@ -95,7 +95,7 @@ func SpawnStageL1Syncer(
 		var err error
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to open tx, %w", err)
+			return fmt.Errorf("cfg.db.BeginRw: %w", err)
 		}
 		defer tx.Rollback()
 	}
@@ -106,7 +106,7 @@ func SpawnStageL1Syncer(
 	// get l1 block progress from this stage's progress
 	l1BlockProgress, err := stages.GetStageProgress(tx, stages.L1Syncer)
 	if err != nil {
-		return fmt.Errorf("failed to get l1 progress block, %w", err)
+		return fmt.Errorf("GetStageProgress, %w", err)
 	}
 
 	// start syncer if not started
@@ -149,8 +149,7 @@ Loop:
 						continue
 					}
 					if err := hermezDb.WriteSequence(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot, info.L1InfoRoot); err != nil {
-						funcErr = fmt.Errorf("failed to write batch info, %w", err)
-						return funcErr
+						return fmt.Errorf("WriteSequence: %w", err)
 					}
 					if info.L1BlockNo > highestWrittenL1BlockNo {
 						highestWrittenL1BlockNo = info.L1BlockNo
@@ -158,8 +157,7 @@ Loop:
 					newSequencesCount++
 				case logRollbackBatches:
 					if err := hermezDb.RollbackSequences(info.BatchNo); err != nil {
-						funcErr = fmt.Errorf("failed to write rollback sequence, %w", err)
-						return funcErr
+						return fmt.Errorf("RollbackSequences: %w", err)
 					}
 					if info.L1BlockNo > highestWrittenL1BlockNo {
 						highestWrittenL1BlockNo = info.L1BlockNo
@@ -175,8 +173,7 @@ Loop:
 						highestVerification = info
 					}
 					if err := hermezDb.WriteVerification(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
-						funcErr = fmt.Errorf("failed to write verification for block %d, %w", info.L1BlockNo, err)
-						return funcErr
+						return fmt.Errorf("WriteVerification for block %d: %w", info.L1BlockNo, funcErr)
 					}
 					if info.L1BlockNo > highestWrittenL1BlockNo {
 						highestWrittenL1BlockNo = info.L1BlockNo
@@ -206,19 +203,17 @@ Loop:
 		log.Info(fmt.Sprintf("[%s] Saving L1 syncer progress", logPrefix), "latestCheckedBlock", latestCheckedBlock, "newVerificationsCount", newVerificationsCount, "newSequencesCount", newSequencesCount, "highestWrittenL1BlockNo", highestWrittenL1BlockNo)
 
 		if err := stages.SaveStageProgress(tx, stages.L1Syncer, highestWrittenL1BlockNo); err != nil {
-			funcErr = fmt.Errorf("failed to save stage progress, %w", err)
-			return funcErr
+			return fmt.Errorf("SaveStageProgress: %w", err)
 		}
 		if highestVerification.BatchNo > 0 {
 			log.Info(fmt.Sprintf("[%s]", logPrefix), "highestVerificationBatchNo", highestVerification.BatchNo)
 			if err := stages.SaveStageProgress(tx, stages.L1VerificationsBatchNo, highestVerification.BatchNo); err != nil {
-				return fmt.Errorf("failed to save stage progress, %w", err)
+				return fmt.Errorf("SaveStageProgress: %w", err)
 			}
 		}
 
 		// State Root Verifications Check
-		err = verifyAgainstLocalBlocks(tx, hermezDb, logPrefix)
-		if err != nil {
+		if err = verifyAgainstLocalBlocks(tx, hermezDb, logPrefix); err != nil {
 			if errors.Is(err, ErrStateRootMismatch) {
 				panic(err)
 			}
@@ -231,8 +226,7 @@ Loop:
 	if internalTxOpened {
 		log.Debug("l1 sync: first cycle, committing tx")
 		if err := tx.Commit(); err != nil {
-			funcErr = fmt.Errorf("failed to commit tx, %w", err)
-			return funcErr
+			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
 
@@ -325,7 +319,7 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 	// get the highest hashed block
 	hashedBlockNo, err := stages.GetStageProgress(tx, stages.IntermediateHashes)
 	if err != nil {
-		return fmt.Errorf("failed to get highest hashed block, %w", err)
+		return fmt.Errorf("GetStageProgress: %w", err)
 	}
 
 	// no need to check - interhashes has not yet run
@@ -336,7 +330,7 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 	// get the highest verified block
 	verifiedBlockNo, err := hermezDb.GetHighestVerifiedBlockNo()
 	if err != nil {
-		return fmt.Errorf("failed to get highest verified block no, %w", err)
+		return fmt.Errorf("GetHighestVerifiedBlockNo: %w", err)
 	}
 
 	// no verifications on l1
@@ -356,7 +350,7 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 		// get the batch of the last hashed block
 		hashedBatch, err := hermezDb.GetBatchNoByL2Block(hashedBlockNo)
 		if err != nil && !errors.Is(err, hermez_db.ErrorNotStored) {
-			return err
+			return fmt.Errorf("GetBatchNoByL2Block: %w", err)
 		}
 
 		if hashedBatch == 0 {
@@ -368,7 +362,7 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 		// find the higher blocknum for previous batch
 		blockNumbers, err := hermezDb.GetL2BlockNosByBatch(hashedBatch)
 		if err != nil {
-			return err
+			return fmt.Errorf("GetL2BlockNosByBatch: %w", err)
 		}
 
 		if len(blockNumbers) == 0 {
@@ -386,18 +380,17 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 	// already checked
 	highestChecked, err := stages.GetStageProgress(tx, stages.VerificationsStateRootCheck)
 	if err != nil {
-		return fmt.Errorf("failed to get highest checked block, %w", err)
+		return fmt.Errorf("GetStageProgress: %w", err)
 	}
 	if highestChecked >= blockToCheck {
 		return nil
 	}
 
 	if !sequencer.IsSequencer() {
-		err = blockComparison(tx, hermezDb, blockToCheck, logPrefix)
-		if err == nil {
+		if err = blockComparison(tx, hermezDb, blockToCheck, logPrefix); err == nil {
 			log.Info(fmt.Sprintf("[%s] State root verified in block %d", logPrefix, blockToCheck))
 			if err := stages.SaveStageProgress(tx, stages.VerificationsStateRootCheck, verifiedBlockNo); err != nil {
-				return fmt.Errorf("failed to save stage progress, %w", err)
+				return fmt.Errorf("SaveStageProgress: %w", err)
 			}
 		}
 	}
@@ -408,12 +401,12 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 func blockComparison(tx kv.RwTx, hermezDb *hermez_db.HermezDb, blockNo uint64, logPrefix string) error {
 	v, err := hermezDb.GetVerificationByL2BlockNo(blockNo)
 	if err != nil {
-		return fmt.Errorf("failed to get verification by l2 block no, %w", err)
+		return fmt.Errorf("GetVerificationByL2BlockNo: %w", err)
 	}
 
 	block, err := rawdb.ReadBlockByNumber(tx, blockNo)
 	if err != nil {
-		return fmt.Errorf("failed to read block by number, %w", err)
+		return fmt.Errorf("ReadBlockByNumber: %w", err)
 	}
 
 	if v == nil || block == nil {

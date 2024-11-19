@@ -346,10 +346,19 @@ func sequencingBatchStep(
 						return err
 					}
 				} else if !batchState.isL1Recovery() {
+
 					var allConditionsOK bool
-					batchState.blockState.transactionsForInclusion, allConditionsOK, err = getNextPoolTransactions(ctx, cfg, executionAt, batchState.forkId, batchState.yieldedTransactions)
+					var newTransactions []types.Transaction
+					var newIds []common.Hash
+
+					newTransactions, newIds, allConditionsOK, err = getNextPoolTransactions(ctx, cfg, executionAt, batchState.forkId, batchState.yieldedTransactions)
 					if err != nil {
 						return err
+					}
+
+					batchState.blockState.transactionsForInclusion = append(batchState.blockState.transactionsForInclusion, newTransactions...)
+					for idx, tx := range newTransactions {
+						batchState.blockState.transactionHashesToSlots[tx.Hash()] = newIds[idx]
 					}
 
 					if len(batchState.blockState.transactionsForInclusion) == 0 {
@@ -512,6 +521,8 @@ func sequencingBatchStep(
 		if block, err = doFinishBlockAndUpdateState(batchContext, ibs, header, parentBlock, batchState, ger, l1BlockHash, l1TreeUpdateIndex, infoTreeIndexProgress, batchCounters); err != nil {
 			return err
 		}
+
+		cfg.txPool.RemoveMinedTransactions(batchState.blockState.builtBlockElements.txSlots)
 
 		if batchState.isLimboRecovery() {
 			stateRoot := block.Root()

@@ -165,7 +165,11 @@ func (bs *BatchState) getCoinbase(cfg *SequenceBlockCfg) common.Address {
 }
 
 func (bs *BatchState) onAddedTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *core.ExecutionResult, effectiveGas uint8) {
-	bs.blockState.builtBlockElements.onFinishAddingTransaction(transaction, receipt, execResult, effectiveGas)
+	slotId, ok := bs.blockState.transactionHashesToSlots[transaction.Hash()]
+	if !ok {
+		log.Warn("[batchState] transaction hash not found in transaction hashes to slots map", "hash", transaction.Hash())
+	}
+	bs.blockState.builtBlockElements.onFinishAddingTransaction(transaction, receipt, execResult, effectiveGas, slotId)
 	bs.hasAnyTransactionsInThisBatch = true
 }
 
@@ -250,12 +254,15 @@ func newLimboRecoveryData(limboHeaderTimestamp uint64, limboTxHash *common.Hash)
 // TYPE BLOCK STATE
 type BlockState struct {
 	transactionsForInclusion []types.Transaction
+	transactionHashesToSlots map[common.Hash]common.Hash
 	builtBlockElements       BuiltBlockElements
 	blockL1RecoveryData      *zktx.DecodedBatchL2Data
 }
 
 func newBlockState() *BlockState {
-	return &BlockState{}
+	return &BlockState{
+		transactionHashesToSlots: make(map[common.Hash]common.Hash),
+	}
 }
 
 func (bs *BlockState) hasAnyTransactionForInclusion() bool {
@@ -294,6 +301,7 @@ type BuiltBlockElements struct {
 	receipts         types.Receipts
 	effectiveGases   []uint8
 	executionResults []*core.ExecutionResult
+	txSlots          []common.Hash
 }
 
 func (bbe *BuiltBlockElements) resetBlockBuildingArrays() {
@@ -303,11 +311,12 @@ func (bbe *BuiltBlockElements) resetBlockBuildingArrays() {
 	bbe.executionResults = []*core.ExecutionResult{}
 }
 
-func (bbe *BuiltBlockElements) onFinishAddingTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *core.ExecutionResult, effectiveGas uint8) {
+func (bbe *BuiltBlockElements) onFinishAddingTransaction(transaction types.Transaction, receipt *types.Receipt, execResult *core.ExecutionResult, effectiveGas uint8, slotId common.Hash) {
 	bbe.transactions = append(bbe.transactions, transaction)
 	bbe.receipts = append(bbe.receipts, receipt)
 	bbe.executionResults = append(bbe.executionResults, execResult)
 	bbe.effectiveGases = append(bbe.effectiveGases, effectiveGas)
+	bbe.txSlots = append(bbe.txSlots, slotId)
 }
 
 type resequenceTxMetadata struct {
