@@ -102,8 +102,8 @@ func (r *HistoricalStatesReader) ComputeCommittee(mix libcommon.Hash, indicies [
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64
-
-	shuffledIndicies = make([]uint64, lenIndicies)
+	fmt.Println("shuffledIndicies", len(indicies),
+	shuffledIndicies = make([]uint64, lenIndicies), slot, count, index)
 	shuffledIndicies = shuffling.ComputeShuffledIndicies(cfg, mix, shuffledIndicies, indicies, slot)
 
 	return shuffledIndicies[start:end], nil
