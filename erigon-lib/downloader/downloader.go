@@ -595,6 +595,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 				hashBytes, err := localHashBytes(ctx, fileInfo, db, stats, statsLock)
 
 				if err != nil {
+					println("preverified " + fileInfo.Name())
 					return fmt.Errorf("localHashBytes: %w", err)
 				}
 
@@ -626,6 +627,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 				hashBytes, err := localHashBytes(ctx, fileInfo, db, stats, statsLock)
 
 				if err != nil {
+					println("non preverified " + fileInfo.Name())
 					return fmt.Errorf("localHashBytes: %w", err)
 				}
 
@@ -658,6 +660,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 					hashBytes, err := localHashBytes(ctx, fileInfo, db, stats, statsLock)
 
 					if err != nil {
+						println("non versioned, non preverified " + fileInfo.Name())
 						return err
 					}
 
