@@ -16,7 +16,7 @@ tx_hash => transaction
 ## Send notifications about new pending transactions
 There are RPC methods that allow subscribing to new pending transactions. First of all, we need to define what "new pending" transaction means. Our current understanding of this terminology is illustrated below.
 
-![](https://github.com/erigontech/erigon/blob/main/docs/assets/tx_types.png)
+![](/docs/assets/tx_types.png)
 
 Out of all transaction arriving at the pool, there are those that are valid on the current state. Good test for those is: "If we were to produce a block with unlimited block gas limit, as large as possible, which transactions would we include?". This set of transactions is shown as light green circle.
 
@@ -77,7 +77,7 @@ tx_hashes, pending_pool, queued_pool, local_transactions => pending_pool`, queue
 
 where modified pending pool and queued pool, and local transactions do not contain given transaction hashes anymore.
 
-In code can find production of such event by `p.newPendingTxs <-`, and handling of this event by `announcements := <-newTxs` here https://github.com/erigontech/erigon/blob/main/txpool/pool.go#L1429
+In code can find production of such event by `p.newPendingTxs <-`, and handling of this event by `announcements := <-newTxs` [here](pool.go#L1429)
 
 ## Reinject transactions into the transaction pool on unwinding a block
 This can be thought of a reverse operation from the one described before. When a block that was deemed "the best" of its height, is no longer deemed "the best", the transactions contained in it, are now viable for inclusion in other blocks, and therefore should be returned into the transaction pool. We can describe this function as:
@@ -101,7 +101,7 @@ Another challenge (solvable) of persisting transactions (for example, local tran
 
 ## Changes for EIP-1559
 
-![](https://github.com/erigontech/erigon/blob/main/docs/assets/Pool-eip1559.png)
+![](/docs/assets/Pool-eip1559.png)
 
 With the EIP-1559, there are a few changes to the transaction pool model described above. Now it is possible for transactions to
 become executable or not without any changes to the sender's balance or nonce. This is because there is a rule that `feeCap` of a transaction needs to be no less than `baseFee` of the block, for the transaction to be includable.
@@ -124,7 +124,7 @@ First ephemeral field is an integer that acts as a bitfield, we call it `SubPool
 
 Currently there are five bits in the `SubPool` ephemeral field, so it is an integer `0..31`. These integers can be directly compared, and the largest value means a transaction is more preferable. This ephemeral field allows us to stratify all transactions into three sub pools (hence the name of the field).
 
-![](https://github.com/erigontech/erigon/blob/main/docs/assets/Subpools.png)
+![](/docs/assets/Subpools.png)
 
 There are three subpools - pending (green), basefee (yellow), and queued (red). Each subpool consists of two sorting data structures, one of which sorts transactions in the order of decreasing priority ("best" structure), another - in the order of increasing priority ("worst" structure). For yellow and red subpools, the sorting data structures are priority queues. For the green pool, the "best" structure could be priority queue, but it may be more convenient to have it as a list, to avoid frequent popping and pushing elements in and out of priority queue.
 Worst data structures serve to restrict the size of a subpool. The restriction can be defined either in terms of number of transactions, or in terms of total size of transactions (in bytes). Worst data structure allows taking the "worst" elements from the pool (and either demoting them into lower pools, or discarding them), that is why it needs to order transactions from the lowest priority to the highest.
@@ -308,7 +308,7 @@ Firstly, we now specified what was the expected block height and the block hash 
 
 Having this modified interface, it would be possible to batch the forward updates for multiple blocks into one. But perhaps more importantly, it allows the "client side" (tx pool, or RPC daemon, or other system where state cache is used) to detect the lost messages, and invalidate the state cache if it happens.
 
-![](https://github.com/erigontech/erigon/blob/main/docs/assets/Coherence.png)
+![](/docs/assets/Coherence.png)
 
 State Cache works on top of Database Transaction and pair Cache+ReadTransaction must provide "Serializable Isolation Level" semantic: all data form consistent db view at moment when read transaction started, read data are immutable until end of read transaction, reader can't see newer updates.
 
