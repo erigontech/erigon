@@ -103,14 +103,14 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	// TODO: send the new tracer once we switch to the tracing.Hook
-	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger, nil); err != nil {
+	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, nil); err != nil {
 		return nil, err
 	}
 
 	var rejectedTxs []*RejectedTx
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
-	noop := state.NewNoopWriter()
+	// noop := state.NewNoopWriter()
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(i)
 		writeTrace := false
@@ -122,7 +122,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, txn, usedGas, usedBlobGas, *vmConfig)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(txn)
@@ -167,15 +167,19 @@ func ExecuteBlockEphemerally(
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
-
+	var newBlock *types.Block
+	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, logger); err != nil {
+		newBlock, _, _, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
+		if err != nil {
 			return nil, err
 		}
 	}
 	blockLogs := ibs.Logs()
+	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
+		StateRoot:   newRoot,
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
@@ -353,13 +357,15 @@ func FinalizeBlockExecution(
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
-	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracer *tracing.Hooks,
+	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)
 	}, logger, tracer)
-	noop := state.NewNoopWriter()
-	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)
+	if stateWriter == nil {
+		stateWriter = state.NewNoopWriter()
+	}
+	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), stateWriter)
 	return nil
 }
 

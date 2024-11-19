@@ -1274,6 +1274,10 @@ func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
 
+func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
+	return sdc.patriciaTrie
+}
+
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
@@ -1316,7 +1320,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
-	sdc.patriciaTrie.SetTrace(sdc.sharedDomains.trace)
+	sdc.patriciaTrie.SetTrace(false)
 	sdc.Reset()
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix)

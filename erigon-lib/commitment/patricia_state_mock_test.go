@@ -415,8 +415,8 @@ func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, u
 	upd := NewUpdates(mode, tb.TempDir(), hasher)
 	for i, key := range keys {
 		upd.TouchPlainKey(key, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = key
-			c.hashedKey = hasher(key)
+			c.PlainKey = key
+			c.HashedKey = hasher(key)
 			c.update = &updates[i]
 		})
 	}

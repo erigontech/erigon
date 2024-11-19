@@ -37,11 +37,28 @@ func (*HexStdOutWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {
-	printDiff(t.root, t2.root, w, "", "0x")
+func (t *Trie) Print(w io.Writer) {
+	witness, err := t.ExtractWitness(false, nil)
+	if err != nil {
+		panic(err)
+	}
+	_, err = witness.WriteInto(w)
+	if err != nil {
+		panic(err)
+	}
 }
 
-func (n *fullNode) fstring(ind string) string {
+func (t *Trie) PrintTrie() {
+	fmt.Printf("trie:0x")
+	t.Print(&HexStdOutWriter{})
+	fmt.Println("")
+}
+
+func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {
+	printDiff(t.RootNode, t2.RootNode, w, "", "0x")
+}
+
+func (n *FullNode) fstring(ind string) string {
 	resp := fmt.Sprintf("full\n%s  ", ind)
 	for i, node := range &n.Children {
 		if node == nil {
@@ -52,7 +69,7 @@ func (n *fullNode) fstring(ind string) string {
 	}
 	return resp + "\n" + ind + "]"
 }
-func (n *fullNode) print(w io.Writer) {
+func (n *FullNode) print(w io.Writer) {
 	fmt.Fprintf(w, "f(")
 	for i, node := range &n.Children {
 		if node != nil {
@@ -63,14 +80,14 @@ func (n *fullNode) print(w io.Writer) {
 	fmt.Fprintf(w, ")")
 }
 
-func (n *duoNode) fstring(ind string) string {
+func (n *DuoNode) fstring(ind string) string {
 	resp := fmt.Sprintf("duo[\n%s  ", ind)
 	i1, i2 := n.childrenIdx()
 	resp += fmt.Sprintf("%s: %v", indices[i1], n.child1.fstring(ind+"  "))
 	resp += fmt.Sprintf("%s: %v", indices[i2], n.child2.fstring(ind+"  "))
 	return resp + fmt.Sprintf("\n%s] ", ind)
 }
-func (n *duoNode) print(w io.Writer) {
+func (n *DuoNode) print(w io.Writer) {
 	fmt.Fprintf(w, "d(")
 	i1, i2 := n.childrenIdx()
 	fmt.Fprintf(w, "%d:", i1)
@@ -80,55 +97,55 @@ func (n *duoNode) print(w io.Writer) {
 	fmt.Fprintf(w, ")")
 }
 
-func (n *shortNode) fstring(ind string) string {
+func (n *ShortNode) fstring(ind string) string {
 	return fmt.Sprintf("{%x: %v} ", n.Key, n.Val.fstring(ind+"  "))
 }
-func (n *shortNode) print(w io.Writer) {
+func (n *ShortNode) print(w io.Writer) {
 	fmt.Fprintf(w, "s(%x:", n.Key)
 	n.Val.print(w)
 	fmt.Fprintf(w, ")")
 }
 
-func (n hashNode) fstring(ind string) string {
+func (n HashNode) fstring(ind string) string {
 	return fmt.Sprintf("<%x> ", n.hash)
 }
-func (n hashNode) print(w io.Writer) {
+func (n HashNode) print(w io.Writer) {
 	fmt.Fprintf(w, "h(%x)", n.hash)
 }
 
-func (n valueNode) fstring(ind string) string {
+func (n ValueNode) fstring(ind string) string {
 	return fmt.Sprintf("%x ", []byte(n))
 }
-func (n valueNode) print(w io.Writer) {
+func (n ValueNode) print(w io.Writer) {
 	fmt.Fprintf(w, "v(%x)", []byte(n))
 }
 
-func (n codeNode) fstring(ind string) string {
+func (n CodeNode) fstring(ind string) string {
 	return fmt.Sprintf("code: %x ", []byte(n))
 }
-func (n codeNode) print(w io.Writer) {
+func (n CodeNode) print(w io.Writer) {
 	fmt.Fprintf(w, "code(%x)", []byte(n))
 }
 
-func (an accountNode) fstring(ind string) string {
+func (an AccountNode) fstring(ind string) string {
 	encodedAccount := make([]byte, an.EncodingLengthForHashing())
 	an.EncodeForHashing(encodedAccount)
-	if an.storage == nil {
+	if an.Storage == nil {
 		return hex.EncodeToString(encodedAccount)
 	}
-	return hex.EncodeToString(encodedAccount) + " " + an.storage.fstring(ind+" ")
+	return hex.EncodeToString(encodedAccount) + " " + an.Storage.fstring(ind+" ")
 }
 
-func (an accountNode) print(w io.Writer) {
+func (an AccountNode) print(w io.Writer) {
 	encodedAccount := make([]byte, an.EncodingLengthForHashing())
 	an.EncodeForHashing(encodedAccount)
 
 	fmt.Fprintf(w, "v(%x)", encodedAccount)
 }
 
-func printDiffSide(n node, w io.Writer, ind string, key string) {
+func printDiffSide(n Node, w io.Writer, ind string, key string) {
 	switch n := n.(type) {
-	case *fullNode:
+	case *FullNode:
 		fmt.Fprintf(w, "full(\n")
 		for i, child := range &n.Children {
 			if child != nil {
@@ -138,7 +155,7 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 			}
 		}
 		fmt.Fprintf(w, "%s)\n", ind)
-	case *duoNode:
+	case *DuoNode:
 		fmt.Fprintf(w, "duo(\n")
 		i1, i2 := n.childrenIdx()
 		fmt.Fprintf(w, "%s%s:", ind, indices[i1])
@@ -148,7 +165,7 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 		printDiffSide(n.child2, w, "  "+ind, key+indices[i2])
 		fmt.Fprintf(w, "\n")
 		fmt.Fprintf(w, "%s)\n", ind)
-	case *shortNode:
+	case *ShortNode:
 		fmt.Fprintf(w, "short %x(", n.reference())
 		keyHex := n.Key
 		hexV := make([]byte, len(keyHex))
@@ -159,19 +176,19 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 		printDiffSide(n.Val, w, "  "+ind, key+string(hexV))
 		fmt.Fprintf(w, "\n")
 		fmt.Fprintf(w, "%s)\n", ind)
-	case hashNode:
+	case HashNode:
 		fmt.Fprintf(w, "hash(%x)", n.hash)
-	case valueNode:
+	case ValueNode:
 		fmt.Fprintf(w, "value(%s %x)", key, []byte(n))
-	case *accountNode:
+	case *AccountNode:
 		fmt.Fprintf(w, "account(%s %x)", key, n)
 	}
 }
 
-func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
-	if nv1, ok := n1.(valueNode); ok {
+func printDiff(n1, n2 Node, w io.Writer, ind string, key string) {
+	if nv1, ok := n1.(ValueNode); ok {
 		fmt.Fprintf(w, "value(")
-		if n, ok := n2.(valueNode); ok {
+		if n, ok := n2.(ValueNode); ok {
 			fmt.Fprintf(w, "%s %x/%x", key, []byte(nv1), []byte(n))
 		} else {
 			fmt.Fprintf(w, "/%T", n2)
@@ -187,9 +204,9 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 		return
 	}
 	switch n1 := n1.(type) {
-	case *fullNode:
+	case *FullNode:
 		fmt.Fprintf(w, "full(\n")
-		if n, ok := n2.(*fullNode); ok {
+		if n, ok := n2.(*FullNode); ok {
 			for i, child := range &n1.Children {
 				child2 := n.Children[i]
 				if child == nil {
@@ -211,9 +228,9 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 			printDiffSide(n2, w, ind, key)
 		}
 		fmt.Fprintf(w, "%s)\n", ind)
-	case *duoNode:
+	case *DuoNode:
 		fmt.Fprintf(w, "duo(\n")
-		if n, ok := n2.(*duoNode); ok {
+		if n, ok := n2.(*DuoNode); ok {
 			i1, i2 := n1.childrenIdx()
 			j1, j2 := n.childrenIdx()
 			if i1 == j1 {
@@ -235,9 +252,9 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 			printDiffSide(n1, w, ind, key)
 		}
 		fmt.Fprintf(w, "%s)\n", ind)
-	case *shortNode:
+	case *ShortNode:
 		fmt.Fprintf(w, "short(")
-		if n, ok := n2.(*shortNode); ok {
+		if n, ok := n2.(*ShortNode); ok {
 			if bytes.Equal(n1.Key, n.Key) {
 				keyHex := n1.Key
 				hexV := make([]byte, len(keyHex))
@@ -260,9 +277,9 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 			printDiffSide(n2, w, ind, key)
 		}
 		fmt.Fprintf(w, "%s)\n", ind)
-	case hashNode:
+	case HashNode:
 		fmt.Fprintf(w, "hash(")
-		if n, ok := n2.(hashNode); ok {
+		if n, ok := n2.(HashNode); ok {
 			fmt.Fprintf(w, "%x/%x", n1.hash, n.hash)
 		} else {
 			fmt.Fprintf(w, "hash(%x)/%T(%x)\n", n1.hash, n2, n2.reference())
@@ -273,25 +290,25 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 }
 
 func (t *Trie) HashOfHexKey(hexKey []byte) (libcommon.Hash, error) {
-	nd := t.root
+	nd := t.RootNode
 	pos := 0
 	var account bool
 	for pos < len(hexKey) || account {
 		switch n := nd.(type) {
 		case nil:
 			return libcommon.Hash{}, fmt.Errorf("premature nil: pos %d, hexKey %x", pos, hexKey)
-		case *shortNode:
+		case *ShortNode:
 			matchlen := prefixLen(hexKey[pos:], n.Key)
 			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 				nd = n.Val
 				pos += matchlen
-				if _, ok := n.Val.(*accountNode); ok {
+				if _, ok := n.Val.(*AccountNode); ok {
 					account = true
 				}
 			} else {
 				return libcommon.Hash{}, fmt.Errorf("too long shortNode key: pos %d, hexKey %x: %s", pos, hexKey, n.fstring(""))
 			}
-		case *duoNode:
+		case *DuoNode:
 			i1, i2 := n.childrenIdx()
 			switch hexKey[pos] {
 			case i1:
@@ -303,26 +320,26 @@ func (t *Trie) HashOfHexKey(hexKey []byte) (libcommon.Hash, error) {
 			default:
 				return libcommon.Hash{}, fmt.Errorf("nil entry in the duoNode: pos %d, hexKey %x", pos, hexKey)
 			}
-		case *fullNode:
+		case *FullNode:
 			child := n.Children[hexKey[pos]]
 			if child == nil {
 				return libcommon.Hash{}, fmt.Errorf("nil entry in the fullNode: pos %d, hexKey %x", pos, hexKey)
 			}
 			nd = child
 			pos++
-		case valueNode:
+		case ValueNode:
 			return libcommon.Hash{}, fmt.Errorf("premature valueNode: pos %d, hexKey %x", pos, hexKey)
-		case *accountNode:
-			nd = n.storage
+		case *AccountNode:
+			nd = n.Storage
 			account = false
-		case hashNode:
+		case HashNode:
 			return libcommon.Hash{}, fmt.Errorf("premature hashNode: pos %d, hexKey %x", pos, hexKey)
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
 	var hash libcommon.Hash
-	if hn, ok := nd.(hashNode); ok {
+	if hn, ok := nd.(HashNode); ok {
 		copy(hash[:], hn.hash)
 	} else {
 		h := t.newHasherFunc()

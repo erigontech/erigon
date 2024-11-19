@@ -53,7 +53,7 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 		Storage("05", "04", "9898").
 		Build()
 
-	upds := WrapKeyUpdates(t, ModeDirect, hph.hashAndNibblizeKey, plainKeys, updates)
+	upds := WrapKeyUpdates(t, ModeDirect, hph.HashAndNibblizeKey, plainKeys, updates)
 	defer upds.Close()
 
 	fmt.Printf("1. Generated %d updates\n", len(updates))
@@ -121,7 +121,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	upds := WrapKeyUpdates(t, ModeDirect, hph.hashAndNibblizeKey, plainKeys, updates)
+	upds := WrapKeyUpdates(t, ModeDirect, hph.HashAndNibblizeKey, plainKeys, updates)
 	defer upds.Close()
 
 	hashBeforeEmptyUpdate, err := hph.Process(ctx, upds, "")
@@ -174,7 +174,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 			err := msOne.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			updsOne := WrapKeyUpdates(t, ModeDirect, trieOne.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			updsOne := WrapKeyUpdates(t, ModeDirect, trieOne.HashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
 
 			sequentialRoot, err := trieOne.Process(ctx, updsOne, "")
 			require.NoError(t, err)
@@ -189,7 +189,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		err := msTwo.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.hashAndNibblizeKey, plainKeys, updates)
+		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.HashAndNibblizeKey, plainKeys, updates)
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
 		rh, err := trieTwo.Process(ctx, updsTwo, "")
@@ -215,7 +215,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 			err := msOne.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			updsOne := WrapKeyUpdates(t, ModeDirect, trieOne.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			updsOne := WrapKeyUpdates(t, ModeDirect, trieOne.HashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
 
 			sequentialRoot, err := trieOne.Process(ctx, updsOne, "")
 			require.NoError(t, err)
@@ -231,7 +231,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 		err := msTwo.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.hashAndNibblizeKey, plainKeys, updates)
+		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.HashAndNibblizeKey, plainKeys, updates)
 
 		rh, err := trieTwo.Process(ctx, updsTwo, "")
 		require.NoError(t, err)
@@ -249,17 +249,17 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 
 	ku := make([]*KeyUpdate, len(plainKeys))
 	for i, pk := range plainKeys {
-		ku[i] = &KeyUpdate{plainKey: pk, hashedKey: hph.hashAndNibblizeKey(pk), update: &updates[i]}
+		ku[i] = &KeyUpdate{PlainKey: pk, HashedKey: hph.HashAndNibblizeKey(pk), update: &updates[i]}
 	}
 
 	sort.Slice(updates, func(i, j int) bool {
-		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
+		return bytes.Compare(ku[i].HashedKey, ku[j].HashedKey) < 0
 	})
 
 	pks := make([][]byte, len(updates))
 	upds := make([]Update, len(updates))
 	for i, u := range ku {
-		pks[i] = u.plainKey
+		pks[i] = u.PlainKey
 		upds[i] = *u.update
 	}
 	return pks, upds
@@ -316,7 +316,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 				err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 				require.NoError(t, err)
 
-				updsOne := WrapKeyUpdates(t, ModeDirect, trieSequential.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+				updsOne := WrapKeyUpdates(t, ModeDirect, trieSequential.HashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
 
 				sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
 				require.NoError(t, err)
@@ -332,7 +332,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 			err := stateBatch.applyPlainUpdates(plainKeys, updates)
 			require.NoError(t, err)
 
-			updsTwo := WrapKeyUpdates(t, ModeDirect, trieBatch.hashAndNibblizeKey, plainKeys, updates)
+			updsTwo := WrapKeyUpdates(t, ModeDirect, trieBatch.HashAndNibblizeKey, plainKeys, updates)
 
 			rh, err := trieBatch.Process(ctx, updsTwo, "")
 			require.NoError(t, err)
@@ -399,7 +399,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 			err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			updsOne := WrapKeyUpdates(t, ModeDirect, trieSequential.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			updsOne := WrapKeyUpdates(t, ModeDirect, trieSequential.HashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
 
 			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
 			require.NoError(t, err)
@@ -415,7 +415,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		err := stateBatch.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, trieBatch.hashAndNibblizeKey, plainKeys, updates)
+		updsTwo := WrapKeyUpdates(t, ModeDirect, trieBatch.HashAndNibblizeKey, plainKeys, updates)
 
 		rh, err := trieBatch.Process(ctx, updsTwo, "")
 		require.NoError(t, err)
@@ -485,7 +485,7 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 		err := state.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		upds := WrapKeyUpdates(t, ModeDirect, hph.hashAndNibblizeKey, plainKeys, updates)
+		upds := WrapKeyUpdates(t, ModeDirect, hph.HashAndNibblizeKey, plainKeys, updates)
 		rootHash, err := hph.Process(ctx, upds, "")
 		require.NoError(t, err)
 		require.EqualValues(t, testData.expectedRoot, fmt.Sprintf("%x", rootHash))
@@ -598,7 +598,7 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	upds := WrapKeyUpdates(t, ModeDirect, before.hashAndNibblizeKey, plainKeys, updates)
+	upds := WrapKeyUpdates(t, ModeDirect, before.HashAndNibblizeKey, plainKeys, updates)
 	defer upds.Close()
 
 	// process updates
@@ -659,7 +659,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	err = msTwo.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	updOne := WrapKeyUpdates(t, ModeDirect, trieOne.hashAndNibblizeKey, plainKeys, updates)
+	updOne := WrapKeyUpdates(t, ModeDirect, trieOne.HashAndNibblizeKey, plainKeys, updates)
 	defer updOne.Close()
 
 	withoutRestore, err := trieOne.Process(ctx, updOne, "")
@@ -717,7 +717,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 
 	t.Logf("batch without restore (%d) root %x\n", len(updates), withoutRestore)
 
-	updTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.hashAndNibblizeKey, plainKeys, updates)
+	updTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.HashAndNibblizeKey, plainKeys, updates)
 	defer updTwo.Close()
 
 	afterRestore, err := trieTwo.Process(ctx, updTwo, "")
@@ -758,7 +758,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	updTwo := WrapKeyUpdates(t, ModeDirect, trieOne.hashAndNibblizeKey, plainKeys, updates)
+	updTwo := WrapKeyUpdates(t, ModeDirect, trieOne.HashAndNibblizeKey, plainKeys, updates)
 	defer updTwo.Close()
 
 	beforeRestore, err := trieTwo.Process(ctx, updTwo, "")
@@ -844,7 +844,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 			err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			updsOne := WrapKeyUpdates(t, ModeDirect, trieSequential.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			updsOne := WrapKeyUpdates(t, ModeDirect, trieSequential.HashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
 
 			sequentialRoot, err := trieSequential.Process(ctx, updsOne, "")
 			require.NoError(t, err)
@@ -871,7 +871,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 		err := stateBatch.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, trieBatch.hashAndNibblizeKey, plainKeys, updates)
+		updsTwo := WrapKeyUpdates(t, ModeDirect, trieBatch.HashAndNibblizeKey, plainKeys, updates)
 
 		rh, err := trieBatch.Process(ctx, updsTwo, "")
 		require.NoError(t, err)
@@ -944,7 +944,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 			err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			updsOne := WrapKeyUpdates(t, ModeDirect, sequential.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			updsOne := WrapKeyUpdates(t, ModeDirect, sequential.HashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
 
 			sequentialRoot, err := sequential.Process(ctx, updsOne, "")
 			require.NoError(t, err)
@@ -972,7 +972,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		err := stateBatch.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, batch.hashAndNibblizeKey, plainKeys[:somewhere+1], updates[:somewhere+1])
+		updsTwo := WrapKeyUpdates(t, ModeDirect, batch.HashAndNibblizeKey, plainKeys[:somewhere+1], updates[:somewhere+1])
 
 		rh, err := batch.Process(ctx, updsTwo, "")
 		require.NoError(t, err)
@@ -1310,7 +1310,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 			err := msOne.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
-			updsOne := WrapKeyUpdates(t, ModeDirect, trieOne.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			updsOne := WrapKeyUpdates(t, ModeDirect, trieOne.HashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
 
 			sequentialRoot, err := trieOne.Process(ctx, updsOne, "")
 			require.NoError(t, err)
@@ -1325,7 +1325,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 		err := msTwo.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.hashAndNibblizeKey, plainKeys, updates)
+		updsTwo := WrapKeyUpdates(t, ModeDirect, trieTwo.HashAndNibblizeKey, plainKeys, updates)
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
 		rh, err := trieTwo.Process(ctx, updsTwo, "")

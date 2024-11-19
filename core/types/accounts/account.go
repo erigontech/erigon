@@ -199,6 +199,13 @@ func (a *Account) EncodeRLP(w io.Writer) error {
 	return err
 }
 
+// returns the RLP encoding of the account directly as a []byte
+func (a *Account) RLP() []byte {
+	accRlp := make([]byte, a.EncodingLengthForHashing())
+	a.EncodeForHashing(accRlp)
+	return accRlp
+}
+
 func (a *Account) EncodeForHashing(buffer []byte) {
 	balanceBytes := 0
 	if !a.Balance.LtUint64(128) {

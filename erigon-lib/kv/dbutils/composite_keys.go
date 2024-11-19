@@ -75,3 +75,116 @@ func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
 }
+
+// Address + storageLocationHash
+func GenerateStoragePlainKey(address libcommon.Address, storageKey libcommon.Hash) []byte {
+	storagePlainKey := make([]byte, 0, length.Addr+length.Hash)
+	storagePlainKey = append(storagePlainKey, address.Bytes()...)
+	storagePlainKey = append(storagePlainKey, storageKey.Bytes()...)
+	return storagePlainKey
+}
+
+// AddrHash + incarnation + KeyHash
+// For contract storage
+func GenerateCompositeStorageKey(addressHash libcommon.Hash, incarnation uint64, seckey libcommon.Hash) []byte {
+	compositeKey := make([]byte, length.Hash+length.Incarnation+length.Hash)
+	copy(compositeKey, addressHash[:])
+	binary.BigEndian.PutUint64(compositeKey[length.Hash:], incarnation)
+	copy(compositeKey[length.Hash+length.Incarnation:], seckey[:])
+	return compositeKey
+}
+
+func ParseCompositeStorageKey(compositeKey []byte) (libcommon.Hash, uint64, libcommon.Hash) {
+	prefixLen := length.Hash + length.Incarnation
+	addrHash, inc := ParseStoragePrefix(compositeKey[:prefixLen])
+	var key libcommon.Hash
+	copy(key[:], compositeKey[prefixLen:prefixLen+length.Hash])
+	return addrHash, inc, key
+}
+
+// AddrHash + incarnation + KeyHash
+// For contract storage (for plain state)
+func PlainGenerateCompositeStorageKey(address []byte, incarnation uint64, key []byte) []byte {
+	compositeKey := make([]byte, length.Addr+length.Incarnation+length.Hash)
+	copy(compositeKey, address)
+	binary.BigEndian.PutUint64(compositeKey[length.Addr:], incarnation)
+	copy(compositeKey[length.Addr+length.Incarnation:], key)
+	return compositeKey
+}
+
+func PlainParseCompositeStorageKey(compositeKey []byte) (libcommon.Address, uint64, libcommon.Hash) {
+	prefixLen := length.Addr + length.Incarnation
+	addr, inc := PlainParseStoragePrefix(compositeKey[:prefixLen])
+	var key libcommon.Hash
+	copy(key[:], compositeKey[prefixLen:prefixLen+length.Hash])
+	return addr, inc, key
+}
+
+// AddrHash + incarnation + StorageHashPrefix
+func GenerateCompositeStoragePrefix(addressHash []byte, incarnation uint64, storageHashPrefix []byte) []byte {
+	key := make([]byte, length.Hash+length.Incarnation+len(storageHashPrefix))
+	copy(key, addressHash)
+	binary.BigEndian.PutUint64(key[length.Hash:], incarnation)
+	copy(key[length.Hash+length.Incarnation:], storageHashPrefix)
+	return key
+}
+
+// address hash + incarnation prefix
+func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
+	prefix := make([]byte, length.Hash+NumberLength)
+	copy(prefix, addressHash)
+	binary.BigEndian.PutUint64(prefix[length.Hash:], incarnation)
+	return prefix
+}
+
+// address hash + incarnation prefix (for plain state)
+func PlainGenerateStoragePrefix(address []byte, incarnation uint64) []byte {
+	prefix := make([]byte, length.Addr+NumberLength)
+	copy(prefix, address)
+	binary.BigEndian.PutUint64(prefix[length.Addr:], incarnation)
+	return prefix
+}
+
+func PlainParseStoragePrefix(prefix []byte) (libcommon.Address, uint64) {
+	var addr libcommon.Address
+	copy(addr[:], prefix[:length.Addr])
+	inc := binary.BigEndian.Uint64(prefix[length.Addr : length.Addr+length.Incarnation])
+	return addr, inc
+}
+
+func ParseStoragePrefix(prefix []byte) (libcommon.Hash, uint64) {
+	var addrHash libcommon.Hash
+	copy(addrHash[:], prefix[:length.Hash])
+	inc := binary.BigEndian.Uint64(prefix[length.Hash : length.Hash+length.Incarnation])
+	return addrHash, inc
+}
+
+// Key + blockNum
+func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []byte) {
+	encodedTS = encodeTimestamp(timestamp)
+	composite = make([]byte, len(key)+len(encodedTS))
+	copy(composite, key)
+	copy(composite[len(key):], encodedTS)
+	return composite, encodedTS
+}
+
+// encodeTimestamp has the property: if a < b, then Encoding(a) < Encoding(b) lexicographically
+func encodeTimestamp(timestamp uint64) []byte {
+	var suffix []byte
+	var limit uint64 = 32
+
+	for bytecount := 1; bytecount <= 8; bytecount++ {
+		if timestamp < limit {
+			suffix = make([]byte, bytecount)
+			b := timestamp
+			for i := bytecount - 1; i > 0; i-- {
+				suffix[i] = byte(b & 0xff)
+				b >>= 8
+			}
+			suffix[0] = byte(b) | (byte(bytecount) << 5) // 3 most significant bits of the first byte are bytecount
+			break
+		}
+		limit <<= 8
+	}
+	return suffix
+}

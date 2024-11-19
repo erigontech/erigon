@@ -17,13 +17,21 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon/turbo/trie"
+
+	"github.com/erigontech/erigon-lib/commitment"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
+
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -34,12 +42,14 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
@@ -415,6 +425,265 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		}
 		return pr.ProofResult()
 	*/
+}
+
+func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
+	return api.getWitness(ctx, api.db, blockNrOrHash, 0, true, api.MaxGetProofRewindBlockCount, api.logger)
+}
+
+func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrHash, txIndex hexutil.Uint) (hexutility.Bytes, error) {
+	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.MaxGetProofRewindBlockCount, api.logger)
+}
+
+func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) error {
+	actualTxRoot := execResult.TxRoot.Bytes()
+	expectedTxRoot := block.TxHash().Bytes()
+	if !bytes.Equal(actualTxRoot, expectedTxRoot) {
+		return fmt.Errorf("mismatch in block TxRoot actual(%x) != expected(%x)", actualTxRoot, expectedTxRoot)
+	}
+
+	actualGasUsed := uint64(execResult.GasUsed)
+	expectedGasUsed := block.GasUsed()
+	if actualGasUsed != expectedGasUsed {
+		return fmt.Errorf("mismatch in block gas used actual(%x) != expected(%x)", actualGasUsed, expectedGasUsed)
+	}
+
+	actualReceiptsHash := execResult.ReceiptRoot.Bytes()
+	expectedReceiptsHash := block.ReceiptHash().Bytes()
+	if !bytes.Equal(actualReceiptsHash, expectedReceiptsHash) {
+		return fmt.Errorf("mismatch in receipts hash actual(%x) != expected(%x)", actualReceiptsHash, expectedReceiptsHash)
+	}
+
+	// check the state root
+	resultingStateRoot := execResult.StateRoot.Bytes()
+	expectedBlockStateRoot := block.Root().Bytes()
+	if !bytes.Equal(resultingStateRoot, expectedBlockStateRoot) {
+		return fmt.Errorf("resulting state root after execution doesn't match state root in block actual(%x)!=expected(%x)", resultingStateRoot, expectedBlockStateRoot)
+	}
+	return nil
+}
+
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutility.Bytes, error) {
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer roTx.Rollback()
+
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return nil, err
+	}
+
+	// Witness for genesis block is empty
+	if blockNr == 0 {
+		w := trie.NewWitness(make([]trie.WitnessOperator, 0))
+
+		var buf bytes.Buffer
+		_, err = w.WriteInto(&buf)
+		if err != nil {
+			return nil, err
+		}
+
+		return buf.Bytes(), nil
+	}
+
+	block, err := api.blockWithSenders(ctx, roTx, hash, blockNr)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	if !fullBlock && int(txIndex) >= len(block.Transactions()) {
+		return nil, fmt.Errorf("transaction index out of bounds")
+	}
+
+	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	if err != nil {
+		return nil, err
+	}
+
+	if latestBlock < blockNr {
+		// shouldn't happen, but check anyway
+		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
+	}
+
+	// Compute the witness if it's for a tx or it's not present in db
+	prevHeader, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNr-1)
+	if err != nil {
+		return nil, err
+	}
+
+	regenerateHash := false
+	if latestBlock-blockNr > uint64(maxGetProofRewindBlockCount) {
+		regenerateHash = true
+	}
+
+	engine, ok := api.engine().(consensus.Engine)
+	if !ok {
+		return nil, fmt.Errorf("engine is not consensus.Engine")
+	}
+
+	// // DEBUGGING
+	roTx2, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
+	defer txBatch2.Rollback()
+
+	// Prepare witness config
+	chainConfig, err := api.chainConfig(ctx, roTx2)
+	if err != nil {
+		return nil, fmt.Errorf("error loading chain config: %v", err)
+	}
+
+	cfg := stagedsync.StageWitnessCfg(true, 0, chainConfig, engine, api._blockReader, api.dirs)
+	err = stagedsync.RewindStagesForWitness(txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	store, err := stagedsync.PrepareForWitness(txBatch2, block, prevHeader.Root, &cfg, ctx, logger)
+	if err != nil {
+		return nil, err
+	}
+	// // The code below is for using ExecV3 instead of ExecuteBlockEphemerally
+	// txNumsReader := rawdbv3.TxNums
+	// cr := rawdb.NewCanonicalReader(txNumsReader)
+	// agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, txBatch.MemDB(), cr, logger)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// temporalDB, err := temporal.New(txBatch.MemDB(), agg)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// txc := wrap.TxContainer{Tx: txBatch}
+	// batchSizeStr := "512M"
+	// var batchSize datasize.ByteSize
+	// err = batchSize.UnmarshalText([]byte(batchSizeStr))
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// pruneMode := prune.Mode{
+	// 	Initialised: false,
+	// 	History:     prune.Distance(math.MaxUint64),
+	// }
+	// vmConfig := &vm.Config{}
+	// syncCfg := ethconfig.Defaults.Sync
+
+	// execCfg := stagedsync.StageExecuteBlocksCfg(temporalDB, pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
+	// 	/*stateStream=*/ false,
+	// 	/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, nil)
+
+	// stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
+	// stateSync := stagedsync.New(
+	// 	ethconfig.Defaults.Sync,
+	// 	stateSyncStages,
+	// 	stagedsync.DefaultUnwindOrder,
+	// 	stagedsync.DefaultPruneOrder,
+	// 	logger,
+	// )
+	// stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
+	// // Re-execute block
+	// err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger, false)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// execute block ephemerally
+
+	// var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
+	// stateReader := rpchelper.NewLatestStateReader(txBatch)
+	// stateReader, err := rpchelper.CreateHistoryStateReader(roTx, txNumsReader, blockNr, 0, "")  <-----
+	// stateReader := state.NewHistoryReaderV3()
+
+	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
+	patricieTrie := sdCtx.Trie()
+	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
+	}
+
+	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
+	codeReads := store.Tds.BuildCodeTouches()
+
+	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
+	// for _, key := range touchedPlainKeys {
+	// 	updates.TouchPlainKey(key, nil, updates.TouchAccount)
+	// }
+
+	_ = touchedPlainKeys
+	extraPlainKey := libcommon.FromHex("00a3ca265ebcb825b45f985a16cefb49958ce017")
+	updates.TouchPlainKey(extraPlainKey, nil, updates.TouchAccount)
+
+	hph.SetTrace(false) // disable tracing
+	witnessTrie, rootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
+	if err != nil {
+		return nil, err
+	}
+
+	_ = witnessTrie
+
+	if !bytes.Equal(rootHash, prevHeader.Root[:]) {
+		return nil, errors.New("root hash mismatch")
+	}
+
+	retainListBuilder := trie.NewRetainListBuilder()
+	for _, key := range touchedHashedKeys {
+		if len(key) == 32 {
+			retainListBuilder.AddTouch(key)
+		} else {
+			addr, _, hash := dbutils.ParseCompositeStorageKey(key)
+			storageTouch := dbutils.GenerateCompositeTrieKey(addr, hash)
+			retainListBuilder.AddStorageTouch(storageTouch)
+		}
+	}
+
+	for _, codeWithHash := range codeReads {
+		retainListBuilder.ReadCode(codeWithHash.CodeHash, codeWithHash.Code)
+	}
+
+	retainList := retainListBuilder.Build(false)
+
+	witness, err := witnessTrie.ExtractWitness(true, retainList)
+	if err != nil {
+		return nil, err
+	}
+
+	var witnessBuffer bytes.Buffer
+	_, err = witness.WriteInto(&witnessBuffer)
+	if err != nil {
+		return nil, err
+	}
+
+	store.Tds.SetTrie(witnessTrie)
+	newStateRoot, err := stagedsync.ExecuteBlockStatelessly(block, prevHeader, store.ChainReader, store.Tds, &cfg, &witnessBuffer, store.GetHashFn, logger)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(newStateRoot.Bytes(), block.Root().Bytes()) {
+		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
+	}
+	witnessBufBytes := witnessBuffer.Bytes()
+	witnessBufBytesCopy := make([]byte, len(witnessBufBytes))
+	copy(witnessBufBytesCopy, witnessBufBytes)
+	return witnessBufBytesCopy, nil
 }
 
 func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {

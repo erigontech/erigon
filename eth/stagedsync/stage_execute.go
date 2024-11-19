@@ -152,21 +152,21 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		workersCount = 1
 	}
 
-	prevStageProgress, err := stageProgress(txc.Tx, cfg.db, stages.Senders)
-	if err != nil {
-		return err
-	}
+	// prevStageProgress, err := stageProgress(txc.Tx, cfg.db, stages.Senders)
+	// if err != nil {
+	// 	return err
+	// }
 
-	var to = prevStageProgress
-	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
-	}
-	if to < s.BlockNumber {
-		return nil
-	}
+	// var to = prevStageProgress
+	// if toBlock > 0 {
+	// 	to = min(prevStageProgress, toBlock)
+	// }
+	// if to < s.BlockNumber {
+	// 	return nil
+	// }
 
 	parallel := txc.Tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, initialCycle, isMining); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, toBlock, logger, initialCycle, isMining); err != nil {
 		return err
 	}
 	return nil

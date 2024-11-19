@@ -43,10 +43,10 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 	// Collect all nodes on the path to key.
 	key = keybytesToHex(key)
 	key = key[:len(key)-1] // Remove terminator
-	tn := t.root
+	tn := t.RootNode
 	for len(key) > 0 && tn != nil {
 		switch n := tn.(type) {
-		case *shortNode:
+		case *ShortNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
 					proof = append(proof, libcommon.CopyBytes(rlp))
@@ -68,7 +68,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 			if fromLevel > 0 {
 				fromLevel -= len(nKey)
 			}
-		case *duoNode:
+		case *DuoNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
 					proof = append(proof, libcommon.CopyBytes(rlp))
@@ -90,7 +90,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 			if fromLevel > 0 {
 				fromLevel--
 			}
-		case *fullNode:
+		case *FullNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
 					proof = append(proof, libcommon.CopyBytes(rlp))
@@ -103,15 +103,15 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 			if fromLevel > 0 {
 				fromLevel--
 			}
-		case *accountNode:
+		case *AccountNode:
 			if storage {
-				tn = n.storage
+				tn = n.Storage
 			} else {
 				tn = nil
 			}
-		case valueNode:
+		case ValueNode:
 			tn = nil
-		case hashNode:
+		case HashNode:
 			return nil, fmt.Errorf("encountered hashNode unexpectedly, key %x, fromLevel %d", key, fromLevel)
 		default:
 			panic(fmt.Sprintf("%T: invalid node: %v", tn, tn))
@@ -120,7 +120,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 	return proof, nil
 }
 
-func decodeRef(buf []byte) (node, []byte, error) {
+func decodeRef(buf []byte) (Node, []byte, error) {
 	kind, val, rest, err := rlp.Split(buf)
 	if err != nil {
 		return nil, nil, err
@@ -138,14 +138,14 @@ func decodeRef(buf []byte) (node, []byte, error) {
 	case kind == rlp.String && len(val) == 0:
 		return nil, rest, nil
 	case kind == rlp.String && len(val) == 32:
-		return hashNode{hash: val}, rest, nil
+		return HashNode{hash: val}, rest, nil
 	default:
 		return nil, nil, fmt.Errorf("invalid RLP string size %d (want 0 through 32)", len(val))
 	}
 }
 
-func decodeFull(elems []byte) (*fullNode, error) {
-	n := &fullNode{}
+func decodeFull(elems []byte) (*FullNode, error) {
+	n := &FullNode{}
 	for i := 0; i < 16; i++ {
 		var err error
 		n.Children[i], elems, err = decodeRef(elems)
@@ -159,12 +159,12 @@ func decodeFull(elems []byte) (*fullNode, error) {
 		return nil, err
 	}
 	if len(val) > 0 {
-		n.Children[16] = valueNode(val)
+		n.Children[16] = ValueNode(val)
 	}
 	return n, nil
 }
 
-func decodeShort(elems []byte) (*shortNode, error) {
+func decodeShort(elems []byte) (*ShortNode, error) {
 	kbuf, rest, err := rlp.SplitString(elems)
 	if err != nil {
 		return nil, err
@@ -175,9 +175,9 @@ func decodeShort(elems []byte) (*shortNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &shortNode{
+		return &ShortNode{
 			Key: kb.ToHex(),
-			Val: valueNode(val),
+			Val: ValueNode(val),
 		}, nil
 	}
 
@@ -185,13 +185,13 @@ func decodeShort(elems []byte) (*shortNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &shortNode{
+	return &ShortNode{
 		Key: kb.ToHex(),
 		Val: val,
 	}, nil
 }
 
-func decodeNode(encoded []byte) (node, error) {
+func decodeNode(encoded []byte) (Node, error) {
 	if len(encoded) == 0 {
 		return nil, errors.New("nodes must not be zero length")
 	}
@@ -215,8 +215,8 @@ type rawProofElement struct {
 }
 
 // proofMap creates a map from hash to proof node
-func proofMap(proof []hexutility.Bytes) (map[libcommon.Hash]node, map[libcommon.Hash]rawProofElement, error) {
-	res := map[libcommon.Hash]node{}
+func proofMap(proof []hexutility.Bytes) (map[libcommon.Hash]Node, map[libcommon.Hash]rawProofElement, error) {
+	res := map[libcommon.Hash]Node{}
 	raw := map[libcommon.Hash]rawProofElement{}
 	for i, proofB := range proof {
 		hash := crypto.Keccak256Hash(proofB)
@@ -233,13 +233,13 @@ func proofMap(proof []hexutility.Bytes) (map[libcommon.Hash]node, map[libcommon.
 	return res, raw, nil
 }
 
-func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]node, used map[libcommon.Hash]rawProofElement) ([]byte, error) {
+func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]Node, used map[libcommon.Hash]rawProofElement) ([]byte, error) {
 	nextIndex := 0
 	key = keybytesToHex(key)
-	var node node = hashNode{hash: root[:]}
+	var node Node = HashNode{hash: root[:]}
 	for {
 		switch nt := node.(type) {
-		case *fullNode:
+		case *FullNode:
 			if len(key) == 0 {
 				return nil, errors.New("full nodes should not have values")
 			}
@@ -247,7 +247,7 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]node
 			if node == nil {
 				return nil, nil
 			}
-		case *shortNode:
+		case *ShortNode:
 			shortHex := nt.Key
 			if len(shortHex) > len(key) {
 				return nil, fmt.Errorf("len(shortHex)=%d must be leq len(key)=%d", len(shortHex), len(key))
@@ -256,7 +256,7 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]node
 				return nil, nil
 			}
 			node, key = nt.Val, key[len(shortHex):]
-		case hashNode:
+		case HashNode:
 			var ok bool
 			h := libcommon.BytesToHash(nt.hash)
 			node, ok = proofs[h]
@@ -272,7 +272,7 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]node
 			}
 			nextIndex++
 			delete(used, h)
-		case valueNode:
+		case ValueNode:
 			if len(key) != 0 {
 				return nil, fmt.Errorf("value node should have zero length remaining in key %x", key)
 			}

@@ -22,6 +22,7 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -29,9 +30,9 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -399,7 +400,7 @@ func TestCodeNodeGetHashedAccount(t *testing.T) {
 
 	hex := keybytesToHex(crypto.Keccak256(address[:]))
 
-	_, trie.root = trie.insert(trie.root, hex, hashNode{hash: fakeAccountHash[:]})
+	_, trie.RootNode = trie.insert(trie.RootNode, hex, &HashNode{hash: fakeAccountHash[:]})
 
 	value, gotValue := trie.GetAccountCode(crypto.Keccak256(address[:]))
 	assert.False(t, gotValue, "should indicate that account exists but hashed")
@@ -634,6 +635,41 @@ func TestNextSubtreeHex(t *testing.T) {
 	for _, tc := range cases {
 		res := isDenseSequence(common.FromHex(tc.prev), common.FromHex(tc.next))
 		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
+	}
+}
+
+func TestShortNode(t *testing.T) {
+	extensionKeyStr := "0b00000d020809020b080f0d0a090a0a0705070f050d0002090f0d0d0e07080e0402070e010c08030d0e0409060e040b0e0406060b0c080b0503010005"
+	extensionKeyNibbles := make([]byte, len(extensionKeyStr)/2+1)
+	for i := 0; i < len(extensionKeyStr)/2; i++ {
+		c, err := hex.DecodeString(extensionKeyStr[2*i : 2*i+2])
+		if err != nil {
+			t.Errorf("parsing error")
+		}
+		extensionKeyNibbles[i] = c[0]
+	}
+	extensionKeyNibbles[len(extensionKeyNibbles)-1] = 16
+
+	accRlpHex := "f84b08873f54314ab16fd0a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+	accRlp, err := hex.DecodeString(accRlpHex)
+	if err != nil {
+		t.Fatalf("failed to decode rlp from hex")
+	}
+
+	valNode := ValueNode(accRlp)
+
+	shortNode := &ShortNode{Key: extensionKeyNibbles, Val: valNode}
+	trie := NewInMemoryTrieRLPEncoded(shortNode)
+	trie.valueNodesRLPEncoded = true
+	rootHash := trie.Root()
+
+	expectedHashStr := "fa7297cfa8b2d445e356e9f752e23b018ae8717fdf117cbe4fcef1b16217d3c2"
+	expectedHashBytes, err := hex.DecodeString(expectedHashStr)
+	if err != nil {
+		t.Fatalf("unable to decode expected hash %v", err)
+	}
+	if !bytes.Equal(rootHash, expectedHashBytes) {
+		t.Fatalf("rootHash(%x) != expectedHash(%x)", rootHash, expectedHashBytes)
 	}
 }
 

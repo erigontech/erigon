@@ -137,7 +137,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	default:
 
 		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
-		tree := NewUpdates(mode, tmpdir, trie.hashAndNibblizeKey)
+		tree := NewUpdates(mode, tmpdir, trie.HashAndNibblizeKey)
 		return trie, tree
 	}
 }
@@ -1033,17 +1033,17 @@ func (t *Updates) Size() (updates uint64) {
 func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
 	case ModeUpdate:
-		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
+		pivot, updated := &KeyUpdate{PlainKey: key, update: new(Update)}, false
 
 		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
-			if bytes.Equal(item.plainKey, pivot.plainKey) {
+			if bytes.Equal(item.PlainKey, pivot.PlainKey) {
 				fn(item, val)
 				updated = true
 			}
 			return false
 		})
 		if !updated {
-			pivot.hashedKey = t.hasher(pivot.plainKey)
+			pivot.HashedKey = t.hasher(pivot.PlainKey)
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
 		}
@@ -1144,7 +1144,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 			default:
 			}
 
-			if err := fn(item.hashedKey, item.plainKey, item.update); err != nil {
+			if err := fn(item.HashedKey, item.PlainKey, item.update); err != nil {
 				return false
 			}
 			return true
@@ -1170,13 +1170,13 @@ func (t *Updates) Reset() {
 }
 
 type KeyUpdate struct {
-	plainKey  []byte
-	hashedKey []byte
+	PlainKey  []byte
+	HashedKey []byte
 	update    *Update
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
-	return bytes.Compare(i.plainKey, j.plainKey) < 0
+	return bytes.Compare(i.PlainKey, j.PlainKey) < 0
 }
 
 type UpdateFlags uint8
