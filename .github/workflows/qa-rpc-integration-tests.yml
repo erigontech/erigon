@@ -32,9 +32,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch main https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
-          cd ${{ runner.workspace }}/rpc-tests
-          git checkout 0edbdc1681b2a7080212364dbd0a22f06a163614
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.14.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           pip3 install -r requirements.txt
 
       - name: Clean Erigon Build Directory
