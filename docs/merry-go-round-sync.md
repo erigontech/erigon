@@ -17,7 +17,7 @@ Cycle is divided into ticks. For convenience, we can say that each ticks starts 
 for some predetermined amount of time, let's say, 30 seconds. This definition means that the ticks will often overlap, but not
 always, as shown on the picture below.
 
-![cycles-and-ticks](mgr-sync-1.png)
+![cycles-and-ticks](./asssets/mgr-sync-1.png)
 
 If chain reorgs occur, and the timings of recent Ethereum blocks change as a result, we can accept these rules to prevent
 the reorgs to be used to disrupt the sync. Imagine the tick started at block A (height H), and then due to reorg, block A
