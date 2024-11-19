@@ -17,11 +17,19 @@
 package state
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOverflowPages(t *testing.T) {
+	db, _ := testDbAndAggregatorv3(t, 10)
+	require.Equal(t, 4096, int(db.PageSize()))
+}
 
 func TestSerializeDeserializeDiff(t *testing.T) {
 	t.Parallel()
