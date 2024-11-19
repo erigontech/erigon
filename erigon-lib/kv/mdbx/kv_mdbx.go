@@ -143,6 +143,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.dirtySpace = uint64(64 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.label = kv.InMem
+	opts.pageSize = 4096
 	return opts
 }
 
