@@ -67,7 +67,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		duties := make([]proposerDuties, len(indicies))
 		for i, validatorIndex := range indicies {
 			var pk libcommon.Bytes48
-			pk, err := state_accessors.ReadPublicKeyByIndex(tx, uint64(validatorIndex))
+			pk, err := state_accessors.ReadPublicKeyByIndex(tx, validatorIndex)
 			if err != nil {
 				return nil, err
 			}
