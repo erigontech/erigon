@@ -373,25 +373,21 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	}
 
 	maxDi := b.offt.Count()
-	check := func(di uint64, v []byte) (vb []byte, cmp int, offt uint64, err error) {
+	check := func(di uint64) (cmp int, offt uint64, err error) {
 		if di >= maxDi {
-			return nil, 0, 0, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.offt.Count(), di, g.FileName())
+			return 0, 0, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.offt.Count(), di, g.FileName())
 		}
 
 		offt = b.offt.Get(di)
 		g.Reset(offt)
 		if !g.HasNext() {
-			return nil, 0, 0, fmt.Errorf("pair %d/%d key not found in %s", di, b.offt.Count(), g.FileName())
+			return 0, 0, fmt.Errorf("pair %d/%d key not found in %s", di, b.offt.Count(), g.FileName())
 		}
 		//v, _ = g.Next(v[:0])
 		//if cmp = bytes.Compare(v, key); cmp == 0 {
-		if cmp = g.MatchCmp(key) * -1; cmp == 0 {
-			if !g.HasNext() {
-				return nil, 0, 0, fmt.Errorf("pair %d/%d value not found in %s", di, b.offt.Count(), g.FileName())
-			}
-			vb, _ = g.Next(v[:0])
-		}
-		return vb, cmp, offt, nil
+		//if cmp = g.MatchCmp(key) * -1; cmp == 0 {
+		//}
+		return g.MatchCmp(key) * -1, offt, nil
 	}
 
 	var cmp int
@@ -401,11 +397,15 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		if r-l <= DefaultBtreeStartSkip {
 			m = l
 		}
-		v, cmp, offset, err = check(m, v)
+		cmp, offset, err = check(m)
 		if err != nil {
 			return nil, false, 0, err
 		}
 		if cmp == 0 {
+			if !g.HasNext() {
+				return nil, false, 0, fmt.Errorf("offset %d value not found in %s", offset, g.FileName())
+			}
+			v, _ = g.Next(v[:0])
 			//return v, true, m, nil
 			return v, true, offset, nil
 		} else if cmp > 0 {
@@ -418,10 +418,14 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	v, cmp, offset, err = check(l, v)
+	cmp, offset, err = check(l)
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
+	if !g.HasNext() {
+		return nil, false, 0, fmt.Errorf("offset %d value not found in %s", offset, g.FileName())
+	}
+	v, _ = g.Next(v[:0])
 	//return v, true, l, nil
 	return v, true, offset, nil
 }
