@@ -18,7 +18,6 @@ package state
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"testing"
 
@@ -44,92 +43,6 @@ func TestOverflowPages(t *testing.T) {
 	require.Equal(t, 1, int(st.LeafPages))
 	require.Equal(t, 2, int(st.Entries))
 	require.Equal(t, 2, int(st.Entries))
-}
-
-func BenchmarkName(b *testing.B) {
-	db, _ := testDbAndAggregatorv3(b, 10)
-	ctx := context.Background()
-
-	{
-		k, v := make([]byte, diffChunkKeyLen), make([]byte, diffChunkLen)
-		tx, _ := db.BeginRw(ctx)
-		for i := 0; i < 10_000; i++ {
-			binary.BigEndian.PutUint64(k, uint64(i))
-			_ = tx.Put(kv.ChangeSets3, k, v)
-		}
-		for i := 0; i < b.N; i++ {
-			binary.BigEndian.PutUint64(k, uint64(i))
-			_ = tx.Delete(kv.ChangeSets3, k)
-		}
-		tx.Rollback()
-	}
-
-	b.Run("no", func(b *testing.B) {
-		k, v := make([]byte, diffChunkKeyLen), make([]byte, 1980)
-		tx, _ := db.BeginRw(ctx)
-		for i := 0; i < b.N; i++ {
-			binary.BigEndian.PutUint64(k, uint64(i))
-			_ = tx.Put(kv.ChangeSets3, k, v)
-		}
-		c, _ := tx.RwCursor(kv.ChangeSets3)
-		defer c.Close()
-		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
-			_ = c.DeleteCurrent()
-		}
-		tx.Rollback()
-	})
-	b.Run("no2", func(b *testing.B) {
-		k, v := make([]byte, diffChunkKeyLen), make([]byte, 1980)
-		tx, _ := db.BeginRw(ctx)
-		for i := 0; i < b.N; i++ {
-			binary.BigEndian.PutUint64(k, uint64(i))
-			_ = tx.Put(kv.ChangeSets3, k, v)
-		}
-		c, _ := tx.RwCursor(kv.ChangeSets3)
-		defer c.Close()
-		for k, _, _ := c.Last(); k != nil; k, _, _ = c.Prev() {
-			_ = c.DeleteCurrent()
-		}
-		tx.Rollback()
-	})
-	b.Run("yes", func(b *testing.B) {
-		k, v := make([]byte, diffChunkKeyLen), make([]byte, diffChunkLen)
-		tx, _ := db.BeginRw(ctx)
-		for i := 0; i < b.N; i++ {
-			binary.BigEndian.PutUint64(k, uint64(i))
-			_ = tx.Put(kv.ChangeSets3, k, v)
-		}
-		c, _ := tx.RwCursor(kv.ChangeSets3)
-		defer c.Close()
-		for k, _, _ := c.First(); k != nil; k, _, _ = c.Next() {
-			_ = c.DeleteCurrent()
-		}
-		tx.Rollback()
-	})
-	b.Run("yes2", func(b *testing.B) {
-		k, v := make([]byte, diffChunkKeyLen), make([]byte, diffChunkLen)
-		tx, _ := db.BeginRw(ctx)
-		for i := 0; i < b.N; i++ {
-			binary.BigEndian.PutUint64(k, uint64(i))
-			_ = tx.Put(kv.ChangeSets3, k, v)
-		}
-		c, _ := tx.RwCursor(kv.ChangeSets3)
-		defer c.Close()
-		for k, _, _ := c.Last(); k != nil; k, _, _ = c.Prev() {
-			_ = c.DeleteCurrent()
-		}
-		tx.Rollback()
-	})
-	b.Run("yes3", func(b *testing.B) {
-		k, v := make([]byte, diffChunkKeyLen), make([]byte, diffChunkLen)
-		tx, _ := db.BeginRw(ctx)
-		for i := 0; i < b.N; i++ {
-			binary.BigEndian.PutUint64(k, uint64(i))
-			_ = tx.Put(kv.ChangeSets3, k, v)
-		}
-		_ = tx.ClearBucket(kv.ChangeSets3)
-		tx.Rollback()
-	})
 }
 
 func TestSerializeDeserializeDiff(t *testing.T) {
