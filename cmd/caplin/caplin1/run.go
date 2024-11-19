@@ -101,7 +101,6 @@ func OpenCaplinDatabase(ctx context.Context,
 	os.MkdirAll(dbPath, 0700)
 	os.MkdirAll(dataDirIndexer, 0700)
 
-	kv.ChainDB
 	db := mdbx.NewMDBX(log.New()).Path(dbPath).Label(kv.CaplinDB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
