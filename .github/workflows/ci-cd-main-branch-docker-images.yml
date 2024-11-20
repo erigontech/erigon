@@ -174,7 +174,7 @@ jobs:
         run: |
           echo The following docker images have been published:
           echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ env.BUILD_VERSION_LATEST }}"
-          echo "${{ env.BUILD_VERSION_CONDITION }} (empty, if keep_images is 0)"
+          echo "${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }} (empty, if keep_images is 0)"
           echo
           echo "Cleanup old docker images matching pattern tag ~= ${{ env.TAG_KEY }}-XXXXXXX"
           curl_cmd="curl -s -H \"Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}\" "
@@ -189,7 +189,9 @@ jobs:
               next_page=`$curl_cmd $next_page | jq '.next' | sed -e 's/^\"//' -e 's/\"$//'`
             done
             }
-
+            echo "DEBUG"
+            my_list
+            echo "END DEBUG"
             my_list | tail -n+${{ env.KEEP_IMAGES }} | while read line; do
               echo -n "Removing docker image/published - $line "
               current_image=$(echo $line | sed -e 's/^\(${{ env.TAG_KEY }}-.\{7\}\) .*/\1/')
@@ -206,7 +208,7 @@ jobs:
               echo "Done."
             done
 
-  ## run only for 'main' branch:
+  ## run only for 'main' branch and workflow executed by push event:
   run-kurtosis-assertoor:
     if: github.ref_name == 'main'
     needs: [ Build]
