@@ -434,16 +434,24 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
 	a := time.Now()
+	var b time.Time
+	var db_time, files_time time.Duration
+	defer func() {
+		sd.sdCtx.commReadTime += time.Since(a)
+		sd.sdCtx.commDbTime += db_time
+		sd.sdCtx.commFilesTime += files_time
+	}()
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
 	}
 	v, step, found, err := sd.aggTx.d[kv.CommitmentDomain].getLatestFromDb(prefix, sd.roTx)
+	db_time = time.Since(a)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
+	b = time.Now()
 	if found {
-		common.ReadFromDB += time.Since(a)
 		// db store values as is (without transformation) so safe to return
 		return v, step, nil
 	}
@@ -451,29 +459,30 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	// getFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
 	v, _, startTx, endTx, err := sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
+	files_time = time.Since(b)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 
 	if !sd.aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
-		common.ReadFromFiles += time.Since(a)
 		return v, endTx / sd.aggTx.a.StepSize(), nil
 	}
 
-	xenoverse := time.Now()
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
 	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx)
 	if err != nil {
 		return nil, 0, err
 	}
-	common.ReplacedKeys += time.Since(a)
-	common.ReplacedKeys2 += time.Since(xenoverse)
 
 	return rv, endTx / sd.aggTx.a.StepSize(), nil
 }
 
 // replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
 func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
+	a := time.Now()
+	defer func() {
+		sd.sdCtx.replaceTime += time.Since(a)
+	}()
 	if !sd.aggTx.d[kv.CommitmentDomain].d.replaceKeysInValues && sd.aggTx.a.commitmentValuesTransform {
 		panic("domain.replaceKeysInValues is disabled, but agg.commitmentValuesTransform is enabled")
 	}
@@ -1117,6 +1126,12 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool
 
 	limitReadAsOfTxNum uint64
+	accountReadTime    time.Duration
+	storageReadTime    time.Duration
+	commReadTime       time.Duration
+	replaceTime        time.Duration
+	commDbTime         time.Duration
+	commFilesTime      time.Duration
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
@@ -1185,6 +1200,10 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 }
 
 func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
+	a := time.Now()
+	defer func() {
+		sdc.accountReadTime += time.Since(a)
+	}()
 	var encAccount []byte
 	if sdc.limitReadAsOfTxNum == 0 {
 		encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey, nil)
@@ -1246,6 +1265,10 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 }
 
 func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
+	a := time.Now()
+	defer func() {
+		sdc.storageReadTime += time.Since(a)
+	}()
 	// Look in the summary table first
 	var enc []byte
 	if sdc.limitReadAsOfTxNum == 0 {
@@ -1339,6 +1362,26 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	return rootHash, err
+}
+
+func (sdc *SharedDomainsCommitmentContext) ResetPerfCounters() {
+	sdc.accountReadTime = 0
+	sdc.storageReadTime = 0
+	sdc.commReadTime = 0
+	sdc.replaceTime = 0
+	sdc.commDbTime = 0
+	sdc.commFilesTime = 0
+}
+
+func (sdc *SharedDomainsCommitmentContext) PerfCounters() map[string]time.Duration {
+	m := map[string]time.Duration{}
+	m["read_account"] = sdc.accountReadTime
+	m["read_storage"] = sdc.storageReadTime
+	m["read_comm"] = sdc.commReadTime
+	m["read_comm_db"] = sdc.commDbTime
+	m["read_comm_files"] = sdc.commFilesTime
+	m["read_comm_replace"] = sdc.replaceTime
+	return m
 }
 
 func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64, rootHash []byte) error {
