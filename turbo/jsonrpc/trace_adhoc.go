@@ -766,7 +766,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 	}
 
 	var isBorStateSyncTxn bool
-	blockNum, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}

@@ -292,8 +292,7 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
-	TxLookup   = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
-	TxIDLookUp = "TxIDLookup"
+	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
 
@@ -503,7 +502,6 @@ var ChaindataTables = []string{
 	BlockBody,
 	Receipts,
 	TxLookup,
-	TxIDLookUp,
 	ConfigTable,
 	DatabaseInfo,
 	IncarnationMap,

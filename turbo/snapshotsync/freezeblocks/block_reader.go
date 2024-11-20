@@ -49,17 +49,6 @@ type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
 
-func (r *RemoteBlockReader) TxnNumLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	reply, err := r.client.TxnNumLookup(ctx, &remote.TxnLookupRequest{TxnHash: gointerfaces.ConvertHashToH256(txnHash)})
-	if err != nil {
-		return 0, false, err
-	}
-	if reply == nil {
-		return 0, false, nil
-	}
-	return reply.TxNumber, true, nil
-}
-
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
 	panic("not implemented")
 }
@@ -175,15 +164,15 @@ func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
 	return &RemoteBlockReader{client}
 }
 
-func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
 	reply, err := r.client.TxnLookup(ctx, &remote.TxnLookupRequest{TxnHash: gointerfaces.ConvertHashToH256(txnHash)})
 	if err != nil {
-		return 0, false, err
+		return 0, 0, false, err
 	}
 	if reply == nil {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
-	return reply.BlockNumber, true, nil
+	return reply.BlockNumber, reply.TxNumber, true, nil
 }
 
 func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
@@ -1102,7 +1091,7 @@ func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf
 	return
 }
 
-func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, bool, error) {
+func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 
@@ -1131,7 +1120,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 
 		txn, err := types.DecodeTransaction(txnRlp)
 		if err != nil {
-			return nil, 0, false, err
+			return nil, 0, 0, false, err
 		}
 
 		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
@@ -1144,11 +1133,11 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
-			return txn, blockNum, true, nil
+			return txn, blockNum, txnId, true, nil
 		}
 	}
 
-	return nil, 0, false, nil
+	return nil, 0, 0, false, nil
 }
 
 func (r *BlockReader) txnIDByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment) (txnId uint64, found bool) {
@@ -1220,43 +1209,25 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash
-func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	blockNumPointer, err := rawdb.ReadTxLookupEntry(tx, txnHash)
+func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
+	println("хихихих")
+	blockNumPointer, txNumPointer, err := rawdb.ReadTxLookupEntry(tx, txnHash)
 	if err != nil {
-		return 0, false, err
+		return 0, 0, false, err
 	}
 
-	if blockNumPointer != nil {
-		return *blockNumPointer, true, nil
+	if blockNumPointer != nil && txNumPointer != nil {
+		return *blockNumPointer, *txNumPointer, true, nil
 	}
 
 	txns := r.sn.ViewType(coresnaptype.Transactions)
 	defer txns.Close()
-	_, blockNum, ok, err := r.txnByHash(txnHash, txns.Segments, nil)
+	_, blockNum, txNum, ok, err := r.txnByHash(txnHash, txns.Segments, nil)
 	if err != nil {
-		return 0, false, err
+		return 0, 0, false, err
 	}
 
-	return blockNum, ok, nil
-}
-
-// TxnNumLookup - find txnID by txnHash
-func (r *BlockReader) TxnNumLookup(_ context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	n, err := rawdb.ReadTxIDLookupEntry(tx, txnHash)
-	if err != nil {
-		return 0, false, err
-	}
-
-	if n != nil {
-		return *n, true, nil
-	}
-
-	txns := r.sn.ViewType(coresnaptype.Transactions)
-	defer txns.Close()
-
-	txID, ok := r.txnIDByHash(txnHash, txns.Segments)
-
-	return txID, ok, nil
+	return blockNum, txNum, ok, nil
 }
 
 func (r *BlockReader) FirstTxnNumNotInSnapshots() uint64 {

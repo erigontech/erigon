@@ -21,6 +21,7 @@ package rawdb
 
 import (
 	"encoding/binary"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -40,59 +41,43 @@ type TxLookupEntry struct {
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, error) {
-	dataBlockNum, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
+func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, *uint64, error) {
+	data, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if len(dataBlockNum) == 0 {
-		return nil, nil
+	if len(data) == 0 {
+		return nil, nil, nil
 	}
-	numberBlockNum := new(big.Int).SetBytes(dataBlockNum).Uint64()
-	return &numberBlockNum, nil
+	numberBlockNum := new(big.Int).SetBytes(data[:min(8, len(data))]).Uint64()
+
+	var numberTxNum uint64
+	if len(data) >= 8 {
+		numberTxNum = new(big.Int).SetBytes(data[8:]).Uint64()
+	} else {
+		return &numberBlockNum, nil, nil
+	}
+
+	return &numberBlockNum, &numberTxNum, nil
 }
 
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
-func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
+func WriteTxLookupEntries(db kv.Putter, block *types.Block, txNum uint64) {
+	println("aёёёёу", dbg.Stack())
 	for _, txn := range block.Transactions() {
 		data := block.Number().Bytes()
+		txNumData := make([]byte, 8, 16)
+		binary.BigEndian.PutUint64(txNumData, txNum)
+		data = append(data, txNumData...)
 		if err := db.Put(kv.TxLookup, txn.Hash().Bytes(), data); err != nil {
 			log.Crit("Failed to store transaction lookup entry", "err", err)
 		}
+		txNum++
 	}
 }
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
 func DeleteTxLookupEntry(db kv.Putter, hash libcommon.Hash) error {
 	return db.Delete(kv.TxLookup, hash.Bytes())
-}
-
-// ReadTxIDLookupEntry retrieves the positional metadata associated with a transaction
-// hash to allow retrieving the transaction or receipt by hash.
-func ReadTxIDLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, error) {
-	data, err := db.GetOne(kv.TxIDLookUp, txnHash.Bytes())
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	number := new(big.Int).SetBytes(data).Uint64()
-	return &number, nil
-}
-
-// WriteTxIDLookupEntries stores a positional metadata for every transaction from
-// a block, enabling hash based transaction and receipt lookups.
-func WriteTxIDLookupEntries(db kv.Putter, txn types.Transaction, txNum uint64) {
-	data := make([]byte, 8)
-	binary.BigEndian.PutUint64(data, txNum)
-	if err := db.Put(kv.TxIDLookUp, txn.Hash().Bytes(), data); err != nil {
-		log.Crit("Failed to store transaction id lookup entry", "err", err)
-	}
-}
-
-// DeleteTxIDLookupEntry removes all transaction data associated with a hash.
-func DeleteTxIDLookupEntry(db kv.Putter, hash libcommon.Hash) error {
-	return db.Delete(kv.TxIDLookUp, hash.Bytes())
 }

@@ -108,6 +108,7 @@ require (
 require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/elastic/go-freelru v0.13.0 // indirect
+	github.com/erigontech/interfaces v0.0.0-20241120074553-214b5fd396ed // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect

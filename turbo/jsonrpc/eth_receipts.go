@@ -416,15 +416,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	txNum, ok, err = api.txnNumLookup(ctx, tx, txnHash)
-	if err != nil {
-		return nil, err
-	}
-	if !ok && chainConfig.Bor == nil {
-		return nil, nil
-	}
-
-	ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, txNum)
+	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
 	}

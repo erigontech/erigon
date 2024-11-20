@@ -96,8 +96,7 @@ type BodyReader interface {
 }
 
 type TxnReader interface {
-	TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error)
-	TxnNumLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error)
+	TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error)
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error)
 	RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error)
 	FirstTxnNumNotInSnapshots() uint64

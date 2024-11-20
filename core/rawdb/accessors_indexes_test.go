@@ -115,7 +115,7 @@ func TestLookupStorage(t *testing.T) {
 // ReadTransactionByHash retrieves a specific transaction from the database, along with
 // its added positional metadata.
 func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockReader) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
-	blockNumber, err := rawdb.ReadTxLookupEntry(db, hash)
+	blockNumber, _, err := rawdb.ReadTxLookupEntry(db, hash)
 	if err != nil {
 		return nil, libcommon.Hash{}, 0, 0, err
 	}

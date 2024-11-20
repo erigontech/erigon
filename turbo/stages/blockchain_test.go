@@ -544,7 +544,7 @@ func TestChainTxReorgs(t *testing.T) {
 	// removed tx
 	txs := types.Transactions{pastDrop, freshDrop}
 	for i, txn := range txs {
-		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn != nil {
+		if bn, _, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn != nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
 		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt != nil {
@@ -555,7 +555,7 @@ func TestChainTxReorgs(t *testing.T) {
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
 	for i, txn := range txs {
-		_, found, err := m.BlockReader.TxnLookup(m.Ctx, tx, txn.Hash())
+		_, _, found, err := m.BlockReader.TxnLookup(m.Ctx, tx, txn.Hash())
 		require.NoError(t, err)
 		require.True(t, found)
 
@@ -566,7 +566,7 @@ func TestChainTxReorgs(t *testing.T) {
 	// shared tx
 	txs = types.Transactions{postponed, swapped}
 	for i, txn := range txs {
-		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn == nil {
+		if bn, _, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn == nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
 
@@ -578,7 +578,7 @@ func TestChainTxReorgs(t *testing.T) {
 
 func readReceipt(db kv.Tx, txHash libcommon.Hash, m *mock.MockSentry) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
 	// Retrieve the context of the receipt based on the transaction hash
-	blockNumber, err := rawdb.ReadTxLookupEntry(db, txHash)
+	blockNumber, _, err := rawdb.ReadTxLookupEntry(db, txHash)
 	if err != nil {
 		return nil, libcommon.Hash{}, 0, 0, err
 	}
@@ -883,7 +883,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
 		require.NoError(err)
 		for _, txn := range b.Transactions() {
-			found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
+			found, _, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
 			require.NoError(err)
 			require.Nil(found)
 		}
@@ -891,7 +891,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
 		require.NoError(err)
 		for _, txn := range b.Transactions() {
-			foundBlockNum, found, err := m.BlockReader.TxnLookup(context.Background(), tx, txn.Hash())
+			foundBlockNum, _, found, err := m.BlockReader.TxnLookup(context.Background(), tx, txn.Hash())
 			require.NoError(err)
 			require.True(found)
 			require.Equal(uint64(1), foundBlockNum)

@@ -276,15 +276,15 @@ func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupR
 	}
 	defer tx.Rollback()
 
-	blockNum, ok, err := s.blockReader.TxnLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.TxnHash))
+	blockNum, txNum, ok, err := s.blockReader.TxnLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.TxnHash))
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		// Not a perfect solution, assumes there are no transactions in block 0
-		return &remote.TxnLookupReply{BlockNumber: 0}, nil
+		return &remote.TxnLookupReply{BlockNumber: 0, TxNumber: txNum}, nil
 	}
-	return &remote.TxnLookupReply{BlockNumber: blockNum}, nil
+	return &remote.TxnLookupReply{BlockNumber: blockNum, TxNumber: txNum}, nil
 }
 
 func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) (*remote.BlockReply, error) {
