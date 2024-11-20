@@ -1,5 +1,5 @@
 name: CI-CD build and deploy docker images based on the last commit in the main branch
-run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the main branch"
+run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the ${{ github.ref_name }} branch"
 
 env:
   APPLICATION: "erigon"
@@ -9,7 +9,6 @@ env:
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
-  ## KEEP_IMAGES: 100 ### see step 'Define variables"
   RUNNER: "ubuntu-latest"
 
 on:
@@ -25,7 +24,7 @@ on:
         required: false
         type: string
         default: ''
-        description: 'The branch to checkout and build artifacts from in case of manual run. Default is "" .'
+        description: 'The branch to checkout and build artifacts from (in case of manual run). Default is "" .'
 
 jobs:
   Build:
@@ -46,7 +45,7 @@ jobs:
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.22'
+          go-version: '>=1.23'
           cache-dependency-path: |
             erigon/go.sum
 
@@ -67,13 +66,13 @@ jobs:
               export tag_name='docker_pectra';
               export keep_images=5;
               export latest_suffix='';
-              export binaries="erigon"
+              export binaries="erigon caplin diag devnet downloader evm hack integration rpcdaemon rpctest sentinel sentry state txpool"
               ;;
             * )
               # use last string after last slash '/' by default if branch contains slash:
               export tag_name=$(echo ${{ inputs.checkout_ref }} | sed -e  's/.*\///g' );
               export keep_images=0;
-              export latest_suffix='-latest'
+              export latest_suffix=''
               export binaries="erigon"
               ;;
           esac
@@ -125,12 +124,15 @@ jobs:
           -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo erigon integration rpcdaemon"
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
+        id: built_tag_export
         env:
           BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
-          BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.def_docker_vars.outputs.latest_suffix }}"
+          BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
+          DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
+          echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           cp -vr build-amd64 erigon/
           cp -vr build-arm64 erigon/
           cd erigon
@@ -141,7 +143,7 @@ jobs:
           --sbom=true \
           --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
           --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
-          --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
+          ${{ env.DOCKER_PUBLISH_CONDITION }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION_LATEST }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
@@ -158,16 +160,19 @@ jobs:
           --platform linux/amd64,linux/arm64 .
 
       - name: export and print docker build tag, cleanup old docker images
-        id: built_tag_export
         env:
-          BUILD_VERSION: "main-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
+          BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
+          BUILD_VERSION_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }}
+          DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
+          TAG_KEY: ${{ steps.def_docker_vars.outputs.tag_name }}
+          KEEP_IMAGES: ${{ steps.def_docker_vars.outputs.keep_images }}
         run: |
-          echo "docker_build_tag=${{ env.BUILD_VERSION }}" >> $GITHUB_OUTPUT
           echo The following docker images have been published:
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-${{ env.BUILD_VERSION }}"
-          echo "${{ env.DOCKERHUB_REPOSITORY }}:main-latest"
+          echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ env.BUILD_VERSION_LATEST }}"
+          echo "${{ env.BUILD_VERSION_CONDITION }} (empty, if keep_images is 0)"
           echo
-          echo "Cleanup old docker images matching pattern tag ~= main-XXXXXXX"
+          echo "Cleanup old docker images matching pattern tag ~= ${{ env.TAG_KEY }}-XXXXXXX"
           curl_cmd="curl -s -H \"Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}\" "
           dockerhub_url='https://hub.docker.com/v2/namespaces/erigontech/repositories/erigon'
           my_list () {
@@ -175,29 +180,31 @@ jobs:
             next_page="$dockerhub_url/tags?page=1&page_size=100"
             while [ "$next_page" != "null" ]
               do
-              # Print tags and push dates for tags matching "main-":
-              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep 'main-'
+              # Print tags and push dates for tags matching "${{ env.TAG_KEY }}-":
+              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep '${{ env.TAG_KEY }}-'
               next_page=`$curl_cmd $next_page | jq '.next' | sed -e 's/^\"//' -e 's/\"$//'`
             done
             }
 
             my_list | tail -n+${{ env.KEEP_IMAGES }} | while read line; do
               echo -n "Removing docker image/published - $line "
-              current_image=$(echo $line | sed -e 's/^\(main-.\{7\}\) .*/\1/')
-              output_code=$(curl --write-out %{http_code} --output curl-output.log \
-                    -s -X DELETE -H "Accept: application/json" \
-                    -H "Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}" \
-                    https://hub.docker.com/v2/repositories/erigontech/erigon/tags/${current_image} )
-              if [ $output_code -ne 204 ]; then
-                echo "ERROR: failed to remove docker image erigon:${current_image}"
-                echo "ERROR: API response: $(cat curl-output.log)."
-              else
-                echo -n " - removed. "
-              fi
+              current_image=$(echo $line | sed -e 's/^\(${{ env.TAG_KEY }}-.\{7\}\) .*/\1/')
+              #output_code=$(curl --write-out %{http_code} --output curl-output.log \
+              #      -s -X DELETE -H "Accept: application/json" \
+              #      -H "Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}" \
+              #      https://hub.docker.com/v2/repositories/erigontech/erigon/tags/${current_image} )
+              #if [ $output_code -ne 204 ]; then
+              #  echo "ERROR: failed to remove docker image erigon:${current_image}"
+              #  echo "ERROR: API response: $(cat curl-output.log)."
+              #else
+              #  echo -n " - removed. "
+              #fi
               echo "Done."
             done
 
+  ## run only for 'main' branch:
   run-kurtosis-assertoor:
+    if: github.ref == 'main'
     needs: [ Build]
     uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
     with:
