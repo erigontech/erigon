@@ -9,7 +9,6 @@ env:
   CHECKOUT_REF: "main"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
-  RUNNER: "ubuntu-latest"
 
 on:
   push:
@@ -28,7 +27,7 @@ on:
 
 jobs:
   Build:
-    runs-on: ${{ env.RUNNER }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
@@ -204,10 +203,10 @@ jobs:
 
   ## run only for 'main' branch:
   run-kurtosis-assertoor:
-    if: github.ref == 'main'
+    if: github.ref_name == 'main'
     needs: [ Build]
     uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
     with:
       checkout_ref: ${{ github.sha }}
-      os: ${{ env.RUNNER }}
+      os: ubuntu-latest
       docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}
