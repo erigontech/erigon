@@ -100,7 +100,6 @@ func (ap *attestationProducer) computeTargetCheckpoint(tx kv.Tx, baseState *stat
 func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot libcommon.Hash, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
 	var err error
-
 	ap.attCacheMutex.RLock()
 	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
 		ap.attCacheMutex.RUnlock()
@@ -115,6 +114,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		if err != nil {
 			return solid.AttestationData{}, err
 		}
+		fmt.Println("X1", "slot", slot, "committeeIndex", committeeIndex, "beaconBlockRoot", beaconBlockRoot, "source root", baseAttestationData.Source.Root, "source epoch", baseAttestationData.Source.Epoch, "target root", targetCheckpoint.Root, "target epoch", targetCheckpoint.Epoch)
 		return solid.AttestationData{
 			Slot:            slot,
 			CommitteeIndex:  committeeIndex,
@@ -143,6 +143,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 			log.Debug("Failed to compute target checkpoint - falling back to the cached one", "slot", slot, "err", err)
 			targetCheckpoint = baseAttestationData.Target
 		}
+		fmt.Println("X2", "slot", slot, "committeeIndex", committeeIndex, "beaconBlockRoot", beaconBlockRoot, "source root", baseAttestationData.Source.Root, "source epoch", baseAttestationData.Source.Epoch, "target root", targetCheckpoint.Root, "target epoch", targetCheckpoint.Epoch)
 		return solid.AttestationData{
 			Slot:            slot,
 			CommitteeIndex:  committeeIndex,
@@ -184,6 +185,8 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		Target:          targetCheckpoint,
 	}
 	ap.attestationsCache.Add(epoch, baseAttestationData)
+	fmt.Println("X1", "slot", slot, "committeeIndex", committeeIndex, "beaconBlockRoot", baseStateBlockRoot, "source root", baseAttestationData.Source.Root, "source epoch", baseAttestationData.Source.Epoch, "target root", targetCheckpoint.Root, "target epoch", targetCheckpoint.Epoch)
+
 	return solid.AttestationData{
 		Slot:            slot,
 		CommitteeIndex:  committeeIndex,

@@ -35,7 +35,7 @@ var _ SyncedData = (*SyncedDataManager)(nil)
 
 func EmptyCancel() {}
 
-const MinHeadStateDelay = 600 * time.Millisecond
+const MinHeadStateDelay = 0 * time.Millisecond
 
 type SyncedDataManager struct {
 	enabled bool
@@ -87,6 +87,7 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if took < s.minHeadStateDelay {
 		time.Sleep(s.minHeadStateDelay - took)
 	}
+	fmt.Println("DONE")
 	return err
 }
 
