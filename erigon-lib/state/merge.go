@@ -531,7 +531,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		btM := DefaultBtreeM
 		if toStep == 0 || math.Log2(float64(toStep-fromStep)) > 10 { // 2^9 = 512, decrease M for large step ranges
 			btM = 128
-			if d.filenameBase == "commitment" {
+			if dt.d.filenameBase == "commitment" {
 				btM = 64
 			}
 		}
