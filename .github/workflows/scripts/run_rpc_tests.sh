@@ -6,12 +6,8 @@ set +e # Disable exit on error
 disabled_tests=(
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
-    # needs investigations
-    debug_getModifiedAccountsByHash
-    debug_getModifiedAccountsByNumber
     # Erigon bug https://github.com/erigontech/erigon/issues/12603
     erigon_getLatestLogs
-    parity_listStorageKeys/test_12.json
     # created task https://github.com/erigontech/erigon/issues/12668
     debug_traceCallMany/test_02.tar
     debug_traceCallMany/test_04.tar
