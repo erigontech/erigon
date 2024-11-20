@@ -131,8 +131,9 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 }
 
 func (ms *MockState) ResetPerfCounters() {}
-
-func (ms *MockState) PerfCounters() map[string]time.Duration
+func (ms *MockState) PerfCounters() map[string]time.Duration {
+	return map[string]time.Duration{}
+}
 
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
 	for i, key := range plainKeys {
