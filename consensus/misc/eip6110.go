@@ -22,6 +22,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -71,6 +72,9 @@ func unpackDepositLog(data []byte) ([]byte, error) {
 // ParseDepositLogs extracts the EIP-6110 deposit values from logs emitted by
 // BeaconDepositContract and returns a FlatRequest object ptr
 func ParseDepositLogs(logs []*types.Log, depositContractAddress libcommon.Address) (*types.FlatRequest, error) {
+	if depositContractAddress == (libcommon.Address{}) {
+		log.Warn("Error in ParseDepositLogs - depositContractAddress is 0x0")
+	}
 	reqData := make([]byte, 0, len(logs)*types.DepositRequestDataLen)
 	for _, l := range logs {
 		if l.Address == depositContractAddress {
