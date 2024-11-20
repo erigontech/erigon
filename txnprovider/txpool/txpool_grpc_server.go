@@ -190,7 +190,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
 	for i := 0; i < len(in.RlpTxs); i++ {
-		j := len(slots.Txns) // some incoming txs may be rejected, so - need second index
+		j := len(slots.Txns) // some incoming txns may be rejected, so - need second index
 		slots.Resize(uint(j + 1))
 		slots.Txns[j] = &TxnSlot{}
 		slots.IsLocal[j] = true
@@ -253,7 +253,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpool_proto.Import
 }
 
 func (s *GrpcServer) OnAdd(req *txpool_proto.OnAddRequest, stream txpool_proto.Txpool_OnAddServer) error {
-	s.logger.Info("New txs subscriber joined")
+	s.logger.Info("New txns subscriber joined")
 	//txpool.Loop does send messages to this streams
 	remove := s.NewSlotsStreams.Add(stream)
 	defer remove()

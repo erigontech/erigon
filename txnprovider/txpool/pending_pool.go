@@ -26,7 +26,7 @@ import (
 
 // PendingPool - is different from other pools - it's best is Slice instead of Heap
 // It's more expensive to maintain "slice sort" invariant, but it allow do cheap copy of
-// pending.best slice for mining (because we consider txs and metaTxn are immutable)
+// pending.best slice for mining (because we consider txns and metaTxn are immutable)
 type PendingPool struct {
 	best  *bestSlice
 	worst *WorstQueue

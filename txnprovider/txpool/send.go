@@ -71,40 +71,40 @@ func (f *Send) notifyTests() {
 }
 
 // Broadcast given RLPs to random peers
-func (f *Send) BroadcastPooledTxns(rlps [][]byte, maxPeers uint64) (txSentTo []int) {
+func (f *Send) BroadcastPooledTxns(rlps [][]byte, maxPeers uint64) (txnSentTo []int) {
 	defer f.notifyTests()
 	if len(rlps) == 0 {
 		return
 	}
-	txSentTo = make([]int, len(rlps))
+	txnSentTo = make([]int, len(rlps))
 	var prev, size int
 	for i, l := 0, len(rlps); i < len(rlps); i++ {
 		size += len(rlps[i])
 		// Wait till the combined size of rlps so far is greater than a threshold and
 		// send them all at once. Then wait till end of array or this threshold hits again
 		if i == l-1 || size >= p2pTxPacketLimit {
-			txsData := EncodeTransactions(rlps[prev:i+1], nil)
-			var txs66 *sentry.SendMessageToRandomPeersRequest
+			txnsData := EncodeTransactions(rlps[prev:i+1], nil)
+			var txns66 *sentry.SendMessageToRandomPeersRequest
 			for _, sentryClient := range f.sentryClients {
 				if !sentryClient.Ready() {
 					continue
 				}
-				if txs66 == nil {
-					txs66 = &sentry.SendMessageToRandomPeersRequest{
+				if txns66 == nil {
+					txns66 = &sentry.SendMessageToRandomPeersRequest{
 						Data: &sentry.OutboundMessageData{
 							Id:   sentry.MessageId_TRANSACTIONS_66,
-							Data: txsData,
+							Data: txnsData,
 						},
 						MaxPeers: maxPeers,
 					}
 				}
-				peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, txs66)
+				peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, txns66)
 				if err != nil {
 					f.logger.Debug("[txpool.send] BroadcastPooledTxns", "err", err)
 				}
 				if peers != nil {
 					for j := prev; j <= i; j++ {
-						txSentTo[j] = len(peers.Peers)
+						txnSentTo[j] = len(peers.Peers)
 					}
 				}
 			}

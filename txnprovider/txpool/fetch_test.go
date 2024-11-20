@@ -109,6 +109,8 @@ func TestSendTxnPropagate(t *testing.T) {
 		txnsMessage := requests[0].Data
 		assert.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
 		assert.Equal(t, 3, len(txnsMessage.Data))
+		assert.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
+		assert.Equal(t, 3, len(txnsMessage.Data))
 
 		txnHashesMessage := requests[1].Data
 		assert.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)
@@ -171,9 +173,9 @@ func TestSendTxnPropagate(t *testing.T) {
 
 		require.Equal(t, 2, len(requests))
 
-		txnsMessage := requests[0].Data
-		assert.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnsMessage.Id)
-		assert.True(t, len(txnsMessage.Data) > 0)
+		txnnsMessage := requests[0].Data
+		assert.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, txnnsMessage.Id)
+		assert.True(t, len(txnnsMessage.Data) > 0)
 
 		txnHashesMessage := requests[1].Data
 		assert.Equal(t, sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, txnHashesMessage.Id)

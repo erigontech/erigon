@@ -52,10 +52,10 @@ type Fetch struct {
 	stateChangesClient       StateChangesClient
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	stateChangesParseCtx     *TxnParseContext
-	pooledTxsParseCtx        *TxnParseContext
+	pooledTxnsParseCtx       *TxnParseContext
 	sentryClients            []direct.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
-	pooledTxsParseCtxLock    sync.Mutex
+	pooledTxnsParseCtxLock   sync.Mutex
 	logger                   log.Logger
 }
 
@@ -76,10 +76,10 @@ func NewFetch(ctx context.Context, sentryClients []direct.SentryClient, pool Poo
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
-		pooledTxsParseCtx:    NewTxnParseContext(chainID).ChainIDRequired(),
+		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
 		logger:               logger,
 	}
-	f.pooledTxsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
+	f.pooledTxnsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
 	f.stateChangesParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
 
 	return f
@@ -90,9 +90,9 @@ func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
 }
 
 func (f *Fetch) threadSafeParsePooledTxn(cb func(*TxnParseContext) error) error {
-	f.pooledTxsParseCtxLock.Lock()
-	defer f.pooledTxsParseCtxLock.Unlock()
-	return cb(f.pooledTxsParseCtx)
+	f.pooledTxnsParseCtxLock.Lock()
+	defer f.pooledTxnsParseCtxLock.Unlock()
+	return cb(f.pooledTxnsParseCtx)
 }
 
 func (f *Fetch) threadSafeParseStateChangeTxn(cb func(*TxnParseContext) error) error {
@@ -288,7 +288,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		const hashSize = 32
 		hashes = hashes[:cmp.Min(len(hashes), 256*hashSize)]
 
-		var txs [][]byte
+		var txns [][]byte
 		responseSize := 0
 		processed := len(hashes)
 
@@ -308,11 +308,11 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 				continue
 			}
 
-			txs = append(txs, txn)
+			txns = append(txns, txn)
 			responseSize += len(txn)
 		}
 
-		encodedRequest = EncodePooledTransactions66(txs, requestID, nil)
+		encodedRequest = EncodePooledTransactions66(txns, requestID, nil)
 		if len(encodedRequest) > p2pTxPacketLimit {
 			log.Debug("txpool.Fetch.handleInboundMessage PooledTransactions reply exceeds p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
 		}
@@ -324,7 +324,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return err
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66:
-		txs := TxnSlots{}
+		txns := TxnSlots{}
 		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 			return nil
 		}); err != nil {
@@ -334,7 +334,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		switch req.Id {
 		case sentry.MessageId_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-				if _, err := ParseTransactions(req.Data, 0, parseContext, &txs, func(hash []byte) error {
+				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
 						return err
@@ -352,7 +352,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			}
 		case sentry.MessageId_POOLED_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txs, func(hash []byte) error {
+				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
 						return err
@@ -371,10 +371,10 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		default:
 			return fmt.Errorf("unexpected message: %s", req.Id.String())
 		}
-		if len(txs.Txns) == 0 {
+		if len(txns.Txns) == 0 {
 			return nil
 		}
-		f.pool.AddRemoteTxns(ctx, txs)
+		f.pool.AddRemoteTxns(ctx, txns)
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
 	}
@@ -478,14 +478,14 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 }
 
 func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.StateChangeBatch) error {
-	var unwindTxs, unwindBlobTxs, minedTxs TxnSlots
+	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
 	for _, change := range req.ChangeBatch {
 		if change.Direction == remote.Direction_FORWARD {
-			minedTxs.Resize(uint(len(change.Txs)))
+			minedTxns.Resize(uint(len(change.Txs)))
 			for i := range change.Txs {
-				minedTxs.Txns[i] = &TxnSlot{}
+				minedTxns.Txns[i] = &TxnSlot{}
 				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txns[i], minedTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxns.Txns[i], minedTxns.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 					return err
 				}); err != nil && !errors.Is(err, context.Canceled) {
 					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
@@ -501,10 +501,10 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 					if err != nil {
 						return err
 					}
-					if utx.Type == BlobTxType {
-						unwindBlobTxs.Append(utx, sender, false)
+					if utx.Type == BlobTxnType {
+						unwindBlobTxns.Append(utx, sender, false)
 					} else {
-						unwindTxs.Append(utx, sender, false)
+						unwindTxns.Append(utx, sender, false)
 					}
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
@@ -516,7 +516,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 	}
 
 	if err := f.db.View(ctx, func(tx kv.Tx) error {
-		return f.pool.OnNewBlock(ctx, req, unwindTxs, unwindBlobTxs, minedTxs)
+		return f.pool.OnNewBlock(ctx, req, unwindTxns, unwindBlobTxns, minedTxns)
 	}); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
