@@ -423,7 +423,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-downloader
@@ -444,7 +444,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-devnet
@@ -465,7 +465,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-evm
@@ -486,7 +486,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-caplin
@@ -507,7 +507,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-diag
@@ -528,7 +528,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-integration
@@ -549,7 +549,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-rpcdaemon
@@ -570,7 +570,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-sentry
@@ -591,7 +591,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-txpool
@@ -612,7 +612,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 ## End of Linux AMD64 (v1, v2)
 
@@ -633,7 +633,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-downloader
@@ -651,7 +651,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-devnet
@@ -669,7 +669,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-evm
@@ -687,7 +687,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-caplin
@@ -705,7 +705,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-diag
@@ -723,7 +723,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-integration
@@ -741,7 +741,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-rpcdaemon
@@ -759,7 +759,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-sentry
@@ -777,7 +777,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-txpool
@@ -795,7 +795,7 @@ builds:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 ## End of Linux ARM64
 
