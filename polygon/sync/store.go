@@ -115,7 +115,7 @@ func (s *ExecutionClientStore) Flush(ctx context.Context) error {
 }
 
 func (s *ExecutionClientStore) Run(ctx context.Context) error {
-	s.logger.Debug(syncLogPrefix("running execution client store component"))
+	s.logger.Info(syncLogPrefix("running execution client store component"))
 
 	for {
 		select {
@@ -190,48 +190,84 @@ func (s *ExecutionClientStore) insertBlocks(ctx context.Context, blocks []*types
 //
 // The bridge store is in control of determining whether and which block need replaying.
 func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Context) error {
-	initialBlockNum, replayNeeded, err := s.bridgeStore.InitialBlockReplayNeeded(ctx)
-	if err != nil {
-		return err
-	}
-	if !replayNeeded {
-		return nil
-	}
-
-	initialHeader, err := s.executionStore.GetHeader(ctx, initialBlockNum)
+	initialBlockNum, initialReplayNeeded, err := s.bridgeStore.InitialBlockReplayNeeded(ctx)
 	if err != nil {
 		return err
 	}
 
-	s.logger.Debug(
-		syncLogPrefix("replaying initial block for bridge store"),
-		"blockNum", initialHeader.Number.Uint64(),
-	)
+	if initialReplayNeeded {
+		initialHeader, err := s.executionStore.GetHeader(ctx, initialBlockNum)
+		if err != nil {
+			return err
+		}
 
-	if err = s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlockWithHeader(initialHeader)); err != nil {
-		return err
+		s.logger.Info(
+			syncLogPrefix("replaying initial block for bridge store"),
+			"blockNum", initialHeader.Number.Uint64(),
+		)
+
+		if err = s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlockWithHeader(initialHeader)); err != nil {
+			return err
+		}
 	}
 
 	if s.lastQueuedBlock <= initialBlockNum {
 		return nil
 	}
 
+	start, end := initialBlockNum+1, s.lastQueuedBlock
 	blocksCount := s.lastQueuedBlock - initialBlockNum
-	s.logger.Debug(
+	s.logger.Info(
 		syncLogPrefix("replaying post initial blocks for bridge store to fill gap with execution"),
+		"start", start,
+		"end", end,
 		"blocks", blocksCount,
-		"executionTip", s.lastQueuedBlock,
 	)
 
-	blocks := make([]*types.Block, 0, blocksCount)
-	for blockNum := initialBlockNum + 1; blockNum <= s.lastQueuedBlock; blockNum++ {
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
+
+	blocksBatchSize := 10_000
+	blocks := make([]*types.Block, 0, blocksBatchSize)
+	for blockNum := start; blockNum <= end; blockNum++ {
 		header, err := s.executionStore.GetHeader(ctx, blockNum)
 		if err != nil {
 			return err
 		}
+		if header == nil {
+			// this should never happen, check snapshot files and/or db data integrity
+			//return fmt.Errorf("unexpected block header missing when replying blocks for bridge: %d", blockNum)
+
+			//
+			// TODO switch back to error
+			//
+			s.logger.Error("unexpected block header missing when replying blocks for bridge", "blockNum", blockNum)
+			continue
+		}
+
+		select {
+		case <-progressLogTicker.C:
+			s.logger.Info(
+				syncLogPrefix("replaying blocks for bridge periodic progress"),
+				"current", blockNum,
+				"start", start,
+				"end", end,
+			)
+		default:
+			// carry-on
+		}
 
 		blocks = append(blocks, types.NewBlockWithHeader(header))
+		if len(blocks) < blocksBatchSize && blockNum != s.lastQueuedBlock {
+			continue
+		}
+
+		if err := s.bridgeStore.ProcessNewBlocks(ctx, blocks); err != nil {
+			return err
+		}
+
+		blocks = nil
 	}
 
-	return s.bridgeStore.ProcessNewBlocks(ctx, blocks)
+	return nil
 }

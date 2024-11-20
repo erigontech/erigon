@@ -168,7 +168,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	// start syncing
-	s.logger.Debug(
+	s.logger.Info(
 		bridgeLogPrefix("running bridge component"),
 		"lastFetchedEventId", lastFetchedEventId,
 		"lastProcessedEventId", lastProcessedEventId,
@@ -238,7 +238,7 @@ func (s *Service) Run(ctx context.Context) error {
 
 		select {
 		case <-logTicker.C:
-			s.logger.Debug(
+			s.logger.Info(
 				bridgeLogPrefix("fetched new events periodic progress"),
 				"count", len(events),
 				"lastFetchedEventId", lastFetchedEventId,
@@ -257,7 +257,7 @@ func (s *Service) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, e
 	lastFrozen := s.store.LastFrozenEventBlockNum()
 
 	if blockInfo := s.lastProcessedBlockInfo.Load(); blockInfo != nil && blockInfo.BlockNum > lastFrozen {
-		return 0, false, nil
+		return blockInfo.BlockNum, false, nil
 	}
 
 	blockInfo, ok, err := s.store.LastProcessedBlockInfo(ctx)
