@@ -388,7 +388,14 @@ func (d *Domain) openDirtyFiles() (err error) {
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
 				if exists {
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, d.compression); err != nil {
+					btM := DefaultBtreeM
+					if toStep == 0 || math.Log2(float64(toStep-fromStep)) > 10 { // 2^9 = 512, decrease M for large step ranges
+						btM = 128
+						if d.filenameBase == "commitment" {
+							btM = 64
+						}
+					}
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, btM, item.decompressor, d.compression); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -1124,10 +1131,10 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 	{
 		btPath := d.kvBtFilePath(stepFrom, stepTo)
 		btM := DefaultBtreeM
-		if stepFrom == 0 || math.Log2(float64(stepTo-stepFrom)) > 9 { // 2^9 = 512, decrease M for large step ranges
+		if stepFrom == 0 || math.Log2(float64(stepTo-stepFrom)) > 10 { // 2^9 = 512, decrease M for large step ranges
 			btM = 128
 			if d.filenameBase == "commitment" {
-				btM = 32
+				btM = 64
 			}
 		}
 
@@ -1229,7 +1236,14 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 
 	{
 		btPath := d.kvBtFilePath(step, step+1)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
+		btM := DefaultBtreeM
+		if step == 0 {
+			btM = 128
+			if d.filenameBase == "commitment" {
+				btM = 16
+			}
+		}
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
