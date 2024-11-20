@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/klauspost/compress/zstd"
@@ -48,6 +50,8 @@ type HistoricalStatesReader struct {
 	blockReader    freezeblocks.BeaconSnapshotReader
 	stateSn        *snapshotsync.CaplinStateSnapshots
 	genesisState   *state.CachingBeaconState
+
+	shuffledIndiciesCache *lru.CacheWithTTL[uint64, []uint64]
 }
 
 func NewHistoricalStatesReader(
@@ -55,13 +59,15 @@ func NewHistoricalStatesReader(
 	blockReader freezeblocks.BeaconSnapshotReader,
 	validatorTable *state_accessors.StaticValidatorTable,
 	genesisState *state.CachingBeaconState, stateSn *snapshotsync.CaplinStateSnapshots) *HistoricalStatesReader {
+	shuffledIndiciesCache := lru.NewWithTTL[uint64, []uint64]("shuffledIndiciesCacheReader", 64, 2*time.Minute)
 
 	return &HistoricalStatesReader{
-		cfg:            cfg,
-		blockReader:    blockReader,
-		genesisState:   genesisState,
-		validatorTable: validatorTable,
-		stateSn:        stateSn,
+		cfg:                   cfg,
+		blockReader:           blockReader,
+		genesisState:          genesisState,
+		validatorTable:        validatorTable,
+		stateSn:               stateSn,
+		shuffledIndiciesCache: shuffledIndiciesCache,
 	}
 }
 
