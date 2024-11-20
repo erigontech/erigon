@@ -49,8 +49,7 @@ type Sync struct {
 	logPrefixes   []string
 	logger        log.Logger
 	stagesIdsList []string
-
-	mode stages.Mode
+	mode          stages.Mode
 }
 
 type Timing struct {
