@@ -228,6 +228,15 @@ func (s *Service) RegisterMilestoneObserver(callback func(*Milestone), opts ...O
 	})
 }
 
+func (s *Service) RegisterCheckpointObserver(callback func(*Checkpoint), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
+	return s.checkpointScraper.RegisterObserver(func(entities []*Checkpoint) {
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
+			callback(entity)
+		}
+	})
+}
+
 func (s *Service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
 	options := NewObserverOptions(opts...)
 	return s.spanScraper.RegisterObserver(func(entities []*Span) {
@@ -303,6 +312,16 @@ func (s *Service) Run(ctx context.Context) error {
 	s.RegisterSpanObserver(func(span *Span) {
 		s.spanBlockProducersTracker.ObserveSpanAsync(span)
 	})
+
+	milestoneObserver := s.RegisterMilestoneObserver(func(milestone *Milestone) {
+		UpdateObservedWaypointMilestoneLength(milestone.Length())
+	})
+	defer milestoneObserver()
+
+	checkpointObserver := s.RegisterCheckpointObserver(func(checkpoint *Checkpoint) {
+		UpdateObservedWaypointCheckpointLength(checkpoint.Length())
+	}, WithEventsLimit(5))
+	defer checkpointObserver()
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
