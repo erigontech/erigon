@@ -133,7 +133,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		if err != nil {
 			return solid.AttestationData{}, err
 		}
-		fmt.Println("X1", "slot", slot, "committeeIndex", committeeIndex, "beaconBlockRoot", beaconBlockRoot, "source root", baseAttestationData.Source.Root, "source epoch", baseAttestationData.Source.Epoch, "target root", targetCheckpoint.Root, "target epoch", targetCheckpoint.Epoch)
 		return solid.AttestationData{
 			Slot:            slot,
 			CommitteeIndex:  committeeIndex,
@@ -159,7 +158,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 			log.Debug("Failed to compute target checkpoint - falling back to the cached one", "slot", slot, "err", err)
 			targetCheckpoint = baseAttestationData.Target
 		}
-		fmt.Println("X2", "slot", slot, "committeeIndex", committeeIndex, "beaconBlockRoot", beaconBlockRoot, "source root", baseAttestationData.Source.Root, "source epoch", baseAttestationData.Source.Epoch, "target root", targetCheckpoint.Root, "target epoch", targetCheckpoint.Epoch)
 		return solid.AttestationData{
 			Slot:            slot,
 			CommitteeIndex:  committeeIndex,
