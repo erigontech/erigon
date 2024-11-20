@@ -21,6 +21,7 @@ package rawdb_test
 
 import (
 	"context"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"math/big"
 	"testing"
 
@@ -41,12 +42,12 @@ func TestLookupStorage(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name                 string
-		writeTxLookupEntries func(kv.Putter, *types.Block)
+		writeTxLookupEntries func(kv.Putter, *types.Block, uint64)
 	}{
 		{
 			"DatabaseV6",
-			func(db kv.Putter, block *types.Block) {
-				rawdb.WriteTxLookupEntries(db, block)
+			func(db kv.Putter, block *types.Block, txNum uint64) {
+				rawdb.WriteTxLookupEntries(db, block, txNum)
 			},
 		},
 		// Erigon: older databases are removed, no backward compatibility
@@ -85,7 +86,12 @@ func TestLookupStorage(t *testing.T) {
 			if err := rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
 				t.Fatal(err)
 			}
-			tc.writeTxLookupEntries(tx, block)
+			txNum, err := rawdbv3.TxNums.Min(tx, block.NumberU64())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			tc.writeTxLookupEntries(tx, block, txNum)
 
 			for i, txn := range txs {
 				if txn2, hash, number, index, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 == nil {

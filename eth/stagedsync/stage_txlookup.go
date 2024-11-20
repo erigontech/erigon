@@ -137,7 +137,6 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 
 // txnLookupTransform - [startKey, endKey)
 func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
-	bigNum := new(big.Int)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
@@ -149,22 +148,19 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 			return nil
 		}
 
-		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
-
 		txNum, err := rawdbv3.TxNums.Min(tx, blocknum)
 		if err != nil {
 			return err
 		}
 
-		data := make([]byte, 0, 16)
-		data = append(data, blockNumBytes...)
+		data := make([]byte, 16)
+		binary.BigEndian.PutUint64(data[:8], blocknum)
+
 		for i, txn := range body.Transactions {
-			txNumBytes := bigNum.SetUint64(txNum + uint64(i)).Bytes()
-			data = append(data, txNumBytes...)
+			binary.BigEndian.PutUint64(data[8:], txNum+uint64(i))
 			if err := next(k, txn.Hash().Bytes(), data); err != nil {
 				return err
 			}
-			data = data[:8]
 		}
 
 		return nil

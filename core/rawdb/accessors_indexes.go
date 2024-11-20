@@ -21,7 +21,6 @@ package rawdb
 
 import (
 	"encoding/binary"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -64,12 +63,10 @@ func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, *uint64, 
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
 func WriteTxLookupEntries(db kv.Putter, block *types.Block, txNum uint64) {
-	println("aёёёёу", dbg.Stack())
 	for _, txn := range block.Transactions() {
-		data := block.Number().Bytes()
-		txNumData := make([]byte, 8, 16)
-		binary.BigEndian.PutUint64(txNumData, txNum)
-		data = append(data, txNumData...)
+		data := make([]byte, 16)
+		binary.BigEndian.PutUint64(data[:8], block.NumberU64())
+		binary.BigEndian.PutUint64(data[8:], txNum)
 		if err := db.Put(kv.TxLookup, txn.Hash().Bytes(), data); err != nil {
 			log.Crit("Failed to store transaction lookup entry", "err", err)
 		}

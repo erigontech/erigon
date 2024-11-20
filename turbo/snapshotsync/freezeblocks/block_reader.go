@@ -1210,7 +1210,6 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 
 // TxnLookup - find blockNumber and txnID by txnHash
 func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
-	println("хихихих")
 	blockNumPointer, txNumPointer, err := rawdb.ReadTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, 0, false, err
