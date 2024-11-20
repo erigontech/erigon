@@ -89,7 +89,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		growthStep:      DefaultGrowthStep,
 		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
-		label:           kv.InMem,
+		label:           kv.Unknown,
 	}
 	return opts
 }
@@ -142,7 +142,6 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.mapSize = 512 * datasize.MB
 	opts.dirtySpace = uint64(64 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
-	opts.label = kv.InMem
 	opts.pageSize = 4096
 	return opts
 }

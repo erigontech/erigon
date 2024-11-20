@@ -146,15 +146,16 @@ type DBVerbosityLvl int8
 type Label uint8
 
 const (
-	ChainDB         Label = 0
-	TxPoolDB        Label = 1
-	SentryDB        Label = 2
-	ConsensusDB     Label = 3
-	DownloaderDB    Label = 4
-	InMem           Label = 5
-	HeimdallDB      Label = 6
-	DiagnosticsDB   Label = 7
-	PolygonBridgeDB Label = 8
+	Unknown Label = iota
+	ChainDB
+	TxPoolDB
+	SentryDB
+	ConsensusDB
+	DownloaderDB
+	HeimdallDB
+	DiagnosticsDB
+	PolygonBridgeDB
+	CaplinDB
 )
 
 func (l Label) String() string {
@@ -169,14 +170,14 @@ func (l Label) String() string {
 		return "consensus"
 	case DownloaderDB:
 		return "downloader"
-	case InMem:
-		return "inMem"
 	case HeimdallDB:
 		return "heimdall"
 	case DiagnosticsDB:
 		return "diagnostics"
 	case PolygonBridgeDB:
 		return "polygon-bridge"
+	case CaplinDB:
+		return "caplin"
 	default:
 		return "unknown"
 	}
@@ -193,14 +194,16 @@ func UnmarshalLabel(s string) Label {
 		return ConsensusDB
 	case "downloader":
 		return DownloaderDB
-	case "inMem":
-		return InMem
 	case "heimdall":
 		return HeimdallDB
 	case "diagnostics":
 		return DiagnosticsDB
 	case "polygon-bridge":
 		return PolygonBridgeDB
+	case "caplin":
+		return CaplinDB
+	case "unknown":
+		return Unknown
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", s))
 	}
