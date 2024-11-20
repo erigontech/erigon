@@ -185,7 +185,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		Target:          targetCheckpoint,
 	}
 	ap.attestationsCache.Add(epoch, baseAttestationData)
-	fmt.Println("X1", "slot", slot, "committeeIndex", committeeIndex, "beaconBlockRoot", baseStateBlockRoot, "source root", baseAttestationData.Source.Root, "source epoch", baseAttestationData.Source.Epoch, "target root", targetCheckpoint.Root, "target epoch", targetCheckpoint.Epoch)
+	fmt.Println("X1A", "slot", slot, "committeeIndex", committeeIndex, "beaconBlockRoot", baseStateBlockRoot, "source root", baseAttestationData.Source.Root, "source epoch", baseAttestationData.Source.Epoch, "target root", targetCheckpoint.Root, "target epoch", targetCheckpoint.Epoch)
 
 	return solid.AttestationData{
 		Slot:            slot,
