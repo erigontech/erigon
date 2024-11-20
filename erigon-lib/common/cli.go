@@ -22,8 +22,15 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+)
+
+var (
+	ReadFromDB    time.Duration
+	ReadFromFiles time.Duration
+	ReplacedKeys  time.Duration
 )
 
 func RootContext() (context.Context, context.CancelFunc) {

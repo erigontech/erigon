@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/rlp"
-	state2 "github.com/erigontech/erigon-lib/state"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -1609,8 +1608,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)
 	}
-	fmt.Println("totalTimeProcessing", time.Since(start), "timeSpentFold", timeSpentFold, "timeSpentUnf", timeSpentUnf, "timeSpentReadingCommitmentDB", state2.ReadFromDB, "timeSpentReadingCommitmentFiles", state2.ReadFromFiles, "timeSpentReplacingAccountAndStorage", state2.ReplacedKeys)
-	timeSpentFold, timeSpentUnf, state2.ReadFromDB, state2.ReadFromFiles, state2.ReplacedKeys = 0, 0, 0, 0, 0
+	fmt.Println("totalTimeProcessing", time.Since(start), "timeSpentFold", timeSpentFold, "timeSpentUnf", timeSpentUnf, "timeSpentReadingCommitmentDB", common.ReadFromDB, "timeSpentReadingCommitmentFiles", common.ReadFromFiles, "timeSpentReplacingAccountAndStorage", common.ReplacedKeys)
+	timeSpentFold, timeSpentUnf, common.ReadFromDB, common.ReadFromFiles, common.ReplacedKeys = 0, 0, 0, 0, 0
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
