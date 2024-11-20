@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
@@ -128,6 +129,10 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 	}
 	return &ex, nil
 }
+
+func (ms *MockState) ResetPerfCounters() {}
+
+func (ms *MockState) PerfCounters() map[string]time.Duration
 
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
 	for i, key := range plainKeys {
