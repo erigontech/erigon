@@ -285,7 +285,6 @@ func TestReplaceWithHigherFee(t *testing.T) {
 }
 
 func TestReverseNonces(t *testing.T) {
-	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -311,8 +310,7 @@ func TestReverseNonces(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
-	EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	v := types2.EncodeAccountBytesV3(2, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
