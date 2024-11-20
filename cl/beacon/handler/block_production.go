@@ -114,7 +114,7 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 }
 
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
-	stopCh := time.After(250 * time.Millisecond)
+	stopCh := time.After(1 * time.Second)
 	for {
 		if a.syncedData.HeadSlot() >= slot {
 			return
