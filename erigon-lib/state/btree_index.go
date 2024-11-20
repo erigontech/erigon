@@ -786,6 +786,9 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 		TmpDir:    tmpdir,
 		M:         DefaultBtreeM,
 	}
+	if strings.Contains(indexFileName, "commitment") {
+		args.M = 64
+	}
 
 	iw, err := NewBtIndexWriter(args, logger)
 	if err != nil {
@@ -847,6 +850,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 			idx = nil
 		}
 	}()
+
+	if strings.Contains(indexPath, "commitment") {
+		M = 64
+	}
 
 	s, err := os.Stat(indexPath)
 	if err != nil {
