@@ -1123,7 +1123,15 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 
 	{
 		btPath := d.kvBtFilePath(stepFrom, stepTo)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
+		btM := DefaultBtreeM
+		if stepFrom == 0 || math.Log2(float64(stepTo-stepFrom)) > 9 { // 2^9 = 512, decrease M for large step ranges
+			btM = 128
+			if d.filenameBase == "commitment" {
+				btM = 32
+			}
+		}
+
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}

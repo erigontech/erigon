@@ -372,28 +372,6 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
 	}
 
-	maxDi := b.offt.Count()
-	check := func(di uint64) (val []byte, cmp int, offt uint64, err error) {
-		if di >= maxDi {
-			return nil, 0, 0, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.offt.Count(), di, g.FileName())
-		}
-
-		offt = b.offt.Get(di)
-		g.Reset(offt)
-		if !g.HasNext() {
-			return nil, 0, 0, fmt.Errorf("pair %d/%d key not found in %s", di, b.offt.Count(), g.FileName())
-		}
-		v, _ = g.Next(v[:0])
-		if cmp = bytes.Compare(v, key); cmp == 0 {
-			//if cmp = g.MatchCmp(key) * -1; cmp == 0 { // ends up with gas mismatch
-			if !g.HasNext() {
-				return nil, 0, 0, fmt.Errorf("value for %d/%d key not found in %s", di, b.offt.Count(), g.FileName())
-			}
-			val, _ = g.Next(nil)
-		}
-		return val, cmp, offt, nil
-	}
-
 	var cmp int
 	var m uint64
 	for l < r {
@@ -401,12 +379,18 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		if r-l <= DefaultBtreeStartSkip {
 			m = l
 		}
-		v, cmp, offset, err = check(m)
+		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}
 		if cmp == 0 {
-			//return v, true, m, nil
+			offset = b.offt.Get(m)
+			g.Reset(offset)
+			g.Skip()
+			if !g.HasNext() {
+				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
+			}
+			v, _ = g.Next(v[:0])
 			return v, true, offset, nil
 		} else if cmp > 0 {
 			r = m
@@ -418,11 +402,18 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	v, cmp, offset, err = check(l)
+	cmp, _, err = b.keyCmpFunc(key, l, g, v[:0])
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
-	//return v, true, l, nil
+
+	offset = b.offt.Get(l)
+	g.Reset(offset)
+	g.Skip()
+	if !g.HasNext() {
+		return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
+	}
+	v, _ = g.Next(v[:0])
 	return v, true, offset, nil
 }
 
