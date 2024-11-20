@@ -197,6 +197,7 @@ jobs:
         if: steps.kurtosis-test.outcome == 'failure'
         run: |
           mkdir -p logs
+          echo '${{ toJSON(steps.kurtosis-test.outputs) }}' > logs/kurtosis-outputs.json
           python3 - << EOF
           import json
           import re
