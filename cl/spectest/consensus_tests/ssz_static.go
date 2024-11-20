@@ -115,6 +115,10 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		}
 
 		obj2 := object.Clone()
+		if versionObj, ok := obj2.(interface{ SetVersion(clparams.StateVersion) }); ok {
+			// Note: a bit tricky to change version here :(
+			versionObj.SetVersion(c.Version())
+		}
 		// test json
 		jsonBlock, err := json.Marshal(object)
 		require.NoError(t, err)

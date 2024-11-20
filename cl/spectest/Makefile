@@ -25,3 +25,6 @@ eip7594:
 
 deneb:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/deneb/ -v --timeout 30m
+
+bellatrix:
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/bellatrix/ -v --timeout 30m

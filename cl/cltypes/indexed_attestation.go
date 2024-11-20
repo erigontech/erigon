@@ -18,6 +18,7 @@ package cltypes
 
 import (
 	"encoding/json"
+	"strconv"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -53,22 +54,36 @@ func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
 	}
 }
 
+func (i *IndexedAttestation) SetVersion(v clparams.StateVersion) {
+	if v >= clparams.ElectraVersion {
+		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimitElectra, []uint64{})
+	} else {
+		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, []uint64{})
+	}
+}
+
 func (i *IndexedAttestation) Static() bool {
 	return false
 }
 
 func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		AttestingIndices *solid.RawUint64List   `json:"attesting_indices"`
+		AttestingIndices []string               `json:"attesting_indices"`
 		Data             *solid.AttestationData `json:"data"`
 		Signature        libcommon.Bytes96      `json:"signature"`
 	}
-	tmp.AttestingIndices = solid.NewRawUint64List(2048, nil)
 	tmp.Data = &solid.AttestationData{}
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
-	i.AttestingIndices = tmp.AttestingIndices
+	for _, index := range tmp.AttestingIndices {
+		v, err := strconv.ParseUint(index, 10, 64)
+		if err != nil {
+			return err
+		}
+		i.AttestingIndices.Append(v)
+	}
+
 	i.Data = tmp.Data
 	i.Signature = tmp.Signature
 	return nil
@@ -81,7 +96,11 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 // DecodeSSZ ssz unmarshals the IndexedAttestation object
 func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
 	i.Data = &solid.AttestationData{}
-	i.AttestingIndices = solid.NewRawUint64List(2048, nil)
+	if version >= int(clparams.ElectraVersion) {
+		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimitElectra, nil)
+	} else {
+		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, nil)
+	}
 
 	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
 }
