@@ -1,9 +1,5 @@
 package stages
 
-import (
-	"fmt"
-)
-
 type Mode int8 // in which staged sync can run
 
 const (
@@ -37,6 +33,6 @@ func ModeFromString(s string) Mode { //nolint
 	case "UnknownMode":
 		return ModeUnknown
 	default:
-		panic(fmt.Sprintf("unexpected mode string: %s", s))
+		panic("unexpected mode string: " + s)
 	}
 }
