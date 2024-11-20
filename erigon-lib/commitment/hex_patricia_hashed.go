@@ -1523,10 +1523,6 @@ var (
 	perfCountersCum map[string]time.Duration
 )
 
-func printShit() {
-
-}
-
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
 		m      runtime.MemStats
