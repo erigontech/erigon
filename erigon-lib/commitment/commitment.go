@@ -29,15 +29,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/google/btree"
-	"golang.org/x/crypto/sha3"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/google/btree"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
@@ -123,11 +121,18 @@ const (
 	// VariantHexPatriciaTrie used as default commitment approach
 	VariantHexPatriciaTrie TrieVariant = "hex-patricia-hashed"
 	// VariantBinPatriciaTrie - Experimental mode with binary key representation
-	VariantBinPatriciaTrie TrieVariant = "bin-patricia-hashed"
+	VariantBinPatriciaTrie     TrieVariant = "bin-patricia-hashed"
+	VariantParallelHexPatricia TrieVariant = "parallel-hex-patricia-hashed"
 )
 
 func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
 	switch tv {
+	case VariantParallelHexPatricia:
+		root := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
+		trie := NewParallelPatriciaHashed(root, nil, tmpdir)
+		tree := NewUpdates(mode, tmpdir, root.hashAndNibblizeKey)
+		tree.SetConcurrentCommitment()
+		return trie, tree
 	case VariantBinPatriciaTrie:
 		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
 		//fn := func(key []byte) []byte { return hexToBin(key) }
@@ -775,6 +780,8 @@ func ParseTrieVariant(s string) TrieVariant {
 	switch s {
 	case "bin":
 		trieVariant = VariantBinPatriciaTrie
+	case "hex-parallel":
+		trieVariant = VariantParallelHexPatricia
 	case "hex":
 		fallthrough
 	default:
@@ -906,7 +913,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 				switch tv {
 				case VariantBinPatriciaTrie:
 					stat.ExtSize += uint64(c.extLen)
-				case VariantHexPatriciaTrie:
+				case VariantHexPatriciaTrie, VariantParallelHexPatricia:
 					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++
@@ -1157,6 +1164,13 @@ func (t *Updates) Close() {
 	if t.etl != nil {
 		t.etl.Close()
 	}
+	if t.sortPerNibble {
+		for i := 0; i < len(t.nibbles); i++ {
+			if t.nibbles[i] != nil {
+				t.nibbles[i].Close()
+			}
+		}
+	}
 }
 
 func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHashed) error {
@@ -1181,7 +1195,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 		mainLock.Lock()
 		defer mainLock.Unlock()
 
-		fmt.Printf("\tmount d=%d n=%0x %s\n", d, prevByte, c.FullString())
+		fmt.Printf("\tmounted n=%0x d=%d n %s\n", d, prevByte, c.FullString())
 		c.extLen = 0
 		c.hashedExtLen = 0
 
@@ -1201,35 +1215,38 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 		return nil
 	}
 
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(16)
+	//g, ctx := errgroup.WithContext(ctx)
+	//g.SetLimit(16)
 
 	for n := 0; n < len(t.nibbles); n++ {
 		nib := t.nibbles[n]
 		phnib := pph.mounts[n]
 		n = n
 
-		g.Go(func() error {
-			n = n
-			cnt := 0
-			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-				cnt++
-				if phnib.trace {
-					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
-				}
-				return phnib.followAndUpdate(hashedKey, plainKey, nil)
-			}, etl.TransformArgs{Quit: ctx.Done()})
-			if err != nil {
-				panic(err)
+		//g.Go(func() error {
+		//n = n
+		cnt := 0
+		err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			cnt++
+			if phnib.trace {
+				fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+			}
+			return phnib.followAndUpdate(hashedKey, plainKey, nil)
+		}, etl.TransformArgs{Quit: ctx.Done()})
+		if err != nil {
+			panic(err)
+			return err
+		}
+		if cnt > 0 {
+			if err = foldAndFlush(byte(n)); err != nil {
 				return err
 			}
-			if cnt > 0 {
-				return foldAndFlush(byte(n))
-			}
-			return nil
-		})
+		}
+		//return nil
+		//})
 	}
-	return g.Wait()
+	//return g.Wait()
+	return nil
 }
 
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.

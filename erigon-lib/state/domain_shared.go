@@ -133,7 +133,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	}
 
 	sd.SetTxNum(0)
-	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
+	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantParallelHexPatricia)
 
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
@@ -1113,17 +1113,17 @@ func NewConcurrentCommitmentContext(sdCtx *SharedDomainsCommitmentContext) (*Con
 	cc := &ConcurrentSDCommitmentContext{
 		SharedDomainsCommitmentContext: sdCtx,
 	}
-
-	t, ok := sdCtx.patriciaTrie.(*commitment.HexPatriciaHashed)
-	if !ok {
-		return nil, fmt.Errorf("only hex trie parallelisation supported")
-	}
-
-	var err error
-	cc.trie, err = commitment.NewParallelPatriciaHashed(t, cc, sdCtx.TempDir())
-	if err != nil {
-		return nil, fmt.Errorf("failed to init parallel patricia hashed trie")
-	}
+	//
+	//t, ok := sdCtx.patriciaTrie.(*commitment.HexPatriciaHashed)
+	//if !ok {
+	//	return nil, fmt.Errorf("only hex trie parallelisation supported")
+	//}
+	//
+	////var err error
+	//cc.trie = commitment.NewParallelPatriciaHashed(t, cc, sdCtx.TempDir())
+	//if err != nil {
+	//	return nil, fmt.Errorf("failed to init parallel patricia hashed trie")
+	//}
 	return cc, nil
 }
 
@@ -1153,6 +1153,7 @@ func (ctx *ConcurrentSDCommitmentContext) Storage(plainKey []byte) (u *commitmen
 }
 
 func (ctx *ConcurrentSDCommitmentContext) ComputeCommitment(ct context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+	panic("nope")
 	if dbg.DiscardCommitment() {
 		ctx.updates.Reset()
 		return nil, nil
@@ -1202,6 +1203,12 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool
 
 	limitReadAsOfTxNum uint64
+}
+
+func (sdc *SharedDomainsCommitmentContext) ConcurrentContext() commitment.PatriciaContext {
+	return &ConcurrentSDCommitmentContext{
+		SharedDomainsCommitmentContext: sdc,
+	}
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
@@ -1465,6 +1472,11 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 		if err != nil {
 			return nil, err
 		}
+	case *commitment.ParallelPatriciaHashed:
+		state, err = trie.RootTrie().EncodeCurrentState(nil)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("unsupported state storing for patricia trie type: %T", sdc.patriciaTrie)
 	}
@@ -1494,7 +1506,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, tx
 	if dbg.DiscardCommitment() {
 		return 0, 0, nil, nil
 	}
-	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
+	if tv := sdc.patriciaTrie.Variant(); tv == commitment.VariantBinPatriciaTrie {
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 	state, _, err = sdc.Branch(keyCommitmentState)
@@ -1531,20 +1543,37 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		}
 		// nil value is acceptable for SetState and will reset trie
 	}
-	if hext, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
-		if err := hext.SetState(cs.trieState); err != nil {
-			return 0, 0, fmt.Errorf("failed restore state : %w", err)
+	tv := sdc.patriciaTrie.Variant()
+
+	var hext *commitment.HexPatriciaHashed
+	if tv == commitment.VariantHexPatriciaTrie {
+		var ok bool
+		hext, ok = sdc.patriciaTrie.(*commitment.HexPatriciaHashed)
+		if !ok {
+			return 0, 0, errors.New("cannot typecast hex patricia trie")
 		}
-		sdc.justRestored.Store(true) // to prevent double reset
-		if sdc.sharedDomains.trace {
-			rootHash, err := hext.RootHash()
-			if err != nil {
-				return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
-			}
-			fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
+	}
+	if tv == commitment.VariantParallelHexPatricia {
+		phext, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
+		if !ok {
+			return 0, 0, errors.New("cannot typecast parallel hex patricia trie")
 		}
-	} else {
+		hext = phext.RootTrie()
+	}
+	if tv == commitment.VariantBinPatriciaTrie || hext == nil {
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")
+	}
+
+	if err := hext.SetState(cs.trieState); err != nil {
+		return 0, 0, fmt.Errorf("failed restore state : %w", err)
+	}
+	sdc.justRestored.Store(true) // to prevent double reset
+	if sdc.sharedDomains.trace {
+		rootHash, err := hext.RootHash()
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to get root hash after state restore: %w", err)
+		}
+		fmt.Printf("[commitment] restored state: block=%d txn=%d rootHash=%x\n", cs.blockNum, cs.txNum, rootHash)
 	}
 	return cs.blockNum, cs.txNum, nil
 }

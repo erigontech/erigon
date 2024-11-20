@@ -1557,18 +1557,29 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 }
 
 func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, int, error) {
+	fmt.Printf("=======[%x] folding rows %d depth=%d =========\n", nib, hph.activeRows, hph.depths[hph.activeRows])
+	fmt.Printf("depths %+v\n", hph.depths[:hph.activeRows])
+	hph.trace = true
+	if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == 1 {
+		fmt.Printf("mount nibble %x-%x %s\n", nib, hph.mountedNib, hph.grid[0][hph.mountedNib].FullString())
+		return hph.grid[0][hph.mountedNib], 1, nil
+	}
 	for hph.activeRows > 0 {
 		if err := hph.fold(); err != nil {
 			panic(err)
 			return cell{}, 0, fmt.Errorf("final fold: %w", err)
 		}
 	}
+	fmt.Printf("=======[%x] folded =========\n", nib)
+	_ = nib
 	if hph.rootPresent && hph.rootTouched {
+		fmt.Printf("mount root %x %s\n", nib, hph.root.FullString())
 		return hph.root, 0, nil
 	}
-	_ = nib
+	fmt.Printf("mount nibble %x-%x %s\n", nib, hph.mountedNib, hph.grid[0][hph.mountedNib].FullString())
 	return hph.grid[0][hph.mountedNib], 1, nil
 }
+
 func (hph *HexPatriciaHashed) flush(ctx context.Context) error {
 	return hph.branchEncoder.Load(hph.ctx, etl.TransformArgs{Quit: ctx.Done()})
 }
@@ -2193,54 +2204,104 @@ func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
 	return nibblized
 }
 
+func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
+	hph.Reset()
+
+	hph.root.hashedExtLen = root.root.hashedExtLen
+	hph.root.accountAddrLen = root.root.accountAddrLen
+	hph.root.storageAddrLen = root.root.storageAddrLen
+	hph.root.stateHashLen = root.root.stateHashLen
+	hph.root.hashLen = root.root.hashLen
+	hph.root.extLen = root.root.extLen
+	hph.root.Flags = root.root.Flags
+	hph.rootPresent = root.rootPresent
+	hph.rootChecked = root.rootChecked
+	hph.rootTouched = root.rootTouched
+
+	copy(hph.root.hashedExtension[:], root.root.hashedExtension[:])
+	copy(hph.root.accountAddr[:], root.root.accountAddr[:])
+	copy(hph.root.storageAddr[:], root.root.storageAddr[:])
+	copy(hph.root.stateHash[:], root.root.stateHash[:])
+	copy(hph.root.hash[:], root.root.hash[:])
+	copy(hph.root.extension[:], root.root.extension[:])
+
+	//hph.rootPresent = false
+	hph.activeRows = root.activeRows
+	hph.currentKeyLen = root.currentKeyLen
+	copy(hph.currentKey[:], root.currentKey[:])
+	copy(hph.depths[:], root.depths[:])
+	copy(hph.branchBefore[:], root.branchBefore[:])
+	copy(hph.touchMap[:], root.touchMap[:])
+	copy(hph.afterMap[:], root.afterMap[:])
+
+	for i := 0; i < len(hph.grid[0]); i++ {
+		hph.grid[0][i] = root.grid[0][i]
+	}
+
+	hph.mountedNib = nibble
+	hph.mounted = true
+}
+
 type ParallelPatriciaHashed struct {
 	root   *HexPatriciaHashed
 	mounts [16]*HexPatriciaHashed
 	ctx    PatriciaContext
-	//ch [16]chan
+}
+
+func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
+	return p.root
 }
 
 func (p *ParallelPatriciaHashed) unfoldRoot() error {
 	zero := []byte{0}
 	// Now unfold until we step on an empty cell
+	//rs, err := p.root.EncodeCurrentState(nil)
+	//if err != nil {
+	//	return fmt.Errorf("encode current state: %w", err)
+	//}
+	p.root.trace = true
+	fmt.Printf("==============================\n")
 	for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
 		if err := p.root.unfold(zero, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
 	}
+	p.root.trace = false
+	fmt.Printf("==============================\n")
 
 	for i := range p.mounts {
 		if p.mounts[i] == nil {
 			panic(fmt.Sprintf("nibble %x is nil", i))
 		}
 		hph := p.mounts[i]
-		hph.Reset()
-
-		hph.mountedNib = i
-		for unfolding := hph.needUnfolding(zero); unfolding > 0; unfolding = hph.needUnfolding(zero) {
-			if err := hph.unfold(zero, unfolding); err != nil {
-				return fmt.Errorf("unfold: %w", err)
-			}
-		}
+		hph.mountTo(p.root, i)
+		//hph.Reset()
+		//if err = hph.SetState(rs); err != nil {
+		//	return fmt.Errorf("set state %x: %w", i, err)
+		//}
+		//
+		//hph.mounted = true
+		//hph.mountedNib = i
+		//for unfolding := hph.needUnfolding(zero); unfolding > 0; unfolding = hph.needUnfolding(zero) {
+		//	if err := hph.unfold(zero, unfolding); err != nil {
+		//		return fmt.Errorf("unfold: %w", err)
+		//	}
+		//}
 		p.mounts[i] = hph
 	}
 	return nil
 }
 
-func NewParallelPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext, tmpdir string) (*ParallelPatriciaHashed, error) {
+func NewParallelPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext, tmpdir string) *ParallelPatriciaHashed {
 	p := &ParallelPatriciaHashed{root: root}
 
 	for i := range p.mounts {
 		hph := NewHexPatriciaHashed(length.Addr, ctx, tmpdir)
 		hph.mountedNib = i
+		hph.mounted = true
 		p.mounts[i] = hph
 	}
-
-	if err := p.unfoldRoot(); err != nil {
-		return nil, err
-	}
-
-	return p, nil
+	return p
 }
 
 func (p *ParallelPatriciaHashed) Close() {
@@ -2255,6 +2316,8 @@ func (p *ParallelPatriciaHashed) SetTrace(b bool) {
 		p.mounts[i].SetTrace(b)
 	}
 }
+
+// pass -1 to enable trace just for root trie
 func (p *ParallelPatriciaHashed) SetParticularTrace(b bool, n int) {
 	p.root.SetTrace(b)
 	if n < len(p.mounts) && n >= 0 {
@@ -2266,62 +2329,6 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 	if err = p.unfoldRoot(); err != nil {
 		return nil, err
 	}
-
-	// foldAndFlush := func(prevByte, curByte byte) error {
-	// 	c, d, err := p.mounts[prevByte].foldMounted(int(prevByte))
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	_ = d
-
-	// 	//fmt.Printf("\tmount d=%d n=%0x %s\n", d, prevByte, c.FullString())
-	// 	p.root.grid[0][prevByte] = c
-	// 	if err = p.mounts[prevByte].branchEncoder.Load(p.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-	// 		return err
-	// 	}
-	// 	p.mounts[prevByte].Reset()
-	// 	p.mounts[prevByte].currentKeyLen = 0
-	// 	if p.mounts[prevByte].activeRows >= 0 {
-	// 		p.mounts[prevByte].depths[0] = 0
-	// 		p.mounts[prevByte].activeRows = 0
-	// 		p.mounts[prevByte].touchMap[0] = 0
-	// 		p.mounts[prevByte].afterMap[0] = 0
-	// 	}
-
-	// 	p.root.touchMap[0] |= uint16(1) << prevByte
-	// 	p.root.afterMap[0] |= uint16(1) << prevByte
-	// 	p.root.depths[0] = 1
-	// 	return nil
-	// }
-
-	// var prevByte byte
-	// var prevset bool
-
-	// err = updates.HashSort(ctx, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-	// 	err = p.mounts[hashedKey[0]].followAndUpdate(hashedKey, plainKey, stateUpdate)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if !prevset {
-	// 		prevByte = hashedKey[0]
-	// 		prevset = true
-	// 	}
-	// 	if prevByte != hashedKey[0] {
-	// 		if err := foldAndFlush(prevByte, hashedKey[0]); err != nil {
-	// 			return err
-	// 		}
-	// 		prevByte = hashedKey[0]
-	// 	}
-	// 	return nil
-	// })
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// if err := foldAndFlush(prevByte, 0); err != nil {
-	// 	return nil, err
-	// }
-	//
 	err = updates.ParallelHashSort(ctx, p)
 	if err != nil {
 		return nil, err
@@ -2330,8 +2337,9 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 	if p.root.activeRows == 0 {
 		p.root.activeRows = 1
 	}
-
-	// p.root.trace = true
+	p.root.SetTrace(true)
+	p.root.currentKeyLen = 0
+	fmt.Printf("======= folding root =========\n")
 	for p.root.activeRows > 0 {
 		if err = p.root.fold(); err != nil {
 			return nil, err
@@ -2341,11 +2349,36 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("======= folding root done =========\n")
 
 	err = p.root.branchEncoder.Load(p.ctx, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
-
 	return rootHash, nil
+}
+
+// Variant returns commitment trie variant
+func (p *ParallelPatriciaHashed) Variant() TrieVariant {
+	return VariantParallelHexPatricia
+}
+
+// Reset Drops everything from the trie
+func (p *ParallelPatriciaHashed) Reset() {
+	p.root.Reset()
+	for i := 0; i < len(p.mounts); i++ {
+		p.mounts[i].Reset()
+	}
+}
+
+// Set context for state IO
+func (p *ParallelPatriciaHashed) ResetContext(ctx PatriciaContext) {
+	p.root.ctx = ctx
+	for i := 0; i < len(p.mounts); i++ {
+		p.mounts[i].ResetContext(ctx)
+	}
+}
+
+func (p *ParallelPatriciaHashed) RootHash() (hash []byte, err error) {
+	return p.root.RootHash()
 }

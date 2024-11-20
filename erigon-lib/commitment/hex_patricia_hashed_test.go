@@ -163,8 +163,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation2(t *testing.T) {
 
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne, msOne.TempDir())
 	trieTwoR := NewHexPatriciaHashed(length.Addr, msTwo, msTwo.TempDir())
-	trieTwo, err := NewParallelPatriciaHashed(trieTwoR, msTwo, msTwo.TempDir())
-	require.NoError(t, err)
+	trieTwo := NewParallelPatriciaHashed(trieTwoR, msTwo, msTwo.TempDir())
 
 	//trieOne.SetTrace(true)
 	//trieTwo.SetTrace(true)
@@ -304,8 +303,7 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 		keyLen := 20
 		trieSequential := NewHexPatriciaHashed(keyLen, stateSeq, stateSeq.TempDir())
 		trieBatchR := NewHexPatriciaHashed(keyLen, stateBatch, stateBatch.TempDir())
-		trieBatch, err := NewParallelPatriciaHashed(trieBatchR, stateBatch, stateBatch.TempDir())
-		require.NoError(t, err)
+		trieBatch := NewParallelPatriciaHashed(trieBatchR, stateBatch, stateBatch.TempDir())
 
 		if sortHashedKeys {
 			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
@@ -1085,6 +1083,124 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		updsTwo.Close()
 	}
 	require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
+}
+
+func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stateSeq := NewMockState(t)
+	stateBatch := NewMockState(t)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
+		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
+		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
+		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
+		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
+		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
+		Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
+		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
+		Storage("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "050505").
+		Balance("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", 9*1e16).
+		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "060606").
+		Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 6*1e18).
+		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
+		Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "0000fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
+		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Nonce("27456647f49ba65e220e86cba9abfc4fc1587b81", 1).
+		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 3*1e17).
+		Nonce("b13363d527cdc18173c54ac5d4a54af05dbec22e", 1).
+		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
+		Storage("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "909090").
+		Balance("14c4d3bba7f5009599257d3701785d34c7f2aa27", 5*1e18).
+		Nonce("14c4d3bba7f5009599257d3701785d34c7f2aa27", 1).
+		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
+		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a444448f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
+		//Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "0000000000000000018ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
+		//Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e77777778033", "8989").
+		Storage("88e76c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d22222222e1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
+		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6000000).
+		Nonce("eabf041afbb6c6059fbd25eab0d3202db84e842d", 1).
+		Balance("93fe03620e4d70ea39ab6e8c0e04dd0d83e041f2", 7).
+		Balance("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", 5*1e17).
+		Build()
+
+	sequential := NewHexPatriciaHashed(20, stateSeq, stateSeq.TempDir())
+	batch := NewHexPatriciaHashed(20, stateBatch, stateBatch.TempDir())
+
+	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
+
+	//sequential.SetTrace(true)
+	//batch.SetTrace(true)
+	somewhere := 6
+	var rSeq, rBatch, somewhereRoot []byte
+	_ = rSeq
+	{
+		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
+		err := stateSeq.applyPlainUpdates(plainKeys[:somewhere+1], updates[:somewhere+1])
+		require.NoError(t, err)
+
+		updsOne := WrapKeyUpdates(t, ModeDirect, sequential.hashAndNibblizeKey, plainKeys[:somewhere+1], updates[:somewhere+1])
+
+		sequential.SetTrace(true)
+		sequentialRoot, err := sequential.Process(ctx, updsOne, "")
+		require.NoError(t, err)
+		//sequential.SetTrace(false)
+
+		t.Logf("sequential root @%d hash %x\n", somewhere, sequentialRoot)
+		somewhereRoot = common.Copy(sequentialRoot)
+
+		updsOne.Close()
+
+		WrapKeyUpdatesInto(t, updsOne, plainKeys[somewhere+1:], updates[somewhere+1:])
+		err = stateSeq.applyPlainUpdates(plainKeys[somewhere+1:], updates[somewhere+1:])
+		require.NoError(t, err)
+
+		sequentialRoot, err = sequential.Process(ctx, updsOne, "")
+		require.NoError(t, err)
+
+		t.Logf("sequential root @%d hash %x\n", len(plainKeys), sequentialRoot)
+		rSeq = common.Copy(sequentialRoot)
+	}
+	{
+		err := stateBatch.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		//updsTwo := WrapKeyUpdates(t, ModeDirect, batch.hashAndNibblizeKey, plainKeys[:somewhere+1], updates[:somewhere+1])
+		//
+		//batch.trace = true
+		//rh, err := batch.Process(ctx, updsTwo, "")
+		//require.NoError(t, err)
+		//t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
+		//require.EqualValues(t, rh, somewhereRoot)
+
+		//updsTwo.Close()
+		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
+		trieBatch := NewParallelPatriciaHashed(batch, stateBatch, stateBatch.TempDir())
+		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, batch.hashAndNibblizeKey, plainKeys[:somewhere+1], updates[:somewhere+1])
+
+		//trieBatch.SetParticularTrace(true, 2)
+		trieBatch.SetTrace(true)
+		rh, err := trieBatch.Process(ctx, updsTwo, "")
+		require.NoError(t, err)
+		t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
+		require.EqualValues(t, somewhereRoot, rh)
+
+		WrapKeyUpdatesInto(t, updsTwo, plainKeys[somewhere+1:], updates[somewhere+1:])
+		rh, err = trieBatch.Process(ctx, updsTwo, "")
+		require.NoError(t, err)
+
+		t.Logf("(second half) batch of %d root hash %x\n", len(updates)-somewhere, rh)
+
+		rBatch = common.Copy(rh)
+		updsTwo.Close()
+		require.EqualValues(t, rSeq, rBatch, "sequential and batch root should match")
+	}
+	//require.EqualValues(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
 func TestUpdate_EncodeDecode(t *testing.T) {

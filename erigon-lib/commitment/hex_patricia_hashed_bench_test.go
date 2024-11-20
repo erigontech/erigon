@@ -49,8 +49,7 @@ func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
 	require.NoError(b, err)
 
 	hphR := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
-	hph, err := NewParallelPatriciaHashed(hphR, ms, ms.TempDir())
-	require.NoError(b, err)
+	hph := NewParallelPatriciaHashed(hphR, ms, ms.TempDir())
 	upds := WrapKeyUpdatesParallel(b, ModeDirect, hphR.hashAndNibblizeKey, nil, nil)
 	defer upds.Close()
 
