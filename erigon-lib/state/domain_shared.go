@@ -432,7 +432,14 @@ func (sd *SharedDomains) SizeEstimate() uint64 {
 	return uint64(sd.estSize) * 4
 }
 
+var (
+	ReadFromDB    time.Duration
+	ReadFromFiles time.Duration
+	ReplacedKeys  time.Duration
+)
+
 func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error) {
+	a := time.Now()
 	if v, prevStep, ok := sd.get(kv.CommitmentDomain, prefix); ok {
 		// sd cache values as is (without transformation) so safe to return
 		return v, prevStep, nil
@@ -442,6 +449,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
 	if found {
+		ReadFromDB += time.Since(a)
 		// db store values as is (without transformation) so safe to return
 		return v, step, nil
 	}
@@ -454,6 +462,7 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	}
 
 	if !sd.aggTx.a.commitmentValuesTransform || bytes.Equal(prefix, keyCommitmentState) {
+		ReadFromFiles += time.Since(a)
 		return v, endTx / sd.aggTx.a.StepSize(), nil
 	}
 
@@ -462,6 +471,8 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 	if err != nil {
 		return nil, 0, err
 	}
+	ReplacedKeys += time.Since(a)
+
 	return rv, endTx / sd.aggTx.a.StepSize(), nil
 }
 

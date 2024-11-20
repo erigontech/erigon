@@ -40,11 +40,11 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/rlp"
+	state2 "github.com/erigontech/erigon-lib/state"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -975,10 +975,12 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row, depth int, deleted bool) (bool, error) {
 	key := hexToCompact(hph.currentKey[:hph.currentKeyLen])
+	timeSpentReadingBranchA := time.Now()
 	branchData, fileEndTxNum, err := hph.ctx.Branch(key)
 	if err != nil {
 		return false, err
 	}
+	timeSpentReadingBranch += time.Since(timeSpentReadingBranchA)
 	hph.depthsToTxNum[depth] = fileEndTxNum
 	if len(branchData) >= 2 {
 		branchData = branchData[2:] // skip touch map and keep the rest
@@ -1517,6 +1519,18 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
+var (
+	timeSpentFold           time.Duration
+	timeSpentUnf            time.Duration
+	timeSpentReadingAccount time.Duration
+	timeSpentReadingStorage time.Duration
+	timeSpentReadingBranch  time.Duration
+)
+
+func printShit() {
+
+}
+
 func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	var (
 		m      runtime.MemStats
@@ -1546,29 +1560,37 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
+			start := time.Now()
 			if err := hph.fold(); err != nil {
 				return fmt.Errorf("fold: %w", err)
 			}
+			timeSpentFold += time.Since(start)
 		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+			start := time.Now()
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
+			timeSpentUnf += time.Since(start)
 		}
 
 		if stateUpdate == nil {
 			// Update the cell
 			if len(plainKey) == hph.accountKeyLen {
+				a := time.Now()
 				update, err = hph.ctx.Account(plainKey)
 				if err != nil {
 					return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 				}
+				timeSpentReadingAccount += time.Since(a)
 			} else {
+				a := time.Now()
 				update, err = hph.ctx.Storage(plainKey)
 				if err != nil {
 					return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 				}
+				timeSpentReadingStorage += time.Since(a)
 			}
 		} else {
 			if update == nil {
@@ -1587,6 +1609,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)
 	}
+	fmt.Println("totalTimeProcessing", time.Since(start), "timeSpentFold", timeSpentFold, "timeSpentUnf", timeSpentUnf, "timeSpentReadingCommitmentDB", state2.ReadFromDB, "timeSpentReadingCommitmentFiles", state2.ReadFromFiles, "timeSpentReplacingAccountAndStorage", state2.ReplacedKeys)
+	timeSpentFold, timeSpentUnf, state2.ReadFromDB, state2.ReadFromFiles, state2.ReplacedKeys = 0, 0, 0, 0, 0
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
