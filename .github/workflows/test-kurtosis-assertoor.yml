@@ -193,23 +193,63 @@ jobs:
             #kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             enclave_dump: false
 
-      - name: Save Kurtosis test output
-        if: always()
-        shell: bash
+      - name: Parse and Format Test Details
+        if: steps.kurtosis-test.outcome == 'failure'
         run: |
           mkdir -p logs
-          echo '${{ toJSON(steps.kurtosis-test.outputs) }}' > logs/kurtosis-outputs.json
+          python3 - << EOF
+          import json
+          import re
 
+          def format_test_details(details):
+              lines = details.split('\n')
+              formatted_lines = []
+              for line in lines:
+                  # Parse the line
+                  match = re.match(r'\s*(\d+)\s*\t(.*)\t(.*)\t(.*)\t(.*)', line)
+                  if match:
+                      index, complete_status, test_status, task_id, task_description = match.groups()
+                      
+                      # Color-code status
+                      if test_status == '\u001b[0;32msuccess\u001b[0m':
+                          status_color = 'GREEN ✓'
+                      elif test_status == '\u001b[0;31mfailure\u001b[0m':
+                          status_color = 'RED ✗'
+                      else:
+                          status_color = test_status
+                      
+                      formatted_line = f"Task {index}: {task_description} - {status_color}"
+                      formatted_lines.append(formatted_line)
+              
+              return '\n'.join(formatted_lines)
+
+          # Read the JSON file
+          with open('logs/kurtosis-outputs.json', 'r') as f:
+              outputs = json.load(f)
+
+          # If test_overview or failed_test_details exist in the original JSON
+          original_json = json.loads(outputs.get('test_result_json', '{}'))
+          
+          # Format test details
+          formatted_details = format_test_details(original_json.get('failed_test_details', ''))
+          
+          # Create a human-readable text file
+          with open('logs/test-details-readable.txt', 'w') as f:
+              f.write("Test Overview:\n")
+              f.write(original_json.get('test_overview', 'No overview available') + "\n\n")
+              f.write("Detailed Test Results:\n")
+              f.write(formatted_details)
+          
+          # Print to console for immediate visibility
+          print(open('logs/test-details-readable.txt', 'r').read())
+          EOF
 
       - name: Save Kurtosis test logs
-        if: always()
+        if: steps.kurtosis-test.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: kurtosis-test-logs
-          path: |
-            logs/kurtosis-outputs.json
-            ./**/*.log
-            kurtosis-logs/**
+          name: human-readable-test-details
+          path: logs/test-details-readable.txt
           retention-days: 14
 
       - name: Check test result
