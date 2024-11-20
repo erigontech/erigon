@@ -793,7 +793,6 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 
 // Blob gas price bump + other requirements to replace existing txns in the pool
 func TestBlobTxnReplacement(t *testing.T) {
-	t.Skip("TODO")
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
