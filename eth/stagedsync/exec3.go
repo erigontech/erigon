@@ -303,7 +303,7 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	shouldGenerateChangesets := !isMining && (maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets)
+	shouldGenerateChangesets := !inMemExec && !isMining && (maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets)
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
