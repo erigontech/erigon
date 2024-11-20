@@ -1,26 +1,42 @@
 package stages
 
 import (
-	"context"
+	"fmt"
 )
 
 type Mode int8 // in which staged sync can run
 
 const (
-	ModeBlockProduction Mode = iota
+	ModeUnknown Mode = iota
+	ModeBlockProduction
 	ModeForkValidation
 	ModeApplyingBlocks
 )
 
-type modeContextKey struct{}
-
-func PutMode(ctx context.Context, v Mode) context.Context {
-	return context.WithValue(ctx, modeContextKey{}, v)
-}
-func GetMode(ctx context.Context) (Mode, bool) {
-	v := ctx.Value(modeContextKey{})
-	if v == nil {
-		return 0, false
+func (m Mode) String() string {
+	switch m {
+	case ModeBlockProduction:
+		return "ModeBlockProduction"
+	case ModeForkValidation:
+		return "ModeForkValidation"
+	case ModeApplyingBlocks:
+		return "ModeApplyingBlocks"
+	default:
+		return "UnknownMode"
 	}
-	return v.(Mode), true
+}
+
+func ModeFromString(s string) Mode { //nolint
+	switch s {
+	case "ModeBlockProduction":
+		return ModeBlockProduction
+	case "ModeForkValidation":
+		return ModeForkValidation
+	case "ModeApplyingBlocks":
+		return ModeApplyingBlocks
+	case "UnknownMode":
+		return ModeUnknown
+	default:
+		panic(fmt.Sprintf("unexpected mode string: %s", s))
+	}
 }
