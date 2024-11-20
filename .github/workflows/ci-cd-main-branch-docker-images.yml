@@ -78,7 +78,8 @@ jobs:
           echo "tag_name=${tag_name}" >> $GITHUB_OUTPUT
           echo "keep_images=${keep_images}" >> $GITHUB_OUTPUT
           echo "latest_suffix=${latest_suffix}" >> $GITHUB_OUTPUT
-          echo "Debug ${tag_name} ${keep_images} ${latest_suffix}"
+          echo "binaries=${binaries}" >> $GITHUB_OUTPUT
+          echo "Debug ${tag_name} ${keep_images} ${latest_suffix} ${binaries}"
 
       - name: Get commit id
         id: getCommitId
@@ -101,6 +102,8 @@ jobs:
         uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db ## v3.6.1
 
       - name: Build arm64
+        env:
+          BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
         run: |
           docker run --platform linux/arm64 \
           --rm -v $(pwd)/erigon:/erigon:ro \
@@ -109,9 +112,11 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo erigon integration rpcdaemon"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
 
       - name: Build amd64
+        env:
+          BINARIES: ${{ steps.def_docker_vars.outputs.binaries }}
         run: |
           docker run --platform linux/amd64 \
           --rm -v $(pwd)/erigon:/erigon:ro \
@@ -120,14 +125,14 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo erigon integration rpcdaemon"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo ${{ env.BINARIES }}"
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
         id: built_tag_export
         env:
           BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
           BUILD_VERSION_LATEST: "${{ steps.def_docker_vars.outputs.tag_name }}${{ steps.def_docker_vars.outputs.latest_suffix }}"
-          DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }}
+          DOCKER_PUBLISH_CONDITION: ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
           DOCKERFILE_PATH: Dockerfile.release
         run: |
@@ -142,7 +147,7 @@ jobs:
           --sbom=true \
           --build-arg CI_CD_MAIN_TARGET_BASE_IMAGE=${{ env.TARGET_BASE_IMAGE }} \
           --build-arg CI_CD_MAIN_BUILDER_IMAGE=${{ env.BUILDER_IMAGE }} \
-          ${{ env.DOCKER_PUBLISH_CONDITION }} \
+          ${{ steps.def_docker_vars.outputs.keep_images > 0 && format('--tag {0}:{1} ', env.DOCKER_URL, env.BUILD_VERSION) || '' }} \
           --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION_LATEST }} \
           --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
