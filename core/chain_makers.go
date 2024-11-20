@@ -177,7 +177,7 @@ func (b *BlockGen) AddUncheckedReceipt(receipt *types.Receipt) {
 // account at addr. It panics if the account does not exist.
 func (b *BlockGen) TxNonce(addr libcommon.Address) uint64 {
 	if !b.ibs.Exist(addr) {
-		panic("account does not exist")
+		panic("account does not exist " + addr.Hex())
 	}
 	return b.ibs.GetNonce(addr)
 }
