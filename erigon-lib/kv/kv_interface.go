@@ -155,6 +155,7 @@ const (
 	HeimdallDB
 	DiagnosticsDB
 	PolygonBridgeDB
+	CaplinDB
 )
 
 func (l Label) String() string {
@@ -175,6 +176,8 @@ func (l Label) String() string {
 		return "diagnostics"
 	case PolygonBridgeDB:
 		return "polygon-bridge"
+	case CaplinDB:
+		return "caplin"
 	default:
 		return "unknown"
 	}
@@ -197,6 +200,8 @@ func UnmarshalLabel(s string) Label {
 		return DiagnosticsDB
 	case "polygon-bridge":
 		return PolygonBridgeDB
+	case "caplin":
+		return CaplinDB
 	case "unknown":
 		return Unknown
 	default:
