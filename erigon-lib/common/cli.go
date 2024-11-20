@@ -31,6 +31,7 @@ var (
 	ReadFromDB    time.Duration
 	ReadFromFiles time.Duration
 	ReplacedKeys  time.Duration
+	ReplacedKeys2 time.Duration
 )
 
 func RootContext() (context.Context, context.CancelFunc) {

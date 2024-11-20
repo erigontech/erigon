@@ -1608,8 +1608,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)
 	}
-	fmt.Println("totalTimeProcessing", time.Since(start), "timeSpentFold", timeSpentFold, "timeSpentUnf", timeSpentUnf, "timeSpentReadingCommitmentDB", common.ReadFromDB, "timeSpentReadingCommitmentFiles", common.ReadFromFiles, "timeSpentReplacingAccountAndStorage", common.ReplacedKeys)
-	timeSpentFold, timeSpentUnf, common.ReadFromDB, common.ReadFromFiles, common.ReplacedKeys = 0, 0, 0, 0, 0
+	fmt.Println("totalTimeProcessing", time.Since(start), "timeSpentFold", timeSpentFold, "timeSpentUnf", timeSpentUnf, "timeSpentReadingCommitmentDB", common.ReadFromDB, "timeSpentReadingCommitmentFiles", common.ReadFromFiles, "timeSpentReplacingAccountAndStorage", common.ReplacedKeys, "timeSpentReplacingAccountAndStorageOnly", common.ReplacedKeys2)
+	timeSpentFold, timeSpentUnf, common.ReadFromDB, common.ReadFromFiles, common.ReplacedKeys, common.ReplacedKeys2 = 0, 0, 0, 0, 0, 0
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {

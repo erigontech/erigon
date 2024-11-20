@@ -460,12 +460,14 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 		return v, endTx / sd.aggTx.a.StepSize(), nil
 	}
 
+	xenoverse := time.Now()
 	// replace shortened keys in the branch with full keys to allow HPH work seamlessly
 	rv, err := sd.replaceShortenedKeysInBranch(prefix, commitment.BranchData(v), startTx, endTx)
 	if err != nil {
 		return nil, 0, err
 	}
 	common.ReplacedKeys += time.Since(a)
+	common.ReplacedKeys2 += time.Since(xenoverse)
 
 	return rv, endTx / sd.aggTx.a.StepSize(), nil
 }
