@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,7 +34,11 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters)
 			log.Warn("Failed to build a block", "err", err)
 		} else {
 			block := result.Block
-			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
+			reqLenStr := "nil"
+			if len(result.Requests) == 3 {
+				reqLenStr = fmt.Sprint("Deposit Requests", len(result.Requests[0].RequestData), "Withdrawal Requests", len(result.Requests[1].RequestData), "Consolidation Requests", len(result.Requests[2].RequestData))
+			}
+			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "executionRequests", len(result.Requests), "Requests", reqLenStr, "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
 		}
 
 		builder.syncCond.L.Lock()

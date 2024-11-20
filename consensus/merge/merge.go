@@ -306,7 +306,7 @@ func (s *Merge) Seal(chain consensus.ChainHeaderReader, blockWithReceipts *types
 	header.Nonce = ProofOfStakeNonce
 
 	select {
-	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests }:
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests}:
 	default:
 		log.Warn("Sealing result is not read", "sealhash", block.Hash())
 	}
