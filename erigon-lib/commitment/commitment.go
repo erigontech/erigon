@@ -227,10 +227,10 @@ func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error 
 }
 
 func (be *BranchEncoder) CollectUpdate(
-	ctx PatriciaContext,
-	prefix []byte,
-	bitmap, touchMap, afterMap uint16,
-	readCell func(nibble int, skip bool) (*cell, error),
+		ctx PatriciaContext,
+		prefix []byte,
+		bitmap, touchMap, afterMap uint16,
+		readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
 	prev, prevStep, err := ctx.Branch(prefix)
@@ -1181,7 +1181,10 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 		mainLock.Lock()
 		defer mainLock.Unlock()
 
-		//fmt.Printf("\tmount d=%d n=%0x %s\n", d, prevByte, c.FullString())
+		fmt.Printf("\tmount d=%d n=%0x %s\n", d, prevByte, c.FullString())
+		c.extLen = 0
+		c.hashedExtLen = 0
+
 		pph.root.grid[0][prevByte] = c
 		pph.mounts[prevByte].Reset()
 		pph.mounts[prevByte].currentKeyLen = 0
@@ -1211,9 +1214,13 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
+				if phnib.trace {
+					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+				}
 				return phnib.followAndUpdate(hashedKey, plainKey, nil)
 			}, etl.TransformArgs{Quit: ctx.Done()})
 			if err != nil {
+				panic(err)
 				return err
 			}
 			if cnt > 0 {

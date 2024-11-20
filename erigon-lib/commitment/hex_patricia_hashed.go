@@ -1520,7 +1520,9 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 }
 
 func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
-	// fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
+	//if hph.trace {
+	//	fmt.Printf("mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
+	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
 		if err := hph.fold(); err != nil {
@@ -1555,14 +1557,13 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 }
 
 func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, int, error) {
-	uptoroot := hph.activeRows == 0
 	for hph.activeRows > 0 {
 		if err := hph.fold(); err != nil {
 			panic(err)
 			return cell{}, 0, fmt.Errorf("final fold: %w", err)
 		}
 	}
-	if uptoroot {
+	if hph.rootPresent && hph.rootTouched {
 		return hph.root, 0, nil
 	}
 	_ = nib
