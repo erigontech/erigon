@@ -114,7 +114,7 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 }
 
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
-	stopCh := time.After(1 * time.Second)
+	stopCh := time.After(250 * time.Millisecond)
 	for {
 		if a.syncedData.HeadSlot() >= slot {
 			return
@@ -161,6 +161,10 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			errors.New("slot is required"),
 		)
 	}
+	if *slot > a.ethClock.GetCurrentSlot() {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
+	}
+
 	a.waitForHeadSlot(*slot)
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
