@@ -509,6 +509,7 @@ Loop:
 		skipPostEvaluation := false
 		var usedGas uint64
 		var txTasks []*state.TxTask
+		start := time.Now()
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
@@ -606,7 +607,7 @@ Loop:
 		}
 
 		mxExecBlocks.Add(1)
-
+		fmt.Println("block exec", time.Since(start))
 		if shouldGenerateChangesets {
 			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 			aggTx.RestrictSubsetFileDeletions(true)
@@ -614,6 +615,7 @@ Loop:
 			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
 			}
+			fmt.Println("commitment", time.Since(start))
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
 			executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
