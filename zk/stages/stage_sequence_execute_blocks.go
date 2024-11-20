@@ -300,6 +300,14 @@ func addSenders(
 	cryptoContext := secp256k1.ContextForThread(1)
 	senders := make([]common.Address, 0, len(finalTransactions))
 	for _, transaction := range finalTransactions {
+		from, ok := transaction.GetSender()
+		if ok {
+			senders = append(senders, from)
+			continue
+		}
+
+		// shouldn't be hit as we preload this value before processing the transaction
+		// to look for errors in handling it.
 		from, err := signer.SenderWithContext(cryptoContext, transaction)
 		if err != nil {
 			return err
