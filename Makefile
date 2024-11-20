@@ -50,7 +50,7 @@ ifeq ($(shell uname -s), Darwin)
 endif
 
 # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
-BUILD_TAGS = nosqlite,noboltdb
+BUILD_TAGS = nosqlite,noboltdb,netgo
 
 ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
