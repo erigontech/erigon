@@ -267,6 +267,11 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 func (b *BeaconBody) SetVersion(version clparams.StateVersion) {
 	b.Version = version
 	b.ExecutionPayload.SetVersion(version)
+	if version.AfterOrEqual(clparams.ElectraVersion) {
+		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashingsElectra)
+		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestationsElectra)
+		b.ExecutionRequests = NewExecutionRequests(b.beaconCfg)
+	}
 }
 
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {

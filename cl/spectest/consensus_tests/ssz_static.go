@@ -61,6 +61,10 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		require.NoError(t, err)
 		expectedRoot := libcommon.HexToHash(root.Root)
 		object := ref.Clone().(unmarshalerMarshalerHashable)
+		if versionObj, ok := object.(interface{ SetVersion(clparams.StateVersion) }); ok {
+			// Note: a bit tricky to change version here :(
+			versionObj.SetVersion(c.Version())
+		}
 		_, isBeaconState := object.(*state.CachingBeaconState)
 
 		snappyEncoded, err := fs.ReadFile(fsroot, serializedFile)
