@@ -144,10 +144,7 @@ func ExecV3(ctx context.Context,
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
 
-	batchSize := cfg.batchSize
-	chainDb := cfg.db
 	blockReader := cfg.blockReader
-	engine := cfg.engine
 	chainConfig := cfg.chainConfig
 	totalGasUsed := uint64(0)
 	start := time.Now()
@@ -162,7 +159,7 @@ func ExecV3(ctx context.Context,
 	if !useExternalTx {
 		if !parallel {
 			var err error
-			applyTx, err = chainDb.BeginRw(ctx) //nolint
+			applyTx, err = cfg.db.BeginRw(ctx) //nolint
 			if err != nil {
 				return err
 			}
@@ -279,7 +276,7 @@ func ExecV3(ctx context.Context,
 		}
 	} else {
 		var _nothing bool
-		if err := chainDb.View(ctx, func(tx kv.Tx) (err error) {
+		if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 			if _nothing, err = nothingToExec(applyTx); err != nil {
 				return err
 			} else if _nothing {
@@ -347,7 +344,7 @@ func ExecV3(ctx context.Context,
 	applyWorker.ResetState(rs, accumulator)
 	defer applyWorker.LogLRUStats()
 
-	commitThreshold := batchSize.Bytes()
+	commitThreshold := cfg.batchSize.Bytes()
 	progress := NewProgress(blockNum, commitThreshold, workerCount, false, execStage.LogPrefix(), logger)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -364,7 +361,7 @@ func ExecV3(ctx context.Context,
 	if parallel {
 		pe := &parallelExecutor{
 			execStage:                execStage,
-			chainDb:                  chainDb,
+			chainDb:                  cfg.db,
 			applyWorker:              applyWorker,
 			applyTx:                  applyTx,
 			outputTxNum:              &outputTxNum,
@@ -468,7 +465,7 @@ Loop:
 		inputBlockNum.Store(blockNum)
 		executor.domains().SetBlockNum(blockNum)
 
-		b, err = blockWithSenders(ctx, chainDb, executor.tx(), blockReader, blockNum)
+		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
 		if err != nil {
 			return err
 		}
@@ -490,7 +487,7 @@ Loop:
 			return f(n)
 		}
 		totalGasUsed += b.GasUsed()
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
 		// print type of engine
 		if parallel {
 			if err := executor.status(ctx, commitThreshold); err != nil {
