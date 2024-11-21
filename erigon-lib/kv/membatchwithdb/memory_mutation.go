@@ -69,7 +69,7 @@ func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation 
 	}
 }
 
-func NewMemoryBatchWithCustomDB(tx kv.Tx, db kv.RwDB, uTx kv.RwTx, tmpDir string) *MemoryMutation {
+func NewMemoryBatchWithCustomDB(tx kv.Tx, db kv.RwDB, uTx kv.RwTx) *MemoryMutation {
 	return &MemoryMutation{
 		db:             tx,
 		memDb:          db,
