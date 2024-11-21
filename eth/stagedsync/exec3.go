@@ -275,35 +275,6 @@ func ExecV3(ctx context.Context,
 		blockNum, maxTxNum       uint64
 	)
 
-	if applyTx != nil {
-		if _nothing, err := nothingToExec(applyTx); err != nil {
-			return err
-		} else if _nothing {
-			return nil
-		}
-
-		if err := restoreTxNum(applyTx); err != nil {
-			return err
-		}
-	} else {
-		var _nothing bool
-		if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
-			if _nothing, err = nothingToExec(applyTx); err != nil {
-				return err
-			} else if _nothing {
-				return nil
-			}
-
-			return restoreTxNum(applyTx)
-		}); err != nil {
-			return err
-		}
-		if _nothing {
-			return nil
-		}
-	}
-
-	ts := time.Duration(0)
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
@@ -323,8 +294,6 @@ func ExecV3(ctx context.Context,
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
-	var outputBlockNum = stages.SyncMetrics[stages.Execution]
-	inputBlockNum := &atomic.Uint64{}
 	var count uint64
 
 	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
@@ -346,7 +315,7 @@ func ExecV3(ctx context.Context,
 			return err
 		}
 	} else {
-		if err := chainDb.View(ctx, func(tx kv.Tx) (err error) {
+		if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 			inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, tx, doms, maxBlockNum)
 			return err
 		}); err != nil {
@@ -364,20 +333,9 @@ func ExecV3(ctx context.Context,
 	}
 	defer applyWorker.LogLRUStats()
 
-	shouldGenerateChangesets := blockNum >= cfg.blockReader.FrozenBlocks() &&
-		(maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets)
-
-	var accumulator *shards.Accumulator
-	if cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64 {
-		accumulator = cfg.notifications.Accumulator
-		if accumulator == nil {
-			accumulator = shards.NewAccumulator()
-		}
-	}
-
 	applyWorker.ResetState(rs, accumulator)
 
-	commitThreshold := batchSize.Bytes()
+	commitThreshold := cfg.batchSize.Bytes()
 
 	// TODO are these dups ?
 	processed := NewProgress(blockNum, commitThreshold, workerCount, true, execStage.LogPrefix(), logger)
@@ -420,7 +378,7 @@ func ExecV3(ctx context.Context,
 		defer executorCancel()
 
 		defer func() {
-			processed.Log("Done", executor.readState(), in, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			processed.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = pe
@@ -447,7 +405,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			processed.Log("Done", executor.readState(), in, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			processed.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = se
@@ -469,8 +427,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
-
-	var count uint64
 
 	var readAhead chan uint64
 	if !parallel {
@@ -699,7 +655,7 @@ Loop:
 				}
 
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState(), in, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+				progress.Log("", executor.readState(), nil, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {

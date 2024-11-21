@@ -162,7 +162,7 @@ type IntraBlockState interface {
 	Empty(common.Address) (bool, error)
 
 	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
-		precompiles []common.Address, txAccesses types.AccessList, authorities []common.Address)
+		precompiles []common.Address, txAccesses types.AccessList, authorities []common.Address) error
 
 	AddressInAccessList(addr common.Address) bool
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform

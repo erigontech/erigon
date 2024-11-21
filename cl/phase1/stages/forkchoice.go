@@ -51,7 +51,6 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		}
 
 	}
-	cn()
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
 	monitor.ObserveCurrentEpoch(headSlot / cfg.beaconCfg.SlotsPerEpoch)

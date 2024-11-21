@@ -203,7 +203,7 @@ func (t *prestateTracer) CaptureTxEnd(restGas uint64) {
 		}
 		modified := false
 		postAccount := &account{Storage: make(map[libcommon.Hash]libcommon.Hash)}
-		newBalance, _ := t.env.IntraBlockState().GetBalance(addr).ToBig()
+		newBalance, _ := t.env.IntraBlockState().GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState().GetNonce(addr)
 
 		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
@@ -216,7 +216,7 @@ func (t *prestateTracer) CaptureTxEnd(restGas uint64) {
 		}
 
 		if !t.config.DisableCode {
-			newCode := t.env.IntraBlockState().GetCode(addr)
+			newCode, _ := t.env.IntraBlockState().GetCode(addr)
 			if !bytes.Equal(newCode, t.pre[addr].Code) {
 				modified = true
 				postAccount.Code = newCode
@@ -297,12 +297,12 @@ func (t *prestateTracer) lookupAccount(addr libcommon.Address) {
 	code, _ := t.env.IntraBlockState().GetCode(addr)
 
 	t.pre[addr] = &account{
-		Balance: t.env.IntraBlockState().GetBalance(addr).ToBig(),
-		Nonce:   t.env.IntraBlockState().GetNonce(addr),
+		Balance: balance.ToBig(),
+		Nonce:   nonce,
 	}
 
 	if !t.config.DisableCode {
-		t.pre[addr].Code = t.env.IntraBlockState().GetCode(addr)
+		t.pre[addr].Code = code
 	}
 	if !t.config.DisableStorage {
 		t.pre[addr].Storage = make(map[libcommon.Hash]libcommon.Hash)

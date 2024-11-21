@@ -8,8 +8,6 @@ import (
 
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
