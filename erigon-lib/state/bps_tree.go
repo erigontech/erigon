@@ -400,21 +400,21 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip {
 			m = l
-			if offset == 0 {
-				offset = b.offt.Get(m)
-				g.Reset(offset)
-			}
-			v, _ = g.Next(v[:0])
-			if cmp = bytes.Compare(v, key); cmp > 0 {
-				return nil, false, 0, err
-			} else if cmp < 0 {
-				g.Skip()
-				l++
-				continue
-			}
-			v, _ = g.Next(v[:0])
-			offset = b.offt.Get(m)
-			return v, true, offset, nil
+			// if offset == 0 {
+			// 	offset = b.offt.Get(m)
+			// 	g.Reset(offset)
+			// }
+			// v, _ = g.Next(v[:0])
+			// if cmp = bytes.Compare(v, key); cmp > 0 {
+			// 	return nil, false, 0, err
+			// } else if cmp < 0 {
+			// 	g.Skip()
+			// 	l++
+			// 	continue
+			// }
+			// v, _ = g.Next(v[:0])
+			// offset = b.offt.Get(m)
+			// return v, true, offset, nil
 		}
 
 		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
