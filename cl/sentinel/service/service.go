@@ -106,6 +106,8 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 
 	var subscription *sentinel.GossipSubscription
 
+	fmt.Println("publishing gossip", msg.Name)
+
 	switch msg.Name {
 	case gossip.TopicNameBeaconBlock,
 		gossip.TopicNameBeaconAggregateAndProof,
