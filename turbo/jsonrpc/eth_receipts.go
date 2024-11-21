@@ -458,6 +458,21 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 	}
 
+	if txNum-1 == txnIndex {
+		txNumNew, err := rawdbv3.TxNums.Min(tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		txNumNew += txNum
+		txNum = txNumNew
+	} else {
+		txNum1, err := rawdbv3.TxNums.Min(tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		println("txn", txNum1+txnIndex, txNum)
+	}
+
 	if txn == nil && chainConfig.Bor != nil {
 		receipts, err := api.getReceipts(ctx, tx, block)
 		if err != nil {
