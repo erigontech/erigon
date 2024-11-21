@@ -36,7 +36,7 @@ import (
 )
 
 func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
-	// Trace block for Txns
+	// Trace block for Txs
 	newdbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		log.Error("Search trace error", "err", err)
