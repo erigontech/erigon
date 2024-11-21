@@ -78,6 +78,7 @@ var Defaults = Config{
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
 		ParallelStateFlushing: true,
+		ChaosMonkey:           false,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -105,8 +106,6 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-
-	ChaosMonkey: false,
 }
 
 func init() {
