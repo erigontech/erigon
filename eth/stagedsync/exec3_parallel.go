@@ -378,7 +378,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 			if txTask.Error != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error)
 			}
-			if pe.cfg.chaosMonkey {
+			if pe.cfg.syncCfg.chaosMonkey {
 				chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, txTask.Error)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")
