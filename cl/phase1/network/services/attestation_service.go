@@ -234,7 +234,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
 	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
-		s.scheduleAttestationForLaterProcessing(att)
+		//s.scheduleAttestationForLaterProcessing(att)
 		return ErrIgnore
 	}
 
