@@ -560,7 +560,7 @@ func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
 		}
 		sub.subscribed.Store(false)
 		log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())
-		//sub.s.updateENROnSubscription(sub.sub.Topic(), false)
+		sub.s.updateENROnSubscription(sub.sub.Topic(), false)
 		return
 	}
 	if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
