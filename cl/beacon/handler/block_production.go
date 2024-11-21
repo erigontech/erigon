@@ -187,8 +187,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			*slot,
 			*committeeIndex,
 		)
-		x, _ := json.Marshal(attestationData)
-		fmt.Println(string(x))
+
 		if err == attestation_producer.ErrHeadStateBehind {
 			return beaconhttp.NewEndpointError(
 				http.StatusServiceUnavailable,
