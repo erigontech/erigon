@@ -105,7 +105,7 @@ var readDomains = &cobra.Command{
 		}
 		defer chainDb.Close()
 
-		stateDb, err := kv2.New(log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
+		stateDb, err := kv2.New(kv.ChainDB, log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
 		if err != nil {
 			return
 		}
