@@ -77,9 +77,6 @@ import (
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
-// const Unbounded []byte = nil
-const Unlim int = -1
-
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
 
@@ -149,15 +146,16 @@ type DBVerbosityLvl int8
 type Label uint8
 
 const (
-	ChainDB         Label = 0
-	TxPoolDB        Label = 1
-	SentryDB        Label = 2
-	ConsensusDB     Label = 3
-	DownloaderDB    Label = 4
-	InMem           Label = 5
-	HeimdallDB      Label = 6
-	DiagnosticsDB   Label = 7
-	PolygonBridgeDB Label = 8
+	Unknown Label = iota
+	ChainDB
+	TxPoolDB
+	SentryDB
+	ConsensusDB
+	DownloaderDB
+	HeimdallDB
+	DiagnosticsDB
+	PolygonBridgeDB
+	CaplinDB
 )
 
 func (l Label) String() string {
@@ -172,14 +170,14 @@ func (l Label) String() string {
 		return "consensus"
 	case DownloaderDB:
 		return "downloader"
-	case InMem:
-		return "inMem"
 	case HeimdallDB:
 		return "heimdall"
 	case DiagnosticsDB:
 		return "diagnostics"
 	case PolygonBridgeDB:
 		return "polygon-bridge"
+	case CaplinDB:
+		return "caplin"
 	default:
 		return "unknown"
 	}
@@ -196,14 +194,16 @@ func UnmarshalLabel(s string) Label {
 		return ConsensusDB
 	case "downloader":
 		return DownloaderDB
-	case "inMem":
-		return InMem
 	case "heimdall":
 		return HeimdallDB
 	case "diagnostics":
 		return DiagnosticsDB
 	case "polygon-bridge":
 		return PolygonBridgeDB
+	case "caplin":
+		return CaplinDB
+	case "unknown":
+		return Unknown
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", s))
 	}
@@ -345,6 +345,9 @@ type StatelessRwTx interface {
 	Putter
 }
 
+// const Unbounded/EOF/EndOfTable []byte = nil
+const Unlim int = -1
+
 // Tx
 // WARNING:
 //   - Tx is not threadsafe and may only be used in the goroutine that created it
@@ -366,23 +369,16 @@ type Tx interface {
 	Cursor(table string) (Cursor, error)
 	CursorDupSort(table string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 
-	DBSize() (uint64, error)
-
 	// --- High-Level methods: 1request -> stream of server-side pushes ---
 
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
-	Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
-	// Stream is like Range, but for requesting huge data (Example: full table scan). Client can't stop it.
-	// Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error)
-	// RangeAscend - like Range [from, to) but also allow pass Limit parameters
+	// if `order.Desc` expecing `from`<`to`
 	// Limit -1 means Unlimited
-	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
-	// StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
-	// RangeDescend - is like Range [from, to), but expecing `from`<`to`
-	// example: RangeDescend("Table", "B", "A", -1)
-	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
+	// Designed for requesting huge data (Example: full table scan). Client can't stop it.
+	// Example: RangeDescend("Table", "B", "A", order.Asc, -1)
+	Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error)
 	//StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error)
 	// Prefix - is exactly Range(Table, prefix, kv.NextSubtree(prefix))
 	Prefix(table string, prefix []byte) (stream.KV, error)
@@ -512,7 +508,7 @@ type (
 )
 
 type TemporalGetter interface {
-	DomainGet(name Domain, k, k2 []byte) (v []byte, step uint64, err error)
+	GetLatest(name Domain, k, k2 []byte) (v []byte, step uint64, err error)
 }
 type TemporalTx interface {
 	Tx
@@ -520,13 +516,10 @@ type TemporalTx interface {
 
 	// DomainGetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
-	// Means if you want re-execute `txNum` on historical state - do `GetAsOf(key, txNum)` to read state
+	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
-	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
-
-	// HistorySeek - like `DomainGetAsOf` but without latest state - only for `History`
-	// `ok == true && v != nil && len(v) == 0` means key-creation even
-	HistorySeek(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+	GetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
+	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
 	// Asc semantic:  [from, to) AND from > to
@@ -536,11 +529,14 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error)
-	DomainRange(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
+
+	// HistorySeek - like `GetAsOf` but without latest state - only for `History`
+	// `ok == true && v != nil && len(v) == 0` means key-creation even
+	HistorySeek(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// HistoryRange - producing "state patch" - sorted list of keys updated at [fromTs,toTs) with their most-recent value.
 	//   no duplicates
-	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
+	HistoryRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error)
 }
 
 type TemporalRwTx interface {
@@ -569,10 +565,6 @@ type TemporalPutDel interface {
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
 
-type CanWarmupDB interface {
-	WarmupDB(force bool) error
-	LockDBInRam() error
-}
 type HasSpaceDirty interface {
 	SpaceDirty() (uint64, uint64, error)
 }

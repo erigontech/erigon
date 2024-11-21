@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
 
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -388,6 +388,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if ctx.Bool(utils.DisableIPV4.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv4 = true
 	}
+
+	if ctx.Bool(utils.ChaosMonkeyFlag.Name) {
+		cfg.ChaosMonkey = true
+	}
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
@@ -453,6 +457,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	cfg.StateStream = true
 	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
 		cfg.StateStream = false
+	}
+
+	if v := f.Bool(utils.ChaosMonkeyFlag.Name, true, utils.ChaosMonkeyFlag.Usage); v != nil {
+		cfg.ChaosMonkey = true
 	}
 }
 

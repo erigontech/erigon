@@ -26,6 +26,7 @@ import (
 	"github.com/Giulio2002/bls"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -73,7 +74,7 @@ func NewBlobSidecarService(
 		ethClock:          ethClock,
 		emitters:          emitters,
 	}
-	go b.loop(ctx)
+	// go b.loop(ctx)
 	return b
 }
 
@@ -159,26 +160,31 @@ func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaco
 	currentVersion := b.beaconCfg.GetCurrentStateVersion(parentHeader.Slot / b.beaconCfg.SlotsPerEpoch)
 	forkVersion := b.beaconCfg.GetForkVersionByVersion(currentVersion)
 
+	var (
+		domain []byte
+		pk     common.Bytes48
+		err    error
+	)
 	// Load head state
-	headState, cn := b.syncedDataManager.HeadState()
-	defer cn()
-	if headState == nil {
-		return ErrIgnore
-	}
-	domain, err := fork.ComputeDomain(b.beaconCfg.DomainBeaconProposer[:], utils.Uint32ToBytes4(forkVersion), headState.GenesisValidatorsRoot())
-	if err != nil {
+	if err := b.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		domain, err = fork.ComputeDomain(b.beaconCfg.DomainBeaconProposer[:], utils.Uint32ToBytes4(forkVersion), headState.GenesisValidatorsRoot())
+		if err != nil {
+			return err
+		}
+
+		pk, err = headState.ValidatorPublicKey(int(header.Header.ProposerIndex))
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
+
 	sigRoot, err := fork.ComputeSigningRoot(header.Header, domain)
 	if err != nil {
 		return err
 	}
-
-	pk, err := headState.ValidatorPublicKey(int(header.Header.ProposerIndex))
-	if err != nil {
-		return err
-	}
-	cn()
 
 	if ok, err = bls.Verify(header.Signature[:], sigRoot[:], pk[:]); err != nil {
 		return err

@@ -85,7 +85,7 @@ type Progress struct {
 	logger       log.Logger
 }
 
-func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
+func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
 	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -122,6 +122,7 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 		"buf", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.HistoryV3AggregationStep)),
+		"inMem", inMemExec,
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 
@@ -208,10 +209,7 @@ func ExecV3(ctx context.Context,
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
 
-	batchSize := cfg.batchSize
-	chainDb := cfg.db
 	blockReader := cfg.blockReader
-	engine := cfg.engine
 	chainConfig := cfg.chainConfig
 	totalGasUsed := uint64(0)
 	start := time.Now()
@@ -226,7 +224,7 @@ func ExecV3(ctx context.Context,
 	if !useExternalTx {
 		if !parallel {
 			var err error
-			applyTx, err = chainDb.BeginRw(ctx) //nolint
+			applyTx, err = cfg.db.BeginRw(ctx) //nolint
 			if err != nil {
 				return err
 			}
@@ -277,6 +275,66 @@ func ExecV3(ctx context.Context,
 		blockNum, maxTxNum       uint64
 	)
 
+	if applyTx != nil {
+		if _nothing, err := nothingToExec(applyTx); err != nil {
+			return err
+		} else if _nothing {
+			return nil
+		}
+
+		if err := restoreTxNum(applyTx); err != nil {
+			return err
+		}
+	} else {
+		var _nothing bool
+		if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
+			if _nothing, err = nothingToExec(applyTx); err != nil {
+				return err
+			} else if _nothing {
+				return nil
+			}
+
+			return restoreTxNum(applyTx)
+		}); err != nil {
+			return err
+		}
+		if _nothing {
+			return nil
+		}
+	}
+
+	ts := time.Duration(0)
+	blockNum = doms.BlockNum()
+	outputTxNum.Store(doms.TxNum())
+
+	if maxBlockNum < blockNum {
+		return nil
+	}
+
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets
+	if blockNum < cfg.blockReader.FrozenBlocks() {
+		shouldGenerateChangesets = false
+	}
+
+	if maxBlockNum > blockNum+16 {
+		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
+			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
+	}
+
+	agg.BuildFilesInBackground(outputTxNum.Load())
+
+	var outputBlockNum = stages.SyncMetrics[stages.Execution]
+	inputBlockNum := &atomic.Uint64{}
+	var count uint64
+
+	shouldReportToTxPool := cfg.notifications != nil && !isMining && maxBlockNum <= blockNum+64
+	var accumulator *shards.Accumulator
+	if shouldReportToTxPool {
+		accumulator = cfg.notifications.Accumulator
+		if accumulator == nil {
+			accumulator = shards.NewAccumulator()
+		}
+	}
 	rs := state.NewStateV3(doms, logger)
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
@@ -362,7 +420,7 @@ func ExecV3(ctx context.Context,
 		defer executorCancel()
 
 		defer func() {
-			processed.Log("Done", executor.readState(), pe.in, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+			processed.Log("Done", executor.readState(), in, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = pe
@@ -389,7 +447,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			processed.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+			processed.Log("Done", executor.readState(), in, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = se
@@ -462,7 +520,7 @@ Loop:
 		inputBlockNum.Store(blockNum)
 		executor.domains().SetBlockNum(blockNum)
 
-		b, err = blockWithSenders(ctx, chainDb, executor.tx(), blockReader, blockNum)
+		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
 		if err != nil {
 			return err
 		}
@@ -483,7 +541,7 @@ Loop:
 			return executor.getHeader(ctx, hash, number)
 		})
 		totalGasUsed += b.GasUsed()
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
 		// print type of engine
 		if parallel {
 			if err := executor.status(ctx, commitThreshold); err != nil {
@@ -640,8 +698,8 @@ Loop:
 					break
 				}
 
-				stepsInDB = rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState(), nil, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
+				progress.Log("", executor.readState(), in, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {

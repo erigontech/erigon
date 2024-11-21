@@ -7,12 +7,13 @@ import (
 	"errors"
 	"fmt"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"golang.org/x/sync/errgroup"
 )
 
 func NewSnapshotStore(base Store, snapshots *RoSnapshots) *SnapshotStore {
@@ -60,16 +61,16 @@ func (s *SnapshotStore) Prepare(ctx context.Context) error {
 
 var ErrSpanNotFound = errors.New("span not found")
 
-type spanSnapshotStore struct {
+type SpanSnapshotStore struct {
 	EntityStore[*Span]
 	snapshots *RoSnapshots
 }
 
-func NewSpanSnapshotStore(base EntityStore[*Span], snapshots *RoSnapshots) *spanSnapshotStore {
-	return &spanSnapshotStore{base, snapshots}
+func NewSpanSnapshotStore(base EntityStore[*Span], snapshots *RoSnapshots) *SpanSnapshotStore {
+	return &SpanSnapshotStore{base, snapshots}
 }
 
-func (s *spanSnapshotStore) Prepare(ctx context.Context) error {
+func (s *SpanSnapshotStore) Prepare(ctx context.Context) error {
 	if err := s.EntityStore.Prepare(ctx); err != nil {
 		return err
 	}
@@ -77,11 +78,11 @@ func (s *spanSnapshotStore) Prepare(ctx context.Context) error {
 	return <-s.snapshots.Ready(ctx)
 }
 
-func (s *spanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
-	return &spanSnapshotStore{txEntityStore[*Span]{s.EntityStore.(*mdbxEntityStore[*Span]), tx}, s.snapshots}
+func (s *SpanSnapshotStore) WithTx(tx kv.Tx) EntityStore[*Span] {
+	return &SpanSnapshotStore{txEntityStore[*Span]{s.EntityStore.(*mdbxEntityStore[*Span]), tx}, s.snapshots}
 }
 
-func (s *spanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
+func (s *SpanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 	return snaptype.RangeExtractorFunc(
 		func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 			return s.SnapType().RangeExtractor().Extract(ctx, blockFrom, blockTo, firstKey,
@@ -89,12 +90,12 @@ func (s *spanSnapshotStore) RangeExtractor() snaptype.RangeExtractor {
 		})
 }
 
-func (r *spanSnapshotStore) LastFrozenEntityId() uint64 {
-	if r.snapshots == nil {
+func (s *SpanSnapshotStore) LastFrozenEntityId() uint64 {
+	if s.snapshots == nil {
 		return 0
 	}
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
@@ -120,21 +121,21 @@ func (r *spanSnapshotStore) LastFrozenEntityId() uint64 {
 	return uint64(lastSpanID)
 }
 
-func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool, error) {
+func (s *SpanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool, error) {
 	var endBlock uint64
 	if id > 0 {
 		endBlock = SpanEndBlockNum(SpanId(id))
 	}
 
-	maxBlockNumInFiles := r.snapshots.VisibleBlocksAvailable(r.SnapType().Enum())
+	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(s.SnapType().Enum())
 	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
-		return r.EntityStore.Entity(ctx, id)
+		return s.EntityStore.Entity(ctx, id)
 	}
 
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], id)
 
-	tx := r.snapshots.ViewType(r.SnapType())
+	tx := s.snapshots.ViewType(s.SnapType())
 	defer tx.Close()
 	segments := tx.Segments
 
@@ -172,10 +173,10 @@ func (r *spanSnapshotStore) Entity(ctx context.Context, id uint64) (*Span, bool,
 	return nil, false, fmt.Errorf("span %d: %w (snapshots)", id, ErrSpanNotFound)
 }
 
-func (r *spanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
-	lastId, ok, err := r.EntityStore.LastEntityId(ctx)
+func (s *SpanSnapshotStore) LastEntityId(ctx context.Context) (uint64, bool, error) {
+	lastId, ok, err := s.EntityStore.LastEntityId(ctx)
 
-	snapshotLastId := r.LastFrozenEntityId()
+	snapshotLastId := s.LastFrozenEntityId()
 	if snapshotLastId > lastId {
 		return snapshotLastId, true, nil
 	}

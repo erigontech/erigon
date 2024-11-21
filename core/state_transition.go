@@ -32,14 +32,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -82,8 +81,6 @@ type StateTransition struct {
 	//some pre-allocated intermediate variables
 	sharedBuyGas        *uint256.Int
 	sharedBuyGasBalance *uint256.Int
-
-	isBor bool
 }
 
 // Message represents a message sent to a contract.
@@ -102,7 +99,7 @@ type Message interface {
 	Nonce() uint64
 	CheckNonce() bool
 	Data() []byte
-	AccessList() types2.AccessList
+	AccessList() types.AccessList
 	BlobHashes() []libcommon.Hash
 	Authorizations() []types.Authorization
 
@@ -111,7 +108,7 @@ type Message interface {
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 // TODO: convert the input to a struct
-func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool, authorizationsLen uint64) (uint64, error) {
+func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool, authorizationsLen uint64) (uint64, error) {
 	// Zero and non-zero bytes are priced differently
 	dataLen := uint64(len(data))
 	dataNonZeroLen := uint64(0)
@@ -130,7 +127,6 @@ func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation 
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
-	isBor := evm.ChainConfig().Bor != nil
 	return &StateTransition{
 		gp:        gp,
 		evm:       evm,
@@ -144,8 +140,6 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 
 		sharedBuyGas:        uint256.NewInt(0),
 		sharedBuyGasBalance: uint256.NewInt(0),
-
-		isBor: isBor,
 	}
 }
 
@@ -369,7 +363,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	accessTuples := slices.Clone[types2.AccessList](msg.AccessList())
+	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
@@ -393,7 +387,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			data.Reset()
 
 			// 1. chainId check
-			if auth.ChainID != nil && !auth.ChainID.IsZero() && auth.ChainID.CmpBig(st.evm.ChainRules().ChainID) != 0 {
+			if auth.ChainID != 0 && (!rules.ChainID.IsUint64() || rules.ChainID.Uint64() != auth.ChainID) {
 				log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "auth index", i)
 				continue
 			}
@@ -537,8 +531,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
 			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
-			if err := st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified); err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
+			if rules.IsAura && rules.IsPrague {
+				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
+				st.state.AddBalance(*burntContractAddress, st.evm.BlobFee, tracing.BalanceChangeUnspecified)
 			}
 		}
 	}

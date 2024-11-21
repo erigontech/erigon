@@ -424,7 +424,7 @@ func (h *Heimdall) Start(ctx context.Context) error {
 	return startHTTPServer(ctx, server, "devnet Heimdall service", h.logger)
 }
 
-func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *chi.Mux {
+func makeHeimdallRouter(ctx context.Context, client heimdall.Client) *chi.Mux {
 	router := chi.NewRouter()
 
 	writeResponse := func(w http.ResponseWriter, result any, err error) {

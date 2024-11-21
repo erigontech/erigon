@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -524,7 +525,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	if trace {
 		if GenerateTrace {
 			fmt.Printf("State after %d================\n", header.Number)
-			it, err := tx.Range(kv.HashedAccounts, nil, nil)
+			it, err := tx.Range(kv.HashedAccounts, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				return hashRoot, err
 			}
@@ -536,7 +537,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 				fmt.Printf("%x: %x\n", k, v)
 			}
 			fmt.Printf("..................\n")
-			it, err = tx.Range(kv.HashedStorage, nil, nil)
+			it, err = tx.Range(kv.HashedStorage, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				return hashRoot, err
 			}

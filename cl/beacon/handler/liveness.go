@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 )
 
 type live struct {
@@ -138,11 +139,15 @@ func (a *ApiHandler) obtainCurrentEpochParticipationFromEpoch(tx kv.Tx, epoch ui
 	if epoch > 0 {
 		prevEpoch--
 	}
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 
 	currParticipation, ok1 := a.forkchoiceStore.Participation(epoch)
 	prevParticipation, ok2 := a.forkchoiceStore.Participation(prevEpoch)
 	if !ok1 || !ok2 {
-		return a.stateReader.ReadParticipations(tx, blockSlot)
+		return a.stateReader.ReadParticipations(tx, stateGetter, blockSlot)
 	}
 	return currParticipation, prevParticipation, nil
 

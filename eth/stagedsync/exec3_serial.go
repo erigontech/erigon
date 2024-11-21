@@ -6,6 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
@@ -73,16 +78,20 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 
 				se.outputBlockNum.SetUint64(txTask.BlockNum)
 			}
-			//if !se.execStage.CurrentSyncCycle.IsInitialCycle && rand2.Int()%1500 == 0 && txTask.TxIndex == 0 && !se.cfg.badBlockHalt {
-			//	return fmt.Errorf("monkey in the datacenter: %w", consensus.ErrInvalidBlock)
-			//}
+			if se.cfg.chaosMonkey {
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, txTask.Error)
+				if chaosErr != nil {
+					log.Warn("Monkey in a consensus")
+					return chaosErr
+				}
+			}
 			return nil
 		}(); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return false, err
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.execStage.LogPrefix()),
-				"block", txTask.BlockNum, "txNum", txTask.TxNum, "hash", txTask.Header.Hash().String(), "err", err)
+				"block", txTask.BlockNum, "txNum", txTask.TxNum, "hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, consensus.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}

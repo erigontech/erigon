@@ -23,8 +23,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 )
@@ -164,7 +162,7 @@ type IntraBlockState interface {
 	Empty(common.Address) (bool, error)
 
 	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
-		precompiles []common.Address, txAccesses types2.AccessList, authorities []common.Address) error
+		precompiles []common.Address, txAccesses types.AccessList, authorities []common.Address)
 
 	AddressInAccessList(addr common.Address) bool
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform

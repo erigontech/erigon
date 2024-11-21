@@ -91,7 +91,7 @@ architecture.
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
-gp3): [Blocks Execution is slow on cloud-network-drives](#blocks-execution-is-slow-on-cloud-network-drives)
+gp3): Blocks Execution is slow on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
@@ -203,18 +203,20 @@ du -hsc /erigon/snapshots/*
 
 ### Erigon3 changes from Erigon2
 
-- Initial sync does download LatestState and it's history - no re-exec from 0 anymore.
-- ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
-- E3 can execute 1 historical transaction - without executing it's block - because history/indices have
-  transaction-granularity, instead of block-granularity.
-- E3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper then in E2 - see point
-  above).
-- Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
-- `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. To prevent it's grow: recommend `--batchSize <= 1G`
-- can symlink/mount latest state to fast drive and history to cheap drive
-- `--internalcl` is enabled by default. to disable use `--externalcl`
-- `--prune` flags changed: default `--prune.mode=archive`, FullNode: `--prune.mode=full`, MinimalNode (EIP-4444):
-  `--prune.mode=minimal`.
+- **Initial sync doesn't re-exec from 0:** downloading 99% LatestState and History
+- **Per-Transaction granularity of history** (Erigon2 had per-block). Means:
+    - Can execute 1 historical transaction - without executing it's block
+    - If account X change V1->V2->V1 within 1 block (different transactions): `debug_getModifiedAccountsByNumber` return
+      it
+    - Erigon3 doesn't store Logs (aka Receipts) - it always re-executing historical txn (but it's cheaper)
+- **Validator mode**: added. `--internalcl` is enabled by default. to disable use `--externalcl`.
+- **Store most of data in immutable files (segments/snapshots):**
+    - can symlink/mount latest state to fast drive and history to cheap drive
+    - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
+- **`--prune` flags changed**: see `--prune.mode` (default: `archive`, full: `full`, EIP-4444: `minimal`)
+- **Other changes:**
+    - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
+    - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
 
 ### Logging
 
@@ -697,7 +699,7 @@ Windows users may run erigon in 3 possible ways:
 * Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
   would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (
   eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact
-  those mount points use `DrvFS` which is a [network file system](#blocks-execution-is-slow-on-cloud-network-drives)
+  those mount points use `DrvFS` which is a [network file system](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
   and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data.
   This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if
   it is executed on the very same computer. If instead your data is hosted on the native Linux filesystem non

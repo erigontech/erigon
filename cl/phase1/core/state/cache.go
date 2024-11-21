@@ -227,7 +227,7 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 
 	numWorkers := runtime.NumCPU()
 	activeBalanceShards := make([]uint64, numWorkers)
-	wp := threading.CreateWorkerPool(numWorkers)
+	wp := threading.NewParallelExecutor()
 	shardSize := b.ValidatorSet().Length() / numWorkers
 
 	for i := 0; i < numWorkers; i++ {
@@ -247,7 +247,7 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 			return nil
 		})
 	}
-	wp.WaitAndClose()
+	wp.Execute()
 
 	for _, shard := range activeBalanceShards {
 		*b.totalActiveBalanceCache += shard
@@ -273,7 +273,6 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	b._refreshActiveBalancesIfNeeded()
 
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
-
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
 
@@ -287,6 +286,7 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	if b.Version() >= clparams.Phase0Version {
 		return b._initializeValidatorsPhase0()
 	}
+
 	return nil
 }
 

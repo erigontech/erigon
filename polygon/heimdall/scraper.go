@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-type scraper[TEntity Entity] struct {
+type Scraper[TEntity Entity] struct {
 	store           EntityStore[TEntity]
 	fetcher         entityFetcher[TEntity]
 	pollDelay       time.Duration
@@ -40,14 +40,14 @@ type scraper[TEntity Entity] struct {
 	logger          log.Logger
 }
 
-func newScraper[TEntity Entity](
+func NewScraper[TEntity Entity](
 	store EntityStore[TEntity],
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,
 	transientErrors []error,
 	logger log.Logger,
-) *scraper[TEntity] {
-	return &scraper[TEntity]{
+) *Scraper[TEntity] {
+	return &Scraper[TEntity]{
 		store:           store,
 		fetcher:         fetcher,
 		pollDelay:       pollDelay,
@@ -58,7 +58,7 @@ func newScraper[TEntity Entity](
 	}
 }
 
-func (s *scraper[TEntity]) Run(ctx context.Context) error {
+func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {
 		return err
@@ -121,11 +121,11 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (s *scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncommon.UnregisterFunc {
+func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncommon.UnregisterFunc {
 	return s.observers.Register(observer)
 }
 
-func (s *scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, error) {
+func (s *Scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, error) {
 	if err := s.syncEvent.Wait(ctx); err != nil {
 		return generics.Zero[TEntity](), err
 	}

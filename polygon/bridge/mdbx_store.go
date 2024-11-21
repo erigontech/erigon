@@ -28,6 +28,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
@@ -56,7 +57,7 @@ var databaseTablesCfg = kv.TableCfg{
 
 var ErrEventIdRangeNotFound = errors.New("event id range not found")
 
-type mdbxStore struct {
+type MdbxStore struct {
 	db *polygoncommon.Database
 }
 
@@ -64,25 +65,25 @@ type txStore struct {
 	tx kv.Tx
 }
 
-func NewMdbxStore(dataDir string, logger log.Logger, accede bool, roTxLimit int64) *mdbxStore {
-	return &mdbxStore{db: polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
+func NewMdbxStore(dataDir string, logger log.Logger, accede bool, roTxLimit int64) *MdbxStore {
+	return &MdbxStore{db: polygoncommon.NewDatabase(dataDir, kv.PolygonBridgeDB, databaseTablesCfg, logger, accede, roTxLimit)}
 }
 
-func NewDbStore(db kv.RoDB) *mdbxStore {
-	return &mdbxStore{db: polygoncommon.AsDatabase(db)}
+func NewDbStore(db kv.RoDB) *MdbxStore {
+	return &MdbxStore{db: polygoncommon.AsDatabase(db)}
 }
 
-func (s *mdbxStore) WithTx(tx kv.Tx) Store {
+func (s *MdbxStore) WithTx(tx kv.Tx) Store {
 	return txStore{tx: tx}
 }
 
-func (s *mdbxStore) RangeExtractor() snaptype.RangeExtractor {
+func (s *MdbxStore) RangeExtractor() snaptype.RangeExtractor {
 	return heimdall.EventRangeExtractor{
 		EventsDb: func() kv.RoDB { return s.db.RoDB() },
 	}
 }
 
-func (s *mdbxStore) Prepare(ctx context.Context) error {
+func (s *MdbxStore) Prepare(ctx context.Context) error {
 	err := s.db.OpenOnce(ctx)
 	if err != nil {
 		return err
@@ -91,13 +92,13 @@ func (s *mdbxStore) Prepare(ctx context.Context) error {
 	return nil
 }
 
-func (s *mdbxStore) Close() {
+func (s *MdbxStore) Close() {
 	s.db.Close()
 }
 
 // LastEventId the latest state sync event Id in given DB, 0 if DB is empty
 // NOTE: Polygon sync events start at index 1
-func (s *mdbxStore) LastEventId(ctx context.Context) (uint64, error) {
+func (s *MdbxStore) LastEventId(ctx context.Context) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
@@ -108,7 +109,7 @@ func (s *mdbxStore) LastEventId(ctx context.Context) (uint64, error) {
 }
 
 // LastProcessedEventId gets the last seen event Id in the BorEventNums table
-func (s *mdbxStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
+func (s *MdbxStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
@@ -118,7 +119,7 @@ func (s *mdbxStore) LastProcessedEventId(ctx context.Context) (uint64, error) {
 	return txStore{tx}.LastProcessedEventId(ctx)
 }
 
-func (s *mdbxStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo, bool, error) {
+func (s *MdbxStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockInfo, bool, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return ProcessedBlockInfo{}, false, err
@@ -128,7 +129,7 @@ func (s *mdbxStore) LastProcessedBlockInfo(ctx context.Context) (ProcessedBlockI
 	return txStore{tx}.LastProcessedBlockInfo(ctx)
 }
 
-func (s *mdbxStore) PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error {
+func (s *MdbxStore) PutProcessedBlockInfo(ctx context.Context, info ProcessedBlockInfo) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -148,15 +149,15 @@ func putProcessedBlockInfo(tx kv.RwTx, info ProcessedBlockInfo) error {
 	return tx.Put(kv.BorEventProcessedBlocks, k, v)
 }
 
-func (s *mdbxStore) LastFrozenEventBlockNum() uint64 {
+func (s *MdbxStore) LastFrozenEventBlockNum() uint64 {
 	return 0
 }
 
-func (s *mdbxStore) LastFrozenEventId() uint64 {
+func (s *MdbxStore) LastFrozenEventId() uint64 {
 	return 0
 }
 
-func (s *mdbxStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error {
+func (s *MdbxStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error {
 	if len(eventTxnToBlockNum) == 0 {
 		return nil
 	}
@@ -174,7 +175,7 @@ func (s *mdbxStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNu
 	return tx.Commit()
 }
 
-func (s *mdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
+func (s *MdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, false, err
@@ -185,7 +186,7 @@ func (s *mdbxStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcommon.
 }
 
 // LastEventIdWithinWindow gets the last event id where event.Id >= fromId and event.Time < toTime.
-func (s *mdbxStore) LastEventIdWithinWindow(ctx context.Context, fromId uint64, toTime time.Time) (uint64, error) {
+func (s *MdbxStore) LastEventIdWithinWindow(ctx context.Context, fromId uint64, toTime time.Time) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
@@ -207,7 +208,7 @@ func lastEventIdWithinWindow(tx kv.Tx, fromId uint64, toTime time.Time) (uint64,
 	k := make([]byte, 8)
 	binary.BigEndian.PutUint64(k, fromId)
 
-	it, err := tx.RangeAscend(kv.BorEvents, k, nil, -1)
+	it, err := tx.Range(kv.BorEvents, k, nil, order.Asc, kv.Unlim)
 	if err != nil {
 		return 0, err
 	}
@@ -235,7 +236,7 @@ func lastEventIdWithinWindow(tx kv.Tx, fromId uint64, toTime time.Time) (uint64,
 	return eventId, nil
 }
 
-func (s *mdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
+func (s *MdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecordWithTime) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -250,7 +251,7 @@ func (s *mdbxStore) PutEvents(ctx context.Context, events []*heimdall.EventRecor
 }
 
 // Events gets raw events, start inclusive, end exclusive
-func (s *mdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
+func (s *MdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -260,7 +261,7 @@ func (s *mdbxStore) Events(ctx context.Context, start, end uint64) ([][]byte, er
 	return txStore{tx}.Events(ctx, start, end)
 }
 
-func (s *mdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
+func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId map[uint64]uint64) error {
 	if len(blockNumToEventId) == 0 {
 		return nil
 	}
@@ -281,11 +282,11 @@ func (s *mdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId 
 // BlockEventIdsRange returns the [start, end] event Id for the given block number
 // ErrEventIdRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
-func (s *mdbxStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+func (s *MdbxStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
 	return s.blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
 }
 
-func (s *mdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, error) {
+func (s *MdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, error) {
 	var start, end uint64
 
 	tx, err := s.db.BeginRo(ctx)
@@ -297,7 +298,7 @@ func (s *mdbxStore) blockEventIdsRange(ctx context.Context, blockNum uint64, las
 	return txStore{tx}.blockEventIdsRange(ctx, blockNum, lastFrozenId)
 }
 
-func (s *mdbxStore) Unwind(ctx context.Context, blockNum uint64) error {
+func (s *MdbxStore) Unwind(ctx context.Context, blockNum uint64) error {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -313,7 +314,7 @@ func (s *mdbxStore) Unwind(ctx context.Context, blockNum uint64) error {
 	return tx.Commit()
 }
 
-func (s *mdbxStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
+func (s *MdbxStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
@@ -323,7 +324,7 @@ func (s *mdbxStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, bl
 	return txStore{tx}.BorStartEventId(ctx, hash, blockHeight)
 }
 
-func (s *mdbxStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+func (s *MdbxStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -333,11 +334,11 @@ func (s *mdbxStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, bloc
 	return txStore{tx}.EventsByBlock(ctx, hash, blockHeight)
 }
 
-func (s *mdbxStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
+func (s *MdbxStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool, error) {
 	return nil, false, nil
 }
 
-func (s *mdbxStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
+func (s *MdbxStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return 0, err
@@ -513,7 +514,7 @@ func (s txStore) Events(ctx context.Context, start, end uint64) ([][]byte, error
 	kEnd := make([]byte, 8)
 	binary.BigEndian.PutUint64(kEnd, end)
 
-	it, err := s.tx.Range(kv.BorEvents, kStart, kEnd)
+	it, err := s.tx.Range(kv.BorEvents, kStart, kEnd, order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}

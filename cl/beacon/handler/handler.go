@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -64,18 +65,19 @@ type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
 
-	blockReader     freezeblocks.BeaconSnapshotReader
-	indiciesDB      kv.RwDB
-	netConfig       *clparams.NetworkConfig
-	ethClock        eth_clock.EthereumClock
-	beaconChainCfg  *clparams.BeaconChainConfig
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	operationsPool  pool.OperationsPool
-	syncedData      synced_data.SyncedData
-	stateReader     *historical_states_reader.HistoricalStatesReader
-	sentinel        sentinel.SentinelClient
-	blobStoage      blob_storage.BlobStorage
-	caplinSnapshots *freezeblocks.CaplinSnapshots
+	blockReader          freezeblocks.BeaconSnapshotReader
+	indiciesDB           kv.RwDB
+	netConfig            *clparams.NetworkConfig
+	ethClock             eth_clock.EthereumClock
+	beaconChainCfg       *clparams.BeaconChainConfig
+	forkchoiceStore      forkchoice.ForkChoiceStorage
+	operationsPool       pool.OperationsPool
+	syncedData           synced_data.SyncedData
+	stateReader          *historical_states_reader.HistoricalStatesReader
+	sentinel             sentinel.SentinelClient
+	blobStoage           blob_storage.BlobStorage
+	caplinSnapshots      *freezeblocks.CaplinSnapshots
+	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
 	version string // Node's version
 
@@ -143,6 +145,7 @@ func NewApiHandler(
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
 	validatorMonitor monitor.ValidatorMonitor,
+	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
 	enableMemoizedHeadState bool,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
@@ -150,18 +153,19 @@ func NewApiHandler(
 		panic(err)
 	}
 	return &ApiHandler{
-		logger:          logger,
-		validatorParams: validatorParams,
-		o:               sync.Once{},
-		netConfig:       netConfig,
-		ethClock:        ethClock,
-		beaconChainCfg:  beaconChainConfig,
-		indiciesDB:      indiciesDB,
-		forkchoiceStore: forkchoiceStore,
-		operationsPool:  operationsPool,
-		blockReader:     rcsn,
-		syncedData:      syncedData,
-		stateReader:     stateReader,
+		logger:               logger,
+		validatorParams:      validatorParams,
+		o:                    sync.Once{},
+		netConfig:            netConfig,
+		ethClock:             ethClock,
+		beaconChainCfg:       beaconChainConfig,
+		indiciesDB:           indiciesDB,
+		forkchoiceStore:      forkchoiceStore,
+		operationsPool:       operationsPool,
+		blockReader:          rcsn,
+		syncedData:           syncedData,
+		stateReader:          stateReader,
+		caplinStateSnapshots: caplinStateSnapshots,
 		randaoMixesPool: sync.Pool{New: func() interface{} {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
