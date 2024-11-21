@@ -91,7 +91,8 @@ architecture.
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
-gp3): Blocks Execution is slow on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
+gp3): Blocks Execution is slow
+on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
@@ -699,7 +700,8 @@ Windows users may run erigon in 3 possible ways:
 * Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
   would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (
   eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact
-  those mount points use `DrvFS` which is a [network file system](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
+  those mount points use `DrvFS` which is
+  a [network file system](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
   and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data.
   This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if
   it is executed on the very same computer. If instead your data is hosted on the native Linux filesystem non
@@ -765,10 +767,19 @@ same Disk.
 
 (Like gp3)
 You may read: https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
-In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
-non-batched way.
-Tricks: if you throw anough RAM and set env variable `ERIGON_SNAPSHOT_MADV_RND=false` - then Erigon will work
-good-enough on Cloud drives - in cost of higher IO.
+In short: network-disks are bad for blocks execution - because they are designed for parallel/batch workloads (databases
+with many parallel requests). But blocks execution in Erigon is non-parallel and using blocking-io.
+
+What can do:
+
+- reduce disk latency (not throughput, not iops)
+    - use latency-critical cloud-drives
+    - or attached-NVMe (at least for initial sync)
+- increase RAM
+- if you throw anough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
+- Use `--db.pagesize=64kb` (less fragmentation, more IO)
+- Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
+- Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
 ### Filesystem's background features are expensive
 
