@@ -480,7 +480,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
-
+	println("txnum", txNum, "txInd", txnIndex)
 	receipt, err := api.getReceipt(ctx, chainConfig, tx.(kv.TemporalTx), block, int(txnIndex), txNum, true)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %w", err)
