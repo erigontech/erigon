@@ -277,5 +277,6 @@ type Sync struct {
 	UploadFrom       rpc.BlockNumber
 	FrozenBlockLimit uint64
 
-	ChaosMonkey bool
+	ChaosMonkey              bool
+	AlwaysGenerateChangesets bool
 }

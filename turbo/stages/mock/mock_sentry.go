@@ -495,7 +495,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					mock.Notifications,
 					cfg.StateStream,
 					/*stateStream=*/ false,
-					/*alwaysGenerateChangesets=*/ true,
 					dirs,
 					mock.BlockReader,
 					mock.sentriesClient.Hd,
