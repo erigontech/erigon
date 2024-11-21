@@ -156,7 +156,7 @@ func resetOpcodeTracer(ot *opcodeTracer) {
 	}
 	// allocate new storage, allow past storage to be GCed
 	ot.Txs = make([]*txn, 0, 64)
-	// reset the counter of Txns at depth 0
+	// reset the counter of Txs at depth 0
 	ot.txsInDepth[0] = 0
 }
 

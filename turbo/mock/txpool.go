@@ -69,7 +69,7 @@ func (p *TestTxPool) add(txs []types.Transaction) {
 	for _, txn := range txs {
 		p.pool[txn.Hash()] = txn
 	}
-	p.txFeed.Send(core.NewTxnsEvent{Txns: txs})
+	p.txFeed.Send(core.NewTxsEvent{Txs: txs})
 }
 
 // AddRemotes appends a batch of transactions to the pool, and notifies any
@@ -124,8 +124,8 @@ func (p *TestTxPool) CountContent() (pending uint, queued uint) {
 	return
 }
 
-// SubscribeNewTxsEvent should return an event subscription of NewTxnsEvent and
+// SubscribeNewTxsEvent should return an event subscription of NewTxsEvent and
 // send events to the given channel.
-func (p *TestTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxnsEvent) event.Subscription {
+func (p *TestTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return p.txFeed.Subscribe(ch)
 }

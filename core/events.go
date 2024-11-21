@@ -25,9 +25,9 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
-// NewTxnsEvent is posted when a batch of transactions enter the transaction pool.
-type NewTxnsEvent struct {
-	Txns []types.Transaction
+// NewTxsEvent is posted when a batch of transactions enter the transaction pool.
+type NewTxsEvent struct {
+	Txs []types.Transaction
 }
 
 // RemovedLogsEvent is posted when a reorg happens

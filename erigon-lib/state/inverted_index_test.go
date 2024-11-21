@@ -325,7 +325,7 @@ func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, 
 }
 
 // Creates InvertedIndex instance and fills it with generated data.
-// Txns - amount of transactions to generate
+// Txs - amount of transactions to generate
 // AggStep - aggregation step for InvertedIndex
 // Module - amount of keys to generate
 func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
