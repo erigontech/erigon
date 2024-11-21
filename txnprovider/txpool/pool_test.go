@@ -983,7 +983,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 
 	ctx := context.Background()
 
-	err = txnPool.Start(ctx, db)
+	err = txnPool.Start(ctx)
 	assert.NoError(err)
 
 	var stateVersionID uint64 = 0
