@@ -529,7 +529,7 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 		return borConsensusEng
 	}
 
-	t.Fatalf("unimplmented consensus engine init for cfg %v", cfg.ChainConfig)
+	t.Fatalf("unimplemented consensus engine init for cfg %v", cfg.ChainConfig)
 	return nil
 }
 
