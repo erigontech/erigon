@@ -509,6 +509,10 @@ func (c *StreamClient) handleSocketError(socketErr error) bool {
 // reads entries to the end of the stream
 // at end will wait for new entries to arrive
 func (c *StreamClient) readAllEntriesToChannel() (err error) {
+	defer func() {
+		c.setStreaming(false)
+	}()
+
 	c.setStreaming(true)
 	c.stopReadingToChannel.Store(false)
 
