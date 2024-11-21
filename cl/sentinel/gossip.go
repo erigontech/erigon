@@ -554,14 +554,13 @@ func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
 	var err error
 	expirationTime := sub.expiration.Load().(time.Time)
 	if sub.subscribed.Load() && time.Now().After(expirationTime) {
-		fmt.Println("AAS")
-		sub.stopCh <- struct{}{}
-		if err := sub.topic.Close(); err != nil {
-			log.Warn("[Gossip] failed to close topic", "err", err)
-		}
-		sub.subscribed.Store(false)
-		log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())
-		sub.s.updateENROnSubscription(sub.sub.Topic(), false)
+		// sub.stopCh <- struct{}{}
+		// if err := sub.topic.Close(); err != nil {
+		// 	log.Warn("[Gossip] failed to close topic", "err", err)
+		// }
+		// sub.subscribed.Store(false)
+		// log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())
+		// sub.s.updateENROnSubscription(sub.sub.Topic(), false)
 		return
 	}
 	if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
