@@ -70,7 +70,7 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var cachedBytes uint64
-	var b0 [256][]*Node
+	// var b0 [256][]*Node
 	for i := 0; i < len(nodes); i++ {
 		if envAssertBTKeys {
 			eq, r, err := keyCmp(nodes[i].key, nodes[i].di, kv, nil)
@@ -84,8 +84,8 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 		cachedBytes += nsz + uint64(len(nodes[i].key))
 
 		nodes[i].off = offt.Get(nodes[i].di)
-		k0 := nodes[i].key[0]
-		b0[k0] = append(b0[k0], nodes[i])
+		// k0 := nodes[i].key[0]
+		// b0[k0] = append(b0[k0], nodes[i])
 	}
 
 	return bt
@@ -267,12 +267,13 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 // bs performs pre-seach over warmed-up list of nodes to figure out left and right bounds on di for key
 func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
 	dr = b.offt.Count()
-	m, l, r := 0, 0, len(b.b0mx[x[0]]) //nolint
+	m, l, r := 0, 0, len(b.mx) //nolint
 
 	for l < r {
 		m = (l + r) >> 1
 		// m = l
-		n = b.b0mx[x[0]][m]
+		// n = b.b0mx[x[0]][m]
+		n = b.mx[m]
 
 		if b.trace {
 			fmt.Printf("bs di:%d k:%x\n", n.di, n.key)
