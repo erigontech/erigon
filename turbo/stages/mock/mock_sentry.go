@@ -281,6 +281,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.DeprecatedTxPool.StartOnInit = true
 	cfg.Dirs = dirs
 	cfg.AlwaysGenerateChangesets = true
+	cfg.ChaosMonkey = false
 
 	logger := log.Root()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
