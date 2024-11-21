@@ -105,7 +105,7 @@ func NewGossipReceiver(
 		voluntaryExitService:         voluntaryExitService,
 		blsToExecutionChangeService:  blsToExecutionChangeService,
 		proposerSlashingService:      proposerSlashingService,
-		attestationsLimiter:          newTimeBasedRateLimiter(4*time.Second, 250),
+		attestationsLimiter:          newTimeBasedRateLimiter(4*time.Second, 125),
 		aggregateAndProofLimiter:     newTimeBasedRateLimiter(4*time.Second, 75),
 	}
 }
