@@ -562,7 +562,7 @@ func init() {
 	withHeimdall(cmdStageExec)
 	withWorkers(cmdStageExec)
 	withChaosMonkey(cmdStageExec)
-	withLoopBlockLimit(cmdStageExec)
+	withChainTipMode(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withConfig(cmdStageCustomTrace)
@@ -1061,7 +1061,12 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
 
-	syncCfg.AlwaysGenerateChangesets = syncCfg.LoopBlockLimit <= 1
+	if chainTipMode {
+		syncCfg.LoopBlockLimit = 1
+		syncCfg.AlwaysGenerateChangesets = true
+		noCommit = true
+	}
+
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
@@ -1112,8 +1117,33 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger)
-	if err != nil {
+	if chainTipMode {
+		var execProgress uint64
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		for bn := execProgress; bn < block; bn++ {
+			if err := db.Update(ctx, func(tx kv.RwTx) error {
+				txc.Tx = tx
+				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger); err != nil {
 		return err
 	}
 
