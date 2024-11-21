@@ -1060,6 +1060,8 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
+
+	syncCfg.AlwaysGenerateChangesets = syncCfg.LoopBlockLimit <= 1
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
