@@ -193,6 +193,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
 			snapshotsDisabled: true,
 		},
+		idxList:                     withHashMap | withExistence,
 		replaceKeysInValues:         a.commitmentValuesTransform,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 		compress:                    seg.CompressKeys,
