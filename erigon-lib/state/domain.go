@@ -1606,7 +1606,7 @@ func (dt *DomainRoTx) GetAsOfFile(key []byte, txNum uint64) ([]byte, bool, error
 
 	if traceGetLatest == dt.name {
 		defer func() {
-			fmt.Printf("GetAsOfFile(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
+			fmt.Printf("getAsOfFile(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
 				dt.name.String(), key, v, found, foundStep, dt.files.EndTxNum()/dt.d.aggregationStep)
 		}()
 	}

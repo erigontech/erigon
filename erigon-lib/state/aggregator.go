@@ -1820,7 +1820,7 @@ func (ac *AggregatorRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, domain kv.Dom
 func (ac *AggregatorRoTx) RangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	return ac.d[domain].RangeLatest(tx, from, to, limit)
 }
-func (ac *AggregatorRoTx) GetAsOfFile(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (ac *AggregatorRoTx) getAsOfFile(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return ac.d[name].GetAsOfFile(key, ts)
 }
 
