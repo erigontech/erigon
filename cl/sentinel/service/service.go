@@ -106,7 +106,11 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 
 	var subscription *sentinel.GossipSubscription
 
-	fmt.Println("publishing gossip", msg.Name)
+	if msg.SubnetId == nil {
+		fmt.Println("publishing gossip", msg.Name)
+	} else {
+		fmt.Println("publishing gossip", msg.Name, msg.SubnetId)
+	}
 
 	switch msg.Name {
 	case gossip.TopicNameBeaconBlock,
