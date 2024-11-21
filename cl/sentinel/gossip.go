@@ -554,6 +554,7 @@ func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
 	var err error
 	expirationTime := sub.expiration.Load().(time.Time)
 	if sub.subscribed.Load() && time.Now().After(expirationTime) {
+		fmt.Println("AAS")
 		sub.stopCh <- struct{}{}
 		if err := sub.topic.Close(); err != nil {
 			log.Warn("[Gossip] failed to close topic", "err", err)
