@@ -389,7 +389,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 				if exists {
 					btM := DefaultBtreeM
-					if toStep == 0 {
+					if toStep == 0 && d.filenameBase == "commitment" {
 						btM = 128
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, btM, item.decompressor, d.compression); err != nil {
@@ -1128,7 +1128,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 	{
 		btPath := d.kvBtFilePath(stepFrom, stepTo)
 		btM := DefaultBtreeM
-		if stepFrom == 0 {
+		if stepFrom == 0 && d.filenameBase == "commitment" {
 			btM = 128
 		}
 
@@ -1231,7 +1231,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	{
 		btPath := d.kvBtFilePath(step, step+1)
 		btM := DefaultBtreeM
-		if step == 0 {
+		if step == 0 && d.filenameBase == "commitment" {
 			btM = 128
 		}
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
