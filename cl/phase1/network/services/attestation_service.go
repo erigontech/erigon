@@ -112,6 +112,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
 
+	fmt.Println("received", *subnet)
+
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
 		index, err := att.Attestation.ElectraSingleCommitteeIndex()
 		if err != nil {
