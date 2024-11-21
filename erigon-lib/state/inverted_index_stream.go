@@ -91,7 +91,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			}
 			item := it.stack[len(it.stack)-1]
 			it.stack = it.stack[:len(it.stack)-1]
-			offset, ok := item.reader.TwoLayerLookup(it.key)
+			offset, ok := item.reader.Lookup(it.key)
 			if !ok {
 				continue
 			}
