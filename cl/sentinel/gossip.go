@@ -643,6 +643,7 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			if msg.ReceivedFrom == s.host {
 				continue
 			}
+			fmt.Println(topicName)
 
 			s.ch <- &GossipMessage{
 				From:      msg.ReceivedFrom,
