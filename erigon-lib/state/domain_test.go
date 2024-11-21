@@ -80,7 +80,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	historyValsTable := "HistoryVals"
 	settingsTable := "Settings" //nolint
 	indexTable := "Index"
-	db := mdbx.New(logger).InMem(dirs.Chaindata).Label(kv.ChainDB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		tcfg := kv.TableCfg{
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
