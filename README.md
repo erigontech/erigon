@@ -91,7 +91,7 @@ architecture.
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
-gp3): [Blocks Execution is slow on cloud-network-drives](#blocks-execution-is-slow-on-cloud-network-drives)
+gp3): Blocks Execution is slow on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
@@ -699,7 +699,7 @@ Windows users may run erigon in 3 possible ways:
 * Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
   would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (
   eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact
-  those mount points use `DrvFS` which is a [network file system](#blocks-execution-is-slow-on-cloud-network-drives)
+  those mount points use `DrvFS` which is a [network file system](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
   and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data.
   This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if
   it is executed on the very same computer. If instead your data is hosted on the native Linux filesystem non
