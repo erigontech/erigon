@@ -101,7 +101,7 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 
 func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cache, newTxns chan txpool.Announcements, chainDB kv.RoDB,
 	sentryClients []sentryproto.SentryClient, stateChangesClient txpool.StateChangesClient, feeCalculator txpool.FeeCalculator, logger log.Logger) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
-	opts := mdbx.New(logger).Label(kv.TxPoolDB).Path(cfg.DBDir).
+	opts := mdbx.New(kv.TxPoolDB, logger).Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		WriteMergeThreshold(3 * 8192).
 		PageSize(uint64(16 * datasize.KB)).
