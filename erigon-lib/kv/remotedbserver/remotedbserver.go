@@ -526,7 +526,7 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) DomainGet(_ context.Context, req *remote.GetLatestReq) (reply *remote.GetLatestReply, err error) {
+func (s *KvServer) GetLatest(_ context.Context, req *remote.GetLatestReq) (reply *remote.GetLatestReply, err error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
