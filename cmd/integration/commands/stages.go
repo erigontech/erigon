@@ -1124,6 +1124,15 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 				return err
 			}
+			if execProgress == 0 {
+				doms, err := libstate.NewSharedDomains(tx, log.New())
+				if err != nil {
+					panic(err)
+				}
+				execProgress = doms.BlockNum()
+				doms.Close()
+			}
+
 			if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 				return err
 			}
@@ -1136,6 +1145,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		}
 
 		for bn := execProgress; bn < block; bn++ {
+			fmt.Printf("dbg: %d\n", bn)
 			if err := db.Update(ctx, func(tx kv.RwTx) error {
 				txc.Tx = tx
 				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
