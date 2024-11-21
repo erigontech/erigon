@@ -245,10 +245,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 
-	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
-		return ErrIgnore
-	}
-
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{signature[:]},
 		SignRoots:  [][]byte{signingRoot[:]},
@@ -257,10 +253,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
-			err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
-			if errors.Is(err, aggregation.ErrIsSuperset) {
-				return
+			if s.committeeSubscribe.NeedToAggregate(att.Attestation) {
+				err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
+				if errors.Is(err, aggregation.ErrIsSuperset) {
+					return
+				}
 			}
+
 			if err != nil {
 				log.Warn("could not check aggregate attestation", "err", err)
 				return
