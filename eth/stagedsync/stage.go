@@ -1,12 +1,28 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
 // ExecFunc is the execution function for the stage to move forward.
@@ -41,8 +57,8 @@ type Stage struct {
 }
 
 type CurrentSyncCycleInfo struct {
-	IsInitialCycle bool //deprecated. use IsFirstCycle and IsOnChainTip
-	IsFirstCycle   bool
+	IsInitialCycle bool // means: not-on-chain-tip. can be several sync cycle in this mode.
+	IsFirstCycle   bool // means: first cycle
 }
 
 // StageState is the state of the stage.
@@ -54,7 +70,8 @@ type StageState struct {
 	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
-func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
+func (s *StageState) LogPrefix() string     { return s.state.LogPrefix() }
+func (s *StageState) SyncMode() stages.Mode { return s.state.mode }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
@@ -71,7 +88,7 @@ func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 }
 
 type UnwindReason struct {
-	// If we;re unwinding due to a fork - we want to unlink blocks but not mark
+	// If we're unwinding due to a fork - we want to unlink blocks but not mark
 	// them as bad - as they may get replayed then deselected
 	Block *libcommon.Hash
 	// If unwind is caused by a bad block, this error is not empty

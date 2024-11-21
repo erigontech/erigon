@@ -1,11 +1,27 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 func (b *CachingBeaconState) UpgradeToAltair() error {
@@ -24,12 +40,17 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	b.SetVersion(clparams.AltairVersion)
 	// Fill in previous epoch participation from the pre state's pending attestations
 	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
-		attestationData := pa.AttestantionData()
-		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay(), false)
+		attestationData := pa.Data
+		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay, false)
 		if err != nil {
 			return err
 		}
-		indices, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
+		attestation := &solid.Attestation{
+			AggregationBits: pa.AggregationBits,
+			Data:            attestationData,
+			// don't care signature and committee_bits here
+		}
+		indices, err := b.GetAttestingIndicies(attestation, false)
 		if err != nil {
 			return err
 		}
@@ -112,5 +133,25 @@ func (b *CachingBeaconState) UpgradeToDeneb() error {
 	b.SetLatestExecutionPayloadHeader(header)
 	// Update the state root cache
 	b.SetVersion(clparams.DenebVersion)
+	return nil
+}
+
+func (b *CachingBeaconState) UpgradeToElectra() error {
+	b.previousStateRoot = libcommon.Hash{}
+	epoch := Epoch(b.BeaconState)
+	// update version
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().ElectraForkVersion))
+	b.SetFork(fork)
+
+	// Update the payload header.
+	//header := b.LatestExecutionPayloadHeader()
+	// header.Electra()
+	//b.SetLatestExecutionPayloadHeader(header)
+
+	// Update the state root cache
+	b.SetVersion(clparams.ElectraVersion)
 	return nil
 }

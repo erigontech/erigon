@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sentry
 
 import (
@@ -23,27 +39,27 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	proto_types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/dnsdisc"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 const (
@@ -238,7 +254,7 @@ func (pi *PeerInfo) Async(f func(), logger log.Logger) {
 				default:
 				}
 			}
-			logger.Debug("slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
+			logger.Trace("[sentry] slow peer or too many requests, dropping its old requests", "name", pi.peer.Name())
 		}
 	}
 }
@@ -438,20 +454,6 @@ func runPeer(
 				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
-		case eth.GetNodeDataMsg:
-			if protocol >= direct.ETH67 {
-				msg.Discard()
-				return p2p.NewPeerError(p2p.PeerErrorMessageObsolete, p2p.DiscSubprotocolError, nil, fmt.Sprintf("unexpected GetNodeDataMsg from %s in eth/%d", peerID, protocol))
-			}
-			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
-				continue
-			}
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
-			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
-			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -542,17 +544,18 @@ func runPeer(
 		msgType := eth.ToProto[protocol][msg.Code]
 		msgCap := cap.String()
 
-		trackPeerStatistics(peerInfo.peer.Info().ID, true, msgType.String(), msgCap, int(msg.Size))
+		trackPeerStatistics(peerInfo.peer.Info().Name, peerInfo.peer.Info().ID, true, msgType.String(), msgCap, int(msg.Size))
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
 	}
 }
 
-func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
+func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType string, msgCap string, bytes int) {
 	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
 		stats := diagnostics.PeerStatisticMsgUpdate{
+			PeerName: peerName,
 			PeerID:   peerID,
 			Inbound:  inbound,
 			MsgType:  msgType,
@@ -608,77 +611,73 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 	var disc enode.Iterator
 	if dialCandidates != nil {
 		disc = dialCandidates()
+	} else {
+		disc, _ = setupDiscovery(ss.p2p.DiscoveryDNS)
 	}
-	protocols := []uint{protocol}
-	if protocol == direct.ETH67 {
-		protocols = append(protocols, direct.ETH66)
-	}
-	for _, p := range protocols {
-		protocol := p
-		ss.Protocols = append(ss.Protocols, p2p.Protocol{
-			Name:           eth.ProtocolName,
-			Version:        protocol,
-			Length:         17,
-			DialCandidates: disc,
-			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
-				peerID := peer.Pubkey()
-				printablePeerID := hex.EncodeToString(peerID[:])[:20]
-				if ss.getPeer(peerID) != nil {
-					return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
-				}
-				logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
 
-				peerInfo := NewPeerInfo(peer, rw)
-				peerInfo.protocol = protocol
-				defer peerInfo.Close()
+	ss.Protocols = append(ss.Protocols, p2p.Protocol{
+		Name:           eth.ProtocolName,
+		Version:        protocol,
+		Length:         17,
+		DialCandidates: disc,
+		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
+			peerID := peer.Pubkey()
+			printablePeerID := hex.EncodeToString(peerID[:])[:20]
+			if ss.getPeer(peerID) != nil {
+				return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
+			}
+			logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
 
-				defer ss.GoodPeers.Delete(peerID)
+			peerInfo := NewPeerInfo(peer, rw)
+			peerInfo.protocol = protocol
+			defer peerInfo.Close()
 
-				status := ss.GetStatus()
+			defer ss.GoodPeers.Delete(peerID)
 
-				if status == nil {
-					return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
-				}
+			status := ss.GetStatus()
 
-				peerBestHash, err := handShake(ctx, status, rw, protocol, protocol)
-				if err != nil {
-					return err
-				}
+			if status == nil {
+				return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
+			}
 
-				// handshake is successful
-				logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
+			peerBestHash, err := handShake(ctx, status, rw, protocol, protocol)
+			if err != nil {
+				return err
+			}
 
-				ss.GoodPeers.Store(peerID, peerInfo)
-				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
-				defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
-				getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
-				if getBlockHeadersErr != nil {
-					return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
-				}
+			// handshake is successful
+			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
 
-				cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
+			ss.GoodPeers.Store(peerID, peerInfo)
+			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
+			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
+			getBlockHeadersErr := ss.getBlockHeaders(ctx, *peerBestHash, peerID)
+			if getBlockHeadersErr != nil {
+				return p2p.NewPeerError(p2p.PeerErrorFirstMessageSend, p2p.DiscNetworkError, getBlockHeadersErr, "p2p.Protocol.Run getBlockHeaders failure")
+			}
 
-				return runPeer(
-					ctx,
-					peerID,
-					cap,
-					rw,
-					peerInfo,
-					ss.send,
-					ss.hasSubscribers,
-					logger,
-				)
-			},
-			NodeInfo: func() interface{} {
-				return readNodeInfo()
-			},
-			PeerInfo: func(peerID [64]byte) interface{} {
-				// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
-				return nil
-			},
-			//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
-		})
-	}
+			cap := p2p.Cap{Name: eth.ProtocolName, Version: protocol}
+
+			return runPeer(
+				ctx,
+				peerID,
+				cap,
+				rw,
+				peerInfo,
+				ss.send,
+				ss.hasSubscribers,
+				logger,
+			)
+		},
+		NodeInfo: func() interface{} {
+			return readNodeInfo()
+		},
+		PeerInfo: func(peerID [64]byte) interface{} {
+			// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
+			return nil
+		},
+		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
+	})
 
 	return ss
 }
@@ -694,8 +693,8 @@ func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discovery
 		}
 		return d
 	}
+	cfg.DiscoveryDNS = discoveryDNS
 	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion, logger)
-	sentryServer.discoveryDNS = discoveryDNS
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer, healthCheck)
 	if err != nil {
@@ -712,7 +711,6 @@ type GrpcServer struct {
 	proto_sentry.UnimplementedSentryServer
 	ctx                  context.Context
 	Protocols            []p2p.Protocol
-	discoveryDNS         []string
 	GoodPeers            sync.Map
 	TxSubscribed         uint32 // Set to non-zero if downloader is subscribed to transaction messages
 	p2pServer            *p2p.Server
@@ -762,7 +760,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 
 		cap := p2p.Cap{Name: eth.ProtocolName, Version: peerInfo.protocol}
 		msgType := eth.ToProto[cap.Version][msgcode]
-		trackPeerStatistics(peerInfo.peer.Info().ID, false, msgType.String(), cap.String(), len(data))
+		trackPeerStatistics(peerInfo.peer.Info().Name, peerInfo.peer.Info().ID, false, msgType.String(), cap.String(), len(data))
 
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
@@ -910,6 +908,8 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *proto_sentry.Sen
 		msgcode != eth.BlockHeadersMsg &&
 		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.BlockBodiesMsg &&
+		msgcode != eth.NewBlockMsg &&
+		msgcode != eth.NewBlockHashesMsg &&
 		msgcode != eth.GetReceiptsMsg &&
 		msgcode != eth.ReceiptsMsg &&
 		msgcode != eth.NewPooledTransactionHashesMsg &&
@@ -989,8 +989,6 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *proto_sentry.Ou
 func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
 	reply := &proto_sentry.HandShakeReply{}
 	switch ss.Protocols[0].Version {
-	case direct.ETH66:
-		reply.Protocol = proto_sentry.Protocol_ETH66
 	case direct.ETH67:
 		reply.Protocol = proto_sentry.Protocol_ETH67
 	case direct.ETH68:
@@ -1001,17 +999,18 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.
 
 func (ss *GrpcServer) startP2PServer(genesisHash libcommon.Hash) (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
-		if len(ss.discoveryDNS) == 0 {
+		if len(ss.p2p.DiscoveryDNS) == 0 {
 			if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
-				ss.discoveryDNS = []string{url}
+				ss.p2p.DiscoveryDNS = []string{url}
 			}
-		}
-		for _, p := range ss.Protocols {
-			dialCandidates, err := setupDiscovery(ss.discoveryDNS)
-			if err != nil {
-				return nil, err
+
+			for _, p := range ss.Protocols {
+				dialCandidates, err := setupDiscovery(ss.p2p.DiscoveryDNS)
+				if err != nil {
+					return nil, err
+				}
+				p.DialCandidates = dialCandidates
 			}
-			p.DialCandidates = dialCandidates
 		}
 	}
 

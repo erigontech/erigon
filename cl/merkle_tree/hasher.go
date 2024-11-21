@@ -1,10 +1,26 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package merkle_tree
 
 import (
 	"sync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/prysmaticlabs/gohashtree"
 )
 
@@ -30,10 +46,14 @@ func newMerkleHasher() *merkleHasher {
 
 // merkleizeTrieLeaves returns intermediate roots of given leaves.
 func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte, limit uint64) (err error) {
+	return m.merkleizeTrieLeavesFlatWithStart(leaves, out, limit, 0)
+}
+
+func (m *merkleHasher) merkleizeTrieLeavesFlatWithStart(leaves []byte, out []byte, limit, start uint64) (err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	layer := m.getBufferFromFlat(leaves)
-	for i := uint8(0); i < GetDepth(limit); i++ {
+	for i := uint8(start); i < GetDepth(limit); i++ {
 		layerLen := len(layer)
 		if layerLen%2 != 0 {
 			layer = append(layer, ZeroHashes[i])

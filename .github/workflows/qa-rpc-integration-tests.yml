@@ -1,18 +1,29 @@
 name: QA - RPC Integration Tests
 
 on:
-  schedule:
-    - cron: '0 8 * * *'  # Run every day at 8:00 UTC
   workflow_dispatch:     # Run manually
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 jobs:
   integration-test-suite:
-    runs-on: [self-hosted, Erigon3]
+    runs-on: [ self-hosted, Erigon3 ]
+    timeout-minutes: 15
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
+      CHAIN: mainnet
 
     steps:
       - name: Check out repository
@@ -21,7 +32,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v0.16.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch v1.14.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
@@ -38,39 +49,52 @@ jobs:
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-      - name: Restore Erigon Testbed Data Directory
-        run: |
-          rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
-
       - name: Run RpcDaemon
         working-directory: ${{ github.workspace }}/build/bin
         run: |
-          echo "Erigon RpcDaemon starting..."
+          echo "RpcDaemon starting..."
           
-          ./rpcdaemon --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --verbosity 1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws --verbosity 1 > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           
-          echo "Erigon RpcDaemon started"
+          echo "RpcDaemon started"
+
+      - name: Wait for port 8545 to be opened
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 8545; then
+              echo "Port 8545 is open"
+              break
+            fi
+            echo "Waiting for port 8545 to open..."
+            sleep 10
+          done
+          if ! nc -z localhost 8545; then
+            echo "Port 8545 did not open in time"
+            exit 1
+          fi
 
       - name: Run RPC Integration Tests
         id: test_step
         run: |
           set +e # Disable exit on error
-          
+          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
+
           cd ${{ runner.workspace }}/rpc-tests/integration
           rm -rf ./mainnet/results/
-          
+                    
           # Run RPC integration test runner via http
-          python3 ./run_tests.py --continue --blockchain mainnet --display-only-fail --port 8545 -x debug_trace,trace_ --transport_type http,websocket
-         
+          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
+          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests.sh
+          
           # Capture test runner script exit status
           test_exit_status=$?
           
           # Save the subsection reached status
           echo "::set-output name=test_executed::true"
-        
+          
           # Check test runner exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "tests completed successfully"
@@ -79,9 +103,9 @@ jobs:
           else
             echo "error detected during tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-            
+          
             # Save failed results to a directory with timestamp and commit hash
-            cp -r ${{ runner.workspace }}/rpc-tests/integration/mainnet/results/ $RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_$(git -C ${{ github.workspace }} rev-parse --short HEAD)_http/
+            cp -r ${{ runner.workspace }}/rpc-tests/integration/mainnet/results/ $RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_$commit_http/
           fi
 
       - name: Stop Erigon RpcDaemon
@@ -89,17 +113,12 @@ jobs:
         run: |
           # Clean up rpcdaemon process if it's still running
           if kill -0 $RPC_DAEMON_PID 2> /dev/null; then
-            echo "Erigon RpcDaemon stopping..."
+            echo "RpcDaemon stopping..."
             kill $RPC_DAEMON_PID
-            echo "Erigon RpcDaemon stopped"
+            echo "RpcDaemon stopped"
           else
-            echo "Erigon RpcDaemon has already terminated"
+            echo "RpcDaemon has already terminated"
           fi
-
-      - name: Delete Erigon Testbed Data Directory
-        if: always()
-        run: |
-          rm -rf $ERIGON_TESTBED_DATA_DIR
 
       - name: Resume the Erigon instance dedicated to db maintenance
         run: |
@@ -117,7 +136,13 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-        run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name rpc-integration-tests --outcome $TEST_RESULT #--result_file ${{runner.workspace}}/rpc-tests/integration/mainnet/result.json
+        run: |
+          db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
+          if [ -z "$db_version" ]; then
+            db_version="no-version"
+          fi
+          
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
 
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'

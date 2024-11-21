@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package integrity
 
 import (
@@ -9,16 +25,18 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // E3 History - usually don't have anything attributed to 1-st system txs (except genesis)
-func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator) error {
+func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, blockReader services.FullBlockReader, agg *state.Aggregator) error {
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -59,7 +77,7 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggre
 						if err != nil {
 							return err
 						}
-						ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
+						ok, blockNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader)).FindBlockNum(tx, txNum)
 						if err != nil {
 							return err
 						}
@@ -78,7 +96,7 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggre
 
 						select {
 						case <-logEvery.C:
-							log.Warn(fmt.Sprintf("[dbg] checked=%dK", count.Load()/1_000))
+							log.Warn(fmt.Sprintf("[dbg] checked=%dK keys", count.Load()/1_000))
 						default:
 						}
 					}

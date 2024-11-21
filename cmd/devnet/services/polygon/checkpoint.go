@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package polygon
 
 import (
@@ -10,18 +26,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type CheckpointBlock struct {
@@ -45,7 +61,7 @@ func (c CheckpointBlock) GetSignBytes() ([]byte, error) {
 	}
 
 	return sdk.SortJSON(b)*/
-	return nil, fmt.Errorf("TODO")
+	return nil, errors.New("TODO")
 }
 
 type CheckpointAck struct {
@@ -179,8 +195,8 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 		h.pendingCheckpoint = &heimdall.Checkpoint{
 			Fields: heimdall.WaypointFields{
 				Timestamp:  timeStamp,
-				StartBlock: big.NewInt(int64(expectedCheckpointState.newStart)),
-				EndBlock:   big.NewInt(int64(expectedCheckpointState.newEnd)),
+				StartBlock: new(big.Int).SetUint64(expectedCheckpointState.newStart),
+				EndBlock:   new(big.Int).SetUint64(expectedCheckpointState.newEnd),
 			},
 		}
 	}
@@ -377,7 +393,7 @@ func (h *Heimdall) getRootHash(ctx context.Context, start uint64, end uint64) (l
 		return libcommon.Hash{}, errors.New("number of headers requested exceeds")
 	}
 
-	return devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)).GetRootHash(ctx, start, end)
+	return devnet.SelectBlockProducer(devnet.WithCurrentNetwork(ctx, networkname.BorDevnet)).GetRootHash(ctx, start, end)
 }
 
 func (h *Heimdall) shouldSendCheckpoint(start uint64, end uint64) (bool, error) {
@@ -572,7 +588,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 
 	if ack.StartBlock != h.pendingCheckpoint.StartBlock().Uint64() {
 		h.logger.Error("Invalid start block", "startExpected", h.pendingCheckpoint.StartBlock, "startReceived", ack.StartBlock)
-		return fmt.Errorf("invalid Checkpoint Ack: Invalid start block")
+		return errors.New("invalid Checkpoint Ack: Invalid start block")
 	}
 
 	// Return err if start and end matches but contract root hash doesn't match
@@ -587,7 +603,7 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 			"rootRecieved", ack.RootHash.String(),
 		)
 
-		return fmt.Errorf("invalid Checkpoint Ack: Invalid root hash")
+		return errors.New("invalid Checkpoint Ack: Invalid root hash")
 	}
 
 	h.latestCheckpoint = &ack

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
@@ -7,12 +23,13 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/core/types"
 )
 
 //go:embed testdata/block_test_gnosis_deneb.json
@@ -39,7 +56,7 @@ func TestBeaconBody(t *testing.T) {
 		BaseFee: big.NewInt(1),
 	}, []types.Transaction{types.NewTransaction(1, [20]byte{}, uint256.NewInt(1), 5, uint256.NewInt(2), nil)}, nil, nil, types.Withdrawals{&types.Withdrawal{
 		Index: 69,
-	}}, nil /*requests*/)
+	}})
 
 	// Test BeaconBody
 	body := &BeaconBody{
@@ -97,7 +114,7 @@ func TestBeaconBody(t *testing.T) {
 
 func TestBeaconBlockJson(t *testing.T) {
 	_, bc := clparams.GetConfigsByNetwork(clparams.GnosisNetwork)
-	block := NewSignedBeaconBlock(bc)
+	block := NewSignedBeaconBlock(bc, clparams.DenebVersion)
 	block.Block.Body.Version = clparams.DenebVersion
 	err := json.Unmarshal(beaconBodyJSON, block)
 	require.NoError(t, err)
@@ -112,7 +129,7 @@ func TestBeaconBlockJson(t *testing.T) {
 
 	r, _ := block.Block.HashSSZ()
 
-	block2 := NewSignedBeaconBlock(bc)
+	block2 := NewSignedBeaconBlock(bc, clparams.DenebVersion)
 	if err := block2.DecodeSSZ(beaconBodySSZ, int(clparams.DenebVersion)); err != nil {
 		t.Fatal(err)
 	}

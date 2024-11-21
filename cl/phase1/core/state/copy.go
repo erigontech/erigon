@@ -1,8 +1,24 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
@@ -27,7 +43,13 @@ func (b *CachingBeaconState) copyCachesInto(bs *CachingBeaconState) error {
 	if bs.publicKeyIndicies == nil {
 		bs.publicKeyIndicies = make(map[[48]byte]uint64)
 	}
-	for k := range bs.publicKeyIndicies {
+	for k, idx := range bs.publicKeyIndicies {
+		if otherIdx, ok := b.publicKeyIndicies[k]; ok {
+			if idx != otherIdx {
+				delete(bs.publicKeyIndicies, k)
+			}
+			continue
+		}
 		delete(bs.publicKeyIndicies, k)
 	}
 	for pk, index := range b.publicKeyIndicies {

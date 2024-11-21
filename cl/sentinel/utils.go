@@ -1,49 +1,54 @@
-// Copyright 2022 Erigon-Lightclient contributors
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//     http://www.apache.org/licenses/LICENSE-2.0
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2022 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// package sentinel
 package sentinel
 
 import (
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/pion/randutil"
 	"github.com/prysmaticlabs/go-bitfield"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
-	xVal, yVal := new(btcec.FieldVal), new(btcec.FieldVal)
+	xVal, yVal := new(secp256k1.FieldVal), new(secp256k1.FieldVal)
 	overflows := xVal.SetByteSlice(pubkey.X.Bytes())
 	if overflows {
-		return nil, fmt.Errorf("x value overflows")
+		return nil, errors.New("x value overflows")
 	}
 	overflows = yVal.SetByteSlice(pubkey.Y.Bytes())
 	if overflows {
-		return nil, fmt.Errorf("y value overflows")
+		return nil, errors.New("y value overflows")
 	}
-	newKey := crypto.PubKey((*crypto.Secp256k1PublicKey)(btcec.NewPublicKey(xVal, yVal)))
+	newKey := crypto.PubKey((*crypto.Secp256k1PublicKey)(secp256k1.NewPublicKey(xVal, yVal)))
 	// Zero out temporary values.
 	xVal.Zero()
 	yVal.Zero()
@@ -81,7 +86,7 @@ func multiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (
 		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
 	}
 	if id.String() == "" {
-		return nil, fmt.Errorf("empty peer id given")
+		return nil, errors.New("empty peer id given")
 	}
 	if parsedIP.To4() != nil {
 		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/%s/%d/p2p/%s", ipAddr, protocol, port, id.String()))

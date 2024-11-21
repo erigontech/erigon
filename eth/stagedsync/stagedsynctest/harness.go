@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsynctest
 
 import (
@@ -15,28 +31,30 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv/order"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/erigon/turbo/testlog"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/eth/stagedsync"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon/turbo/testlog"
 )
 
 func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
@@ -47,20 +65,24 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	blockReader := m.BlockReader
 	borConsensusDB := memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
-	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
-	miningState := stagedsync.NewProposingState(&ethconfig.Defaults.Miner)
+	heimdallClient := heimdall.NewMockClient(ctrl)
+	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
+	bridgeStore := bridge.NewDbStore(m.DB)
+	heimdallStore := heimdall.NewDbStore(m.DB)
+
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDB,
 		borConsensusDB,
 		miningState,
 		*cfg.ChainConfig,
 		heimdallClient,
+		heimdallStore,
+		bridgeStore,
 		blockReader,
 		nil, // headerDownloader
 		nil, // penalize
-		nil, // loopBreakCheck
 		nil, // recent bor snapshots cached
-		nil, // signatures lru cache
+		nil, // signatures
 		false,
 		nil,
 	)
@@ -71,6 +93,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 		logger,
+		stages.ModeApplyingBlocks,
 	)
 	miningSyncStages := stagedsync.MiningStages(
 		ctx,
@@ -87,6 +110,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
 		logger,
+		stages.ModeBlockProduction,
 	)
 	validatorKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -159,7 +183,7 @@ type Harness struct {
 	miningSync                 *stagedsync.Sync
 	miningState                stagedsync.MiningState
 	bhCfg                      stagedsync.BorHeimdallCfg
-	heimdallClient             *heimdall.MockHeimdallClient
+	heimdallClient             *heimdall.MockClient
 	heimdallNextMockSpan       *heimdall.Span
 	heimdallLastEventID        uint64
 	heimdallLastEventHeaderNum uint64
@@ -271,7 +295,7 @@ func (h *Harness) SetMiningBlockEmptyHeader(ctx context.Context, t *testing.T, p
 
 func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		spanIter, err := tx.Range(kv.BorSpans, nil, nil)
+		spanIter, err := tx.Range(kv.BorSpans, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -306,7 +330,7 @@ func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, 
 
 func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uint64, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		eventsIter, err := tx.Range(kv.BorEvents, nil, nil)
+		eventsIter, err := tx.Range(kv.BorEvents, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -329,23 +353,23 @@ func (h *Harness) ReadStateSyncEventsFromDB(ctx context.Context) (eventIDs []uin
 	return eventIDs, nil
 }
 
-func (h *Harness) ReadFirstStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
+func (h *Harness) ReadLastStateSyncEventNumPerBlockFromDB(ctx context.Context) (nums map[uint64]uint64, err error) {
 	nums = map[uint64]uint64{}
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
-		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil)
+		eventNumsIter, err := tx.Range(kv.BorEventNums, nil, nil, order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
 
 		for eventNumsIter.HasNext() {
-			blockNumBytes, firstEventNumBytes, err := eventNumsIter.Next()
+			blockNumBytes, lastEventNumBytes, err := eventNumsIter.Next()
 			if err != nil {
 				return err
 			}
 
 			blockNum := binary.BigEndian.Uint64(blockNumBytes)
-			firstEventNum := binary.BigEndian.Uint64(firstEventNumBytes)
-			nums[blockNum] = firstEventNum
+			lastEventNum := binary.BigEndian.Uint64(lastEventNumBytes)
+			nums[blockNum] = lastEventNum
 		}
 
 		return nil
@@ -395,6 +419,15 @@ func createGenesisInitData(t *testing.T, chainConfig *chain.Config) *genesisInit
 	}
 }
 
+type dummySpanReader struct {
+	consensus.ChainHeaderReader
+}
+
+// BorSpan mocks base method - this is required for pre-astrid testing
+func (m dummySpanReader) BorSpan(arg0 uint64) *heimdall.Span {
+	return nil
+}
+
 func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.Controller, cfg HarnessCfg) {
 	if cfg.GenerateChainNumBlocks == 0 {
 		return
@@ -408,7 +441,7 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 	})
 	require.NoError(t, err)
 	h.sealedHeaders[parentBlock.Number().Uint64()] = parentBlock.Header()
-	mockChainHR := h.mockChainHeaderReader(ctrl)
+	mockChainHR := dummySpanReader{h.mockChainHeaderReader(ctrl)}
 
 	chainPack, err := core.GenerateChain(
 		h.chainConfig,
@@ -465,32 +498,28 @@ func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.
 
 func (h *Harness) seal(t *testing.T, chr consensus.ChainHeaderReader, eng consensus.Engine, block *types.Block) {
 	h.logger.Info("Sealing mock block", "blockNum", block.Number())
-	sealRes, sealStop := make(chan *types.Block, 1), make(chan struct{}, 1)
-	if err := eng.Seal(chr, block, sealRes, sealStop); err != nil {
+	sealRes, sealStop := make(chan *types.BlockWithReceipts, 1), make(chan struct{}, 1)
+	if err := eng.Seal(chr, &types.BlockWithReceipts{Block: block}, sealRes, sealStop); err != nil {
 		t.Fatal(err)
 	}
 
 	sealedParentBlock := <-sealRes
-	h.sealedHeaders[sealedParentBlock.Number().Uint64()] = sealedParentBlock.Header()
+	h.sealedHeaders[sealedParentBlock.Block.Number().Uint64()] = sealedParentBlock.Block.Header()
 }
 
 func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine {
 	if h.chainConfig.Bor != nil {
-		genesisContracts := bor.NewGenesisContractsClient(
-			h.chainConfig,
-			h.borConfig.ValidatorContract,
-			h.borConfig.StateReceiverContract,
-			h.logger,
-		)
-
+		stateReceiver := bor.NewStateReceiver(h.borConfig.StateReceiverContractAddress())
 		borConsensusEng := bor.New(
 			h.chainConfig,
 			h.borConsensusDB,
 			nil,
 			h.borSpanner,
 			h.heimdallClient,
-			genesisContracts,
+			stateReceiver,
 			h.logger,
+			nil,
+			nil,
 		)
 
 		borConsensusEng.Authorize(h.validatorAddress, func(_ libcommon.Address, _ string, msg []byte) ([]byte, error) {
@@ -576,14 +605,14 @@ func (h *Harness) setHeimdallNextMockSpan() {
 func (h *Harness) mockBorSpanner() {
 	h.borSpanner.
 		EXPECT().
-		GetCurrentValidators(gomock.Any(), gomock.Any(), gomock.Any()).
+		GetCurrentValidators(gomock.Any(), gomock.Any()).
 		Return(h.heimdallNextMockSpan.ValidatorSet.Validators, nil).
 		AnyTimes()
 
 	h.borSpanner.
 		EXPECT().
-		GetCurrentProducers(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ uint64, _ libcommon.Address, _ consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+		GetCurrentProducers(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ uint64, _ bor.ChainHeaderReader) ([]*valset.Validator, error) {
 			res := make([]*valset.Validator, len(h.heimdallNextMockSpan.SelectedProducers))
 			for i := range h.heimdallNextMockSpan.SelectedProducers {
 				res[i] = &h.heimdallNextMockSpan.SelectedProducers[i]

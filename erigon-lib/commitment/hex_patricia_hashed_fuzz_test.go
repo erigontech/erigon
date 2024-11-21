@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 //go:build !nofuzz
 
 package commitment
@@ -7,16 +23,17 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"math"
 	"math/rand"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
+	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/stretchr/testify/require"
 )
 
-// go test -trimpath -v -fuzz=Fuzz_ProcessUpdate$ -fuzztime=300s ./commitment
+// go test -trimpath -v -fuzz=Fuzz_ProcessUpdate -fuzztime=300s ./erigon-lib/commitment
 
 func Fuzz_ProcessUpdate(f *testing.F) {
 	ctx := context.Background()
@@ -26,9 +43,10 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 	f.Add(uint64(2), ha, uint64(1235105), hb)
 
 	f.Fuzz(func(t *testing.T, balanceA uint64, accountA []byte, balanceB uint64, accountB []byte) {
-		if len(accountA) == 0 || len(accountA) > 20 || len(accountB) == 0 || len(accountB) > 20 {
+		if len(accountA) == 0 || len(accountA) > length.Addr || len(accountB) == 0 || len(accountB) > length.Addr {
 			t.Skip()
 		}
+		t.Logf("fuzzing %d keys\n", 2)
 
 		builder := NewUpdateBuilder().
 			Balance(hex.EncodeToString(accountA), balanceA).
@@ -36,42 +54,29 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(20, ms, ms.TempDir())
-		hphAnother := NewHexPatriciaHashed(20, ms2, ms2.TempDir())
+		hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
+		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, ms2.TempDir())
 
 		hph.SetTrace(false)
 		hphAnother.SetTrace(false)
 
 		plainKeys, updates := builder.Build()
-		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
-			t.Fatal(err)
-		}
-		if err := ms2.applyPlainUpdates(plainKeys, updates); err != nil {
-			t.Fatal(err)
-		}
+		err := ms.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+		err = ms2.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
 
-		rootHash, err := hph.ProcessKeys(ctx, plainKeys, "")
-		if err != nil {
-			t.Fatal(err)
-		}
+		upds := WrapKeyUpdates(t, ModeDirect, hph.hashAndNibblizeKey, nil, nil)
+		rootHashDirect, err := hph.Process(ctx, upds, "")
+		require.NoError(t, err)
+		require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
+		upds.Close()
 
-		//ms.applyBranchNodeUpdates(branchNodeUpdates)
-		if len(rootHash) != 32 {
-			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
-		}
-
-		rootHashAnother, err := hphAnother.ProcessKeys(ctx, plainKeys, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		//ms2.applyBranchNodeUpdates(branchNodeUpdates)
-
-		if len(rootHashAnother) > 32 {
-			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
-		}
-		if !bytes.Equal(rootHash, rootHashAnother) {
-			t.Fatalf("invalid second root hash with same updates: [%v] != [%v]", hex.EncodeToString(rootHash), hex.EncodeToString(rootHashAnother))
-		}
+		anotherUpds := WrapKeyUpdates(t, ModeUpdate, hphAnother.hashAndNibblizeKey, nil, nil)
+		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "")
+		require.NoError(t, err)
+		require.Len(t, rootHashUpdate, length.Hash, "invalid root hash length")
+		require.EqualValues(t, rootHashDirect, rootHashUpdate, "storage-based and update-based rootHash mismatch")
 	})
 }
 
@@ -87,7 +92,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 			t.Skip()
 		}
 		i := 0
-		keysCount := binary.BigEndian.Uint32(build[i : i+4])
+		keysCount := uint16(binary.BigEndian.Uint32(build[i : i+4]))
 		i += 4
 		ks := binary.BigEndian.Uint32(build[i : i+4])
 		keysSeed := rand.New(rand.NewSource(int64(ks)))
@@ -97,91 +102,99 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 
 		t.Logf("fuzzing %d keys keysSeed=%d updateSeed=%d", keysCount, ks, us)
 
-		builder := NewUpdateBuilder()
-		for k := uint32(0); k < keysCount; k++ {
-			var key [length.Addr]byte
-			n, err := keysSeed.Read(key[:])
-			pkey := hex.EncodeToString(key[:])
-			require.NoError(t, err)
-			require.EqualValues(t, length.Addr, n)
+		plainKeys := make([][]byte, keysCount)
+		updates := make([]Update, keysCount)
+
+		for k := uint16(0); k < keysCount; k++ {
 
 			aux := make([]byte, 32)
 
 			flg := UpdateFlags(updateSeed.Intn(int(CodeUpdate | DeleteUpdate | StorageUpdate | NonceUpdate | BalanceUpdate)))
-			switch {
-			case flg&BalanceUpdate != 0:
-				builder.Balance(pkey, updateSeed.Uint64()).Nonce(pkey, updateSeed.Uint64())
-				continue
-			case flg&CodeUpdate != 0:
-				keccak := sha3.NewLegacyKeccak256().(keccakState)
-				var s [8]byte
-				n, err := updateSeed.Read(s[:])
-				require.NoError(t, err)
-				require.EqualValues(t, len(s), n)
-				keccak.Write(s[:])
-				keccak.Read(aux)
-
-				builder.CodeHash(pkey, hex.EncodeToString(aux))
-				continue
-			case flg&StorageUpdate != 0:
-				sz := updateSeed.Intn(length.Hash)
-				n, err = updateSeed.Read(aux[:sz])
-				require.NoError(t, err)
-				require.EqualValues(t, sz, n)
-
-				loc := make([]byte, updateSeed.Intn(length.Hash-1)+1)
-				keysSeed.Read(loc)
-				builder.Storage(pkey, hex.EncodeToString(loc), hex.EncodeToString(aux[:sz]))
-				continue
-			case flg&DeleteUpdate != 0:
-				continue
-			default:
-				continue
+			if flg&BalanceUpdate != 0 {
+				updates[k].Flags |= BalanceUpdate
+				bn := uint256.NewInt(math.MaxUint64)
+				bn.AddUint64(bn, updateSeed.Uint64())
+				updates[k].Balance.Set(bn)
 			}
+			if flg&NonceUpdate != 0 {
+				updates[k].Flags |= NonceUpdate
+				updates[k].Nonce = updateSeed.Uint64()
+			}
+			if flg&CodeUpdate != 0 {
+				updates[k].Flags |= CodeUpdate
+				updateSeed.Read(aux)
+				copy(updates[k].CodeHash[:], aux)
+			}
+			if flg&DeleteUpdate != 0 {
+				updates[k].Flags |= DeleteUpdate
+			}
+			kl := length.Addr
+			if flg&StorageUpdate != 0 {
+				kl += length.Hash
+
+				updates[k].Reset()
+				updates[k].Flags |= StorageUpdate
+
+				sz := 1 + updateSeed.Intn(len(aux)-1)
+				updateSeed.Read(aux[:sz])
+
+				copy(updates[k].Storage[:], aux[:sz])
+				updates[k].StorageLen = sz
+			}
+
+			plainKeys[k] = make([]byte, kl)
+			keysSeed.Read(plainKeys[k][:])
 		}
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(20, ms, ms.TempDir())
-		hphAnother := NewHexPatriciaHashed(20, ms2, ms2.TempDir())
+		hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
+		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, ms2.TempDir())
 
-		plainKeys, updates := builder.Build()
+		trace := false
+		hph.SetTrace(trace)
+		hphAnother.SetTrace(trace)
 
-		hph.SetTrace(false)
-		hphAnother.SetTrace(false)
+		for i := 0; i < len(plainKeys); i++ {
+			err := ms.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
+			require.NoError(t, err)
 
-		err := ms.applyPlainUpdates(plainKeys, updates)
-		require.NoError(t, err)
+			updsDirect := WrapKeyUpdates(t, ModeDirect, hph.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			rootHashDirect, err := hph.Process(ctx, updsDirect, "")
+			updsDirect.Close()
+			require.NoError(t, err)
+			require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
 
-		rootHashReview, err := hph.ProcessKeys(ctx, plainKeys, "")
-		require.NoError(t, err)
+			err = ms2.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
+			require.NoError(t, err)
 
-		//ms.applyBranchNodeUpdates(branchNodeUpdates)
-		require.Len(t, rootHashReview, length.Hash, "invalid root hash length")
+			upds := WrapKeyUpdates(t, ModeUpdate, hphAnother.hashAndNibblizeKey, plainKeys[i:i+1], updates[i:i+1])
+			rootHashAnother, err := hphAnother.Process(ctx, upds, "")
+			upds.Close()
+			require.NoError(t, err)
+			require.Len(t, rootHashAnother, length.Hash, "invalid root hash length")
+			if !bytes.Equal(rootHashDirect, rootHashAnother) {
+				t.Logf("rootHashDirect=%x rootHashUpdates=%x", rootHashDirect, rootHashAnother)
+				t.Logf("Update %d/%d %x", i+1, len(plainKeys), plainKeys[i])
+				t.Logf("%s", updates[i].String())
+			}
+			require.EqualValues(t, rootHashDirect, rootHashAnother, "storage-based and update-based rootHash mismatch")
+		}
 
-		err = ms2.applyPlainUpdates(plainKeys, updates)
-		require.NoError(t, err)
-
-		rootHashAnother, err := hphAnother.ProcessKeys(ctx, plainKeys, "")
-		require.NoError(t, err)
-		//ms2.applyBranchNodeUpdates(branchUpdatesAnother)
-
-		require.Len(t, rootHashAnother, length.Hash, "invalid root hash length")
-		require.EqualValues(t, rootHashReview, rootHashAnother, "storage-based and update-based rootHash mismatch")
 	})
 }
 
 func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 	ctx := context.Background()
 	var (
-		keysCount uint64 = 100
+		keysCount uint64 = 100000
 		seed      int64  = 1234123415
 	)
 
 	f.Add(keysCount, seed)
 
-	f.Fuzz(func(t *testing.T, keysCount uint64, seed int64) {
-		if keysCount > 10e9 {
+	f.Fuzz(func(t *testing.T, kc uint64, seed int64) {
+		if kc > 10e9 {
 			return
 		}
 
@@ -189,29 +202,32 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		builder := NewUpdateBuilder()
 
 		// generate updates
-		for i := 0; i < int(keysCount); i++ {
+		for i := 0; i < int(kc); i++ {
 			key := make([]byte, length.Addr)
 
 			for j := 0; j < len(key); j++ {
 				key[j] = byte(rnd.Intn(256))
 			}
-			builder.Balance(hex.EncodeToString(key), rnd.Uint64())
+			addr := hex.EncodeToString(key)
+			builder.Balance(addr, rnd.Uint64())
+			builder.Nonce(addr, uint64(i))
+			builder.CodeHash(addr, hex.EncodeToString(append(key, make([]byte, 12)...)))
 		}
+		t.Logf("keys count: %d", kc)
 
 		ms := NewMockState(t)
 		hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
-
-		hph.SetTrace(false)
 
 		plainKeys, updates := builder.Build()
 		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
 			t.Fatal(err)
 		}
 
-		rootHash, err := hph.ProcessKeys(ctx, plainKeys, "")
-		require.NoError(t, err)
+		upds := WrapKeyUpdates(t, ModeDirect, hph.hashAndNibblizeKey, plainKeys, updates)
+		defer upds.Close()
 
-		//ms.applyBranchNodeUpdates(branchNodeUpdates)
+		rootHash, err := hph.Process(ctx, upds, "")
+		require.NoError(t, err)
 		require.Lenf(t, rootHash, length.Hash, "invalid root hash length")
 	})
 }

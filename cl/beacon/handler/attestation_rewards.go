@@ -1,21 +1,37 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/erigontech/erigon/cl/utils"
 )
 
 type IdealReward struct {
@@ -51,6 +67,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	defer tx.Rollback()
 
 	epoch, err := beaconhttp.EpochFromRequest(r)
+
+	// attestation rewards are always delayed by 1 extra epoch compared to other rewards
+	epoch += 1
+
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -72,13 +92,13 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
-	_, headSlot, err := a.forkchoiceStore.GetHead()
+	_, headSlot, statusCode, err := a.getHead()
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 	headEpoch := headSlot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch > headEpoch {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch is in the future"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch is in the future"))
 	}
 	// Few cases to handle:
 	// 1) finalized data
@@ -86,7 +106,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	version := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 
 	// finalized data
-	if epoch > a.forkchoiceStore.LowestAvaiableSlot()/a.beaconChainCfg.SlotsPerEpoch {
+	if epoch > a.forkchoiceStore.LowestAvailableSlot()/a.beaconChainCfg.SlotsPerEpoch {
 		minRange := epoch * a.beaconChainCfg.SlotsPerEpoch
 		maxRange := (epoch + 1) * a.beaconChainCfg.SlotsPerEpoch
 		var blockRoot libcommon.Hash
@@ -99,39 +119,43 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 				continue
 			}
 			if version == clparams.Phase0Version {
-				return nil, beaconhttp.NewEndpointError(http.StatusHTTPVersionNotSupported, fmt.Errorf("phase0 state is not supported when there is no antiquation"))
+				return nil, beaconhttp.NewEndpointError(http.StatusHTTPVersionNotSupported, errors.New("phase0 state is not supported when there is no antiquation"))
 			}
 			inactivityScores, err := a.forkchoiceStore.GetInactivitiesScores(blockRoot)
 			if err != nil {
 				return nil, err
 			}
 			if inactivityScores == nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no inactivity scores found for this epoch"))
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no inactivity scores found for this epoch"))
 			}
 
-			prevPartecipation, err := a.forkchoiceStore.GetPreviousPartecipationIndicies(blockRoot)
+			prevParticipation, err := a.forkchoiceStore.GetPreviousParticipationIndicies(blockRoot)
 			if err != nil {
 				return nil, err
 			}
-			if prevPartecipation == nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no previous partecipation found for this epoch"))
+			if prevParticipation == nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no previous participation found for this epoch"))
 			}
 			validatorSet, err := a.forkchoiceStore.GetValidatorSet(blockRoot)
 			if err != nil {
 				return nil, err
 			}
 			if validatorSet == nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no validator set found for this epoch"))
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no validator set found for this epoch"))
 			}
 
-			ok, finalizedCheckpoint, _, _ := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
+			finalizedCheckpoint, _, _, ok := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
 			if !ok {
-				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no finalized checkpoint found for this epoch"))
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finalized checkpoint found for this epoch"))
 			}
 
-			return a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevPartecipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+			resp, err := a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevParticipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+			if err != nil {
+				return nil, err
+			}
+			return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 		}
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no block found for this epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no block found for this epoch"))
 	}
 
 	root, err := a.findEpochRoot(tx, epoch)
@@ -143,7 +167,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, err
 	}
 	if lastSlotPtr == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no block found for this epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no block found for this epoch"))
 	}
 	lastSlot := *lastSlotPtr
 
@@ -152,45 +176,60 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, err
 	}
 	if lastSlot > stateProgress {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("requested range is not yet processed or the node is not archivial"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("requested range is not yet processed or the node is not archivial"))
 	}
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
 
-	epochData, err := state_accessors.ReadEpochData(tx, a.beaconChainCfg.RoundSlotToEpoch(lastSlot))
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
+
+	epochData, err := state_accessors.ReadEpochData(stateGetter, a.beaconChainCfg.RoundSlotToEpoch(lastSlot))
 	if err != nil {
 		return nil, err
 	}
 
-	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, lastSlot)
+	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, stateGetter, lastSlot)
 	if err != nil {
 		return nil, err
 	}
 	if validatorSet == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no validator set found for this epoch"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no validator set found for this epoch"))
 	}
 
-	_, previousIdx, err := a.stateReader.ReadPartecipations(tx, lastSlot)
+	_, previousIdx, err := a.stateReader.ReadParticipations(tx, stateGetter, lastSlot)
 	if err != nil {
 		return nil, err
 	}
 
-	_, _, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+	_, _, finalizedCheckpoint, ok, err := state_accessors.ReadCheckpoints(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finalized checkpoint found for this epoch"))
 	}
 	if version == clparams.Phase0Version {
-		return a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch()-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+		resp, err := a.computeAttestationsRewardsForPhase0(validatorSet, finalizedCheckpoint.Epoch-epoch, epochData.TotalActiveBalance, previousIdx, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
+		if err != nil {
+			return nil, err
+		}
+		return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 	}
 	inactivityScores := solid.NewUint64ListSSZ(int(a.beaconChainCfg.ValidatorRegistryLimit))
-	if err := a.stateReader.ReconstructUint64ListDump(tx, lastSlot, kv.InactivityScores, validatorSet.Length(), inactivityScores); err != nil {
+	if err := a.stateReader.ReconstructUint64ListDump(stateGetter, lastSlot, kv.InactivityScores, validatorSet.Length(), inactivityScores); err != nil {
 		return nil, err
 	}
-	return a.computeAttestationsRewardsForAltair(
+	resp, err := a.computeAttestationsRewardsForAltair(
 		validatorSet,
 		inactivityScores,
 		previousIdx,
 		a.isInactivityLeaking(epoch, finalizedCheckpoint),
 		filterIndicies,
 		epoch)
+	if err != nil {
+		return nil, err
+	}
+	return resp.WithFinalized(true).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }
 
 func (a *ApiHandler) isInactivityLeaking(epoch uint64, finalityCheckpoint solid.Checkpoint) bool {
@@ -198,7 +237,7 @@ func (a *ApiHandler) isInactivityLeaking(epoch uint64, finalityCheckpoint solid.
 	if epoch > 0 {
 		prevEpoch = epoch - 1
 	}
-	return prevEpoch-finalityCheckpoint.Epoch() > a.beaconChainCfg.MinEpochsToInactivityPenalty
+	return prevEpoch-finalityCheckpoint.Epoch > a.beaconChainCfg.MinEpochsToInactivityPenalty
 }
 
 func (a *ApiHandler) baseReward(version clparams.StateVersion, effectiveBalance, activeBalanceRoot uint64) uint64 {
@@ -209,16 +248,15 @@ func (a *ApiHandler) baseReward(version clparams.StateVersion, effectiveBalance,
 	return effectiveBalance * a.beaconChainCfg.BaseRewardFactor / activeBalanceRoot / a.beaconChainCfg.BaseRewardsPerEpoch
 }
 
-func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.ValidatorSet, inactivityScores solid.Uint64ListSSZ, previousParticipation *solid.BitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.ValidatorSet, inactivityScores solid.Uint64ListSSZ, previousParticipation *solid.ParticipationBitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
 	totalActiveBalance := uint64(0)
-	flagsUnslashedIndiciesSet := statechange.GetUnslashedIndiciesSet(a.beaconChainCfg, epoch, validatorSet, previousParticipation)
-	weights := a.beaconChainCfg.ParticipationWeights()
-	flagsTotalBalances := make([]uint64, len(weights))
-
 	prevEpoch := uint64(0)
 	if epoch > 0 {
 		prevEpoch = epoch - 1
 	}
+	flagsUnslashedIndiciesSet := statechange.GetUnslashedIndiciesSet(a.beaconChainCfg, prevEpoch, validatorSet, previousParticipation)
+	weights := a.beaconChainCfg.ParticipationWeights()
+	flagsTotalBalances := make([]uint64, len(weights))
 
 	validatorSet.Range(func(validatorIndex int, v solid.Validator, l int) bool {
 		if v.Active(epoch) {
@@ -271,7 +309,7 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 			idealReward.Target = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelyTargetFlagIndex] / rewardDenominator)
 			idealReward.Source = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelySourceFlagIndex] / rewardDenominator)
 		}
-		// Note: for altair, we dont have the inclusion delay, always 0.
+		// Note: for altair, we don't have the inclusion delay, always 0.
 		for flagIdx := range weights {
 			if flagsUnslashedIndiciesSet[flagIdx][index] {
 				if flagIdx == int(a.beaconChainCfg.TimelyHeadFlagIndex) {
@@ -318,7 +356,7 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 }
 
 // processRewardsAndPenaltiesPhase0 process rewards and penalties for phase0 state.
-func (a *ApiHandler) computeAttestationsRewardsForPhase0(validatorSet *solid.ValidatorSet, finalityDelay, activeBalance uint64, previousParticipation *solid.BitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) computeAttestationsRewardsForPhase0(validatorSet *solid.ValidatorSet, finalityDelay, activeBalance uint64, previousParticipation *solid.ParticipationBitList, inactivityLeak bool, filterIndicies []uint64, epoch uint64) (*beaconhttp.BeaconResponse, error) {
 	response := &attestationsRewardsResponse{}
 	beaconConfig := a.beaconChainCfg
 	if epoch == beaconConfig.GenesisEpoch {

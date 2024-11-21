@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
@@ -7,9 +23,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func makeEntities(count uint64) []*Checkpoint {
@@ -48,13 +64,14 @@ func testEntityFetcher_FetchAllEntities(t *testing.T, count uint64, fetchEntitie
 	libcommon.SliceShuffle(servedEntities)
 	fetchEntitiesPage := makeFetchEntitiesPage(servedEntities)
 
-	fetcher := newEntityFetcher[*Checkpoint](
+	fetcher := NewEntityFetcher[*Checkpoint](
 		"fetcher",
 		nil,
 		nil,
 		nil,
 		fetchEntitiesPage,
 		fetchEntitiesPageLimit,
+		1,
 		logger,
 	)
 
@@ -64,13 +81,11 @@ func testEntityFetcher_FetchAllEntities(t *testing.T, count uint64, fetchEntitie
 }
 
 type entityFetcherFetchEntitiesRangeTest struct {
-	fetcher entityFetcher[*Checkpoint]
-
+	fetcher          *EntityFetcher[*Checkpoint]
 	testRange        ClosedRange
 	expectedEntities []*Checkpoint
-
-	ctx    context.Context
-	logger log.Logger
+	ctx              context.Context
+	logger           log.Logger
 }
 
 func newEntityFetcherFetchEntitiesRangeTest(count uint64, withPaging bool, testRange *ClosedRange) entityFetcherFetchEntitiesRangeTest {
@@ -91,13 +106,14 @@ func newEntityFetcherFetchEntitiesRangeTest(count uint64, withPaging bool, testR
 		fetchEntitiesPage = nil
 	}
 
-	fetcher := newEntityFetcher[*Checkpoint](
+	fetcher := NewEntityFetcher[*Checkpoint](
 		"fetcher",
 		nil,
 		nil,
 		fetchEntity,
 		fetchEntitiesPage,
 		entityFetcherBatchFetchThreshold,
+		1,
 		logger,
 	)
 

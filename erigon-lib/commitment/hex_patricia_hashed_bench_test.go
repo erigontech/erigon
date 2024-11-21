@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package commitment
 
 import (
@@ -6,39 +22,46 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
-func Benchmark_HexPatriciaHashed_ReviewKeys(b *testing.B) {
-	ms := NewMockState(&testing.T{})
-	ctx := context.Background()
-	hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
-	hph.SetTrace(false)
-
-	builder := NewUpdateBuilder()
+func Benchmark_HexPatriciaHashed_Process(b *testing.B) {
+	b.SetParallelism(1)
 
 	rnd := rand.New(rand.NewSource(133777))
-	keysCount := rnd.Int31n(10_000_0)
+	keysCount := rnd.Intn(100_0000)
 
 	// generate updates
-	for i := int32(0); i < keysCount; i++ {
+	b.Logf("keys count: %d", keysCount)
+	builder := NewUpdateBuilder()
+	for i := 0; i < keysCount; i++ {
 		key := make([]byte, length.Addr)
+		rnd.Read(key)
 
-		for j := 0; j < len(key); j++ {
-			key[j] = byte(rnd.Intn(256))
-		}
 		builder.Balance(hex.EncodeToString(key), rnd.Uint64())
 	}
+	pk, updates := builder.Build()
+	b.Logf("%d keys generated", keysCount)
+	ms := NewMockState(&testing.T{})
+	err := ms.applyPlainUpdates(pk, updates)
+	require.NoError(b, err)
 
-	pk, _ := builder.Build()
+	hph := NewHexPatriciaHashed(length.Addr, ms, ms.TempDir())
+	upds := WrapKeyUpdates(b, ModeDirect, hph.hashAndNibblizeKey, nil, nil)
+	defer upds.Close()
 
-	b.Run("review_keys", func(b *testing.B) {
-		for i, j := 0, 0; i < b.N; i, j = i+1, j+1 {
-			if j >= len(pk) {
-				j = 0
-			}
+	b.ResetTimer()
 
-			hph.ProcessKeys(ctx, pk[j:j+1], "")
+	ctx := context.Background()
+	for i := 0; i < b.N; i++ {
+		if i+5 >= len(pk) {
+			i = 0
 		}
-	})
+
+		WrapKeyUpdatesInto(b, upds, pk[i:i+5], updates[i:i+5])
+		_, err := hph.Process(ctx, upds, "")
+		require.NoError(b, err)
+	}
 }

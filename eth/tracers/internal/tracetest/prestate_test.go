@@ -1,18 +1,21 @@
 // Copyright 2021 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package tracetest
 
@@ -27,18 +30,17 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/tests"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/tests"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // prestateTrace is the result of a prestateTrace run.
@@ -61,18 +63,18 @@ type testcase struct {
 }
 
 func TestPrestateTracerLegacy(t *testing.T) {
-	testPrestateDiffTracer("prestateTracerLegacy", "prestate_tracer_legacy", t)
+	testPrestateTracer("prestateTracerLegacy", "prestate_tracer_legacy", t)
 }
 
 func TestPrestateTracer(t *testing.T) {
-	testPrestateDiffTracer("prestateTracer", "prestate_tracer", t)
+	testPrestateTracer("prestateTracer", "prestate_tracer", t)
 }
 
 func TestPrestateWithDiffModeTracer(t *testing.T) {
-	testPrestateDiffTracer("prestateTracer", "prestate_tracer_with_diff_mode", t)
+	testPrestateTracer("prestateTracer", "prestate_tracer_with_diff_mode", t)
 }
 
-func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
+func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 	files, err := dir.ReadDir(filepath.Join("testdata", dirPath))
 	if err != nil {
 		t.Fatalf("failed to retrieve tracer test suite: %v", err)
@@ -99,41 +101,36 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
 			// Configure a blockchain with the given prestate
-			var (
-				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-				origin, _ = signer.Sender(tx)
-				txContext = evmtypes.TxContext{
-					Origin:   origin,
-					GasPrice: tx.GetFeeCap(),
-				}
-				context = evmtypes.BlockContext{
-					CanTransfer: core.CanTransfer,
-					Transfer:    consensus.Transfer,
-					Coinbase:    test.Context.Miner,
-					BlockNumber: uint64(test.Context.Number),
-					Time:        uint64(test.Context.Time),
-					Difficulty:  (*big.Int)(test.Context.Difficulty),
-					GasLimit:    uint64(test.Context.GasLimit),
-				}
-				rules = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
-			)
+			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
+			context := evmtypes.BlockContext{
+				CanTransfer: core.CanTransfer,
+				Transfer:    consensus.Transfer,
+				Coinbase:    test.Context.Miner,
+				BlockNumber: uint64(test.Context.Number),
+				Time:        uint64(test.Context.Time),
+				Difficulty:  (*big.Int)(test.Context.Difficulty),
+				GasLimit:    uint64(test.Context.GasLimit),
+			}
+			if test.Context.BaseFee != nil {
+				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
+			}
+			rules := test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber, m.HistoryV3)
-			if test.Genesis.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
-			}
+			statedb, err := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
+			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
-			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
-			msg, err := tx.AsMessage(*signer, nil, rules) // BaseFee is set to nil and not to contet.BaseFee, to match the output to go-ethereum tests
+			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
+			txContext := core.NewEVMTxContext(msg)
+			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
 			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()))
 			if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package p2p
 
 import (
@@ -5,8 +21,11 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
 )
+
+var ErrInvalidFetchBlocksAmount = errors.New("invalid fetch blocks amount")
 
 type ErrInvalidFetchHeadersRange struct {
 	start uint64
@@ -44,6 +63,33 @@ func (e ErrIncompleteHeaders) LowestMissingBlockNum() uint64 {
 	return e.start + e.received
 }
 
+type ErrMissingHeaderHash struct {
+	requested common.Hash
+}
+
+func (e ErrMissingHeaderHash) Error() string {
+	return fmt.Sprintf("missing header hash: requested=%s", e.requested)
+}
+
+func (e ErrMissingHeaderHash) Is(err error) bool {
+	var errMissingHeaderHash *ErrMissingHeaderHash
+	return errors.As(err, &errMissingHeaderHash)
+}
+
+type ErrUnexpectedHeaderHash struct {
+	requested common.Hash
+	received  common.Hash
+}
+
+func (e ErrUnexpectedHeaderHash) Error() string {
+	return fmt.Sprintf("unexpected headers hash: requested=%s, received=%s", e.requested, e.received)
+}
+
+func (e ErrUnexpectedHeaderHash) Is(err error) bool {
+	var errUnexpectedHeaderHash *ErrUnexpectedHeaderHash
+	return errors.As(err, &errUnexpectedHeaderHash)
+}
+
 type ErrTooManyHeaders struct {
 	requested int
 	received  int
@@ -73,6 +119,24 @@ func (e ErrNonSequentialHeaderNumbers) Error() string {
 func (e ErrNonSequentialHeaderNumbers) Is(err error) bool {
 	var errDisconnectedHeaders *ErrNonSequentialHeaderNumbers
 	return errors.As(err, &errDisconnectedHeaders)
+}
+
+type ErrNonSequentialHeaderHashes struct {
+	hash       common.Hash
+	parentHash common.Hash
+	prevHash   common.Hash
+}
+
+func (e ErrNonSequentialHeaderHashes) Error() string {
+	return fmt.Sprintf(
+		"non sequential header hashes in fetch headers response: hash=%s parentHash=%s, prevHash=%s",
+		e.hash, e.parentHash, e.prevHash,
+	)
+}
+
+func (e ErrNonSequentialHeaderHashes) Is(err error) bool {
+	var errNonSequentialHeaderHashes *ErrNonSequentialHeaderHashes
+	return errors.As(err, &errNonSequentialHeaderHashes)
 }
 
 type ErrTooManyBodies struct {

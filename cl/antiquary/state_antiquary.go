@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package antiquary
 
 import (
@@ -9,23 +25,26 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
-	"github.com/ledgerwatch/erigon/cl/transition"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/etl"
+	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
+	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 // pool for buffers
@@ -95,6 +114,9 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	if err != nil {
 		return
 	}
+	if s.stateSn != nil {
+		progress = max(progress, s.stateSn.BlocksAvailable())
+	}
 
 	finalized, err = beacon_indicies.ReadHighestFinalized(tx)
 	if err != nil {
@@ -103,8 +125,71 @@ func (s *Antiquary) readHistoricalProcessingProgress(ctx context.Context) (progr
 	return
 }
 
+func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, stateSn *snapshotsync.CaplinStateSnapshots, validatorsTable *state_accessors.StaticValidatorTable) (bool, error) {
+	if stateSn == nil || validatorsTable.Slot() != 0 {
+		return false, nil
+	}
+	if err := stateSn.OpenFolder(); err != nil {
+		return false, err
+	}
+	if stateSn.BlocksAvailable() == 0 {
+		return false, nil
+	}
+	blocksAvaiable := stateSn.BlocksAvailable()
+	stateSnRoTx := stateSn.View()
+	defer stateSnRoTx.Close()
+
+	start := time.Now()
+	for slot := uint64(0); slot <= stateSn.BlocksAvailable(); slot++ {
+		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
+		if !ok {
+			return false, fmt.Errorf("segment not found for slot %d", slot)
+		}
+		buf, err := seg.Get(slot)
+		if err != nil {
+			return false, err
+		}
+		if len(buf) == 0 {
+			continue
+		}
+		event := state_accessors.NewStateEventsFromBytes(buf)
+		state_accessors.ReplayEvents(
+			func(validatorIndex uint64, validator solid.Validator) error {
+				return validatorsTable.AddValidator(validator, validatorIndex, slot)
+			},
+			func(validatorIndex uint64, exitEpoch uint64) error {
+				return validatorsTable.AddExitEpoch(validatorIndex, slot, exitEpoch)
+			},
+			func(validatorIndex uint64, withdrawableEpoch uint64) error {
+				return validatorsTable.AddWithdrawableEpoch(validatorIndex, slot, withdrawableEpoch)
+			},
+			func(validatorIndex uint64, withdrawalCredentials libcommon.Hash) error {
+				return validatorsTable.AddWithdrawalCredentials(validatorIndex, slot, withdrawalCredentials)
+			},
+			func(validatorIndex uint64, activationEpoch uint64) error {
+				return validatorsTable.AddActivationEpoch(validatorIndex, slot, activationEpoch)
+			},
+			func(validatorIndex uint64, activationEligibilityEpoch uint64) error {
+				return validatorsTable.AddActivationEligibility(validatorIndex, slot, activationEligibilityEpoch)
+			},
+			func(validatorIndex uint64, slashed bool) error {
+				return validatorsTable.AddSlashed(validatorIndex, slot, slashed)
+			},
+			event,
+		)
+		validatorsTable.SetSlot(slot)
+	}
+	logger.Info("[Antiquary] Filled static validators table", "slots", blocksAvaiable, "elapsed", time.Since(start))
+	return true, nil
+}
+
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
-	var tx kv.Tx
+
+	// Check if you need to fill the static validators table
+	refilledStaticValidators, err := FillStaticValidatorsTableIfNeeded(ctx, s.logger, s.stateSn, s.validatorsTable)
+	if err != nil {
+		return err
+	}
 
 	tx, err := s.mainDB.BeginRo(ctx)
 	if err != nil {
@@ -113,7 +198,14 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer tx.Rollback()
 
 	// maps which validators changes
-	changedValidators := make(map[uint64]struct{})
+	var changedValidators sync.Map
+
+	if refilledStaticValidators {
+		s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
+			changedValidators.Store(validatorIndex, struct{}{})
+			return true
+		})
+	}
 
 	stateAntiquaryCollector := newBeaconStatesCollector(s.cfg, s.dirs.Tmp, s.logger)
 	defer stateAntiquaryCollector.close()
@@ -128,7 +220,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		// Mark all validators as touched because we just initizialized the whole state.
 		s.currentState.ForEachValidator(func(v solid.Validator, index, total int) bool {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			if err = s.validatorsTable.AddValidator(v, uint64(index), 0); err != nil {
 				return false
 			}
@@ -159,37 +251,37 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return stateAntiquaryCollector.collectIntraEpochRandaoMix(slot, mix)
 		},
 		OnNewValidator: func(index int, v solid.Validator, balance uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.AddValidator(uint64(index), v)
 			return s.validatorsTable.AddValidator(v, uint64(index), slot)
 		},
 		OnNewValidatorActivationEpoch: func(index int, epoch uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeActivationEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddActivationEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorExitEpoch: func(index int, epoch uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeExitEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddExitEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorWithdrawableEpoch: func(index int, epoch uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeWithdrawableEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddWithdrawableEpoch(uint64(index), slot, epoch)
 		},
 		OnNewValidatorSlashed: func(index int, newSlashed bool) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeSlashed(uint64(index), newSlashed)
 			return s.validatorsTable.AddSlashed(uint64(index), slot, newSlashed)
 		},
 		OnNewValidatorActivationEligibilityEpoch: func(index int, epoch uint64) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeActivationEligibilityEpoch(uint64(index), epoch)
 			return s.validatorsTable.AddActivationEligibility(uint64(index), slot, epoch)
 		},
 		OnNewValidatorWithdrawalCredentials: func(index int, wc []byte) error {
-			changedValidators[uint64(index)] = struct{}{}
+			changedValidators.Store(uint64(index), struct{}{})
 			events.ChangeWithdrawalCredentials(uint64(index), libcommon.BytesToHash(wc))
 			return s.validatorsTable.AddWithdrawalCredentials(uint64(index), slot, libcommon.BytesToHash(wc))
 		},
@@ -242,7 +334,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer progressTimer.Stop()
 	prevSlot := slot
 	first := false
-	blocksBeforeCommit := 350_000
+	blocksBeforeCommit := 35_000
 	blocksProcessed := 0
 
 	for ; slot < to && blocksProcessed < blocksBeforeCommit; slot++ {
@@ -373,7 +465,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	buf := &bytes.Buffer{}
 	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
-		if _, ok := changedValidators[validatorIndex]; !ok {
+		if _, ok := changedValidators.Load(validatorIndex); !ok {
 			return true
 		}
 		buf.Reset()
@@ -396,7 +488,59 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err != nil {
 		return err
 	}
+
 	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
+	if s.stateSn != nil {
+		if err := s.stateSn.OpenFolder(); err != nil {
+			return err
+		}
+	}
+
+	if s.snapgen {
+		blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
+		from := s.stateSn.BlocksAvailable() + 1
+		if from+blocksPerStatefulFile+safetyMargin > s.currentState.Slot() {
+			return nil
+		}
+		to := s.currentState.Slot()
+		if to < (safetyMargin + blocksPerStatefulFile) {
+			return nil
+		}
+		to = to - (safetyMargin + blocksPerStatefulFile)
+		if from >= to {
+			return nil
+		}
+		if err := s.stateSn.DumpCaplinState(
+			ctx,
+			s.stateSn.BlocksAvailable()+1,
+			to,
+			blocksPerStatefulFile,
+			s.sn.Salt,
+			s.dirs,
+			1,
+			log.LvlInfo,
+			s.logger,
+		); err != nil {
+			return err
+		}
+		paths := s.stateSn.SegFileNames(from, to)
+		downloadItems := make([]*proto_downloader.AddItem, len(paths))
+		for i, path := range paths {
+			downloadItems[i] = &proto_downloader.AddItem{
+				Path: path,
+			}
+		}
+		if s.downloader != nil {
+			// Notify bittorent to seed the new snapshots
+			if _, err := s.downloader.Add(s.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+			}
+		}
+		if err := s.stateSn.OpenFolder(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -423,11 +567,15 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 	if err != nil {
 		return err
 	}
+	if s.stateSn != nil {
+		targetSlot = max(targetSlot, s.stateSn.BlocksAvailable())
+	}
 	// We want to backoff by some slots until we get a correct state from DB.
-	// we start from 1 * clparams.SlotsPerDump.
-	backoffStep := uint64(10)
+	// we start from 10 * clparams.SlotsPerDump.
+	backoffStrides := uint64(10)
+	backoffStep := backoffStrides
 
-	historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState)
+	historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState, s.stateSn)
 
 	for {
 		attempt, err := computeSlotToBeRequested(tx, s.cfg, s.genesisState.Slot(), targetSlot, backoffStep)
@@ -449,6 +597,12 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 			return fmt.Errorf("failed to read historical state at slot %d: %w", attempt, err)
 		}
 
+		if s.currentState == nil {
+			log.Warn("historical state not found, backoff more and try again", "slot", attempt)
+			backoffStep += backoffStrides
+			continue
+		}
+
 		computedBlockRoot, err := s.currentState.BlockRoot()
 		if err != nil {
 			return err
@@ -460,7 +614,7 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 		if computedBlockRoot != expectedBlockRoot {
 			log.Debug("Block root mismatch, trying again", "slot", attempt, "expected", expectedBlockRoot)
 			// backoff more
-			backoffStep += 10
+			backoffStep += backoffStrides
 			continue
 		}
 		break

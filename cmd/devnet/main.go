@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -13,26 +29,25 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	_ "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
-	_ "github.com/ledgerwatch/erigon/cmd/devnet/admin"
-	_ "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
-	"github.com/ledgerwatch/erigon/cmd/devnet/networks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
-	"github.com/ledgerwatch/erigon/cmd/utils/flags"
-	"github.com/ledgerwatch/erigon/params"
-	erigon_app "github.com/ledgerwatch/erigon/turbo/app"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	_ "github.com/erigontech/erigon/cmd/devnet/accounts/steps"
+	_ "github.com/erigontech/erigon/cmd/devnet/admin"
+	_ "github.com/erigontech/erigon/cmd/devnet/contracts/steps"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
+	"github.com/erigontech/erigon/cmd/devnet/networks"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/cmd/devnet/scenarios"
+	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
+	"github.com/erigontech/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/params"
+	erigon_app "github.com/erigontech/erigon/turbo/app"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 var (
@@ -46,7 +61,7 @@ var (
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
 		Usage: "The devnet chain to run (dev,bor-devnet)",
-		Value: networkname.DevChainName,
+		Value: networkname.Dev,
 	}
 
 	ScenariosFlag = cli.StringFlag{
@@ -102,7 +117,7 @@ var (
 	MetricsPortFlag = cli.IntFlag{
 		Name:  "metrics.port",
 		Usage: "Metrics HTTP server listening port",
-		Value: metrics.DefaultConfig.Port,
+		Value: 6061,
 	}
 
 	DiagnosticsURLFlag = cli.StringFlag{
@@ -317,8 +332,8 @@ func allScenarios(cliCtx *cli.Context, runCtx devnet.Context) scenarios.Scenario
 		"state-sync": {
 			Steps: []*scenarios.Step{
 				{Text: "InitSubscriptions", Args: []any{[]requests.SubMethod{requests.Methods.ETHNewHeads}}},
-				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
-				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.Dev, "root-funder", 200.0}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnet, "child-funder", 200.0}},
 				{Text: "DeployChildChainReceiver", Args: []any{"child-funder"}},
 				{Text: "DeployRootChainSender", Args: []any{"root-funder"}},
 				{Text: "GenerateSyncEvents", Args: []any{"root-funder", 10, 2, 2}},
@@ -328,8 +343,8 @@ func allScenarios(cliCtx *cli.Context, runCtx devnet.Context) scenarios.Scenario
 		},
 		"child-chain-exit": {
 			Steps: []*scenarios.Step{
-				{Text: "CreateAccountWithFunds", Args: []any{networkname.DevChainName, "root-funder", 200.0}},
-				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnetChainName, "child-funder", 200.0}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.Dev, "root-funder", 200.0}},
+				{Text: "CreateAccountWithFunds", Args: []any{networkname.BorDevnet, "child-funder", 200.0}},
 				{Text: "DeployRootChainReceiver", Args: []any{"root-funder"}},
 				{Text: "DeployChildChainSender", Args: []any{"child-funder"}},
 				{Text: "ProcessChildTransfers", Args: []any{"child-funder", 1, 2, 2}},
@@ -405,7 +420,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	}
 
 	switch chainName {
-	case networkname.BorDevnetChainName:
+	case networkname.BorDevnet:
 		if ctx.Bool(WithoutHeimdallFlag.Name) {
 			return networks.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		} else if ctx.Bool(LocalHeimdallFlag.Name) {
@@ -416,7 +431,7 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 			return networks.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		}
 
-	case networkname.DevChainName:
+	case networkname.Dev:
 		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 
 	default:

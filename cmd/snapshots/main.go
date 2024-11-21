@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package main
 
 import (
@@ -10,20 +26,20 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common/disk"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/cmp"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/copy"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/manifest"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/torrents"
-	"github.com/ledgerwatch/erigon/cmd/snapshots/verify"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/erigontech/erigon-lib/common/disk"
+	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon/cmd/snapshots/cmp"
+	"github.com/erigontech/erigon/cmd/snapshots/copy"
+	"github.com/erigontech/erigon/cmd/snapshots/manifest"
+	"github.com/erigontech/erigon/cmd/snapshots/sync"
+	"github.com/erigontech/erigon/cmd/snapshots/torrents"
+	"github.com/erigontech/erigon/cmd/snapshots/verify"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func main() {
@@ -71,7 +87,7 @@ func main() {
 
 			var cancel context.CancelFunc
 
-			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger))
+			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger)) //nolint
 
 			// setup periodic logging and prometheus updates
 			go mem.LogMemStats(ctx.Context, logger)

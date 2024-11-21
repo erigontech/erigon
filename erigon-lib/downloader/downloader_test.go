@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package downloader
 
 import (
@@ -9,10 +25,10 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {
@@ -22,7 +38,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg2.New(dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet", false, false)
+	cfg, err := downloadercfg2.New(context.Background(), dirs, "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet", false, false)
 	require.NoError(err)
 	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo, true)
 	require.NoError(err)

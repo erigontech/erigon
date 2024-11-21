@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -27,16 +30,14 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/protolambda/ztyp/codec"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/math"
+	libcrypto "github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 var (
@@ -52,6 +53,7 @@ const (
 	AccessListTxType
 	DynamicFeeTxType
 	BlobTxType
+	SetCodeTxType
 )
 
 // Transaction is an Ethereum transaction.
@@ -70,11 +72,10 @@ type Transaction interface {
 	GetTo() *libcommon.Address
 	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
-	FakeSign(address libcommon.Address) (Transaction, error)
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte
-	GetAccessList() types2.AccessList
+	GetAccessList() AccessList
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int
@@ -89,7 +90,7 @@ type Transaction interface {
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
 	Sender(Signer) (libcommon.Address, error)
-	cashedSender() (libcommon.Address, bool)
+	cachedSender() (libcommon.Address, bool)
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
@@ -100,8 +101,8 @@ type Transaction interface {
 // implementations of different transaction types
 type TransactionMisc struct {
 	// caches
-	hash atomic.Value //nolint:structcheck
-	from atomic.Value
+	hash atomic.Pointer[libcommon.Hash]
+	from atomic.Pointer[libcommon.Address]
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -171,7 +172,7 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 		return nil, err
 	}
 	if s.Remaining() != 0 {
-		return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
+		return nil, errors.New("trailing bytes after rlp encoded transaction")
 	}
 	return tx, nil
 }
@@ -194,6 +195,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		} else {
 			t = &BlobTx{}
 		}
+	case SetCodeTxType:
+		t = &SetCodeTransaction{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
@@ -205,23 +208,35 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		return nil, err
 	}
 	if s.Remaining() != 0 {
-		return nil, fmt.Errorf("trailing bytes after rlp encoded transaction")
+		return nil, errors.New("trailing bytes after rlp encoded transaction")
 	}
 	return t, nil
 }
 
-// Remove everything but the payload body from the wrapper - this is not used, for reference only
-func UnwrapTxPlayloadRlp(blobTxRlp []byte) (retRlp []byte, err error) {
+// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
+// Doesn't change non-blob tx
+func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if blobTxRlp[0] != BlobTxType {
 		return blobTxRlp, nil
 	}
-	it, err := rlp.NewListIterator(blobTxRlp[1:])
+	dataposPrev, _, isList, err := rlp2.Prefix(blobTxRlp[1:], 0)
+	if err != nil || dataposPrev < 1 {
+		return nil, err
+	}
+	if !isList { // This is clearly not wrapped txn then
+		return blobTxRlp, nil
+	}
+
+	blobTxRlp = blobTxRlp[1:]
+	// Get to the wrapper list
+	datapos, datalen, err := rlp2.List(blobTxRlp, dataposPrev)
 	if err != nil {
 		return nil, err
 	}
-	it.Next()
-	retRlp = it.Value()
-	return
+	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // seekInFiles left an extra-bit
+	blobTxRlp[0] = 0x3
+	// Include the prefix part of the rlp
+	return blobTxRlp, nil
 }
 
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
@@ -279,7 +294,7 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 		// must already be equal to the recovery id.
 		plainV = byte(v.Uint64())
 	}
-	if !crypto.ValidateSignatureValues(plainV, r, s, false) {
+	if !libcrypto.TransactionSignatureIsValid(plainV, r, s, true /* allowPreEip2s */) {
 		return ErrInvalidSig
 	}
 
@@ -404,14 +419,15 @@ type Message struct {
 	tip              uint256.Int
 	maxFeePerBlobGas uint256.Int
 	data             []byte
-	accessList       types2.AccessList
+	accessList       AccessList
 	checkNonce       bool
 	isFree           bool
 	blobHashes       []libcommon.Hash
+	authorizations   []Authorization
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
-	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool,
+	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	isFree bool, maxFeePerBlobGas *uint256.Int,
 ) Message {
 	m := Message{
@@ -440,17 +456,21 @@ func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amo
 	return m
 }
 
-func (m Message) From() libcommon.Address       { return m.from }
-func (m Message) To() *libcommon.Address        { return m.to }
-func (m Message) GasPrice() *uint256.Int        { return &m.gasPrice }
-func (m Message) FeeCap() *uint256.Int          { return &m.feeCap }
-func (m Message) Tip() *uint256.Int             { return &m.tip }
-func (m Message) Value() *uint256.Int           { return &m.amount }
-func (m Message) Gas() uint64                   { return m.gasLimit }
-func (m Message) Nonce() uint64                 { return m.nonce }
-func (m Message) Data() []byte                  { return m.data }
-func (m Message) AccessList() types2.AccessList { return m.accessList }
-func (m Message) CheckNonce() bool              { return m.checkNonce }
+func (m Message) From() libcommon.Address         { return m.from }
+func (m Message) To() *libcommon.Address          { return m.to }
+func (m Message) GasPrice() *uint256.Int          { return &m.gasPrice }
+func (m Message) FeeCap() *uint256.Int            { return &m.feeCap }
+func (m Message) Tip() *uint256.Int               { return &m.tip }
+func (m Message) Value() *uint256.Int             { return &m.amount }
+func (m Message) Gas() uint64                     { return m.gasLimit }
+func (m Message) Nonce() uint64                   { return m.nonce }
+func (m Message) Data() []byte                    { return m.data }
+func (m Message) AccessList() AccessList          { return m.accessList }
+func (m Message) Authorizations() []Authorization { return m.authorizations }
+func (m *Message) SetAuthorizations(authorizations []Authorization) {
+	m.authorizations = authorizations
+}
+func (m Message) CheckNonce() bool { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
 }
@@ -490,13 +510,4 @@ func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 
 func EncodeSSZ(w io.Writer, obj codec.Serializable) error {
 	return obj.Serialize(codec.NewEncodingWriter(w))
-}
-
-// copyAddressPtr copies an address.
-func copyAddressPtr(a *libcommon.Address) *libcommon.Address {
-	if a == nil {
-		return nil
-	}
-	cpy := *a
-	return &cpy
 }

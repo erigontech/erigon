@@ -1,16 +1,37 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package p2p
 
 import (
 	"context"
 	"math/big"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/core/types"
 )
 
 func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
@@ -18,9 +39,9 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 
 	peerId1 := PeerIdFromUint64(1)
 	requestId1 := uint64(1234)
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId1.H512(),
 			Data:   newMockBlockHeadersPacket66Bytes(t, requestId1, 2),
 		},
@@ -33,9 +54,9 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 		wantRequestAmount:           2,
 	}
 	requestId2 := uint64(1235)
-	mockInboundMessages2 := []*sentry.InboundMessage{
+	mockInboundMessages2 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId1.H512(),
 			// peer returns 0 headers for requestId2 - peer does not have this header range
 			Data: newMockBlockHeadersPacket66Bytes(t, requestId2, 0),
@@ -52,6 +73,7 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 	test := newTrackingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
+		test.simulateDefaultPeerEvents()
 		var peerIds []*PeerId // peers which may have blocks 1 and 2
 		require.Eventuallyf(t, func() bool {
 			peerIds = test.peerTracker.ListPeersMayHaveBlockNum(2)
@@ -93,9 +115,9 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 	requestId3 := uint64(1236)
 	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId1.H512(),
 			Data:   newMockBlockBodiesPacketBytes(t, requestId1),
 		},
@@ -106,9 +128,9 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 		wantRequestPeerId:           peerId1,
 		wantRequestHashes:           mockHashes,
 	}
-	mockInboundMessages2 := []*sentry.InboundMessage{
+	mockInboundMessages2 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId2.H512(),
 			Data:   nil, // response timeout
 		},
@@ -120,9 +142,9 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 		wantRequestHashes:           mockHashes,
 		responseDelay:               600 * time.Millisecond,
 	}
-	mockInboundMessages3 := []*sentry.InboundMessage{
+	mockInboundMessages3 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId2.H512(),
 			Data:   nil, // response timeout
 		},
@@ -138,6 +160,7 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 	test := newTrackingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2, requestId3))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2, mockRequestResponse3)
 	test.run(func(ctx context.Context, t *testing.T) {
+		test.simulateDefaultPeerEvents()
 		var peerIds []*PeerId // peers which may have block 1
 		require.Eventuallyf(t, func() bool {
 			peerIds = test.peerTracker.ListPeersMayHaveBlockNum(1)
@@ -163,10 +186,10 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *trackingFetcherTest {
 	fetcherTest := newFetcherTest(t, requestIdGenerator)
 	logger := fetcherTest.logger
-	peerTracker := newPeerTracker(PreservingPeerShuffle)
-	unregister := fetcherTest.messageListener.RegisterPeerEventObserver(NewPeerEventObserver(logger, peerTracker))
-	t.Cleanup(unregister)
-	trackingFetcher := newTrackingFetcher(fetcherTest.fetcher, peerTracker)
+	sentryClient := fetcherTest.sentryClient
+	messageListener := fetcherTest.messageListener
+	peerTracker := NewPeerTracker(logger, sentryClient, messageListener, WithPreservingPeerShuffle)
+	trackingFetcher := NewTrackingFetcher(fetcherTest.fetcher, peerTracker)
 	return &trackingFetcherTest{
 		fetcherTest:     fetcherTest,
 		trackingFetcher: trackingFetcher,
@@ -176,6 +199,75 @@ func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator)
 
 type trackingFetcherTest struct {
 	*fetcherTest
-	trackingFetcher *trackingFetcher
-	peerTracker     PeerTracker
+	trackingFetcher        *TrackingFetcher
+	peerTracker            *PeerTracker
+	peerTrackerInitialised atomic.Bool
+}
+
+func (tft *trackingFetcherTest) run(f func(ctx context.Context, t *testing.T)) {
+	var done atomic.Bool
+	tft.t.Run("start", func(t *testing.T) {
+		go func() {
+			defer done.Store(true)
+			eg, ctx := errgroup.WithContext(tft.ctx)
+			eg.Go(func() error {
+				return tft.peerTracker.Run(ctx)
+			})
+			eg.Go(func() error {
+				// wait for the tracker to be initialised before simulating peer events,
+				// otherwise the tests may be flake-y because simulated test events in each test
+				// may be consumed by the listener background loop before the tracker has
+				// registered its peer event observer which makes the test unreliable
+				require.Eventually(tft.t, func() bool {
+					return tft.peerTrackerInitialised.Load()
+				}, time.Second, 100*time.Millisecond, "expected peer tracker to be initialised")
+
+				return tft.messageListener.Run(ctx)
+			})
+			err := eg.Wait()
+			require.ErrorIs(t, err, context.Canceled)
+		}()
+	})
+
+	tft.t.Run("test", func(t *testing.T) {
+		f(tft.ctx, t)
+	})
+
+	tft.t.Run("stop", func(t *testing.T) {
+		tft.ctxCancel()
+		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
+	})
+}
+
+func (tft *trackingFetcherTest) mockSentryStreams(mocks ...requestResponseMock) {
+	tft.fetcherTest.mockSentryStreams(mocks...)
+
+	tft.sentryClient.EXPECT().
+		Peers(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentryproto.PeersReply, error) {
+			tft.peerTrackerInitialised.Store(true)
+			return &sentryproto.PeersReply{}, nil
+		}).
+		Times(1)
+}
+
+func (tft *trackingFetcherTest) simulateDefaultPeerEvents() {
+	tft.simulatePeerEvents([]*sentryproto.PeerEvent{
+		{
+			EventId: sentryproto.PeerEvent_Connect,
+			PeerId:  PeerIdFromUint64(1).H512(),
+		},
+		{
+			EventId: sentryproto.PeerEvent_Connect,
+			PeerId:  PeerIdFromUint64(2).H512(),
+		},
+	})
+}
+
+func (tft *trackingFetcherTest) simulatePeerEvents(peerEvents []*sentryproto.PeerEvent) {
+	for _, peerEvent := range peerEvents {
+		tft.peerEvents <- &delayedMessage[*sentryproto.PeerEvent]{
+			message: peerEvent,
+		}
+	}
 }

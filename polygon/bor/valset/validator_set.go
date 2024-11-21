@@ -1,16 +1,34 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package valset
 
 // Tendermint leader selection algorithm
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
 	"sort"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // MaxTotalVotingPower - the maximum allowed total voting power.
@@ -172,20 +190,20 @@ func computeMaxMinPriorityDiff(vals *ValidatorSet) int64 {
 		panic("empty validator set")
 	}
 
-	max := int64(math.MinInt64)
-	min := int64(math.MaxInt64)
+	_max := int64(math.MinInt64)
+	_min := int64(math.MaxInt64)
 
 	for _, v := range vals.Validators {
-		if v.ProposerPriority < min {
-			min = v.ProposerPriority
+		if v.ProposerPriority < _min {
+			_min = v.ProposerPriority
 		}
 
-		if v.ProposerPriority > max {
-			max = v.ProposerPriority
+		if v.ProposerPriority > _max {
+			_max = v.ProposerPriority
 		}
 	}
 
-	diff := max - min
+	diff := _max - _min
 
 	if diff < 0 {
 		return -1 * diff
@@ -601,7 +619,7 @@ func (vals *ValidatorSet) updateWithChangeSet(changes []*Validator, allowDeletes
 
 	// Check that the resulting set will not be empty.
 	if numNewValidators == 0 && len(vals.Validators) == len(deletes) {
-		return fmt.Errorf("applying the validator changes would result in empty set")
+		return errors.New("applying the validator changes would result in empty set")
 	}
 
 	// Compute the priorities for updates.
@@ -661,6 +679,20 @@ func (vals *ValidatorSet) Difficulty(signer libcommon.Address) (uint64, error) {
 	}
 
 	return uint64(len(vals.Validators) - indexDiff), nil
+}
+
+// SafeDifficulty returns the difficulty for a particular signer at the current snapshot number if available,
+// otherwise it returns 1 for empty signer and 0 if it is not in the validator set.
+func (vals *ValidatorSet) SafeDifficulty(signer libcommon.Address) uint64 {
+	if bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+		return 1
+	}
+
+	if d, err := vals.Difficulty(signer); err == nil {
+		return d
+	} else {
+		return 0
+	}
 }
 
 // GetSignerSuccessionNumber returns the relative position of signer in terms of the in-turn proposer
@@ -800,4 +832,43 @@ func safeSubClip(a, b int64) int64 {
 	}
 
 	return c
+}
+
+func GetUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*Validator, logger log.Logger) *ValidatorSet {
+	v := oldValidatorSet
+	oldVals := v.Validators
+
+	changes := make([]*Validator, 0, len(oldVals))
+
+	for _, ov := range oldVals {
+		if f, ok := validatorContains(newVals, ov); ok {
+			ov.VotingPower = f.VotingPower
+		} else {
+			ov.VotingPower = 0
+		}
+
+		changes = append(changes, ov)
+	}
+
+	for _, nv := range newVals {
+		if _, ok := validatorContains(changes, nv); !ok {
+			changes = append(changes, nv)
+		}
+	}
+
+	if err := v.UpdateWithChangeSet(changes); err != nil {
+		logger.Error("error while updating change set", "err", err)
+	}
+
+	return v
+}
+
+func validatorContains(a []*Validator, x *Validator) (*Validator, bool) {
+	for _, n := range a {
+		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
+			return n, true
+		}
+	}
+
+	return nil, false
 }

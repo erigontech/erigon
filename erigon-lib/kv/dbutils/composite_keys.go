@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package dbutils
 
 import (
@@ -5,8 +21,8 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
 )
 
 const NumberLength = 8
@@ -51,16 +67,6 @@ func LogKey(blockNumber uint64, txId uint32) []byte {
 	return newK
 }
 
-// bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
-func BloomBitsKey(bit uint, section uint64, hash libcommon.Hash) []byte {
-	key := append(make([]byte, 10), hash.Bytes()...)
-
-	binary.BigEndian.PutUint16(key[0:], uint16(bit))
-	binary.BigEndian.PutUint64(key[2:], section)
-
-	return key
-}
-
 // AddrHash + KeyHash
 // Only for trie
 func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash) []byte {
@@ -68,109 +74,4 @@ func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash)
 	compositeKey = append(compositeKey, addressHash[:]...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
-}
-
-// AddrHash + incarnation + KeyHash
-// For contract storage
-func GenerateCompositeStorageKey(addressHash libcommon.Hash, incarnation uint64, seckey libcommon.Hash) []byte {
-	compositeKey := make([]byte, length.Hash+length.Incarnation+length.Hash)
-	copy(compositeKey, addressHash[:])
-	binary.BigEndian.PutUint64(compositeKey[length.Hash:], incarnation)
-	copy(compositeKey[length.Hash+length.Incarnation:], seckey[:])
-	return compositeKey
-}
-
-func ParseCompositeStorageKey(compositeKey []byte) (libcommon.Hash, uint64, libcommon.Hash) {
-	prefixLen := length.Hash + length.Incarnation
-	addrHash, inc := ParseStoragePrefix(compositeKey[:prefixLen])
-	var key libcommon.Hash
-	copy(key[:], compositeKey[prefixLen:prefixLen+length.Hash])
-	return addrHash, inc, key
-}
-
-// AddrHash + incarnation + KeyHash
-// For contract storage (for plain state)
-func PlainGenerateCompositeStorageKey(address []byte, incarnation uint64, key []byte) []byte {
-	compositeKey := make([]byte, length.Addr+length.Incarnation+length.Hash)
-	copy(compositeKey, address)
-	binary.BigEndian.PutUint64(compositeKey[length.Addr:], incarnation)
-	copy(compositeKey[length.Addr+length.Incarnation:], key)
-	return compositeKey
-}
-
-func PlainParseCompositeStorageKey(compositeKey []byte) (libcommon.Address, uint64, libcommon.Hash) {
-	prefixLen := length.Addr + length.Incarnation
-	addr, inc := PlainParseStoragePrefix(compositeKey[:prefixLen])
-	var key libcommon.Hash
-	copy(key[:], compositeKey[prefixLen:prefixLen+length.Hash])
-	return addr, inc, key
-}
-
-// AddrHash + incarnation + StorageHashPrefix
-func GenerateCompositeStoragePrefix(addressHash []byte, incarnation uint64, storageHashPrefix []byte) []byte {
-	key := make([]byte, length.Hash+length.Incarnation+len(storageHashPrefix))
-	copy(key, addressHash)
-	binary.BigEndian.PutUint64(key[length.Hash:], incarnation)
-	copy(key[length.Hash+length.Incarnation:], storageHashPrefix)
-	return key
-}
-
-// address hash + incarnation prefix
-func GenerateStoragePrefix(addressHash []byte, incarnation uint64) []byte {
-	prefix := make([]byte, length.Hash+NumberLength)
-	copy(prefix, addressHash)
-	binary.BigEndian.PutUint64(prefix[length.Hash:], incarnation)
-	return prefix
-}
-
-// address hash + incarnation prefix (for plain state)
-func PlainGenerateStoragePrefix(address []byte, incarnation uint64) []byte {
-	prefix := make([]byte, length.Addr+NumberLength)
-	copy(prefix, address)
-	binary.BigEndian.PutUint64(prefix[length.Addr:], incarnation)
-	return prefix
-}
-
-func PlainParseStoragePrefix(prefix []byte) (libcommon.Address, uint64) {
-	var addr libcommon.Address
-	copy(addr[:], prefix[:length.Addr])
-	inc := binary.BigEndian.Uint64(prefix[length.Addr : length.Addr+length.Incarnation])
-	return addr, inc
-}
-
-func ParseStoragePrefix(prefix []byte) (libcommon.Hash, uint64) {
-	var addrHash libcommon.Hash
-	copy(addrHash[:], prefix[:length.Hash])
-	inc := binary.BigEndian.Uint64(prefix[length.Hash : length.Hash+length.Incarnation])
-	return addrHash, inc
-}
-
-// Key + blockNum
-func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []byte) {
-	encodedTS = encodeTimestamp(timestamp)
-	composite = make([]byte, len(key)+len(encodedTS))
-	copy(composite, key)
-	copy(composite[len(key):], encodedTS)
-	return composite, encodedTS
-}
-
-// encodeTimestamp has the property: if a < b, then Encoding(a) < Encoding(b) lexicographically
-func encodeTimestamp(timestamp uint64) []byte {
-	var suffix []byte
-	var limit uint64 = 32
-
-	for bytecount := 1; bytecount <= 8; bytecount++ {
-		if timestamp < limit {
-			suffix = make([]byte, bytecount)
-			b := timestamp
-			for i := bytecount - 1; i > 0; i-- {
-				suffix[i] = byte(b & 0xff)
-				b >>= 8
-			}
-			suffix[0] = byte(b) | (byte(bytecount) << 5) // 3 most significant bits of the first byte are bytecount
-			break
-		}
-		limit <<= 8
-	}
-	return suffix
 }

@@ -1,67 +1,58 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sync
 
 import (
 	"context"
+	"fmt"
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/executionproto"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bridge"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/p2p/sentry"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/turbo/shards"
 )
-
-type Service interface {
-	Run(ctx context.Context) error
-}
-
-type service struct {
-	sync *Sync
-
-	p2pService p2p.Service
-	store      Store
-	events     *TipEvents
-
-	heimdallService heimdall.Service
-	bridge          bridge.Service
-}
 
 func NewService(
 	logger log.Logger,
 	chainConfig *chain.Config,
-	dataDir string,
-	tmpDir string,
-	sentryClient direct.SentryClient,
+	sentryClient sentryproto.SentryClient,
 	maxPeers int,
 	statusDataProvider *sentry.StatusDataProvider,
-	heimdallUrl string,
 	executionClient executionproto.ExecutionClient,
 	blockLimit uint,
-) Service {
+	bridgeService *bridge.Service,
+	heimdallService *heimdall.Service,
+	notifications *shards.Notifications,
+) *Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	checkpointVerifier := VerifyCheckpointHeaders
 	milestoneVerifier := VerifyMilestoneHeaders
 	blocksVerifier := VerifyBlocks
-	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
-	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
-	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
-	heimdallServiceV2 := heimdall.NewService(
-		heimdallUrl,
-		dataDir,
-		tmpDir,
-		logger,
-	)
-	execution := NewExecutionClient(executionClient)
-	polygonBridge := bridge.NewBridge(dataDir, logger, borConfig, heimdallClient.FetchStateSyncEvents, bor.GenesisContractStateReceiverABI())
-	store := NewStore(logger, execution, polygonBridge)
-
+	p2pService := p2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData)
+	execution := newExecutionClient(executionClient)
+	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
@@ -72,10 +63,10 @@ func NewService(
 		store,
 		blockLimit,
 	)
-	spansCache := NewSpansCache()
-	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, spansCache)
+	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService)
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
+		logger,
 		store,
 		execution,
 		milestoneVerifier,
@@ -83,34 +74,75 @@ func NewService(
 		p2pService,
 		blockDownloader,
 		ccBuilderFactory,
-		spansCache,
-		heimdallService.FetchLatestSpans,
+		heimdallService,
+		bridgeService,
 		events.Events(),
-		logger,
+		notifications,
 	)
-	return &service{
-		sync:       sync,
-		p2pService: p2pService,
-		store:      store,
-		events:     events,
-
-		heimdallService: heimdallServiceV2,
-		bridge:          polygonBridge,
+	return &Service{
+		sync:            sync,
+		p2pService:      p2pService,
+		store:           store,
+		events:          events,
+		heimdallService: heimdallService,
+		bridgeService:   bridgeService,
 	}
 }
 
-func (s *service) Run(parentCtx context.Context) error {
+type Service struct {
+	sync            *Sync
+	p2pService      *p2p.Service
+	store           Store
+	events          *TipEvents
+	heimdallService *heimdall.Service
+	bridgeService   *bridge.Service
+}
+
+func (s *Service) Run(parentCtx context.Context) error {
 	group, ctx := errgroup.WithContext(parentCtx)
 
-	group.Go(func() error { s.p2pService.Run(ctx); return nil })
-	group.Go(func() error { return s.store.Run(ctx) })
-	group.Go(func() error { return s.events.Run(ctx) })
-	// TODO: remove the check when heimdall.NewService is functional
-	if s.heimdallService != nil {
-		group.Go(func() error { return s.heimdallService.Run(ctx) })
-	}
-	group.Go(func() error { return s.bridge.Run(ctx) })
-	group.Go(func() error { return s.sync.Run(ctx) })
+	group.Go(func() error {
+		if err := s.p2pService.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync p2p failed: %w", err)
+		}
+
+		return nil
+	})
+	group.Go(func() error {
+		if err := s.store.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync store failed: %w", err)
+		}
+
+		return nil
+	})
+	group.Go(func() error {
+		if err := s.events.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync events failed: %w", err)
+		}
+
+		return nil
+	})
+	group.Go(func() error {
+		if err := s.heimdallService.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync heimdall failed: %w", err)
+		}
+
+		return nil
+	})
+	group.Go(func() error {
+		if err := s.bridgeService.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync bridge failed: %w", err)
+		}
+
+		return nil
+	})
+	group.Go(func() error {
+		if err := s.sync.Run(ctx); err != nil {
+			return fmt.Errorf("pos sync failed: %w", err)
+		}
+
+		return nil
+	})
 
 	return group.Wait()
 }

@@ -1,27 +1,43 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 
 func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
-	hash, slotNumber, err := a.forkchoiceStore.GetHead()
+	root, slot, statusCode, err := a.getHead()
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 	return newBeaconResponse(
 		[]interface{}{
 			map[string]interface{}{
-				"slot":                 strconv.FormatUint(slotNumber, 10),
-				"root":                 hash,
+				"slot":                 strconv.FormatUint(slot, 10),
+				"root":                 root,
 				"execution_optimistic": false,
 			},
 		}), nil

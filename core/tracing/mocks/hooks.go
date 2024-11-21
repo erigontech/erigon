@@ -13,10 +13,10 @@ import (
 	reflect "reflect"
 
 	uint256 "github.com/holiman/uint256"
-	chain "github.com/ledgerwatch/erigon-lib/chain"
-	common "github.com/ledgerwatch/erigon-lib/common"
-	tracing "github.com/ledgerwatch/erigon/core/tracing"
-	types "github.com/ledgerwatch/erigon/core/types"
+	chain "github.com/erigontech/erigon-lib/chain"
+	common "github.com/erigontech/erigon-lib/common"
+	tracing "github.com/erigontech/erigon/core/tracing"
+	types "github.com/erigontech/erigon/core/types"
 	gomock "go.uber.org/mock/gomock"
 )
 

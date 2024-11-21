@@ -8,9 +8,10 @@ import (
 	"math/big"
 
 	"github.com/gballet/go-verkle"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
 var _ = (*headerMarshaling)(nil)
@@ -40,7 +41,7 @@ func (h Header) MarshalJSON() ([]byte, error) {
 		BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed"`
 		ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas"`
 		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
-		RequestsRoot          *common.Hash    `json:"requestsRoot"`
+		RequestsHash          *common.Hash    `json:"requestsHash"`
 		Verkle                bool
 		VerkleProof           []byte
 		VerkleKeyVals         []verkle.KeyValuePair
@@ -69,7 +70,7 @@ func (h Header) MarshalJSON() ([]byte, error) {
 	enc.BlobGasUsed = (*hexutil.Uint64)(h.BlobGasUsed)
 	enc.ExcessBlobGas = (*hexutil.Uint64)(h.ExcessBlobGas)
 	enc.ParentBeaconBlockRoot = h.ParentBeaconBlockRoot
-	enc.RequestsRoot = h.RequestsRoot
+	enc.RequestsHash = h.RequestsHash
 	enc.Verkle = h.Verkle
 	enc.VerkleProof = h.VerkleProof
 	enc.VerkleKeyVals = h.VerkleKeyVals
@@ -102,7 +103,7 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 		BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed"`
 		ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas"`
 		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
-		RequestsRoot          *common.Hash    `json:"requestsRoot"`
+		RequestsHash          *common.Hash    `json:"requestsHash"`
 		Verkle                *bool
 		VerkleProof           []byte
 		VerkleKeyVals         []verkle.KeyValuePair
@@ -189,8 +190,8 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 	if dec.ParentBeaconBlockRoot != nil {
 		h.ParentBeaconBlockRoot = dec.ParentBeaconBlockRoot
 	}
-	if dec.RequestsRoot != nil {
-		h.RequestsRoot = dec.RequestsRoot
+	if dec.RequestsHash != nil {
+		h.RequestsHash = dec.RequestsHash
 	}
 	if dec.Verkle != nil {
 		h.Verkle = *dec.Verkle

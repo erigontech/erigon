@@ -1,19 +1,35 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
 	"context"
-	"errors"
 	"log"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	mockState "github.com/ledgerwatch/erigon/cl/abstract/mock_services"
-	mockSync "github.com/ledgerwatch/erigon/cl/beacon/synced_data/mock_services"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/antiquary/tests"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -22,7 +38,7 @@ type proposerSlashingTestSuite struct {
 	suite.Suite
 	gomockCtrl              *gomock.Controller
 	operationsPool          *pool.OperationsPool
-	syncedData              *mockSync.MockSyncedData
+	syncedData              synced_data.SyncedData
 	beaconCfg               *clparams.BeaconChainConfig
 	ethClock                *eth_clock.MockEthereumClock
 	proposerSlashingService *proposerSlashingService
@@ -34,12 +50,15 @@ func (t *proposerSlashingTestSuite) SetupTest() {
 	t.operationsPool = &pool.OperationsPool{
 		ProposerSlashingsPool: pool.NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](10, "proposerSlashingsPool"),
 	}
-	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
+	_, st, _ := tests.GetBellatrixRandom()
+	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0)
+	t.syncedData.OnHeadState(st)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconCfg = &clparams.BeaconChainConfig{
 		SlotsPerEpoch: 2,
 	}
-	t.proposerSlashingService = NewProposerSlashingService(*t.operationsPool, t.syncedData, t.beaconCfg, t.ethClock)
+	emitters := beaconevents.NewEventEmitter()
+	t.proposerSlashingService = NewProposerSlashingService(*t.operationsPool, t.syncedData, t.beaconCfg, t.ethClock, emitters)
 	// mock global functions
 	t.mockFuncs = &mockFuncs{ctrl: t.gomockCtrl}
 	computeSigningRoot = t.mockFuncs.ComputeSigningRoot
@@ -65,6 +84,24 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 			Header: &cltypes.BeaconBlockHeader{
 				Slot:          1,
 				ProposerIndex: mockProposerIndex,
+				Root:          common.Hash{2},
+			},
+			Signature: common.Bytes96{4, 5, 6},
+		},
+	}
+	mockMsg2 := &cltypes.ProposerSlashing{
+		Header1: &cltypes.SignedBeaconBlockHeader{
+			Header: &cltypes.BeaconBlockHeader{
+				Slot:          1,
+				ProposerIndex: 9191991,
+				Root:          common.Hash{1},
+			},
+			Signature: common.Bytes96{1, 2, 3},
+		},
+		Header2: &cltypes.SignedBeaconBlockHeader{
+			Header: &cltypes.BeaconBlockHeader{
+				Slot:          1,
+				ProposerIndex: 9191991,
 				Root:          common.Hash{2},
 			},
 			Signature: common.Bytes96{4, 5, 6},
@@ -136,26 +173,24 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 		{
 			name: "empty head state",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(nil).Times(1)
+				t.syncedData.UnsetHeadState()
 			},
 			msg:     mockMsg,
 			wantErr: true,
-			err:     ErrIgnore,
+			err:     synced_data.ErrNotSynced,
 		},
 		{
 			name: "validator not found",
 			mock: func() {
-				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-				mockState.EXPECT().ValidatorForValidatorIndex(int(mockProposerIndex)).Return(nil, errors.New("not found")).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				_, st, _ := tests.GetBellatrixRandom()
+				t.syncedData.OnHeadState(st)
 			},
-			msg:     mockMsg,
+			msg:     mockMsg2,
 			wantErr: true,
 		},
 		{
 			name: "proposer is not slashable",
 			mock: func() {
-				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
 				mockValidator := solid.NewValidatorFromParameters(
 					[48]byte{},
 					[32]byte{},
@@ -166,8 +201,10 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 					0,
 					0,
 				)
-				mockState.EXPECT().ValidatorForValidatorIndex(int(mockProposerIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				_, st, _ := tests.GetBellatrixRandom()
+				st.ValidatorSet().Set(int(mockProposerIndex), mockValidator)
+				t.syncedData.OnHeadState(st)
+
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(uint64(1)).Times(1)
 			},
 			msg:     mockMsg,
@@ -176,24 +213,21 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 		{
 			name: "pass",
 			mock: func() {
-				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-				mockValidator := solid.NewValidatorFromParameters(
-					[48]byte{},
-					[32]byte{},
-					0,
-					false,
-					0,
-					0,
-					2,
-					2,
-				)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
-				mockState.EXPECT().ValidatorForValidatorIndex(int(mockProposerIndex)).Return(mockValidator, nil).Times(1)
+				// mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
+				// mockValidator := solid.NewValidatorFromParameters(
+				// 	[48]byte{},
+				// 	[32]byte{},
+				// 	0,
+				// 	false,
+				// 	0,
+				// 	0,
+				// 	2,
+				// 	2,
+				// )
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(uint64(1)).Times(1)
 
-				mockState.EXPECT().GetDomain(t.beaconCfg.DomainBeaconProposer, gomock.Any()).Return([]byte{}, nil).Times(2)
-				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.Header1, []byte{}).Return([32]byte{}, nil).Times(1)
-				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.Header2, []byte{}).Return([32]byte{}, nil).Times(1)
+				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.Header1, gomock.Any()).Return([32]byte{}, nil).Times(1)
+				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "ComputeSigningRoot", mockMsg.Header2, gomock.Any()).Return([32]byte{}, nil).Times(1)
 				t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(2)
 			},
 			msg:     mockMsg,

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
@@ -6,10 +22,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/log/v3"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
-
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 type ExistenceFilter struct {
@@ -105,10 +121,27 @@ func (b *ExistenceFilter) fsync(f *os.File) error {
 	return nil
 }
 
-func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
+func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error) {
+	var validationPassed = false
 	_, fileName := filepath.Split(filePath)
-	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
-	if !dir.FileExist(filePath) {
+	idx := &ExistenceFilter{FilePath: filePath, FileName: fileName}
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if rec := recover(); rec != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", filePath, rec, dbg.Stack())
+		}
+		if err != nil || !validationPassed {
+			idx.Close()
+			idx = nil
+		}
+	}()
+
+	exists, err := dir.FileExist(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
 		return nil, fmt.Errorf("file doesn't exists: %s", fileName)
 	}
 	{
@@ -121,21 +154,22 @@ func OpenExistenceFilter(filePath string) (*ExistenceFilter, error) {
 		if err != nil {
 			return nil, err
 		}
-		f.empty = stat.Size() == 0
+		idx.empty = stat.Size() == 0
 	}
 
-	if !f.empty {
+	if !idx.empty {
 		var err error
-		f.filter, _, err = bloomfilter.ReadFile(filePath)
+		idx.filter, _, err = bloomfilter.ReadFile(filePath)
 		if err != nil {
 			return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
 		}
 	}
-	return f, nil
+	return idx, nil
 }
 func (b *ExistenceFilter) Close() {
-	if b.f != nil {
-		b.f.Close()
-		b.f = nil
+	if b == nil || b.f == nil {
+		return
 	}
+	b.f.Close()
+	b.f = nil
 }

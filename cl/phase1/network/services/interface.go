@@ -1,10 +1,25 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 // Note: BlobSidecarService and BlockService are tested in spectests
@@ -20,22 +35,22 @@ type BlockService Service[*cltypes.SignedBeaconBlock]
 type BlobSidecarsService Service[*cltypes.BlobSidecar]
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_committee_messages_service_mock.go -package=mock_services . SyncCommitteeMessagesService
-type SyncCommitteeMessagesService Service[*cltypes.SyncCommitteeMessage]
+type SyncCommitteeMessagesService Service[*cltypes.SyncCommitteeMessageWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/sync_contribution_service_mock.go -package=mock_services . SyncContributionService
-type SyncContributionService Service[*cltypes.SignedContributionAndProof]
+type SyncContributionService Service[*cltypes.SignedContributionAndProofWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/aggregate_and_proof_service_mock.go -package=mock_services . AggregateAndProofService
-type AggregateAndProofService Service[*cltypes.SignedAggregateAndProof]
+type AggregateAndProofService Service[*cltypes.SignedAggregateAndProofData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/attestation_service_mock.go -package=mock_services . AttestationService
-type AttestationService Service[*solid.Attestation]
+type AttestationService Service[*AttestationWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/voluntary_exit_service_mock.go -package=mock_services . VoluntaryExitService
-type VoluntaryExitService Service[*cltypes.SignedVoluntaryExit]
+type VoluntaryExitService Service[*cltypes.SignedVoluntaryExitWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/bls_to_execution_change_service_mock.go -package=mock_services . BLSToExecutionChangeService
-type BLSToExecutionChangeService Service[*cltypes.SignedBLSToExecutionChange]
+type BLSToExecutionChangeService Service[*cltypes.SignedBLSToExecutionChangeWithGossipData]
 
 //go:generate mockgen -typed=true -destination=./mock_services/proposer_slashing_service_mock.go -package=mock_services . ProposerSlashingService
 type ProposerSlashingService Service[*cltypes.ProposerSlashing]

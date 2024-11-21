@@ -1,27 +1,27 @@
-/*
-   Copyright 2021 The Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package ssz
 
 import (
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/types/clonable"
 )
 
 var (
@@ -85,7 +85,7 @@ func UnmarshalUint64SSZ(x []byte) uint64 {
 	return binary.LittleEndian.Uint64(x)
 }
 
-func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint64, version int) ([]T, error) {
+func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -96,7 +96,7 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint6
 		elementsNum = currentOffset / 4
 	}
 	inPos := 4
-	if uint64(elementsNum) > max {
+	if uint64(elementsNum) > _max {
 		return nil, ErrTooBigList
 	}
 	objs := make([]T, elementsNum)
@@ -121,7 +121,7 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint6
 	return objs, nil
 }
 
-func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, max uint64, version int) ([]T, error) {
+func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, _max uint64, version int) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -131,7 +131,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	if uint32(len(buf))%bytesPerElement != 0 {
 		return nil, ErrBufferNotRounded
 	}
-	if elementsNum > max {
+	if elementsNum > _max {
 		return nil, ErrTooBigList
 	}
 	objs := make([]T, elementsNum)
@@ -144,7 +144,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	return objs, nil
 }
 
-func DecodeHashList(bytes []byte, start, end, max uint32) ([]common.Hash, error) {
+func DecodeHashList(bytes []byte, start, end, _max uint32) ([]common.Hash, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -154,7 +154,7 @@ func DecodeHashList(bytes []byte, start, end, max uint32) ([]common.Hash, error)
 	if uint32(len(buf))%length.Hash != 0 {
 		return nil, ErrBufferNotRounded
 	}
-	if elementsNum > max {
+	if elementsNum > _max {
 		return nil, ErrTooBigList
 	}
 	objs := make([]common.Hash, elementsNum)
@@ -164,7 +164,7 @@ func DecodeHashList(bytes []byte, start, end, max uint32) ([]common.Hash, error)
 	return objs, nil
 }
 
-func DecodeNumbersList(bytes []byte, start, end uint32, max uint64) ([]uint64, error) {
+func DecodeNumbersList(bytes []byte, start, end uint32, _max uint64) ([]uint64, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -174,7 +174,7 @@ func DecodeNumbersList(bytes []byte, start, end uint32, max uint64) ([]uint64, e
 	if uint64(len(buf))%length.BlockNum != 0 {
 		return nil, ErrBufferNotRounded
 	}
-	if elementsNum > max {
+	if elementsNum > _max {
 		return nil, ErrTooBigList
 	}
 	objs := make([]uint64, elementsNum)
@@ -195,12 +195,12 @@ func CalculateIndiciesLimit(maxCapacity, numItems, size uint64) uint64 {
 	return numItems
 }
 
-func DecodeString(bytes []byte, start, end, max uint64) ([]byte, error) {
+func DecodeString(bytes []byte, start, end, _max uint64) ([]byte, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
 	buf := bytes[start:end]
-	if uint64(len(buf)) > max {
+	if uint64(len(buf)) > _max {
 		return nil, ErrTooBigList
 	}
 	return buf, nil

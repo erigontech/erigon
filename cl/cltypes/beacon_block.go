@@ -1,16 +1,42 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon-lib/types/ssz"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
+)
+
+var (
+	_ ssz2.SizedObjectSSZ = (*BeaconBody)(nil)
+	_ ssz2.SizedObjectSSZ = (*BeaconBlock)(nil)
+	_ ssz2.SizedObjectSSZ = (*SignedBeaconBlock)(nil)
+	_ ssz2.SizedObjectSSZ = (*DenebBeaconBlock)(nil)
+	_ ssz2.SizedObjectSSZ = (*DenebSignedBeaconBlock)(nil)
 )
 
 const (
@@ -21,13 +47,86 @@ const (
 	MaxVoluntaryExits            = 16
 	MaxExecutionChanges          = 16
 	MaxBlobsCommittmentsPerBlock = 4096
+
+	// For electra fork
+	MaxAttesterSlashingsElectra = 1
+	MaxAttestationsElectra      = 8
 )
 
+var (
+	_ GenericBeaconBlock = (*BeaconBlock)(nil)
+	_ GenericBeaconBlock = (*DenebBeaconBlock)(nil)
+
+	_ GenericBeaconBody = (*BeaconBody)(nil)
+)
+
+// Definition of SignedBeaconBlock
 type SignedBeaconBlock struct {
 	Signature libcommon.Bytes96 `json:"signature"`
 	Block     *BeaconBlock      `json:"message"`
 }
 
+func NewSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *SignedBeaconBlock {
+	return &SignedBeaconBlock{Block: NewBeaconBlock(beaconCfg, version)}
+}
+
+func (b *SignedBeaconBlock) Blinded() (*SignedBlindedBeaconBlock, error) {
+	blindedBlock, err := b.Block.Blinded()
+	if err != nil {
+		return nil, err
+	}
+	return &SignedBlindedBeaconBlock{
+		Signature: b.Signature,
+		Block:     blindedBlock,
+	}, nil
+}
+
+func (s *SignedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
+	bodyRoot, err := s.Block.Body.HashSSZ()
+	if err != nil {
+		panic(err)
+	}
+	return &SignedBeaconBlockHeader{
+		Signature: s.Signature,
+		Header: &BeaconBlockHeader{
+			Slot:          s.Block.Slot,
+			ProposerIndex: s.Block.ProposerIndex,
+			ParentRoot:    s.Block.ParentRoot,
+			Root:          s.Block.StateRoot,
+			BodyRoot:      bodyRoot,
+		},
+	}
+}
+
+// Version returns beacon block version.
+func (b *SignedBeaconBlock) Version() clparams.StateVersion {
+	return b.Block.Body.Version
+}
+
+func (b *SignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.Block, b.Signature[:])
+}
+
+func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
+	if b.Block == nil {
+		return 100
+	}
+	return 100 + b.Block.EncodingSizeSSZ()
+}
+
+func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
+	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
+}
+
+func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
+}
+
+func (b *SignedBeaconBlock) Static() bool {
+	return false
+}
+
+// Definition of BeaconBlock
 type BeaconBlock struct {
 	Slot          uint64         `json:"slot,string"`
 	ProposerIndex uint64         `json:"proposer_index,string"`
@@ -36,6 +135,73 @@ type BeaconBlock struct {
 	Body          *BeaconBody    `json:"body"`
 }
 
+func NewBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BeaconBlock {
+	return &BeaconBlock{Body: NewBeaconBody(beaconCfg, version)}
+}
+
+func (b *BeaconBlock) Blinded() (*BlindedBeaconBlock, error) {
+	body, err := b.Body.Blinded()
+	if err != nil {
+		return nil, err
+	}
+	return &BlindedBeaconBlock{
+		Slot:          b.Slot,
+		ProposerIndex: b.ProposerIndex,
+		ParentRoot:    b.ParentRoot,
+		StateRoot:     b.StateRoot,
+		Body:          body,
+	}, nil
+}
+
+// Version returns beacon block version.
+func (b *BeaconBlock) Version() clparams.StateVersion {
+	return b.Body.Version
+}
+
+func (b *BeaconBlock) SetVersion(version clparams.StateVersion) {
+	b.Body.SetVersion(version)
+}
+
+func (b *BeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	return ssz2.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+}
+
+func (b *BeaconBlock) EncodingSizeSSZ() int {
+	if b.Body == nil {
+		return 80
+	}
+	return 80 + b.Body.EncodingSizeSSZ()
+}
+
+func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+}
+
+func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+}
+
+func (*BeaconBlock) Static() bool {
+	return false
+}
+
+func (b *BeaconBlock) GetSlot() uint64 {
+	return b.Slot
+}
+
+func (b *BeaconBlock) GetProposerIndex() uint64 {
+	return b.ProposerIndex
+}
+
+func (b *BeaconBlock) GetParentRoot() libcommon.Hash {
+	return b.ParentRoot
+}
+
+func (b *BeaconBlock) GetBody() GenericBeaconBody {
+	return b.Body
+}
+
+// Definition of BeaconBody
 type BeaconBody struct {
 	// A byte array used for randomness in the beacon chain
 	RandaoReveal libcommon.Bytes96 `json:"randao_reveal"`
@@ -67,89 +233,33 @@ type BeaconBody struct {
 	beaconCfg *clparams.BeaconChainConfig
 }
 
-// Getters
-
-func NewSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *SignedBeaconBlock {
-	return &SignedBeaconBlock{Block: NewBeaconBlock(beaconCfg)}
-}
-
-func (b *SignedBeaconBlock) Blinded() (*SignedBlindedBeaconBlock, error) {
-	blindedBlock, err := b.Block.Blinded()
-	if err != nil {
-		return nil, err
+func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BeaconBody {
+	var (
+		maxAttSlashing = MaxAttesterSlashings
+		maxAttestation = MaxAttestations
+	)
+	if version.AfterOrEqual(clparams.ElectraVersion) {
+		maxAttSlashing = MaxAttesterSlashingsElectra
+		maxAttestation = MaxAttestationsElectra
 	}
-	return &SignedBlindedBeaconBlock{
-		Signature: b.Signature,
-		Block:     blindedBlock,
-	}, nil
-}
 
-func (s *SignedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
-	bodyRoot, err := s.Block.Body.HashSSZ()
-	if err != nil {
-		panic(err)
-	}
-	return &SignedBeaconBlockHeader{
-		Signature: s.Signature,
-		Header: &BeaconBlockHeader{
-			Slot:          s.Block.Slot,
-			ProposerIndex: s.Block.ProposerIndex,
-			ParentRoot:    s.Block.ParentRoot,
-			Root:          s.Block.StateRoot,
-			BodyRoot:      bodyRoot,
-		},
-	}
-}
-
-func NewBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BeaconBlock {
-	return &BeaconBlock{Body: NewBeaconBody(beaconCfg)}
-}
-
-func (b *BeaconBlock) Blinded() (*BlindedBeaconBlock, error) {
-	body, err := b.Body.Blinded()
-	if err != nil {
-		return nil, err
-	}
-	return &BlindedBeaconBlock{
-		Slot:          b.Slot,
-		ProposerIndex: b.ProposerIndex,
-		ParentRoot:    b.ParentRoot,
-		StateRoot:     b.StateRoot,
-		Body:          body,
-	}, nil
-}
-
-func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BeaconBody {
 	return &BeaconBody{
 		beaconCfg:          beaconCfg,
 		Eth1Data:           &Eth1Data{},
 		ProposerSlashings:  solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416),
-		AttesterSlashings:  solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings),
-		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations),
+		AttesterSlashings:  solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing),
+		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation),
 		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
 		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
 		ExecutionPayload:   NewEth1Block(clparams.Phase0Version, beaconCfg),
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+		Version:            version,
 	}
 }
-
-// Version returns beacon block version.
-func (b *SignedBeaconBlock) Version() clparams.StateVersion {
-	return b.Block.Body.Version
-}
-
-// Version returns beacon block version.
-func (b *BeaconBlock) Version() clparams.StateVersion {
-	return b.Body.Version
-}
-
-func (b *BeaconBlock) SetVersion(version clparams.StateVersion) {
-	b.Body.SetVersion(version)
-}
-
 func (b *BeaconBody) SetVersion(version clparams.StateVersion) {
 	b.Version = version
+	b.ExecutionPayload.SetVersion(version)
 }
 
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -157,6 +267,14 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BeaconBody) EncodingSizeSSZ() (size int) {
+	var (
+		maxAttSlashing = MaxAttesterSlashings
+		maxAttestation = MaxAttestations
+	)
+	if b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		maxAttSlashing = MaxAttesterSlashingsElectra
+		maxAttestation = MaxAttestationsElectra
+	}
 
 	if b.Eth1Data == nil {
 		b.Eth1Data = &Eth1Data{}
@@ -169,10 +287,10 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 	}
 	if b.AttesterSlashings == nil {
-		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings)
+		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing)
 	}
 	if b.Attestations == nil {
-		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
+		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation)
 	}
 	if b.Deposits == nil {
 		b.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
@@ -202,7 +320,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		size += b.ExecutionChanges.EncodingSizeSSZ()
 	}
 	if b.Version >= clparams.DenebVersion {
-		size += b.ExecutionChanges.EncodingSizeSSZ()
+		size += b.BlobKzgCommitments.EncodingSizeSSZ()
 	}
 
 	return
@@ -265,59 +383,16 @@ func (b *BeaconBody) getSchema(storage bool) []interface{} {
 	return s
 }
 
-func (b *BeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
-	return ssz2.MarshalSSZ(buf, b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
-}
-
-func (b *BeaconBlock) EncodingSizeSSZ() int {
-	if b.Body == nil {
-		return 80
-	}
-	return 80 + b.Body.EncodingSizeSSZ()
-}
-
-func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
-}
-
-func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(b.Slot, b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
-}
-
-func (b *SignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.Block, b.Signature[:])
-}
-
-func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
-	if b.Block == nil {
-		return 100
-	}
-	return 100 + b.Block.EncodingSizeSSZ()
-}
-
-func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
-	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
-}
-
-func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
-}
-
 func (*BeaconBody) Static() bool {
 	return false
 }
-
-func (*BeaconBlock) Static() bool {
-	return false
-}
-
 func (b *BeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
 }
 
 func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 	if index >= b.BlobKzgCommitments.Len() {
-		return nil, fmt.Errorf("index out of range")
+		return nil, errors.New("index out of range")
 	}
 	kzgCommitmentsProof, err := merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
 	if err != nil {
@@ -328,6 +403,15 @@ func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 }
 
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
+	var (
+		maxAttSlashing = MaxAttesterSlashings
+		maxAttestation = MaxAttestations
+	)
+	if b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		maxAttSlashing = MaxAttesterSlashingsElectra
+		maxAttestation = MaxAttestationsElectra
+	}
+
 	var tmp struct {
 		RandaoReveal       libcommon.Bytes96                           `json:"randao_reveal"`
 		Eth1Data           *Eth1Data                                   `json:"eth1_data"`
@@ -343,8 +427,8 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		BlobKzgCommitments *solid.ListSSZ[*KZGCommitment]              `json:"blob_kzg_commitments,omitempty"`
 	}
 	tmp.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
-	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings)
-	tmp.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
+	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing)
+	tmp.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation)
 	tmp.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
 	tmp.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
 	tmp.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
@@ -367,4 +451,152 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	b.ExecutionChanges = tmp.ExecutionChanges
 	b.BlobKzgCommitments = tmp.BlobKzgCommitments
 	return nil
+}
+
+func (b *BeaconBody) GetPayloadHeader() (*Eth1Header, error) {
+	return b.ExecutionPayload.PayloadHeader()
+}
+
+func (b *BeaconBody) GetRandaoReveal() libcommon.Bytes96 {
+	return b.RandaoReveal
+}
+
+func (b *BeaconBody) GetEth1Data() *Eth1Data {
+	return b.Eth1Data
+}
+
+func (b *BeaconBody) GetSyncAggregate() *SyncAggregate {
+	return b.SyncAggregate
+}
+
+func (b *BeaconBody) GetProposerSlashings() *solid.ListSSZ[*ProposerSlashing] {
+	return b.ProposerSlashings
+}
+
+func (b *BeaconBody) GetAttesterSlashings() *solid.ListSSZ[*AttesterSlashing] {
+	return b.AttesterSlashings
+}
+
+func (b *BeaconBody) GetAttestations() *solid.ListSSZ[*solid.Attestation] {
+	return b.Attestations
+}
+
+func (b *BeaconBody) GetDeposits() *solid.ListSSZ[*Deposit] {
+	return b.Deposits
+}
+
+func (b *BeaconBody) GetVoluntaryExits() *solid.ListSSZ[*SignedVoluntaryExit] {
+	return b.VoluntaryExits
+}
+
+func (b *BeaconBody) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	return b.BlobKzgCommitments
+}
+
+func (b *BeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionChange] {
+	return b.ExecutionChanges
+}
+
+type DenebBeaconBlock struct {
+	Block     *BeaconBlock              `json:"block"`
+	KZGProofs *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`
+	Blobs     *solid.ListSSZ[*Blob]     `json:"blobs"`
+}
+
+func NewDenebBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *DenebBeaconBlock {
+	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
+	b := &DenebBeaconBlock{
+		Block:     NewBeaconBlock(beaconCfg, version),
+		KZGProofs: solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
+		Blobs:     solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
+	}
+	return b
+}
+
+func (b *DenebBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.Block, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebBeaconBlock) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, b.Block, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebBeaconBlock) EncodingSizeSSZ() int {
+	return b.Block.EncodingSizeSSZ() + b.KZGProofs.EncodingSizeSSZ() + b.Blobs.EncodingSizeSSZ()
+}
+
+func (b *DenebBeaconBlock) Clone() clonable.Clonable {
+	return &DenebBeaconBlock{}
+}
+
+func (b *DenebBeaconBlock) Static() bool {
+	// it's variable size
+	return false
+}
+
+func (b *DenebBeaconBlock) Version() clparams.StateVersion {
+	return b.Block.Version()
+}
+
+func (b *DenebBeaconBlock) GetSlot() uint64 {
+	return b.Block.GetSlot()
+}
+
+func (b *DenebBeaconBlock) GetProposerIndex() uint64 {
+	return b.Block.GetProposerIndex()
+}
+
+func (b *DenebBeaconBlock) GetParentRoot() libcommon.Hash {
+	return b.Block.GetParentRoot()
+}
+
+func (b *DenebBeaconBlock) GetBody() GenericBeaconBody {
+	return b.Block.GetBody()
+}
+
+type DenebSignedBeaconBlock struct {
+	SignedBlock *SignedBeaconBlock        `json:"signed_block"`
+	KZGProofs   *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`
+	Blobs       *solid.ListSSZ[*Blob]     `json:"blobs"`
+}
+
+func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *DenebSignedBeaconBlock {
+	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
+	b := &DenebSignedBeaconBlock{
+		SignedBlock: NewSignedBeaconBlock(beaconCfg, clparams.DenebVersion),
+		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
+		Blobs:       solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
+	}
+	return b
+}
+
+func NewElectraSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *DenebSignedBeaconBlock {
+	maxBlobsPerBlock := int(beaconCfg.MaxBlobsPerBlock)
+	b := &DenebSignedBeaconBlock{
+		SignedBlock: NewSignedBeaconBlock(beaconCfg, clparams.ElectraVersion),
+		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](maxBlobsPerBlock, BYTES_KZG_PROOF),
+		Blobs:       solid.NewStaticListSSZ[*Blob](maxBlobsPerBlock, int(BYTES_PER_BLOB)),
+	}
+	return b
+}
+
+func (b *DenebSignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.SignedBlock, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebSignedBeaconBlock) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, b.SignedBlock, b.KZGProofs, b.Blobs)
+}
+
+func (b *DenebSignedBeaconBlock) EncodingSizeSSZ() int {
+	return b.SignedBlock.EncodingSizeSSZ() + b.KZGProofs.EncodingSizeSSZ() + b.Blobs.EncodingSizeSSZ()
+}
+
+func (b *DenebSignedBeaconBlock) Clone() clonable.Clonable {
+	return &DenebSignedBeaconBlock{}
+}
+
+func (b *DenebSignedBeaconBlock) Static() bool {
+	// it's variable size
+	return false
 }

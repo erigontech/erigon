@@ -1,7 +1,7 @@
 # Devnet
 
 This is an automated tool run on the devnet that simulates p2p connection between nodes and ultimately tests operations on them.
-See [DEV_CHAIN](https://github.com/ledgerwatch/erigon/blob/main/DEV_CHAIN.md) for a manual version.
+See [DEV_CHAIN](https://github.com/erigontech/erigon/blob/main/DEV_CHAIN.md) for a manual version.
 
 The devnet code performs 3 main functions:
 
@@ -16,15 +16,15 @@ The specification of both nodes and scenarios for the devnet is done by specifyi
 The devnet runs as a single `go` process which can be started with the following arguments:
 
 | Arg | Required | Default | Description |
-| --- | -------- | ------- | ----------- |
-| datadir | Y | | The data directory for the devnet contains all the devnet nodes data and logs |
-| chain | N | dev | The devnet chain to run currently supported: dev or bor-devnet | 
-| bor.withoutheimdall | N | false | Bor specific - tells the devnet to run without a heimdall service.  With this flag only a single validator is supported on the devnet |
-| metrics | N | false | Enable metrics collection and reporting from devnet nodes |
-| metrics.node | N | 0 | At the moment only one node on the network can produce metrics.  This value specifies index of the node in the cluster to attach to |
-| metrics.port | N | 6060 | The network port of the node to connect to for gather ing metrics |
-| diagnostics.addr | N | | Address of the diagnostics system provided by the support team, include unique session PIN, if this is specified the devnet will start a `support` tunnel and connect to the diagnostics platform to provide metrics from the specified node on the devnet | 
-| insecure | N | false | Used if `diagnostics.addr` is set to allow communication with diagnostics system
+| --- | -------- |---------| ----------- |
+| datadir | Y |         | The data directory for the devnet contains all the devnet nodes data and logs |
+| chain | N | dev     | The devnet chain to run currently supported: dev or bor-devnet | 
+| bor.withoutheimdall | N | false   | Bor specific - tells the devnet to run without a heimdall service.  With this flag only a single validator is supported on the devnet |
+| metrics | N | false   | Enable metrics collection and reporting from devnet nodes |
+| metrics.node | N | 0       | At the moment only one node on the network can produce metrics.  This value specifies index of the node in the cluster to attach to |
+| metrics.port | N | 6061    | The network port of the node to connect to for gather ing metrics |
+| diagnostics.addr | N |         | Address of the diagnostics system provided by the support team, include unique session PIN, if this is specified the devnet will start a `support` tunnel and connect to the diagnostics platform to provide metrics from the specified node on the devnet | 
+| insecure | N | false   | Used if `diagnostics.addr` is set to allow communication with diagnostics system
 
 ## Network Configuration
 

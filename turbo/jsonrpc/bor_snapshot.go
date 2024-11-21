@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
@@ -6,19 +22,19 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/rpc"
 )
 
 type Snapshot struct {
@@ -52,24 +68,39 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	}
 
 	// init consensus db
-	bor, err := api.bor()
-
+	borEngine, err := api.bor()
 	if err != nil {
 		return nil, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer borTx.Rollback()
+
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
+
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap, nil
+	}
+
 	return snapshot(ctx, api, tx, borTx, header)
 }
 
 // GetAuthor retrieves the author a block.
 func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Address, error) {
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return nil, err
@@ -106,7 +137,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 		return nil, errUnknownBlock
 	}
 
-	author, err := bor.Author(header)
+	author, err := borEngine.Author(header)
 
 	return &author, err
 }
@@ -130,17 +161,33 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	}
 
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return nil, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer borTx.Rollback()
+
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
+
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap, nil
+	}
+
 	return snapshot(ctx, api, tx, borTx, header)
 }
 
@@ -167,18 +214,38 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	}
 
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return nil, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer borTx.Rollback()
+
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
+
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap.signers(), nil
+	}
+
 	snap, err := snapshot(ctx, api, tx, borTx, header)
+	if err != nil {
+		return nil, err
+	}
+
 	return snap.signers(), err
 }
 
@@ -201,20 +268,39 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	}
 
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return nil, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer borTx.Rollback()
 
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
+
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap.signers(), nil
+	}
+
 	snap, err := snapshot(ctx, api, tx, borTx, header)
-	return snap.signers(), err
+	if err != nil {
+		return nil, err
+	}
+
+	return snap.signers(), nil
 }
 
 // GetCurrentProposer gets the current proposer
@@ -313,11 +399,11 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 			if blockNr == rpc.LatestBlockNumber {
 				header = rawdb.ReadCurrentHeader(tx)
 			} else {
-				header = rawdb.ReadHeaderByNumber(tx, uint64(blockNr))
+				header, err = getHeaderByNumber(ctx, blockNr, api, tx)
 			}
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+				header, err = getHeaderByHash(ctx, api, tx, blockHash)
 			}
 		}
 	}
@@ -326,11 +412,39 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 		return common.Address{}, errUnknownBlock
 	}
 
-	snapNumber := rpc.BlockNumber(header.Number.Int64() - 1)
-	snap, err := api.GetSnapshot(&snapNumber)
-
+	borEngine, err := api.bor()
 	if err != nil {
 		return common.Address{}, err
+	}
+
+	borTx, err := borEngine.DB.BeginRo(ctx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	defer borTx.Rollback()
+
+	var snap *Snapshot
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return common.Address{}, err
+		}
+
+		snap = &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+	} else {
+		parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
+		if parent == nil || err != nil {
+			return common.Address{}, errUnknownBlock
+		}
+
+		snap, err = snapshot(ctx, api, tx, borTx, parent)
+		if err != nil {
+			return common.Address{}, err
+		}
 	}
 
 	return snap.ValidatorSet.GetProposer().Address, nil
@@ -369,29 +483,43 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	}
 
 	// init consensus db
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return BlockSigners{}, err
 	}
 
-	borTx, err := bor.DB.BeginRo(ctx)
+	borTx, err := borEngine.DB.BeginRo(ctx)
 	if err != nil {
 		return BlockSigners{}, err
 	}
 	defer borTx.Rollback()
 
-	parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
-	if parent == nil || err != nil {
-		return BlockSigners{}, errUnknownBlock
+	var snap *Snapshot
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return BlockSigners{}, err
+		}
+
+		snap = &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+	} else {
+		parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
+		if parent == nil || err != nil {
+			return BlockSigners{}, errUnknownBlock
+		}
+
+		snap, err = snapshot(ctx, api, tx, borTx, parent)
+		if err != nil {
+			return BlockSigners{}, err
+		}
 	}
-	snap, err := snapshot(ctx, api, tx, borTx, parent)
 
 	var difficulties = make(map[common.Address]uint64)
-
-	if err != nil {
-		return BlockSigners{}, err
-	}
 
 	proposer := snap.ValidatorSet.GetProposer().Address
 	proposerIndex, _ := snap.ValidatorSet.GetByAddress(proposer)
@@ -425,7 +553,7 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 
 // GetRootHash returns the merkle root of the start to end block headers
 func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
-	bor, err := api.bor()
+	borEngine, err := api.bor()
 
 	if err != nil {
 		return "", err
@@ -438,7 +566,7 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 	}
 	defer tx.Rollback()
 
-	return bor.GetRootHash(ctx, tx, start, end)
+	return borEngine.GetRootHash(ctx, tx, start, end)
 }
 
 // Helper functions for Snapshot Type
@@ -484,7 +612,6 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
-		currentLen := s.config.CalculateSprintLength(number)
 
 		// Resolve the authorization key and check against signers
 		signer, err := ecrecover(header, s.config)
@@ -498,11 +625,11 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		}
 
 		// change validator set and change proposer
-		if number > 0 && (number+1)%currentLen == 0 {
+		if number > 0 && s.config.IsSprintEnd(number) {
 			if err := bor.ValidateHeaderExtraLength(header.Extra); err != nil {
 				return nil, err
 			}
-			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			validatorBytes := bor.GetValidatorBytes(header, s.config)
 
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)

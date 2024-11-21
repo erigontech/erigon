@@ -1,17 +1,34 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package rpctest
 
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/erigontech/erigon/core/state"
 )
 
 var routes map[string]string
@@ -145,7 +162,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 							printStorageRange(sm)
 							fmt.Printf("================smg\n")
 							printStorageRange(smg)
-							return fmt.Errorf("Storage range different\n")
+							return errors.New("Storage range different\n")
 						}
 					}
 				}
@@ -213,7 +230,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 					fmt.Printf("Different receipts block %d, txn %s\n", bn, txn.Hash)
 					print(client, routes[Geth], reqGen.getTransactionReceipt(txn.Hash))
 					print(client, routes[Erigon], reqGen.getTransactionReceipt(txn.Hash))
-					return fmt.Errorf("Receipts are different\n")
+					return errors.New("Receipts are different\n")
 				}
 			}
 		}
@@ -307,7 +324,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 						fmt.Printf("Different next page keys: %x geth %x", page, pageGeth)
 					}
 					if !compareAccountRanges(accRangeErigon, accRangeGeth) {
-						return fmt.Errorf("Different in account ranges tx\n")
+						return errors.New("Different in account ranges tx\n")
 					}
 				}
 			}

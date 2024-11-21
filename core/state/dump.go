@@ -1,41 +1,45 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package state
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/turbo/trie"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 type Dumper struct {
-	blockNumber uint64
-	db          kv.Tx
-	hashedState bool
+	blockNumber  uint64
+	db           kv.Tx
+	hashedState  bool
+	txNumsReader rawdbv3.TxNumsReader
 }
 
 // DumpAccount represents tan account in the state.
@@ -123,13 +127,16 @@ func (d iterativeDump) OnRoot(root libcommon.Hash) {
 	}{root})
 }
 
-func NewDumper(db kv.Tx, blockNumber uint64) *Dumper {
+func NewDumper(db kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) *Dumper {
 	return &Dumper{
-		db:          db,
-		blockNumber: blockNumber,
-		hashedState: false,
+		db:           db,
+		blockNumber:  blockNumber,
+		hashedState:  false,
+		txNumsReader: txNumsReader,
 	}
 }
+
+var TooMuchIterations = errors.New("[rpc] dumper: too much iterations protection triggered")
 
 func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress libcommon.Address, maxResults int) ([]byte, error) {
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -145,17 +152,17 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	c.OnRoot(emptyHash) // We do not calculate the root
 
 	ttx := d.db.(kv.TemporalTx)
-	txNum, err := rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
+	txNum, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
 	}
-	txNumForStorage, err := rawdbv3.TxNums.Min(ttx, d.blockNumber)
+	txNumForStorage, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
 	}
 
 	var nextKey []byte
-	it, err := ttx.DomainRange(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults)
+	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
 	if err != nil {
 		return nil, err
 	}
@@ -165,12 +172,12 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if err != nil {
 			return nil, err
 		}
+		if len(v) == 0 {
+			continue
+		}
 		if maxResults > 0 && numberOfResults >= maxResults {
 			nextKey = append(nextKey[:0], k...)
 			break
-		}
-		if len(v) == 0 {
-			continue
 		}
 
 		if e := accounts.DeserialiseV3(&acc, v); e != nil {
@@ -184,10 +191,10 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			Storage:  make(map[string]string),
 		}
 		if acc.CodeHash != emptyCodeHash {
-			account.CodeHash = acc.CodeHash[:]
+			account.CodeHash = hexutility.Bytes(acc.CodeHash.Bytes())
 
 			if !excludeCode {
-				r, _, err := ttx.DomainGet(kv.CodeDomain, k, nil)
+				r, _, err := ttx.GetLatest(kv.CodeDomain, k, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -201,13 +208,14 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 		numberOfResults++
 	}
+	it.Close()
 
 	for i, addr := range addrList {
 		account := accountList[i]
-
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
-			r, err := ttx.DomainRange(kv.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
+			nextAcc, _ := kv.NextSubtree(addr[:])
+			r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
 			if err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 			}
@@ -225,6 +233,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 				h, _ := libcommon.HashData(loc)
 				t.Update(h.Bytes(), libcommon.Copy(vs))
 			}
+			r.Close()
 
 			account.Root = t.Hash().Bytes()
 		}

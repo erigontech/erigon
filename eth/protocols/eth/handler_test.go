@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package eth_test
 
@@ -23,19 +26,20 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/direct"
+	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 var (
@@ -47,6 +51,9 @@ var (
 )
 
 func TestGetBlockReceipts(t *testing.T) {
+	if !sentry_multi_client.EnableP2PReceipts {
+		t.Skip("")
+	}
 	// Define three accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -84,7 +91,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	}
 	// Assemble the test environment
 	m := mockWithGenerator(t, 4, generator)
-
+	receiptsGetter := receipts.NewGenerator(32, m.BlockReader, m.Engine)
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []libcommon.Hash
@@ -97,13 +104,16 @@ func TestGetBlockReceipts(t *testing.T) {
 
 			hashes = append(hashes, block.Hash())
 			// If known, encode and queue for response packet
-			r := rawdb.ReadReceipts(tx, block, nil)
+
+			r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block)
+			require.NoError(t, err)
 			encoded, err := rlp.EncodeToBytes(r)
 			require.NoError(t, err)
 			receipts = append(receipts, encoded)
 		}
 		return nil
 	})
+
 	require.NoError(t, err)
 	b, err := rlp.EncodeToBytes(eth.GetReceiptsPacket66{RequestId: 1, GetReceiptsPacket: hashes})
 	require.NoError(t, err)
@@ -112,20 +122,16 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	m.ReceiveWg.Add(1)
 	// Send the hash request and verify the response
-	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[direct.ETH66][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
+	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[direct.ETH67][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}
 
 	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
-	if m.HistoryV3 {
-		// GetReceiptsMsg disabled for historyV3
-	} else {
-		m.ReceiveWg.Wait()
-		sent := m.SentMessage(0)
-		require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
-		require.Equal(t, expect, sent.Data)
-	}
+	m.ReceiveWg.Wait()
+	sent := m.SentMessage(0)
+	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
+	require.Equal(t, expect, sent.Data)
 }
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package services
 
 import (
@@ -8,15 +24,17 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/mock_services"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
 //go:embed test_data/blob_sidecar_service_blob.ssz_snappy
@@ -30,7 +48,7 @@ var blobSidecarServiceState []byte
 
 func getObjectsForBlobSidecarServiceTests(t *testing.T) (*state.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.BlobSidecar) {
 	stateObj := state.New(&clparams.MainnetBeaconConfig)
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	blob := cltypes.Blob{}
 	require.NoError(t, utils.DecodeSSZSnappy(stateObj, blobSidecarServiceState, int(clparams.DenebVersion)))
 	require.NoError(t, utils.DecodeSSZSnappy(block, blobSidecarServiceBlock, int(clparams.DenebVersion)))
@@ -40,11 +58,12 @@ func getObjectsForBlobSidecarServiceTests(t *testing.T) (*state.CachingBeaconSta
 	proofBytes := common.Hex2Bytes(proofStr[2:])
 	copy(proof[:], proofBytes)
 	sidecar := &cltypes.BlobSidecar{
-		Index:             uint64(0),
-		SignedBlockHeader: block.SignedBeaconBlockHeader(),
-		Blob:              blob,
-		KzgCommitment:     common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(0)),
-		KzgProof:          proof,
+		Index:                    uint64(0),
+		SignedBlockHeader:        block.SignedBeaconBlockHeader(),
+		Blob:                     blob,
+		KzgCommitment:            common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(0)),
+		KzgProof:                 proof,
+		CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
 	}
 	return stateObj, block, sidecar
 }
@@ -54,10 +73,11 @@ func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (
 	ctx2, cn := context.WithTimeout(ctx, 1)
 	cn()
 	cfg := &clparams.MainnetBeaconConfig
-	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true, 0)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	blockService := NewBlobSidecarService(ctx2, cfg, forkchoiceMock, syncedDataManager, ethClock, test)
+	emitters := beaconevents.NewEventEmitter()
+	blockService := NewBlobSidecarService(ctx2, cfg, forkchoiceMock, syncedDataManager, ethClock, emitters, test)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
 

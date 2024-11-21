@@ -11,26 +11,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/config3"
-
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/tests/bor/helper"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/fdlimit"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/tests/bor/helper"
 )
 
 const (
@@ -55,18 +52,17 @@ var (
 )
 
 // CGO_CFLAGS="-D__BLST_PORTABLE__" : flag required for go test.
-// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/ledgerwatch/erigon/tests/bor -v -count=1
+// Example : CGO_CFLAGS="-D__BLST_PORTABLE__" go test -run ^TestMiningBenchmark$ github.com/erigontech/erigon/tests/bor -v -count=1
 // In TestMiningBenchmark, we will test the mining performance. We will initialize a single node devnet and fire 5000 txs. We will measure the time it takes to include all the txs. This can be made more advcanced by increasing blockLimit and txsInTxpool.
 func TestMiningBenchmark(t *testing.T) {
-	if config3.EnableHistoryV4InTest {
-		t.Skip("TODO: [e4] implement me")
-	}
+	//usually 15sec is enough
+	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
+	defer clean()
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	fdlimit.Raise(2048)
 
-	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2ValName)
-
+	genesis := helper.InitGenesis("./testdata/genesis_2val.json", 64, networkname.BorE2ETestChain2Val)
 	var stacks []*node.Node
 	var ethbackends []*eth.Ethereum
 	var enodes []string
@@ -74,7 +70,7 @@ func TestMiningBenchmark(t *testing.T) {
 	var txs []*types.Transaction
 
 	for i := 0; i < 1; i++ {
-		stack, ethBackend, err := helper.InitMiner(context.Background(), &genesis, pkeys[i], true, i)
+		stack, ethBackend, err := helper.InitMiner(ctx, t.TempDir(), &genesis, pkeys[i], true, i)
 		if err != nil {
 			panic(err)
 		}
@@ -107,28 +103,33 @@ func TestMiningBenchmark(t *testing.T) {
 	initNonce := uint64(0)
 
 	for i := 0; i < txInTxpool; i++ {
-		tx := *newRandomTxWithNonce(false, initNonce+uint64(i), ethbackends[0].TxpoolServer())
-		txs = append(txs, &tx)
+		txn, err := newRandomTxWithNonce(false, initNonce+uint64(i), ethbackends[0].TxpoolServer())
+		if err != nil {
+			panic(err)
+		}
+		txs = append(txs, txn)
 	}
 
 	start := time.Now()
 
-	for _, tx := range txs {
+	for _, txn := range txs {
 		buf := bytes.NewBuffer(nil)
-		txV := *tx
+		txV := *txn
 		err := txV.MarshalBinary(buf)
 		if err != nil {
 			panic(err)
 		}
-		ethbackends[0].TxpoolServer().Add(context.Background(), &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
-	}
-
-	for {
-		pendingReply, err := ethbackends[0].TxpoolServer().Status(context.Background(), &txpool_proto.StatusRequest{})
+		_, err = ethbackends[0].TxpoolServer().Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 		if err != nil {
 			panic(err)
 		}
+	}
 
+	for {
+		pendingReply, err := ethbackends[0].TxpoolServer().Status(ctx, &txpool_proto.StatusRequest{})
+		if err != nil {
+			panic(err)
+		}
 		if pendingReply.PendingCount == 0 {
 			break
 		}
@@ -143,17 +144,27 @@ func TestMiningBenchmark(t *testing.T) {
 }
 
 // newRandomTxWithNonce creates a new transaction with the given nonce.
-func newRandomTxWithNonce(creation bool, nonce uint64, txPool txpool_proto.TxpoolServer) *types.Transaction {
-	var tx types.Transaction
+func newRandomTxWithNonce(creation bool, nonce uint64, txPool txpool_proto.TxpoolServer) (tx *types.Transaction, err error) {
+	var txn types.Transaction
 
 	gasPrice := uint256.NewInt(100 * params.InitialBaseFee)
 
 	if creation {
-		nonce, _ := txPool.Nonce(context.Background(), &txpool_proto.NonceRequest{Address: gointerfaces.ConvertAddressToH160(addr1)})
-		tx, _ = types.SignTx(types.NewContractCreation(nonce.Nonce, uint256.NewInt(0), testGas, gasPrice, common.FromHex(testCode)), *types.LatestSignerForChainID(nil), pkey1)
+		var nonceReply *txpool_proto.NonceReply
+		nonceReply, err = txPool.Nonce(context.Background(), &txpool_proto.NonceRequest{Address: gointerfaces.ConvertAddressToH160(addr1)})
+		if err != nil {
+			return nil, err
+		}
+		txn, err = types.SignTx(types.NewContractCreation(nonceReply.Nonce, uint256.NewInt(0), testGas, gasPrice, common.FromHex(testCode)), *types.LatestSignerForChainID(nil), pkey1)
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		tx, _ = types.SignTx(types.NewTransaction(nonce, addr2, uint256.NewInt(1000), params.TxGas, gasPrice, nil), *types.LatestSignerForChainID(nil), pkey1)
+		txn, err = types.SignTx(types.NewTransaction(nonce, addr2, uint256.NewInt(1000), params.TxGas, gasPrice, nil), *types.LatestSignerForChainID(nil), pkey1)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return &tx
+	return &txn, nil
 }

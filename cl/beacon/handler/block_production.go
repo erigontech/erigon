@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
@@ -10,37 +26,40 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Giulio2002/bls"
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/beacon/builder"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/gossip"
-	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/transition"
-	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/erigon/cl/transition/machine"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
+	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/length"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/builder"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/transition/machine"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
 type BlockPublishingValidation string
@@ -52,11 +71,47 @@ const (
 )
 
 var (
-	errBuilderNotEnabled = fmt.Errorf("builder is not enabled")
+	errBuilderNotEnabled = errors.New("builder is not enabled")
 )
 
 var defaultGraffitiString = "Caplin"
 
+const missedTimeout = 500 * time.Millisecond
+
+func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context.Context, syncedData synced_data.SyncedData, epoch uint64) error {
+	timer := time.NewTimer(missedTimeout)
+	checkIfSlotIsThere := func() (bool, error) {
+		tx, err := a.indiciesDB.BeginRo(ctx)
+		if err != nil {
+			return false, err
+		}
+		defer tx.Rollback()
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
+		if err != nil {
+			return false, err
+		}
+		return blockRoot != (libcommon.Hash{}), nil
+	}
+
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return nil
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for head state to reach slot %d: %w", epoch, ctx.Err())
+		default:
+		}
+		ready, err := checkIfSlotIsThere()
+		if err != nil {
+			return err
+		}
+		if ready {
+			return nil
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+}
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -65,32 +120,61 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	// wait until the head state is at the target slot or later
+	err = a.waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+	}
+	tx, err := a.indiciesDB.BeginRo(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	if slot == nil || committeeIndex == nil {
+	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusBadRequest,
-			fmt.Errorf("slot and committee_index url params are required"),
+			errors.New("slot is required"),
 		)
 	}
-	headState := a.syncedData.HeadState()
-	if headState == nil {
+	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
 		return nil, beaconhttp.NewEndpointError(
-			http.StatusServiceUnavailable,
-			fmt.Errorf("beacon node is still syncing"),
+			http.StatusBadRequest,
+			errors.New("committee_index is required for pre-Deneb versions"),
 		)
+	} else if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		// electra case
+		zero := uint64(0)
+		committeeIndex = &zero
 	}
 
-	attestationData, err := a.attestationProducer.ProduceAndCacheAttestationData(
-		headState,
-		*slot,
-		*committeeIndex,
-	)
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+	var attestationData solid.AttestationData
+	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
+			tx,
+			headState,
+			a.syncedData.HeadRoot(),
+			*slot,
+			*committeeIndex,
+		)
+		if err == attestation_producer.ErrHeadStateBehind {
+			return beaconhttp.NewEndpointError(
+				http.StatusServiceUnavailable,
+				synced_data.ErrNotSynced,
+			)
+		} else if err != nil {
+			return beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
+
 	return newBeaconResponse(attestationData), nil
 }
 
@@ -144,20 +228,13 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		}
 	}
 
-	s := a.syncedData.HeadState()
-	if s == nil {
+	baseBlockRoot := a.syncedData.HeadRoot()
+	if baseBlockRoot == (libcommon.Hash{}) {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusServiceUnavailable,
-			fmt.Errorf("node is syncing"),
+			errors.New("node is syncing"),
 		)
 	}
-
-	baseBlockRoot, err := s.BlockRoot()
-	if err != nil {
-		log.Warn("Failed to get block root", "err", err)
-		return nil, err
-	}
-
 	sourceBlock, err := a.blockReader.ReadBlockByRoot(ctx, tx, baseBlockRoot)
 	if err != nil {
 		log.Warn("Failed to get source block", "err", err, "root", baseBlockRoot)
@@ -192,16 +269,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	// do state transition
-	if block.IsBlinded() {
-		if err := machine.ProcessBlindedBlock(transition.DefaultMachine, baseState, block.ToBlinded()); err != nil {
-			log.Warn("Failed to process blinded block", "err", err, "slot", targetSlot)
-			return nil, err
-		}
-	} else {
-		if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToExecution()); err != nil {
-			log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
-			return nil, err
-		}
+	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToGeneric()); err != nil {
+		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
+		return nil, err
 	}
 	block.StateRoot, err = baseState.HashSSZ()
 	if err != nil {
@@ -231,11 +301,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	var resp *beaconhttp.BeaconResponse
 	if block.IsBlinded() {
-		resp = newBeaconResponse(block.ToBlinded()).With("version", block.Version().String())
+		resp = newBeaconResponse(block.ToBlinded())
 	} else {
 		resp = newBeaconResponse(block.ToExecution())
 	}
-	return resp.With("execution_payload_blinded", block.IsBlinded()).
+	return resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
 		With("consensus_block_value", strconv.FormatUint(consensusValue, 10)), nil
 }
@@ -256,10 +326,29 @@ func (a *ApiHandler) produceBlock(
 		beaconBody     *cltypes.BeaconBody
 		localExecValue uint64
 		localErr       error
+		blobs          []*cltypes.Blob
+		kzgProofs      []libcommon.Bytes48
 	)
 	go func() {
 		defer wg.Done()
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlock, baseState, targetSlot, randaoReveal, graffiti)
+		// collect blobs
+		if beaconBody != nil {
+			for i := 0; i < beaconBody.BlobKzgCommitments.Len(); i++ {
+				c := beaconBody.BlobKzgCommitments.Get(i)
+				if c == nil {
+					log.Warn("Nil commitment", "slot", targetSlot, "index", i)
+					continue
+				}
+				blobBundle, ok := a.blobBundles.Get(libcommon.Bytes48(*c))
+				if !ok {
+					log.Warn("Blob not found", "slot", targetSlot, "commitment", c)
+					continue
+				}
+				blobs = append(blobs, blobBundle.Blob)
+				kzgProofs = append(kzgProofs, blobBundle.KzgProof)
+			}
+		}
 	}()
 
 	// get the builder payload
@@ -297,12 +386,15 @@ func (a *ApiHandler) produceBlock(
 		Slot:          targetSlot,
 		ProposerIndex: proposerIndex,
 		ParentRoot:    baseBlockRoot,
+		Cfg:           a.beaconChainCfg,
 	}
 	if !a.routerCfg.Builder || builderErr != nil {
 		// directly return the block if:
 		// 1. builder is not enabled
 		// 2. failed to get builder payload
 		block.BeaconBody = beaconBody
+		block.Blobs = blobs
+		block.KzgProofs = kzgProofs
 		block.ExecutionValue = new(big.Int).SetUint64(localExecValue)
 		return block, nil
 	}
@@ -318,6 +410,8 @@ func (a *ApiHandler) produceBlock(
 
 	if useLocalExec {
 		block.BeaconBody = beaconBody
+		block.Blobs = blobs
+		block.KzgProofs = kzgProofs
 		block.ExecutionValue = execValue
 	} else {
 		// prepare blinded block
@@ -367,7 +461,7 @@ func (a *ApiHandler) getBuilderPayload(
 	if err != nil {
 		return nil, err
 	} else if header == nil {
-		return nil, fmt.Errorf("no error but nil header")
+		return nil, errors.New("no error but nil header")
 	}
 
 	// check the version
@@ -386,10 +480,10 @@ func (a *ApiHandler) getBuilderPayload(
 		for i := 0; i < header.Data.Message.BlobKzgCommitments.Len(); i++ {
 			c := header.Data.Message.BlobKzgCommitments.Get(i)
 			if c == nil {
-				return nil, fmt.Errorf("nil blob kzg commitment")
+				return nil, errors.New("nil blob kzg commitment")
 			}
 			if len(c) != length.Bytes48 {
-				return nil, fmt.Errorf("invalid blob kzg commitment length")
+				return nil, errors.New("invalid blob kzg commitment length")
 			}
 		}
 	}
@@ -417,7 +511,7 @@ func (a *ApiHandler) produceBeaconBody(
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(
 		targetSlot / a.beaconChainCfg.SlotsPerEpoch,
 	)
-	beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig)
+	beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, stateVersion)
 	// Setup body.
 	beaconBody.RandaoReveal = randaoReveal
 	beaconBody.Graffiti = graffiti
@@ -426,7 +520,7 @@ func (a *ApiHandler) produceBeaconBody(
 	// Build execution payload
 	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
 	head := latestExecutionPayload.BlockHash
-	finalizedHash := a.forkchoiceStore.GetEth1Hash(baseState.FinalizedCheckpoint().BlockRoot())
+	finalizedHash := a.forkchoiceStore.GetEth1Hash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (libcommon.Hash{}) {
 		finalizedHash = head // probably fuck up fcu for EL but not a big deal.
 	}
@@ -521,7 +615,7 @@ func (a *ApiHandler) produceBeaconBody(
 						log.Error("BlockProduction: Invalid commitment length")
 						return
 					}
-					if len(bundles.Blobs[i]) != int(cltypes.BYTES_PER_BLOB) {
+					if len(bundles.Blobs[i]) != cltypes.BYTES_PER_BLOB {
 						log.Error("BlockProduction: Invalid blob length")
 						return
 					}
@@ -593,7 +687,7 @@ func (a *ApiHandler) produceBeaconBody(
 
 	wg.Wait()
 	if executionPayload == nil {
-		return nil, 0, fmt.Errorf("failed to produce execution payload")
+		return nil, 0, errors.New("failed to produce execution payload")
 	}
 	beaconBody.ExecutionPayload = executionPayload
 	return beaconBody, executionValue, nil
@@ -605,9 +699,16 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 	*solid.ListSSZ[*cltypes.SignedVoluntaryExit],
 	*solid.ListSSZ[*cltypes.SignedBLSToExecutionChange]) {
 
-	attesterSlashings := solid.NewDynamicListSSZ[*cltypes.AttesterSlashing](
-		int(a.beaconChainCfg.MaxAttesterSlashings),
-	)
+	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
+	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(targetEpoch)
+	var maxAttesterSlashings uint64
+	if targetVersion.BeforeOrEqual(clparams.DenebVersion) {
+		maxAttesterSlashings = a.beaconChainCfg.MaxAttesterSlashings
+	} else {
+		maxAttesterSlashings = a.beaconChainCfg.MaxAttesterSlashingsElectra
+	}
+
+	attesterSlashings := solid.NewDynamicListSSZ[*cltypes.AttesterSlashing](int(maxAttesterSlashings))
 	slashedIndicies := []uint64{}
 	// AttesterSlashings
 AttLoop:
@@ -627,7 +728,7 @@ AttLoop:
 		}
 		slashedIndicies = append(slashedIndicies, rawIdxs...)
 		attesterSlashings.Append(slashing)
-		if attesterSlashings.Len() >= int(a.beaconChainCfg.MaxAttesterSlashings) {
+		if attesterSlashings.Len() >= int(maxAttesterSlashings) {
 			break
 		}
 	}
@@ -712,36 +813,40 @@ func (a *ApiHandler) setupHeaderReponseForBlockProduction(
 	w.Header().Set("Eth-Execution-Payload-Blinded", strconv.FormatBool(blinded))
 }
 
-func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) {
-	a.postBeaconBlocks(w, r, 1)
+func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	resp, err := a.postBeaconBlocks(w, r, 1)
+	if err != nil {
+		log.Warn("Failed to post beacon block in v1 path", "err", err)
+	}
+	return resp, err
 }
 
-func (a *ApiHandler) PostEthV2BeaconBlocks(w http.ResponseWriter, r *http.Request) {
-	a.postBeaconBlocks(w, r, 2)
+func (a *ApiHandler) PostEthV2BeaconBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	resp, err := a.postBeaconBlocks(w, r, 2)
+	if err != nil {
+		log.Warn("Failed to post beacon block in v2 path", "err", err)
+	}
+	return resp, err
 }
 
-func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) {
+func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	version, err := a.parseEthConsensusVersion(r.Header.Get("Eth-Consensus-Version"), apiVersion)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	validation := a.parseBlockPublishingValidation(w, r, apiVersion)
 	// Decode the block
 	block, err := a.parseRequestBeaconBlock(version, r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	_ = validation
 
-	if err := a.broadcastBlock(ctx, block); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if err := a.broadcastBlock(ctx, block.SignedBlock); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	w.WriteHeader(http.StatusOK)
-
+	return newBeaconResponse(nil), nil
 }
 
 func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -769,7 +874,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 
 	// todo: broadcast_validation
 
-	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg)
+	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg, version)
 	signedBlindedBlock.Block.SetVersion(version)
 	b, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
@@ -822,7 +927,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		// check commitments
 		blockCommitments := signedBlindedBlock.Block.Body.BlobKzgCommitments
 		if len(blobsBundle.Commitments) != blockCommitments.Len() {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("commitments length mismatch"))
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("commitments length mismatch"))
 		}
 		for i := range blobsBundle.Commitments {
 			// add the bundle to recently produced blobs
@@ -848,7 +953,7 @@ func (a *ApiHandler) parseEthConsensusVersion(
 	apiVersion int,
 ) (clparams.StateVersion, error) {
 	if str == "" && apiVersion == 2 {
-		return 0, fmt.Errorf("Eth-Consensus-Version header is required")
+		return 0, errors.New("Eth-Consensus-Version header is required")
 	}
 	if str == "" && apiVersion == 1 {
 		currentEpoch := a.ethClock.GetCurrentEpoch()
@@ -873,21 +978,33 @@ func (a *ApiHandler) parseBlockPublishingValidation(
 func (a *ApiHandler) parseRequestBeaconBlock(
 	version clparams.StateVersion,
 	r *http.Request,
-) (*cltypes.SignedBeaconBlock, error) {
-	block := cltypes.NewSignedBeaconBlock(a.beaconChainCfg)
-	block.Block.Body.Version = version
+) (*cltypes.DenebSignedBeaconBlock, error) {
+	var block *cltypes.DenebSignedBeaconBlock
+	if version.AfterOrEqual(clparams.ElectraVersion) {
+		block = cltypes.NewElectraSignedBeaconBlock(a.beaconChainCfg)
+	} else {
+		block = cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg)
+	}
 	// check content type
-	if r.Header.Get("Content-Type") == "application/json" {
-		return block, json.NewDecoder(r.Body).Decode(block)
+	switch r.Header.Get("Content-Type") {
+	case "application/json":
+		if err := json.NewDecoder(r.Body).Decode(block); err != nil {
+			return nil, err
+		}
+		block.SignedBlock.Block.SetVersion(version)
+		return block, nil
+	case "application/octet-stream":
+		octect, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		if err := block.DecodeSSZ(octect, int(version)); err != nil {
+			return nil, err
+		}
+		block.SignedBlock.Block.SetVersion(version)
+		return block, nil
 	}
-	octect, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
-	}
-	if err := block.DecodeSSZ(octect, int(version)); err != nil {
-		return nil, err
-	}
-	return block, nil
+	return nil, errors.New("invalid content type")
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {
@@ -992,7 +1109,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
 		return err
 	}
-	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().Root
 	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
 		return err
 	}
@@ -1007,62 +1124,111 @@ type attestationCandidate struct {
 func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	s abstract.BeaconState,
 ) *solid.ListSSZ[*solid.Attestation] {
-
-	ret := solid.NewDynamicListSSZ[*solid.Attestation](int(a.beaconChainCfg.MaxAttestations))
-	attestationCandidates := []attestationCandidate{}
-
-	for _, attestation := range a.operationsPool.AttestationsPool.Raw() {
-		if err := eth2.IsAttestationApplicable(s, attestation); err != nil {
+	currentVersion := s.Version()
+	aggBitsSize := int(a.beaconChainCfg.MaxValidatorsPerCommittee)
+	if currentVersion.AfterOrEqual(clparams.ElectraVersion) {
+		aggBitsSize = int(a.beaconChainCfg.MaxValidatorsPerCommittee *
+			a.beaconChainCfg.MaxCommitteesPerSlot)
+	}
+	// Group attestations by their data root
+	hashToAtts := make(map[libcommon.Hash][]*solid.Attestation)
+	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
+		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
 		}
-		expectedReward, err := computeAttestationReward(s, attestation)
+
+		attVersion := a.beaconChainCfg.GetCurrentStateVersion(candidate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch)
+		if currentVersion.AfterOrEqual(clparams.ElectraVersion) &&
+			attVersion.Before(clparams.ElectraVersion) {
+			// Because the on chain Attestation container changes, attestations from the prior fork can’t be included
+			// into post-electra blocks. Therefore the first block after the fork may have zero attestations.
+			// see: https://eips.ethereum.org/EIPS/eip-7549#first-block-after-fork
+			continue
+		}
+
+		dataRoot, err := candidate.Data.HashSSZ()
 		if err != nil {
-			log.Warn(
-				"[Block Production] Could not compute expected attestation reward",
-				"reason",
-				err,
-			)
+			log.Warn("[Block Production] Cannot hash attestation data", "err", err)
 			continue
 		}
-		if expectedReward == 0 {
-			continue
+		if _, ok := hashToAtts[dataRoot]; !ok {
+			hashToAtts[dataRoot] = []*solid.Attestation{}
 		}
-		attestationCandidates = append(attestationCandidates, attestationCandidate{
-			attestation: attestation,
-			reward:      expectedReward,
-		})
+
+		// try to merge the attestation with the existing ones
+		mergeAny := false
+		candidateAggregationBits := candidate.AggregationBits.Bytes()
+		for _, curAtt := range hashToAtts[dataRoot] {
+			currAggregationBitsBytes := curAtt.AggregationBits.Bytes()
+			if !utils.IsOverlappingSSZBitlist(currAggregationBitsBytes, candidateAggregationBits) {
+				// merge signatures
+				candidateSig := candidate.Signature
+				curSig := curAtt.Signature
+				mergeSig, err := bls.AggregateSignatures([][]byte{candidateSig[:], curSig[:]})
+				if err != nil {
+					log.Warn("[Block Production] Cannot merge signatures", "err", err)
+					continue
+				}
+				// merge aggregation bits
+				mergedAggBits := solid.NewBitList(0, aggBitsSize)
+				for i := 0; i < len(currAggregationBitsBytes); i++ {
+					mergedAggBits.Append(currAggregationBitsBytes[i] | candidateAggregationBits[i])
+				}
+				var buf [96]byte
+				copy(buf[:], mergeSig)
+				curAtt.Signature = buf
+				curAtt.AggregationBits = mergedAggBits
+				if attVersion.AfterOrEqual(clparams.ElectraVersion) {
+					// merge committee_bits for electra
+					mergedCommitteeBits, err := curAtt.CommitteeBits.Union(candidate.CommitteeBits)
+					if err != nil {
+						log.Warn("[Block Production] Cannot merge committee bits", "err", err)
+						continue
+					}
+					curAtt.CommitteeBits = mergedCommitteeBits
+				}
+
+				mergeAny = true
+			}
+		}
+		if !mergeAny {
+			// no merge case, just append. It might be merged with other attestation later.
+			hashToAtts[dataRoot] = append(hashToAtts[dataRoot], candidate)
+		}
 	}
-	// Rank by reward in descending order.
+
+	attestationCandidates := []attestationCandidate{}
+	for _, atts := range hashToAtts {
+		for _, att := range atts {
+			expectedReward, err := computeAttestationReward(s, att)
+			if err != nil {
+				log.Debug("[Block Production] Could not compute expected attestation reward", "reason", err)
+				continue
+			}
+			if expectedReward == 0 {
+				continue
+			}
+			attestationCandidates = append(attestationCandidates, attestationCandidate{
+				attestation: att,
+				reward:      expectedReward,
+			})
+		}
+	}
 	sort.Slice(attestationCandidates, func(i, j int) bool {
 		return attestationCandidates[i].reward > attestationCandidates[j].reward
 	})
-	// Some aggregates can be supersets of existing ones so let's filter out the supersets
-	// this MAP is HashTreeRoot(AttestationData) => AggregationBits
-	aggregationBitsByAttestationData := make(map[libcommon.Hash][]byte)
-	for _, candidate := range attestationCandidates {
-		// Check if it is a superset of a pre-included attestation with higher reward
-		attestationDataRoot, err := candidate.attestation.AttestantionData().HashSSZ()
-		if err != nil {
-			log.Warn("[Block Production] Cannot compute attestation data root", "err", err)
-			continue
-		}
-		currAggregationBits, exists := aggregationBitsByAttestationData[attestationDataRoot]
-		if exists {
-			if utils.IsNonStrictSupersetBitlist(
-				currAggregationBits,
-				candidate.attestation.AggregationBits(),
-			) {
-				continue
-			}
-			utils.MergeBitlists(currAggregationBits, candidate.attestation.AggregationBits())
-		} else {
-			currAggregationBits = candidate.attestation.AggregationBits()
-		}
-		// Update the currently built superset
-		aggregationBitsByAttestationData[attestationDataRoot] = currAggregationBits
 
+	// decide the max attestation length based on the version
+	var maxAttLen int
+	if s.Version().BeforeOrEqual(clparams.DenebVersion) {
+		maxAttLen = int(a.beaconChainCfg.MaxAttestations)
+	} else {
+		maxAttLen = int(a.beaconChainCfg.MaxAttestationsElectra)
+	}
+	ret := solid.NewDynamicListSSZ[*solid.Attestation](maxAttLen)
+	for _, candidate := range attestationCandidates {
 		ret.Append(candidate.attestation)
-		if ret.Len() >= int(a.beaconChainCfg.MaxAttestations) {
+		if ret.Len() >= maxAttLen {
 			break
 		}
 	}
@@ -1075,26 +1241,26 @@ func computeAttestationReward(
 	attestation *solid.Attestation) (uint64, error) {
 
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	currentEpoch := state.Epoch(s)
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
-		stateSlot-data.Slot(),
+		stateSlot-data.Slot,
 		false,
 	)
 	if err != nil {
 		return 0, err
 	}
-	attestingIndicies, err := s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
+	attestingIndicies, err := s.GetAttestingIndicies(attestation, true)
 	if err != nil {
 		return 0, err
 	}
 	var proposerRewardNumerator uint64
 
-	isCurrentEpoch := data.Target().Epoch() == currentEpoch
+	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))

@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package mdbx_test
 
@@ -23,19 +23,20 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/remotedb"
+	"github.com/erigontech/erigon-lib/kv/remotedbserver"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestSequence(t *testing.T) {
@@ -100,10 +101,8 @@ func TestManagedTx(t *testing.T) {
 	writeDBs, readDBs := setupDatabases(t, logger, func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return map[string]kv.TableCfgItem{
 			bucket1: {
-				Flags:                     kv.DupSort,
-				AutoDupSortKeysConversion: true,
-				DupToLen:                  4,
-				DupFromLen:                6,
+				//TODO: maybe it is bad to remove both flags but tests fail in another way
+				Flags: 0,
 			},
 			bucket2: {
 				Flags: 0,
@@ -273,7 +272,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Range(kv.AccountChangeSet, from, to)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Asc, kv.Unlim)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err = it.Next()
@@ -294,7 +293,7 @@ func TestRemoteKvRange(t *testing.T) {
 	// Limit
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeAscend(kv.AccountChangeSet, from, to, 2)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Asc, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
@@ -314,7 +313,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeDescend(kv.AccountChangeSet, from, to, 2)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Desc, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()

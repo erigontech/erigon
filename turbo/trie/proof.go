@@ -1,15 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package trie
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // Prove constructs a merkle proof for key. The result contains all encoded nodes
@@ -111,7 +128,7 @@ func decodeRef(buf []byte) (node, []byte, error) {
 	switch {
 	case kind == rlp.List:
 		if len(buf)-len(rest) >= length.Hash {
-			return nil, nil, fmt.Errorf("embedded nodes must be less than hash size")
+			return nil, nil, errors.New("embedded nodes must be less than hash size")
 		}
 		n, err := decodeNode(buf)
 		if err != nil {
@@ -176,7 +193,7 @@ func decodeShort(elems []byte) (*shortNode, error) {
 
 func decodeNode(encoded []byte) (node, error) {
 	if len(encoded) == 0 {
-		return nil, fmt.Errorf("nodes must not be zero length")
+		return nil, errors.New("nodes must not be zero length")
 	}
 	elems, _, err := rlp.SplitList(encoded)
 	if err != nil {
@@ -224,7 +241,7 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]node
 		switch nt := node.(type) {
 		case *fullNode:
 			if len(key) == 0 {
-				return nil, fmt.Errorf("full nodes should not have values")
+				return nil, errors.New("full nodes should not have values")
 			}
 			node, key = nt.Children[key[0]], key[1:]
 			if node == nil {
@@ -291,13 +308,13 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 		// A nil value proves the account does not exist.
 		switch {
 		case proof.Nonce != 0:
-			return fmt.Errorf("account is not in state, but has non-zero nonce")
+			return errors.New("account is not in state, but has non-zero nonce")
 		case proof.Balance.ToInt().Sign() != 0:
-			return fmt.Errorf("account is not in state, but has balance")
+			return errors.New("account is not in state, but has balance")
 		case proof.StorageHash != libcommon.Hash{}:
-			return fmt.Errorf("account is not in state, but has non-empty storage hash")
+			return errors.New("account is not in state, but has non-empty storage hash")
 		case proof.CodeHash != libcommon.Hash{}:
-			return fmt.Errorf("account is not in state, but has non-empty code hash")
+			return errors.New("account is not in state, but has non-empty code hash")
 		default:
 			return nil
 		}
@@ -331,7 +348,7 @@ func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResu
 func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash, proof accounts.StorProofResult) error {
 	if storageRoot == EmptyRoot || storageRoot == (libcommon.Hash{}) {
 		if proof.Value.ToInt().Sign() != 0 {
-			return fmt.Errorf("empty storage root cannot have non-zero values")
+			return errors.New("empty storage root cannot have non-zero values")
 		}
 		// The spec here is a bit unclear.  The yellow paper makes it clear that the
 		// EmptyRoot hash is a special case where the trie is empty.  Since the trie
@@ -341,7 +358,7 @@ func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash
 		// pre-image of the EmptyRoot) should be included.  This implementation
 		// chooses to require the proof be empty.
 		if len(proof.Proof) > 0 {
-			return fmt.Errorf("empty storage root should not have proof nodes")
+			return errors.New("empty storage root should not have proof nodes")
 		}
 		return nil
 	}

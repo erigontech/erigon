@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -20,11 +23,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 )
 
 type bytesBacked interface {
@@ -48,6 +51,16 @@ func BytesToBloom(b []byte) Bloom {
 	var bloom Bloom
 	bloom.SetBytes(b)
 	return bloom
+}
+
+func (b Bloom) IsEmpty() bool {
+	var bb []uint64 = unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), BloomByteLength/8)
+	for i := 0; i < BloomByteLength/8; i++ {
+		if bb[i] != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // SetBytes sets the content of b to the given bytes.

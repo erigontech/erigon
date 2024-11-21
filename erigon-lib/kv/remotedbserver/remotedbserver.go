@@ -1,18 +1,18 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package remotedbserver
 
@@ -30,15 +30,14 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	remote "github.com/ledgerwatch/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // MaxTxTTL - kv interface provide high-consistancy guaranties: Serializable Isolations Level https://en.wikipedia.org/wiki/Isolation_(database_systems)
@@ -64,7 +63,7 @@ const MaxTxTTL = 60 * time.Second
 // 6.0.0 - Blocks now have system-txs - in the begin/end of block
 // 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
-var KvServiceAPIVersion = &types.VersionReply{Major: 6, Minor: 2, Patch: 0}
+var KvServiceAPIVersion = &types.VersionReply{Major: 7, Minor: 0, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -408,12 +407,6 @@ func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 		k, v, err = c.SeekExact(in.K)
 	case remote.Op_SEEK_BOTH_EXACT:
 		k, v, err = c.(kv.CursorDupSort).SeekBothExact(in.K, in.V)
-	case remote.Op_COUNT:
-		cnt, err := c.Count()
-		if err != nil {
-			return err
-		}
-		v = hexutility.EncodeTs(cnt)
 	default:
 		return fmt.Errorf("unknown operation: %s", in.Op)
 	}
@@ -533,24 +526,24 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply *remote.DomainGetReply, err error) {
+func (s *KvServer) DomainGet(_ context.Context, req *remote.GetLatestReq) (reply *remote.GetLatestReply, err error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
 	}
-	reply = &remote.DomainGetReply{}
+	reply = &remote.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		if req.Latest {
-			reply.V, _, err = ttx.DomainGet(domainName, req.K, req.K2)
+			reply.V, _, err = ttx.GetLatest(domainName, req.K, req.K2)
 			if err != nil {
 				return err
 			}
 		} else {
-			reply.V, reply.Ok, err = ttx.DomainGetAsOf(domainName, req.K, req.K2, req.Ts)
+			reply.V, reply.Ok, err = ttx.GetAsOf(domainName, req.K, req.K2, req.Ts)
 			if err != nil {
 				return err
 			}
@@ -566,9 +559,13 @@ func (s *KvServer) HistorySeek(_ context.Context, req *remote.HistorySeekReq) (r
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
-		reply.V, reply.Ok, err = ttx.HistorySeek(kv.History(req.Table), req.K, req.Ts)
+		domain, err := kv.String2Domain(req.Table)
+		if err != nil {
+			return err
+		}
+		reply.V, reply.Ok, err = ttx.HistorySeek(domain, req.K, req.Ts)
 		if err != nil {
 			return err
 		}
@@ -598,7 +595,7 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
 		if !ok {
-			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			return errors.New("server DB doesn't implement kv.Temporal interface")
 		}
 		it, err := ttx.IndexRange(kv.InvertedIdx(req.Table), req.K, from, int(req.ToTs), order.By(req.OrderAscend), limit)
 		if err != nil {
@@ -612,15 +609,101 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 			}
 			reply.Timestamps = append(reply.Timestamps, v)
 			limit--
+
+			if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
+				reply.NextPageToken, err = marshalPagination(&remote.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
+				if err != nil {
+					return err
+				}
+				break
+			}
 		}
-		if len(reply.Timestamps) == PageSizeLimit && it.HasNext() {
-			next, err := it.Next()
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
+func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) (*remote.Pairs, error) {
+	reply := &remote.Pairs{}
+	fromTs, limit := int(req.FromTs), int(req.Limit)
+	if err := s.with(req.TxId, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+		}
+		domain, err := kv.String2Domain(req.Table)
+		if err != nil {
+			return err
+		}
+		it, err := ttx.HistoryRange(domain, fromTs, int(req.ToTs), order.By(req.OrderAscend), limit)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			k, v, err := it.Next()
 			if err != nil {
 				return err
 			}
-			reply.NextPageToken, err = marshalPagination(&remote.IndexPagination{NextTimeStamp: int64(next), Limit: int64(limit)})
+			key := bytesCopy(k)
+			value := bytesCopy(v)
+			reply.Keys = append(reply.Keys, key)
+			reply.Values = append(reply.Values, value)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
+func (s *KvServer) DomainRange(_ context.Context, req *remote.RangeAsOfReq) (*remote.Pairs, error) {
+	domainName, err := kv.String2Domain(req.Table)
+	if err != nil {
+		return nil, err
+	}
+	reply := &remote.Pairs{}
+	fromKey, toKey, limit := req.FromKey, req.ToKey, int(req.Limit)
+	if req.PageToken != "" {
+		var pagination remote.PairsPagination
+		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
+			return nil, err
+		}
+		fromKey, limit = pagination.NextKey, int(pagination.Limit)
+	}
+	if req.PageSize <= 0 || req.PageSize > PageSizeLimit {
+		req.PageSize = PageSizeLimit
+	}
+
+	if err := s.with(req.TxId, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return errors.New("server DB doesn't implement kv.Temporal interface")
+		}
+		it, err := ttx.RangeAsOf(domainName, fromKey, toKey, req.Ts, order.By(req.OrderAscend), limit)
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			k, v, err := it.Next()
 			if err != nil {
 				return err
+			}
+			key := bytesCopy(k)
+			value := bytesCopy(v)
+			reply.Keys = append(reply.Keys, key)
+			reply.Values = append(reply.Values, value)
+			limit--
+
+			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
+				reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: k, Limit: int64(limit)})
+				if err != nil {
+					return err
+				}
+				break
 			}
 		}
 		return nil
@@ -633,7 +716,7 @@ func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*re
 func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
 	from, limit := req.FromPrefix, int(req.Limit)
 	if req.PageToken != "" {
-		var pagination remote.ParisPagination
+		var pagination remote.PairsPagination
 		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
 			return nil, err
 		}
@@ -646,17 +729,10 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 	reply := &remote.Pairs{}
 	var err error
 	if err = s.with(req.TxId, func(tx kv.Tx) error {
-		var it iter.KV
-		if req.OrderAscend {
-			it, err = tx.RangeAscend(req.Table, from, req.ToPrefix, limit)
-			if err != nil {
-				return err
-			}
-		} else {
-			it, err = tx.RangeDescend(req.Table, from, req.ToPrefix, limit)
-			if err != nil {
-				return err
-			}
+		var it stream.KV
+		it, err = tx.Range(req.Table, from, req.ToPrefix, order.FromBool(req.OrderAscend), limit)
+		if err != nil {
+			return err
 		}
 		for it.HasNext() {
 			k, v, err := it.Next()
@@ -672,7 +748,7 @@ func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs
 			if err != nil {
 				return err
 			}
-			reply.NextPageToken, err = marshalPagination(&remote.ParisPagination{NextKey: nextK, Limit: int64(limit)})
+			reply.NextPageToken, err = marshalPagination(&remote.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 			if err != nil {
 				return err
 			}

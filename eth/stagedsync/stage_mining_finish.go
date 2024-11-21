@@ -1,16 +1,32 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/turbo/builder"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 type MiningFinishCfg struct {
@@ -52,8 +68,8 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//	continue
 	//}
 
-	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals, current.Requests)
-	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts}
+	block := types.NewBlockForAsembling(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals)
+	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests}
 	*current = MiningBlock{} // hack to clean global data
 
 	//sealHash := engine.SealHash(block.Header())
@@ -64,16 +80,12 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//}
 	//prev = sealHash
 	cfg.latestBlockBuiltStore.AddBlockBuilt(block)
-	if cfg.miningState.MiningResultPOSCh != nil {
-		cfg.miningState.MiningResultPOSCh <- blockWithReceipts
-		return nil
-	}
 
 	// Tests may set pre-calculated nonce
 	if block.NonceU64() != 0 {
 		// Note: To propose a new signer for Clique consensus, the block nonce should be set to 0xFFFFFFFFFFFFFFFF.
 		if cfg.engine.Type() != chain.CliqueConsensus {
-			cfg.miningState.MiningResultCh <- block
+			cfg.miningState.MiningResultCh <- blockWithReceipts
 			return nil
 		}
 	}
@@ -87,6 +99,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 			"gasUsed", block.GasUsed(),
 			"gasLimit", block.GasLimit(),
 			"difficulty", block.Difficulty(),
+			"header", block.Header(),
 		)
 	}
 	// interrupt aborts the in-flight sealing task.
@@ -96,7 +109,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 		logger.Trace("No in-flight sealing task.")
 	}
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
-	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
+	if err := cfg.engine.Seal(chain, blockWithReceipts, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		logger.Warn("Block sealing failed", "err", err)
 	}
 

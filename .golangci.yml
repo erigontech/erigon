@@ -12,7 +12,7 @@ linters:
     - unused
     - performance
   disable:
-    - gosec # enable it after 1-2 weeks. it failing CI withoutt enough info to fix: https://github.com/ledgerwatch/erigon/actions/runs/5928644129/job/16074701625
+    - gosec # enable it after 1-2 weeks. it failing CI withoutt enough info to fix: https://github.com/erigontech/erigon/actions/runs/5928644129/job/16074701625
     - exhaustive
     - musttag
     - contextcheck
@@ -26,16 +26,16 @@ linters:
     - errchkjson #TODO: enable me
     - unused #TODO: enable me
     - testifylint #TODO: enable me
-    - perfsprint #TODO: enable me
     - gocheckcompilerdirectives
     - protogetter
   enable:
     - unconvert
     #    - predeclared #TODO: enable me
     #    - thelper #TODO: enable me
-    #    - wastedassign
+    - wastedassign
     - gofmt
     - gocritic
+    - perfsprint
 #    - revive
 #    - forcetypeassert
 #    - stylecheck

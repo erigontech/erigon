@@ -1,15 +1,31 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package finality
 
 import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/polygon/heimdall"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/polygon/bor/finality/whitelist"
 )
 
 var (
@@ -26,7 +42,7 @@ var (
 
 // fetchWhitelistCheckpoint fetches the latest checkpoint from it's local heimdall
 // and verifies the data against bor data.
-func fetchWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.HeimdallClient, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
+func fetchWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.Client, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
 	var (
 		blockNum  uint64
 		blockHash common.Hash
@@ -66,7 +82,7 @@ func fetchWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.Heimd
 
 // fetchWhitelistMilestone fetches the latest milestone from it's local heimdall
 // and verifies the data against bor data.
-func fetchWhitelistMilestone(ctx context.Context, heimdallClient heimdall.HeimdallClient, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
+func fetchWhitelistMilestone(ctx context.Context, heimdallClient heimdall.Client, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
 	var (
 		num  uint64
 		hash common.Hash
@@ -101,7 +117,7 @@ func fetchWhitelistMilestone(ctx context.Context, heimdallClient heimdall.Heimda
 	return num, hash, nil
 }
 
-func fetchNoAckMilestone(ctx context.Context, heimdallClient heimdall.HeimdallClient, logger log.Logger) (string, error) {
+func fetchNoAckMilestone(ctx context.Context, heimdallClient heimdall.Client, logger log.Logger) (string, error) {
 	var (
 		milestoneID string
 	)
@@ -120,7 +136,7 @@ func fetchNoAckMilestone(ctx context.Context, heimdallClient heimdall.HeimdallCl
 	return milestoneID, nil
 }
 
-func fetchNoAckMilestoneByID(ctx context.Context, heimdallClient heimdall.HeimdallClient, milestoneID string, logger log.Logger) error {
+func fetchNoAckMilestoneByID(ctx context.Context, heimdallClient heimdall.Client, milestoneID string, logger log.Logger) error {
 	err := heimdallClient.FetchNoAckMilestone(ctx, milestoneID)
 	if errors.Is(err, heimdall.ErrServiceUnavailable) {
 		logger.Debug("[bor.heimdall] Failed to fetch no-ack milestone by ID", "milestoneID", milestoneID, "err", err)

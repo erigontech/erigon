@@ -1,18 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var latestTag = libcommon.BytesToHash([]byte("latest"))
@@ -54,11 +72,12 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 	if err != nil {
 		return nil, err
 	} else if a == nil {
-		return nil, fmt.Errorf("acc not found")
+		return nil, errors.New("acc not found")
 	}
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	bn := rawdb.ReadCurrentBlockNumber(tx)
-	minTxNum, err := rawdbv3.TxNums.Min(tx, *bn)
+	minTxNum, err := txNumsReader.Min(tx, *bn)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +87,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		from = append(from, *offset...)
 	}
 	to, _ := kv.NextSubtree(account[:])
-	r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
+	r, err := tx.(kv.TemporalTx).RangeAsOf(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
 	if err != nil {
 		return nil, err
 	}

@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package diagnostics
 
 import (
@@ -6,10 +22,9 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
-	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type ctxKey int
@@ -135,14 +150,12 @@ func Send[I Info](info I) {
 
 	cval := ctx.Value(ckChan)
 
-	if cp, ok := cval.(*atomic.Pointer[chan I]); ok {
-		if c := (*cp).Load(); c != nil {
-			select {
-			case *c <- info:
-			default:
-				// drop the diagnostic message if the receiver is busy
-				// so the sender is not blocked on non critcal actions
-			}
+	if c, ok := cval.(chan I); ok {
+		select {
+		case c <- info:
+		default:
+			// drop the diagnostic message if the receiver is busy
+			// so the sender is not blocked on non critcal actions
 		}
 	} else {
 		if cval == nil {
@@ -155,16 +168,17 @@ func Send[I Info](info I) {
 
 func Context[I Info](ctx context.Context, buffer int) (context.Context, <-chan I, context.CancelFunc) {
 	c := make(chan I, buffer)
-	cp := atomic.Pointer[chan I]{}
-	cp.Store(&c)
+	l := sync.Mutex{}
 
-	ctx = context.WithValue(ctx, ckChan, &cp)
+	ctx = context.WithValue(ctx, ckChan, c)
 	ctx, cancel := context.WithCancel(ctx)
 
-	return ctx, *cp.Load(), func() {
+	return ctx, c, func() {
 		cancel()
 
-		if cp.CompareAndSwap(&c, nil) {
+		l.Lock()
+		defer l.Unlock()
+		if c != nil {
 			ch := c
 			c = nil
 			close(ch)

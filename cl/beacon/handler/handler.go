@@ -1,37 +1,56 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	sentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cl/aggregation"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
-	"github.com/ledgerwatch/erigon/cl/beacon/builder"
-	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
-	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/erigon/cl/phase1/network/services"
-	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
-	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
-	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
-	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/aggregation"
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/builder"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/network/services"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/cl/validator/committee_subscription"
+	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
@@ -46,18 +65,19 @@ type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
 
-	blockReader     freezeblocks.BeaconSnapshotReader
-	indiciesDB      kv.RwDB
-	netConfig       *clparams.NetworkConfig
-	ethClock        eth_clock.EthereumClock
-	beaconChainCfg  *clparams.BeaconChainConfig
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	operationsPool  pool.OperationsPool
-	syncedData      *synced_data.SyncedDataManager
-	stateReader     *historical_states_reader.HistoricalStatesReader
-	sentinel        sentinel.SentinelClient
-	blobStoage      blob_storage.BlobStorage
-	caplinSnapshots *freezeblocks.CaplinSnapshots
+	blockReader          freezeblocks.BeaconSnapshotReader
+	indiciesDB           kv.RwDB
+	netConfig            *clparams.NetworkConfig
+	ethClock             eth_clock.EthereumClock
+	beaconChainCfg       *clparams.BeaconChainConfig
+	forkchoiceStore      forkchoice.ForkChoiceStorage
+	operationsPool       pool.OperationsPool
+	syncedData           synced_data.SyncedData
+	stateReader          *historical_states_reader.HistoricalStatesReader
+	sentinel             sentinel.SentinelClient
+	blobStoage           blob_storage.BlobStorage
+	caplinSnapshots      *freezeblocks.CaplinSnapshots
+	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
 	version string // Node's version
 
@@ -66,7 +86,7 @@ type ApiHandler struct {
 
 	// caches
 	lighthouseInclusionCache sync.Map
-	emitters                 *beaconevents.Emitters
+	emitters                 *beaconevents.EventEmitter
 
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
@@ -89,6 +109,8 @@ type ApiHandler struct {
 	blsToExecutionChangeService      services.BLSToExecutionChangeService
 	proposerSlashingService          services.ProposerSlashingService
 	builderClient                    builder.BuilderClient
+	validatorsMonitor                monitor.ValidatorMonitor
+	enableMemoizedHeadState          bool
 }
 
 func NewApiHandler(
@@ -100,12 +122,12 @@ func NewApiHandler(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	operationsPool pool.OperationsPool,
 	rcsn freezeblocks.BeaconSnapshotReader,
-	syncedData *synced_data.SyncedDataManager,
+	syncedData synced_data.SyncedData,
 	stateReader *historical_states_reader.HistoricalStatesReader,
 	sentinel sentinel.SentinelClient,
 	version string,
 	routerCfg *beacon_router_configuration.RouterConfiguration,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventEmitter,
 	blobStoage blob_storage.BlobStorage,
 	caplinSnapshots *freezeblocks.CaplinSnapshots,
 	validatorParams *validator_params.ValidatorParams,
@@ -122,24 +144,28 @@ func NewApiHandler(
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
+	validatorMonitor monitor.ValidatorMonitor,
+	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
+	enableMemoizedHeadState bool,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
 		panic(err)
 	}
 	return &ApiHandler{
-		logger:          logger,
-		validatorParams: validatorParams,
-		o:               sync.Once{},
-		netConfig:       netConfig,
-		ethClock:        ethClock,
-		beaconChainCfg:  beaconChainConfig,
-		indiciesDB:      indiciesDB,
-		forkchoiceStore: forkchoiceStore,
-		operationsPool:  operationsPool,
-		blockReader:     rcsn,
-		syncedData:      syncedData,
-		stateReader:     stateReader,
+		logger:               logger,
+		validatorParams:      validatorParams,
+		o:                    sync.Once{},
+		netConfig:            netConfig,
+		ethClock:             ethClock,
+		beaconChainCfg:       beaconChainConfig,
+		indiciesDB:           indiciesDB,
+		forkchoiceStore:      forkchoiceStore,
+		operationsPool:       operationsPool,
+		blockReader:          rcsn,
+		syncedData:           syncedData,
+		stateReader:          stateReader,
+		caplinStateSnapshots: caplinStateSnapshots,
 		randaoMixesPool: sync.Pool{New: func() interface{} {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
@@ -163,6 +189,8 @@ func NewApiHandler(
 		blsToExecutionChangeService:      blsToExecutionChangeService,
 		proposerSlashingService:          proposerSlashingService,
 		builderClient:                    builderClient,
+		validatorsMonitor:                validatorMonitor,
+		enableMemoizedHeadState:          enableMemoizedHeadState,
 	}
 }
 
@@ -228,7 +256,7 @@ func (a *ApiHandler) init() {
 						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getHeader))
 					})
 					r.Route("/blocks", func(r chi.Router) {
-						r.Post("/", a.PostEthV1BeaconBlocks)
+						r.Post("/", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconBlocks))
 						r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
 						r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockAttestations))
 						r.Get("/{block_id}/root", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlockRoot))
@@ -264,7 +292,9 @@ func (a *ApiHandler) init() {
 							r.Get("/root", beaconhttp.HandleEndpointFunc(a.getStateRoot))
 							r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
 							r.Get("/validators", a.GetEthV1BeaconStatesValidators)
+							r.Post("/validators", a.PostEthV1BeaconStatesValidators)
 							r.Get("/validator_balances", a.GetEthV1BeaconValidatorsBalances)
+							r.Post("/validator_balances", a.PostEthV1BeaconValidatorsBalances)
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 						})
 					})
@@ -306,7 +336,7 @@ func (a *ApiHandler) init() {
 			if a.routerCfg.Beacon {
 				r.Route("/beacon", func(r chi.Router) {
 					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlock))
-					r.Post("/blocks", a.PostEthV2BeaconBlocks)
+					r.Post("/blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BeaconBlocks))
 					if a.routerCfg.Builder {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))
 					}
@@ -314,7 +344,7 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Validator {
 				r.Route("/validator", func(r chi.Router) {
-					r.Post("/blocks/{slot}", http.NotFound)
+					r.Get("/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock)) // deprecate
 				})
 			}
 		})
@@ -329,4 +359,18 @@ func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.init()
 	})
 	a.mux.ServeHTTP(w, r)
+}
+
+func (a *ApiHandler) getHead() (common.Hash, uint64, int, error) {
+	if a.enableMemoizedHeadState {
+		if a.syncedData.Syncing() {
+			return common.Hash{}, 0, http.StatusServiceUnavailable, errors.New("beacon node is syncing")
+		}
+		return a.syncedData.HeadRoot(), a.syncedData.HeadSlot(), 0, nil
+	}
+	blockRoot, blockSlot, err := a.forkchoiceStore.GetHead(nil)
+	if err != nil {
+		return common.Hash{}, 0, http.StatusInternalServerError, err
+	}
+	return blockRoot, blockSlot, 0, nil
 }

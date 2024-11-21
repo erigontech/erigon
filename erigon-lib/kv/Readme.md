@@ -1,4 +1,4 @@
-#### `Ethdb` package hold's bouquet of objects to access DB
+# `Ethdb` package hold's bouquet of objects to access DB
 
 Words "KV" and "DB" have special meaning here:
 
@@ -14,28 +14,28 @@ is [order of magnitude slower than sequential read](https://www.seagate.com/sg/e
 To enforce sequential-reads - introduced stateful cursors/iterators - they intentionally look as file-api:
 open_cursor/seek/write_data_from_current_position/move_to_end/step_back/step_forward/delete_key_on_current_position/append.
 
-## Class diagram:
+## Class diagram
 
 ```asciiflow.com
-// This is not call graph, just show classes from low-level to high-level. 
+// This is not call graph, just show classes from low-level to high-level.
 // And show which classes satisfy which interfaces.
 
-+-----------------------------------+   +-----------------------------------+ 
-|  github.com/erigonteh/mdbx-go    |   | google.golang.org/grpc.ClientConn |                    
++-----------------------------------+   +-----------------------------------+
+|  github.com/erigontech/mdbx-go    |   | google.golang.org/grpc.ClientConn |
 |  (app-agnostic MDBX go bindings)  |   | (app-agnostic RPC and streaming)  |
 +-----------------------------------+   +-----------------------------------+
                   |                                      |
                   |                                      |
                   v                                      v
 +-----------------------------------+   +-----------------------------------+
-|       ethdb/kv_mdbx.go            |   |       ethdb/kv_remote.go          |                
-|  (tg-specific MDBX implementaion) |   |   (tg-specific remote DB access)  |              
+|       ethdb/kv_mdbx.go            |   |       ethdb/kv_remote.go          |
+|  (tg-specific MDBX implementaion) |   |   (tg-specific remote DB access)  |
 +-----------------------------------+   +-----------------------------------+
                   |                                      |
                   |                                      |
-                  v                                      v    
+                  v                                      v
 +----------------------------------------------------------------------------------------------+
-|                                       eth/kv_interface.go                                   |  
+|                                       eth/kv_interface.go                                    |
 |         (Common KV interface. DB-friendly, disk-friendly, cpu-cache-friendly.                |
 |           Same app code can work with local or remote database.                              |
 |           Allows experiment with another database implementations.                           |
@@ -43,7 +43,7 @@ open_cursor/seek/write_data_from_current_position/move_to_end/step_back/step_for
 +----------------------------------------------------------------------------------------------+
 
 Then:
-turbo/snapshotsync/block_reader.go.go
+turbo/snapshotsync/block_reader.go
 erigon-lib/state/aggregator_v3.go
 
 Then:
@@ -51,22 +51,21 @@ kv_temporal.go
 
 ```
 
-## ethdb.AbstractKV design:
+## ethdb.AbstractKV design
 
 - InMemory, ReadOnly: `NewMDBX().Flags(mdbx.ReadOnly).InMem().Open()`
 - MultipleDatabases, Customization: `NewMDBX().Path(path).WithBucketsConfig(config).Open()`
-
 
 - 1 Transaction object can be used only within 1 goroutine.
 - Only 1 write transaction can be active at a time (other will wait).
 - Unlimited read transactions can be active concurrently (not blocked by write transaction).
 
-
 - Methods db.Update, db.View - can be used to open and close short transaction.
 - Methods Begin/Commit/Rollback - for long transaction.
 - it's safe to call .Rollback() after .Commit(), multiple rollbacks are also safe. Common transaction patter:
 
-```
+```golang
+
 tx, err := db.Begin(true, ethdb.RW)
 if err != nil {
     return err
@@ -86,9 +85,7 @@ if err != nil {
 - Methods .Bucket() and .Cursor(), can’t return nil, can't return error.
 - Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `MdbxCursor`
   and `MdbxDupSortCursor` classes satisfy it.
-  If your are not familiar with "DupSort" concept, please read [dupsort.md](https://github.com/ledgerwatch/erigon/blob/main/docs/programmers_guide/dupsort.md)
-
-
+  If your are not familiar with "DupSort" concept, please read [dupsort.md](https://github.com/erigontech/erigon/blob/main/docs/programmers_guide/dupsort.md)
 
 - If Cursor returns err!=nil then key SHOULD be != nil (can be []byte{} for example).
   Then traversal code look as:
@@ -100,16 +97,16 @@ return err
 }
 // logic
 }
-``` 
+```
 
 - Move cursor: `cursor.Seek(key)`
 
-## ethdb.Database design:
+## ethdb.Database design
 
 - Allows pass multiple implementations
 - Allows traversal tables by `db.Walk`
 
-## ethdb.TxDb design:
+## ethdb.TxDb design
 
 - holds inside 1 long-running transaction and 1 cursor per table
 - method Begin DOESN'T create new TxDb object, it means this object can be passed into other objects by pointer,
@@ -122,14 +119,14 @@ return err
 
 Install all database tools: `make db-tools`
 
-```
+```bash
 ./build/bin/mdbx_dump -a <datadir>/erigon/chaindata | lz4 > dump.lz4
 lz4 -d < dump.lz4 | ./build/bin/mdbx_load -an <datadir>/erigon/chaindata
 ```
 
 ## How to get table checksum
 
-```
+```bash
 ./build/bin/mdbx_dump -s table_name <datadir>/erigon/chaindata | tail -n +4 | sha256sum # tail here is for excluding header 
 
 Header example:

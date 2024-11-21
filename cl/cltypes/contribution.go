@@ -1,12 +1,29 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package cltypes
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types/clonable"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 var _ ssz2.SizedObjectSSZ = (*ContributionAndProof)(nil)
@@ -41,6 +58,13 @@ func (a *ContributionAndProof) EncodingSizeSSZ() int {
 
 func (a *ContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
+}
+
+// SignedContributionAndProofWithGossipData type represents SignedContributionAndProof with the gossip data where it's coming from.
+type SignedContributionAndProofWithGossipData struct {
+	SignedContributionAndProof *SignedContributionAndProof
+	GossipData                 *sentinel.GossipData
+	ImmediateVerification      bool
 }
 
 type SignedContributionAndProof struct {
@@ -161,6 +185,12 @@ func (agg *SyncContribution) EncodingSizeSSZ() int {
 func (agg *SyncContribution) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 
+}
+
+type SyncCommitteeMessageWithGossipData struct {
+	SyncCommitteeMessage  *SyncCommitteeMessage
+	GossipData            *sentinel.GossipData
+	ImmediateVerification bool
 }
 
 type SyncCommitteeMessage struct {

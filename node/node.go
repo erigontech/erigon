@@ -1,18 +1,21 @@
 // Copyright 2015 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package node
 
@@ -27,23 +30,24 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/datadir"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/debug"
 
 	"github.com/gofrs/flock"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/migrations"
 )
 
 // Node is a container on which services can be registered.
@@ -304,7 +308,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		name = "polygon-bridge"
 	case kv.ConsensusDB:
 		if len(name) == 0 {
-			return nil, fmt.Errorf("expected a consensus name")
+			return nil, errors.New("expected a consensus name")
 		}
 	default:
 		name = "test"
@@ -328,11 +332,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		opts := mdbx.NewMDBX(logger).
 			Path(dbPath).Label(label).
 			GrowthStep(16 * datasize.MB).
-			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
-
-		if config.MdbxWriteMap {
-			opts = opts.WriteMap()
-		}
+			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
+			WriteMap(config.MdbxWriteMap)
 
 		if readonly {
 			opts = opts.Readonly()
@@ -375,8 +376,9 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 	if err != nil {
 		return nil, err
 	}
+
 	migrator := migrations.NewMigrator(label)
-	if err := migrator.VerifyVersion(db); err != nil {
+	if err := migrator.VerifyVersion(db, dbPath); err != nil {
 		return nil, err
 	}
 
@@ -384,14 +386,14 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 	if err != nil {
 		return nil, err
 	}
-	if has {
+	if has && !dbg.OnlyCreateDB {
 		logger.Info("Re-Opening DB in exclusive mode to apply migrations")
 		db.Close()
 		db, err = openFunc(true)
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, config.Dirs.DataDir, logger); err != nil {
+		if err = migrator.Apply(db, config.Dirs.DataDir, dbPath, logger); err != nil {
 			return nil, err
 		}
 		db.Close()

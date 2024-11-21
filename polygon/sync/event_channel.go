@@ -1,29 +1,53 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sync
 
 import (
 	"container/list"
 	"context"
+	"fmt"
 	"sync"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 // EventChannel is a buffered channel that drops oldest events when full.
 type EventChannel[TEvent any] struct {
-	events chan TEvent
-
+	opts       eventChannelOptions
+	events     chan TEvent
 	queue      *list.List
 	queueCap   uint
 	queueMutex sync.Mutex
 	queueCond  *sync.Cond
 }
 
-func NewEventChannel[TEvent any](capacity uint) *EventChannel[TEvent] {
+func NewEventChannel[TEvent any](capacity uint, opts ...EventChannelOption) *EventChannel[TEvent] {
 	if capacity == 0 {
 		panic("NewEventChannel: capacity must be > 0")
 	}
 
-	ec := &EventChannel[TEvent]{
-		events: make(chan TEvent),
+	defaultOpts := eventChannelOptions{}
+	for _, opt := range opts {
+		opt(&defaultOpts)
+	}
 
+	ec := &EventChannel[TEvent]{
+		opts:     defaultOpts,
+		events:   make(chan TEvent),
 		queue:    list.New(),
 		queueCap: capacity,
 	}
@@ -43,8 +67,13 @@ func (ec *EventChannel[TEvent]) PushEvent(e TEvent) {
 	ec.queueMutex.Lock()
 	defer ec.queueMutex.Unlock()
 
+	var dropped bool
 	if uint(ec.queue.Len()) == ec.queueCap {
 		ec.queue.Remove(ec.queue.Front())
+		dropped = true
+	}
+	if ec.opts.logger != nil && dropped {
+		ec.opts.logger.Log(ec.opts.loggerLvl, fmt.Sprintf("[event-channel-%s] dropping event", ec.opts.loggerId))
 	}
 
 	ec.queue.PushBack(e)
@@ -109,5 +138,21 @@ func (ec *EventChannel[TEvent]) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+}
+
+type eventChannelOptions struct {
+	logger    log.Logger
+	loggerLvl log.Lvl
+	loggerId  string
+}
+
+type EventChannelOption func(opts *eventChannelOptions)
+
+func WithEventChannelLogging(logger log.Logger, lvl log.Lvl, id string) EventChannelOption {
+	return func(opts *eventChannelOptions) {
+		opts.logger = logger
+		opts.loggerLvl = lvl
+		opts.loggerId = id
 	}
 }

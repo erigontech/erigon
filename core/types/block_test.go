@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -24,21 +27,20 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/go-test/deep"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // the following 2 functions are replica for the test
@@ -189,7 +191,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	tx1, _ = tx1.WithSignature(*LatestSignerForChainID(nil), libcommon.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 
 	addr := libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
-	accesses := types2.AccessList{types2.AccessTuple{
+	accesses := AccessList{AccessTuple{
 		Address: addr,
 		StorageKeys: []libcommon.Hash{
 			{0},
@@ -278,7 +280,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 			},
 			GasPrice: ten,
 		},
-		AccessList: types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}},
+		AccessList: AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}},
 	}
 	sig2 := libcommon.Hex2Bytes("3dbacc8d0259f2508625e97fdfc57cd85fdd16e5821bc2c10bdd1a52649e8335476e10695b183a87b0aa292a7f4b78ef0c3fbe62aa2c42c84e1d9c3da159ef1401")
 	tx2, _ = tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), sig2)
@@ -359,7 +361,7 @@ func makeBenchBlock() *Block {
 			Extra:      []byte("benchmark uncle"),
 		}
 	}
-	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */, nil /*requests*/)
+	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */)
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {
@@ -474,7 +476,8 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 	var decoded Header
 	require.NoError(t, rlp.DecodeBytes(encoded, &decoded))
 
-	assert.Equal(t, header, decoded)
+	deep.CompareUnexportedFields = true
+	require.Nil(t, deep.Equal(&header, &decoded))
 }
 
 func TestWithdrawalsEncoding(t *testing.T) {
@@ -507,7 +510,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		Amount:    5_000_000_000,
 	}
 
-	block := NewBlock(&header, nil, nil, nil, withdrawals, nil /*requests*/)
+	block := NewBlock(&header, nil, nil, nil, withdrawals)
 	_ = block.Size()
 
 	encoded, err := rlp.EncodeToBytes(block)
@@ -519,7 +522,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	assert.Equal(t, block, &decoded)
 
 	// Now test with empty withdrawals
-	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{}, nil /*requests*/)
+	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
 	_ = block2.Size()
 
 	encoded2, err := rlp.EncodeToBytes(block2)
@@ -592,13 +595,13 @@ func TestCopyTxs(t *testing.T) {
 	})
 
 	populateBlobTxs()
-	for _, tx := range dummyBlobTxs {
-		txs = append(txs, tx)
+	for _, txn := range dummyBlobTxs {
+		txs = append(txs, txn)
 	}
 
 	populateBlobWrapperTxs()
-	for _, tx := range dummyBlobWrapperTxs {
-		txs = append(txs, tx)
+	for _, txn := range dummyBlobWrapperTxs {
+		txs = append(txs, txn)
 	}
 
 	copies := CopyTxs(txs)

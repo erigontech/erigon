@@ -1,22 +1,23 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package snaptype
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,12 +30,11 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/dir"
 )
 
 var (
-	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
+	ErrInvalidFileName = errors.New("invalid compressed file name")
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {
@@ -109,6 +109,24 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	isStateFile := IsStateFile(fileName)
 	res.name = fileName
 	res.Path = filepath.Join(dir, fileName)
+
+	if res.From == 0 && res.To == 0 {
+		parts := strings.Split(fileName, ".")
+		if len(parts) == 3 || len(parts) == 4 {
+			fsteps := strings.Split(parts[1], "-")
+			if len(fsteps) == 2 {
+				if from, err := strconv.ParseUint(fsteps[0], 10, 64); err == nil {
+					res.From = from
+				}
+				if to, err := strconv.ParseUint(fsteps[1], 10, 64); err == nil {
+					res.To = to
+				}
+			}
+		}
+	}
+	if strings.Contains(fileName, "caplin/") {
+		return res, isStateFile, true
+	}
 	return res, isStateFile, isStateFile
 }
 
@@ -137,6 +155,8 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		return
 	}
 	res.To = to * 1_000
+	res.TypeString = parts[3]
+
 	res.Type, ok = ParseFileType(parts[3])
 	if !ok {
 		return res, ok
@@ -186,12 +206,20 @@ func SeedableV2Extensions() []string {
 	return []string{".seg"}
 }
 
+func AllV2Extensions() []string {
+	return []string{".seg", ".idx", ".txt"}
+}
+
 func SeedableV3Extensions() []string {
-	return []string{".kv", ".v", ".ef"}
+	return []string{".kv", ".v", ".ef", ".ap"}
+}
+
+func AllV3Extensions() []string {
+	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt"}
 }
 
 func IsSeedableExtension(name string) bool {
-	for _, ext := range append(SeedableV2Extensions(), SeedableV3Extensions()...) {
+	for _, ext := range append(AllV2Extensions(), AllV3Extensions()...) {
 		if strings.HasSuffix(name, ext) {
 			return true
 		}
@@ -209,6 +237,7 @@ const Erigon3SeedableSteps = 64
 //     less files - means small files will be removed after merge (no peers for this files).
 const Erigon2OldMergeLimit = 500_000
 const Erigon2MergeLimit = 100_000
+const CaplinMergeLimit = 10_000
 const Erigon2MinSegmentSize = 1_000
 
 var MergeSteps = []uint64{100_000, 10_000}
@@ -219,13 +248,17 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
+	TypeString      string // This is for giulio's generic snapshots
 }
 
-func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
+func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
 
 func (f FileInfo) Name() string { return f.name }
 func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }
 func (f FileInfo) Len() uint64  { return f.To - f.From }
+
+func (f FileInfo) GetRange() (from, to uint64) { return f.From, f.To }
+func (f FileInfo) GetType() Type               { return f.Type }
 
 func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.From, o.From); res != 0 {
@@ -236,8 +269,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 		return res
 	}
 
-	// this is a lexical comparison (don't use enum)
-	return strings.Compare(f.Type.Name(), o.Type.Name())
+	return strings.Compare(f.name, o.name)
 }
 
 func (f FileInfo) As(t Type) FileInfo {

@@ -1,16 +1,31 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
 	"context"
 	"encoding/binary"
-	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func Benchmark_SharedDomains_GetLatest(t *testing.B) {
@@ -30,8 +45,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	defer domains.Close()
 	maxTx := stepSize * 258
 
-	seed := int64(4500)
-	rnd := rand.New(rand.NewSource(seed))
+	rnd := newRnd(4500)
 
 	keys := make([][]byte, 8)
 	for i := 0; i < len(keys); i++ {
@@ -88,8 +102,8 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 
 	for ik := 0; ik < t.N; ik++ {
 		for i := 0; i < len(keys); i++ {
-			ts := uint64(rnd.Intn(int(maxTx)))
-			v, ok, err := ac2.HistorySeek(kv.AccountsHistory, keys[i], ts, rwTx)
+			ts := uint64(rnd.IntN(int(maxTx)))
+			v, ok, err := ac2.HistorySeek(kv.AccountsDomain, keys[i], ts, rwTx)
 
 			require.True(t, ok)
 			require.NotNil(t, v)

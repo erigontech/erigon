@@ -9,25 +9,24 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/nat"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // InitGenesis initializes genesis file from json with sprint size and chain name as configurable inputs
@@ -78,19 +77,18 @@ func NewNodeConfig() *nodecfg.Config {
 }
 
 // InitNode initializes a node with the given genesis file and config
-func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
+func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, privKey *ecdsa.PrivateKey, withoutHeimdall bool, minerID int) (*node.Node, *eth.Ethereum, error) {
 	// Define the basic configurations for the Ethereum node
-	ddir, _ := os.MkdirTemp("", "")
 
 	logger := log.New()
 
 	nodeCfg := &nodecfg.Config{
 		Name:    "erigon",
 		Version: params.Version,
-		Dirs:    datadir.New(ddir),
+		Dirs:    datadir.New(dirName),
 		P2P: p2p.Config{
 			ListenAddr:      ":30303",
-			ProtocolVersion: []uint{direct.ETH68, direct.ETH67}, // No need to specify direct.ETH66, because 1 sentry is used for both 66 and 67
+			ProtocolVersion: []uint{direct.ETH68, direct.ETH67},
 			MaxPeers:        100,
 			MaxPendingPeers: 1000,
 			AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307, 30308, 30309, 30310},
@@ -125,13 +123,13 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		return nil, nil, err
 	}
 
-	downloaderConfig, err := downloadercfg.New(datadir.New(ddir), nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{}, []string{}, "", true, utils.DbWriteMapFlag.Value)
+	downloaderConfig, err := downloadercfg.New(ctx, datadir.New(dirName), nodeCfg.Version, torrentLogLevel, downloadRate, uploadRate, utils.TorrentPortFlag.Value, utils.TorrentConnsPerFileFlag.Value, utils.TorrentDownloadSlotsFlag.Value, []string{}, []string{}, "", true, utils.DbWriteMapFlag.Value)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	ethCfg := &ethconfig.Config{
-		Dirs:      datadir.New(ddir),
+		Dirs:      datadir.New(dirName),
 		Genesis:   genesis,
 		NetworkID: genesis.Config.ChainID.Uint64(),
 		TxPool:    txpoolcfg.DefaultConfig,

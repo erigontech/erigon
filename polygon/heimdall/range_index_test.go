@@ -1,17 +1,37 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
 	"context"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type rangeIndexTest struct {
-	index  *RangeIndex
+	index  RangeIndex
 	ctx    context.Context
 	logger log.Logger
 }
@@ -20,10 +40,18 @@ func newRangeIndexTest(t *testing.T) rangeIndexTest {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 	logger := log.New()
-	index, err := NewRangeIndex(ctx, tmpDir, logger)
+
+	db, err := mdbx.NewMDBX(logger).
+		InMem(tmpDir).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{"RangeIndex": {}} }).
+		MapSize(1 * datasize.GB).
+		Open(ctx)
+
 	require.NoError(t, err)
 
-	t.Cleanup(index.Close)
+	index := NewRangeIndex(polygoncommon.AsDatabase(db), "RangeIndex")
+
+	t.Cleanup(db.Close)
 
 	return rangeIndexTest{
 		index:  index,
@@ -34,7 +62,7 @@ func newRangeIndexTest(t *testing.T) rangeIndexTest {
 
 func TestRangeIndexEmpty(t *testing.T) {
 	test := newRangeIndexTest(t)
-	actualId, err := test.index.Lookup(test.ctx, 1000)
+	actualId, _, err := test.index.Lookup(test.ctx, 1000)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0), actualId)
 }
@@ -52,7 +80,7 @@ func TestRangeIndex(t *testing.T) {
 	}
 
 	for i, r := range ranges {
-		require.NoError(t, test.index.Put(ctx, r, uint64(i+1)))
+		require.NoError(t, test.index.(RangeIndexer).Put(ctx, r, uint64(i+1)))
 	}
 
 	examples := map[uint64]uint64{
@@ -89,7 +117,7 @@ func TestRangeIndex(t *testing.T) {
 	}
 
 	for blockNum, expectedId := range examples {
-		actualId, err := test.index.Lookup(ctx, blockNum)
+		actualId, _, err := test.index.Lookup(ctx, blockNum)
 		require.NoError(t, err)
 		assert.Equal(t, expectedId, actualId)
 	}

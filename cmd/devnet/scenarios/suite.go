@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package scenarios
 
 import (
@@ -7,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
 )
 
 type SimulationContext struct {
@@ -20,9 +36,7 @@ type AfterScenarioHook func(context.Context, *Scenario, error) (context.Context,
 type BeforeStepHook func(context.Context, *Step) (context.Context, error)
 type AfterStepHook func(context.Context, *Step, StepStatus, error) (context.Context, error)
 
-var TimeNowFunc = func() time.Time {
-	return time.Now()
-}
+var TimeNowFunc = time.Now
 
 type suite struct {
 	stepRunners    []*stepRunner
@@ -91,7 +105,7 @@ func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, pre
 		earlyReturn := prevStepErr != nil || sr.Err == ErrUndefined
 
 		// Run after step handlers.
-		rctx, sr.Err = s.runAfterStepHooks(ctx, step, sr.Status, sr.Err)
+		rctx, sr.Err = s.runAfterStepHooks(ctx, step, sr.Status, sr.Err) //nolint
 
 		// Trigger after scenario on failing or last step to attach possible hook error to step.
 		if isLast || (sr.Status != Skipped && sr.Status != Undefined && sr.Err != nil) {
@@ -289,7 +303,7 @@ func (s *suite) runScenario(scenario *Scenario) (sr *ScenarioResult, err error) 
 	if s.testingT != nil {
 		// Running scenario as a subtest.
 		s.testingT.Run(scenario.Name, func(t *testing.T) {
-			ctx, sr.StepResults, err = s.runSteps(ctx, scenario, scenario.Steps)
+			ctx, sr.StepResults, err = s.runSteps(ctx, scenario, scenario.Steps) //nolint
 			if s.shouldFail(err) {
 				t.Error(err)
 			}
@@ -332,7 +346,7 @@ func (s *suite) runBeforeStepHooks(ctx context.Context, step *Step, err error) (
 		}
 
 		if hctx != nil {
-			ctx = hctx
+			ctx = hctx //nolint
 		}
 	}
 
@@ -357,7 +371,7 @@ func (s *suite) runAfterStepHooks(ctx context.Context, step *Step, status StepSt
 		}
 
 		if hctx != nil {
-			ctx = hctx
+			ctx = hctx //nolint
 		}
 	}
 
@@ -379,7 +393,7 @@ func (s *suite) runBeforeScenarioHooks(ctx context.Context, scenario *Scenario) 
 		}
 
 		if hctx != nil {
-			ctx = hctx
+			ctx = hctx //nolint
 		}
 	}
 
@@ -417,7 +431,7 @@ func (s *suite) runAfterScenarioHooks(ctx context.Context, scenario *Scenario, l
 		}
 
 		if hctx != nil {
-			ctx = hctx
+			ctx = hctx //nolint
 		}
 	}
 

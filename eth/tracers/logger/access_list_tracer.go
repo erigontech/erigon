@@ -1,18 +1,21 @@
 // Copyright 2021 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package logger
 
@@ -20,12 +23,12 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM
@@ -100,11 +103,11 @@ func (al accessList) Equal(other accessList) bool {
 	return al.equal(other)
 }
 
-// accesslist converts the accesslist to a types2.AccessList.
-func (al accessList) accessList() types2.AccessList {
-	acl := make(types2.AccessList, 0, len(al))
+// accesslist converts the accesslist to a types.AccessList.
+func (al accessList) accessList() types.AccessList {
+	acl := make(types.AccessList, 0, len(al))
 	for addr, slots := range al {
-		tuple := types2.AccessTuple{Address: addr, StorageKeys: []libcommon.Hash{}}
+		tuple := types.AccessTuple{Address: addr, StorageKeys: []libcommon.Hash{}}
 		for slot := range slots {
 			tuple.StorageKeys = append(tuple.StorageKeys, slot)
 		}
@@ -113,18 +116,18 @@ func (al accessList) accessList() types2.AccessList {
 	return acl
 }
 
-// accesslist converts the accesslist to a types2.AccessList.
-func (al accessList) accessListSorted() types2.AccessList {
-	acl := make(types2.AccessList, 0, len(al))
+// accesslist converts the accesslist to a types.AccessList.
+func (al accessList) accessListSorted() types.AccessList {
+	acl := make(types.AccessList, 0, len(al))
 	for addr, slots := range al {
 		storageKeys := make([]libcommon.Hash, 0, len(slots))
 		for slot := range slots {
 			storageKeys = append(storageKeys, slot)
 		}
 		sort.Slice(storageKeys, func(i, j int) bool {
-			return storageKeys[i].String() < storageKeys[j].String()
+			return storageKeys[i].Cmp(storageKeys[j]) < 0
 		})
-		acl = append(acl, types2.AccessTuple{
+		acl = append(acl, types.AccessTuple{
 			Address:     addr,
 			StorageKeys: storageKeys,
 		})
@@ -147,7 +150,7 @@ type AccessListTracer struct {
 // the resulting accesslist.
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
-func NewAccessListTracer(acl types2.AccessList, exclude map[libcommon.Address]struct{}, state evmtypes.IntraBlockState) *AccessListTracer {
+func NewAccessListTracer(acl types.AccessList, exclude map[libcommon.Address]struct{}, state evmtypes.IntraBlockState) *AccessListTracer {
 	excl := make(map[libcommon.Address]struct{})
 	if exclude != nil {
 		excl = exclude
@@ -248,12 +251,12 @@ func (*AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 // AccessList returns the current accesslist maintained by the tracer.
-func (a *AccessListTracer) AccessList() types2.AccessList {
+func (a *AccessListTracer) AccessList() types.AccessList {
 	return a.list.accessList()
 }
 
 // AccessListSorted returns the current accesslist maintained by the tracer.
-func (a *AccessListTracer) AccessListSorted() types2.AccessList {
+func (a *AccessListTracer) AccessListSorted() types.AccessList {
 	return a.list.accessListSorted()
 }
 

@@ -1,13 +1,29 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state_accessors
 
 import (
 	"encoding/binary"
 	"io"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
 
 // EpochData stores the data for the epoch (valid throughout the epoch)
@@ -25,9 +41,13 @@ func EpochDataFromBeaconState(s *state.CachingBeaconState) *EpochData {
 	justificationCopy := &cltypes.JustificationBits{}
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
+	totalBalance, err := state.GetTotalBalance(s, s.GetActiveValidatorsIndices(state.Epoch(s)))
+	if err != nil {
+		return nil
+	}
 	return &EpochData{
 		JustificationBits:           justificationCopy,
-		TotalActiveBalance:          s.GetTotalActiveBalance(),
+		TotalActiveBalance:          totalBalance,
 		CurrentJustifiedCheckpoint:  s.CurrentJustifiedCheckpoint(),
 		PreviousJustifiedCheckpoint: s.PreviousJustifiedCheckpoint(),
 		FinalizedCheckpoint:         s.FinalizedCheckpoint(),
@@ -54,9 +74,7 @@ func (m *EpochData) WriteTo(w io.Writer) error {
 // Deserialize deserializes the state from a byte slice with zstd compression.
 func (m *EpochData) ReadFrom(r io.Reader) error {
 	m.JustificationBits = &cltypes.JustificationBits{}
-	m.FinalizedCheckpoint = solid.NewCheckpoint()
-	m.CurrentJustifiedCheckpoint = solid.NewCheckpoint()
-	m.PreviousJustifiedCheckpoint = solid.NewCheckpoint()
+
 	lenB := make([]byte, 8)
 	if _, err := io.ReadFull(r, lenB); err != nil {
 		return err
@@ -70,5 +88,5 @@ func (m *EpochData) ReadFrom(r io.Reader) error {
 }
 
 func (m *EpochData) getSchema() []interface{} {
-	return []interface{}{&m.TotalActiveBalance, m.JustificationBits, m.CurrentJustifiedCheckpoint, m.PreviousJustifiedCheckpoint, m.FinalizedCheckpoint, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
+	return []interface{}{&m.TotalActiveBalance, m.JustificationBits, &m.CurrentJustifiedCheckpoint, &m.PreviousJustifiedCheckpoint, &m.FinalizedCheckpoint, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
 }

@@ -1,16 +1,49 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state_accessors
 
 import (
 	"bytes"
+	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 )
+
+type GetValFn func(table string, key []byte) ([]byte, error)
+
+func GetValFnTxAndSnapshot(tx kv.Tx, snapshotRoTx *snapshotsync.CaplinStateView) GetValFn {
+	return func(table string, key []byte) ([]byte, error) {
+		if snapshotRoTx != nil {
+			slot := uint64(binary.BigEndian.Uint32(key))
+			segment, ok := snapshotRoTx.VisibleSegment(slot, table)
+			if ok {
+				return segment.Get(slot)
+			}
+		}
+		return tx.GetOne(table, key)
+	}
+}
 
 // InitializeValidatorTable initializes the validator table in the database.
 func InitializeStaticTables(tx kv.RwTx, state *state.CachingBeaconState) error {
@@ -109,6 +142,16 @@ func IncrementHistoricalSummariesTable(tx kv.RwTx, state *state.CachingBeaconSta
 	return nil
 }
 
+func ReadPublicKeyByIndexNoCopy(tx kv.Tx, index uint64) ([]byte, error) {
+	var pks []byte
+	var err error
+	key := base_encoding.Encode64ToBytes4(index)
+	if pks, err = tx.GetOne(kv.ValidatorPublicKeys, key); err != nil {
+		return nil, err
+	}
+	return pks, err
+}
+
 func ReadPublicKeyByIndex(tx kv.Tx, index uint64) (libcommon.Bytes48, error) {
 	var pks []byte
 	var err error
@@ -148,9 +191,9 @@ func SetStateProcessingProgress(tx kv.RwTx, progress uint64) error {
 	return tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, base_encoding.Encode64ToBytes4(progress))
 }
 
-func ReadSlotData(tx kv.Tx, slot uint64) (*SlotData, error) {
+func ReadSlotData(getFn GetValFn, slot uint64) (*SlotData, error) {
 	sd := &SlotData{}
-	v, err := tx.GetOne(kv.SlotData, base_encoding.Encode64ToBytes4(slot))
+	v, err := getFn(kv.SlotData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -162,9 +205,9 @@ func ReadSlotData(tx kv.Tx, slot uint64) (*SlotData, error) {
 	return sd, sd.ReadFrom(buf)
 }
 
-func ReadEpochData(tx kv.Tx, slot uint64) (*EpochData, error) {
+func ReadEpochData(getFn GetValFn, slot uint64) (*EpochData, error) {
 	ed := &EpochData{}
-	v, err := tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
+	v, err := getFn(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -177,27 +220,27 @@ func ReadEpochData(tx kv.Tx, slot uint64) (*EpochData, error) {
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
-func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, err error) {
+func ReadCheckpoints(getFn GetValFn, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, ok bool, err error) {
 	ed := &EpochData{}
-	v, err := tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
+	var v []byte
+	v, err = getFn(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
-		return nil, nil, nil, err
+		return
 	}
 	if len(v) == 0 {
-		return nil, nil, nil, nil
+		return
 	}
 	buf := bytes.NewBuffer(v)
 
-	if err := ed.ReadFrom(buf); err != nil {
-		return nil, nil, nil, err
+	if err = ed.ReadFrom(buf); err != nil {
+		return
 	}
-	// Current, Pre
-	return ed.CurrentJustifiedCheckpoint, ed.PreviousJustifiedCheckpoint, ed.FinalizedCheckpoint, nil
+	return ed.CurrentJustifiedCheckpoint, ed.PreviousJustifiedCheckpoint, ed.FinalizedCheckpoint, true, nil
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
-func ReadNextSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
-	v, err := tx.GetOne(kv.NextSyncCommittee, base_encoding.Encode64ToBytes4(slot))
+func ReadNextSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.SyncCommittee, err error) {
+	v, err := getFn(kv.NextSyncCommittee, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +253,8 @@ func ReadNextSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommitte
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
-func ReadCurrentSyncCommittee(tx kv.Tx, slot uint64) (committee *solid.SyncCommittee, err error) {
-	v, err := tx.GetOne(kv.CurrentSyncCommittee, base_encoding.Encode64ToBytes4(slot))
+func ReadCurrentSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.SyncCommittee, err error) {
+	v, err := getFn(kv.CurrentSyncCommittee, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -285,9 +328,9 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 	return err
 }
 
-func ReadActiveIndicies(tx kv.Tx, slot uint64) ([]uint64, error) {
+func ReadActiveIndicies(getFn GetValFn, slot uint64) ([]uint64, error) {
 	key := base_encoding.Encode64ToBytes4(slot)
-	v, err := tx.GetOne(kv.ActiveValidatorIndicies, key)
+	v, err := getFn(kv.ActiveValidatorIndicies, key)
 	if err != nil {
 		return nil, err
 	}
@@ -296,4 +339,22 @@ func ReadActiveIndicies(tx kv.Tx, slot uint64) ([]uint64, error) {
 	}
 	buf := bytes.NewBuffer(v)
 	return base_encoding.ReadRabbits(nil, buf)
+}
+
+func ReadProposersInEpoch(getFn GetValFn, epoch uint64) ([]uint64, error) {
+	key := base_encoding.Encode64ToBytes4(epoch)
+
+	indiciesBytes, err := getFn(kv.Proposers, key)
+	if err != nil {
+		return nil, err
+	}
+	if len(indiciesBytes) == 0 {
+		return nil, nil
+	}
+	var ret []uint64
+	for i := 0; i < len(indiciesBytes); i += 4 {
+		validatorIndex := binary.BigEndian.Uint32(indiciesBytes[i : i+4])
+		ret = append(ret, uint64(validatorIndex))
+	}
+	return ret, nil
 }

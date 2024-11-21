@@ -1,14 +1,31 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package builder
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
 )
 
 type BlockBuilderFunc func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error)
@@ -33,7 +50,11 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters)
 			log.Warn("Failed to build a block", "err", err)
 		} else {
 			block := result.Block
-			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
+			reqLenStr := "nil"
+			if len(result.Requests) == 3 {
+				reqLenStr = fmt.Sprint("Deposit Requests", len(result.Requests[0].RequestData), "Withdrawal Requests", len(result.Requests[1].RequestData), "Consolidation Requests", len(result.Requests[2].RequestData))
+			}
+			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "executionRequests", len(result.Requests), "Requests", reqLenStr, "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
 		}
 
 		builder.syncCond.L.Lock()

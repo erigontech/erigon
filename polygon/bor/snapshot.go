@@ -1,7 +1,22 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bor
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -9,13 +24,13 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 // Snapshot is the state of the authorization voting at a given point in time.
@@ -158,7 +173,6 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
-		sprintLen := s.config.CalculateSprintLength(number)
 
 		if err := ValidateHeaderTime(header, time.Now(), parent, snap.ValidatorSet, s.config, s.sigcache); err != nil {
 			return snap, err
@@ -169,13 +183,13 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 			return nil, err
 		}
 
-		difficulty := snap.Difficulty(signer)
+		difficulty := snap.ValidatorSet.SafeDifficulty(signer)
 		if header.Difficulty.Uint64() != difficulty {
 			return snap, &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
 		}
 
 		// change validator set and change proposer
-		if number > 0 && (number+1)%sprintLen == 0 {
+		if number > 0 && s.config.IsSprintEnd(number) {
 			if err := ValidateHeaderExtraLength(header.Extra); err != nil {
 				return snap, err
 			}
@@ -183,7 +197,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
-			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
+			v := valset.GetUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
 			v.IncrementProposerPriority(1)
 			snap.ValidatorSet = v
 		}
@@ -208,18 +222,4 @@ func (s *Snapshot) signers() []common.Address {
 	}
 
 	return sigs
-}
-
-// Difficulty returns the difficulty for a particular signer at the current snapshot number
-func (s *Snapshot) Difficulty(signer common.Address) uint64 {
-	// if signer is empty
-	if bytes.Equal(signer.Bytes(), common.Address{}.Bytes()) {
-		return 1
-	}
-
-	if d, err := s.ValidatorSet.Difficulty(signer); err == nil {
-		return d
-	} else {
-		return 0
-	}
 }

@@ -1,27 +1,43 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	tracersConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned
@@ -71,15 +87,20 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, blockHash)
-	if number == nil {
-		return StorageRangeResult{}, fmt.Errorf("block not found")
-	}
-	minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	return storageRangeAtV3(tx.(kv.TemporalTx), contractAddress, keyStart, minTxNum+txIndex, maxResult)
+	if number == nil {
+		return StorageRangeResult{}, nil
+	}
+	minTxNum, err := txNumsReader.Min(tx, *number)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+	fromTxNum := minTxNum + txIndex + 1 //+1 for system txn in the beginning of block
+	return storageRangeAt(tx.(kv.TemporalTx), contractAddress, keyStart, fromTxNum, maxResult)
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
@@ -94,7 +115,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 	if number, ok := blockNrOrHash.Number(); ok {
 		if number == rpc.PendingBlockNumber {
-			return state.IteratorDump{}, fmt.Errorf("accountRange for pending block not supported")
+			return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
 		}
 		if number == rpc.LatestBlockNumber {
 			var err error
@@ -131,7 +152,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		}
 	}
 
-	dumper := state.NewDumper(tx, blockNumber)
+	dumper := state.NewDumper(tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader)), blockNumber)
 	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -162,6 +183,8 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, err
 	}
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	// forces negative numbers to fail (too large) but allows zero
 	startNum := uint64(startNumber.Int64())
 	if startNum > latestBlock {
@@ -182,48 +205,40 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	if startNum > endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
-
 	//[from, to)
-	startTxNum, err := rawdbv3.TxNums.Min(tx, startNum)
+	startTxNum, err := txNumsReader.Min(tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := rawdbv3.TxNums.Max(tx, endNum-1)
+	endTxNum, err := txNumsReader.Min(tx, endNum)
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
+	return getModifiedAccounts(tx.(kv.TemporalTx), startTxNum, endTxNum-1)
 }
 
-// getModifiedAccountsV3 returns a list of addresses that were modified in the block range
+// getModifiedAccounts returns a list of addresses that were modified in the block range
 // [startNum:endNum)
-func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
-	it, err := tx.HistoryRange(kv.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
+func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+	it, err := tx.HistoryRange(kv.AccountsDomain, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
 	defer it.Close()
 
-	changedAddrs := make(map[common.Address]struct{})
+	var result []common.Address
+	saw := make(map[common.Address]struct{})
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		changedAddrs[common.BytesToAddress(k)] = struct{}{}
+		//TODO: data is sorted, enough to compare with prevKey
+		if _, ok := saw[common.BytesToAddress(k)]; !ok {
+			saw[common.BytesToAddress(k)] = struct{}{}
+			result = append(result, common.BytesToAddress(k))
+		}
 	}
-
-	if len(changedAddrs) == 0 {
-		return nil, nil
-	}
-
-	idx := 0
-	result := make([]common.Address, len(changedAddrs))
-	for addr := range changedAddrs {
-		copy(result[idx][:], addr[:])
-		idx++
-	}
-
 	return result, nil
 }
 
@@ -234,6 +249,8 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	startBlock, err := api.blockByHashWithSenders(ctx, tx, startHash)
 	if err != nil {
@@ -261,15 +278,15 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	}
 
 	//[from, to)
-	startTxNum, err := rawdbv3.TxNums.Min(tx, startNum)
+	startTxNum, err := txNumsReader.Min(tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := rawdbv3.TxNums.Max(tx, endNum-1)
+	endTxNum, err := txNumsReader.Min(tx, endNum)
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
+	return getModifiedAccounts(tx.(kv.TemporalTx), startTxNum, endTxNum-1)
 }
 
 func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
@@ -279,22 +296,33 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, blockHash)
-	if number == nil {
-		return nil, nil
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
+	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil {
+		return &AccountResult{}, err
 	}
-	canonicalHash, _ := api._blockReader.CanonicalHash(ctx, tx, *number)
+	if number == nil {
+		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+	}
+	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("canonical hash not found %d", *number)
+	}
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
-		return nil, fmt.Errorf("block hash is not canonical")
+		return nil, errors.New("block hash is not canonical")
 	}
 
-	minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
+	minTxNum, err := txNumsReader.Min(tx, *number)
 	if err != nil {
 		return nil, err
 	}
 	ttx := tx.(kv.TemporalTx)
-	v, ok, err := ttx.DomainGetAsOf(kv.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
+	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +339,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash
 
-	code, _, err := ttx.DomainGetAsOf(kv.CodeDomain, address[:], nil, minTxNum+txIndex)
+	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], nil, minTxNum+txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +360,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +369,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 		return nil, err
 	}
 	if header == nil {
-		return nil, fmt.Errorf("header not found")
+		return nil, errors.New("header not found")
 	}
 	return rlp.EncodeToBytes(header)
 }
@@ -352,7 +380,7 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +389,7 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("block not found")
+		return nil, errors.New("block not found")
 	}
 	return rlp.EncodeToBytes(block)
 }

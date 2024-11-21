@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package rlp
 
@@ -28,7 +31,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/holiman/uint256"
 )
@@ -118,7 +121,7 @@ func Decode(r io.Reader, val interface{}) error {
 // DecodeBytes parses RLP data from b into val. Please see package-level documentation for
 // the decoding rules. The input must contain exactly one value and no trailing data.
 func DecodeBytes(b []byte, val interface{}) error {
-	r := bytes.NewReader(b)
+	r := (*sliceReader)(&b)
 
 	stream, ok := streamPool.Get().(*Stream)
 	if !ok {
@@ -130,7 +133,7 @@ func DecodeBytes(b []byte, val interface{}) error {
 	if err := stream.Decode(val); err != nil {
 		return err
 	}
-	if r.Len() > 0 {
+	if len(b) > 0 {
 		return ErrMoreThanOneValue
 	}
 	return nil
@@ -1127,4 +1130,24 @@ func (s *Stream) willRead(n uint64) error {
 		s.remaining -= n
 	}
 	return nil
+}
+
+type sliceReader []byte
+
+func (sr *sliceReader) Read(b []byte) (int, error) {
+	if len(*sr) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(b, *sr)
+	*sr = (*sr)[n:]
+	return n, nil
+}
+
+func (sr *sliceReader) ReadByte() (byte, error) {
+	if len(*sr) == 0 {
+		return 0, io.EOF
+	}
+	b := (*sr)[0]
+	*sr = (*sr)[1:]
+	return b, nil
 }

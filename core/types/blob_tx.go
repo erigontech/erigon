@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -8,13 +24,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
-	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 type BlobTx struct {
@@ -66,7 +80,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {
-			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+			return msg, errors.New("gasPrice higher than 2^256-1")
 		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
@@ -80,29 +94,31 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Me
 	return msg, err
 }
 
-func (stx *BlobTx) cashedSender() (sender libcommon.Address, ok bool) {
+func (stx *BlobTx) cachedSender() (sender libcommon.Address, ok bool) {
 	s := stx.from.Load()
 	if s == nil {
 		return sender, false
 	}
-	return s.(libcommon.Address), true
+	return *s, true
 }
 
 func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := stx.from.Load(); sc != nil {
-		return sc.(libcommon.Address), nil
+	if from := stx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
+		}
 	}
 	addr, err := signer.Sender(stx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	stx.from.Store(addr)
+	stx.from.Store(&addr)
 	return addr, nil
 }
 
 func (stx *BlobTx) Hash() libcommon.Hash {
 	if hash := stx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := prefixedRlpHash(BlobTxType, []interface{}{
 		stx.ChainID,
@@ -327,7 +343,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode AccessList
-	stx.AccessList = types2.AccessList{}
+	stx.AccessList = AccessList{}
 	if err = decodeAccessList(&stx.AccessList, s); err != nil {
 		return err
 	}
@@ -342,7 +358,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
-		return fmt.Errorf("a blob stx must contain at least one blob")
+		return errors.New("a blob stx must contain at least one blob")
 	}
 	// decode V
 	if b, err = s.Uint256Bytes(); err != nil {

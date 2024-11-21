@@ -6,18 +6,18 @@ import (
 	"math/big"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/params"
 )
 
 // MarshalTOML marshals as TOML.
@@ -85,7 +85,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.BadBlockHash = c.BadBlockHash
 	enc.Snapshot = c.Snapshot
 	enc.Downloader = c.Downloader
-	enc.BeaconRouter = c.BeaconRouter
+	enc.CaplinConfig.BeaconAPIRouter = c.CaplinConfig.BeaconAPIRouter
 	enc.CaplinConfig = c.CaplinConfig
 	enc.Dirs = c.Dirs
 	enc.ExternalSnapshotDownloaderAddr = c.ExternalSnapshotDownloaderAddr
@@ -108,11 +108,11 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.PolygonSyncStage = c.PolygonSyncStage
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
-	enc.CaplinDiscoveryAddr = c.CaplinDiscoveryAddr
-	enc.CaplinDiscoveryPort = c.CaplinDiscoveryPort
-	enc.CaplinDiscoveryTCPPort = c.CaplinDiscoveryTCPPort
-	enc.SentinelAddr = c.SentinelAddr
-	enc.SentinelPort = c.SentinelPort
+	enc.CaplinConfig.CaplinDiscoveryAddr = c.CaplinConfig.CaplinDiscoveryAddr
+	enc.CaplinConfig.CaplinDiscoveryPort = c.CaplinConfig.CaplinDiscoveryPort
+	enc.CaplinConfig.CaplinDiscoveryTCPPort = c.CaplinConfig.CaplinDiscoveryTCPPort
+	enc.CaplinConfig.SentinelAddr = c.CaplinConfig.SentinelAddr
+	enc.CaplinConfig.SentinelPort = c.CaplinConfig.SentinelPort
 	enc.OverridePragueTime = c.OverridePragueTime
 	enc.SilkwormExecution = c.SilkwormExecution
 	enc.SilkwormRpcDaemon = c.SilkwormRpcDaemon
@@ -217,7 +217,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Downloader = dec.Downloader
 	}
 	if dec.BeaconRouter != nil {
-		c.BeaconRouter = *dec.BeaconRouter
+		c.CaplinConfig.BeaconAPIRouter = *dec.BeaconRouter
 	}
 	if dec.CaplinConfig != nil {
 		c.CaplinConfig = *dec.CaplinConfig
@@ -286,19 +286,19 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.InternalCL = *dec.InternalCL
 	}
 	if dec.CaplinDiscoveryAddr != nil {
-		c.CaplinDiscoveryAddr = *dec.CaplinDiscoveryAddr
+		c.CaplinConfig.CaplinDiscoveryAddr = *dec.CaplinDiscoveryAddr
 	}
 	if dec.CaplinDiscoveryPort != nil {
-		c.CaplinDiscoveryPort = *dec.CaplinDiscoveryPort
+		c.CaplinConfig.CaplinDiscoveryPort = *dec.CaplinDiscoveryPort
 	}
 	if dec.CaplinDiscoveryTCPPort != nil {
-		c.CaplinDiscoveryTCPPort = *dec.CaplinDiscoveryTCPPort
+		c.CaplinConfig.CaplinDiscoveryTCPPort = *dec.CaplinDiscoveryTCPPort
 	}
 	if dec.SentinelAddr != nil {
-		c.SentinelAddr = *dec.SentinelAddr
+		c.CaplinConfig.SentinelAddr = *dec.SentinelAddr
 	}
 	if dec.SentinelPort != nil {
-		c.SentinelPort = *dec.SentinelPort
+		c.CaplinConfig.SentinelPort = *dec.SentinelPort
 	}
 	if dec.OverridePragueTime != nil {
 		c.OverridePragueTime = dec.OverridePragueTime

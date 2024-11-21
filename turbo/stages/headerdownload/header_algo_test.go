@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package headerdownload_test
 
 import (
@@ -6,13 +22,13 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestSideChainInsert(t *testing.T) {
@@ -67,7 +83,7 @@ func TestSideChainInsert(t *testing.T) {
 
 	testCases := []struct {
 		name         string
-		chain        []types.Header
+		chain        []*types.Header
 		expectedHash common.Hash
 		expectedDiff int64
 	}{
@@ -83,9 +99,8 @@ func TestSideChainInsert(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		for i, h := range tc.chain {
-			h := h
-			data, _ := rlp.EncodeToBytes(&h)
-			if _, err = hi.FeedHeaderPoW(tx, br, &h, data, h.Hash(), uint64(i+1)); err != nil {
+			data, _ := rlp.EncodeToBytes(h)
+			if _, err = hi.FeedHeaderPoW(tx, br, h, data, h.Hash(), uint64(i+1)); err != nil {
 				t.Errorf("feed empty header for %s, err: %v", tc.name, err)
 			}
 		}
@@ -99,14 +114,14 @@ func TestSideChainInsert(t *testing.T) {
 	}
 }
 
-func createTestChain(length int64, parent common.Hash, diff int64, extra []byte) []types.Header {
+func createTestChain(length int64, parent common.Hash, diff int64, extra []byte) []*types.Header {
 	var (
 		i       int64
-		headers []types.Header
+		headers []*types.Header
 	)
 
 	for i = 0; i < length; i++ {
-		h := types.Header{
+		h := &types.Header{
 			Number:     big.NewInt(i + 1),
 			Difficulty: big.NewInt(diff),
 			ParentHash: parent,

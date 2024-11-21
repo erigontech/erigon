@@ -1,12 +1,28 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package state
 
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/types/accounts"
 )
 
 // HistoryReaderV3 Implements StateReader and StateWriter
@@ -39,7 +55,7 @@ func (hr *HistoryReaderV3) ResetReadSet()                     {}
 func (hr *HistoryReaderV3) DiscardReadList()                  {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, ok, err := hr.ttx.DomainGetAsOf(kv.AccountsDomain, address[:], nil, hr.txNum)
+	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address[:], nil, hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountData [%x] => []\n", address)
@@ -59,26 +75,12 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
 func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
-	enc, ok, err := hr.ttx.DomainGetAsOf(kv.AccountsDomain, address[:], nil, hr.txNum)
-	if err != nil || !ok || len(enc) == 0 {
-		if hr.trace {
-			fmt.Printf("ReadAccountDataForDebug [%x] => []\n", address)
-		}
-		return nil, err
-	}
-	var a accounts.Account
-	if err := accounts.DeserialiseV3(&a, enc); err != nil {
-		return nil, fmt.Errorf("ReadAccountDataForDebug(%x): %w", address, err)
-	}
-	if hr.trace {
-		fmt.Printf("ReadAccountDataForDebug [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
-	}
-	return &a, nil
+	return hr.ReadAccountData(address)
 }
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	k := append(address[:], key.Bytes()...)
-	enc, _, err := hr.ttx.DomainGetAsOf(kv.StorageDomain, k, nil, hr.txNum)
+	enc, _, err := hr.ttx.GetAsOf(kv.StorageDomain, k, nil, hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
 	}
@@ -90,8 +92,8 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 		return nil, nil
 	}
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
-	//code, _, err := hr.ttx.DomainGetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
-	code, _, err := hr.ttx.DomainGetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
+	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
 	}
@@ -99,12 +101,12 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 }
 
 func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, _, err := hr.ttx.DomainGetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
+	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
 	return len(enc), err
 }
 
 func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, ok, err := hr.ttx.DomainGetAsOf(kv.AccountsDomain, address.Bytes(), nil, hr.txNum)
+	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address.Bytes(), nil, hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountIncarnation [%x] => [0]\n", address)
@@ -226,7 +228,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	st := btree.New(16)
 	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
-	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false , addr[:], s.blockNr)
+	accData, err := DomainGetAsOf(s.tx, s.accHistoryC, s.accChangesC, false , addr[:], s.blockNr)
 	if err != nil {
 		return err
 	}

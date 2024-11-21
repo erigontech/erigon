@@ -1,12 +1,29 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package p2p
 
 import (
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 type NodeKeyConfig struct {
@@ -71,7 +88,7 @@ func (config NodeKeyConfig) LoadOrGenerateAndSave(keyfile string) (*ecdsa.Privat
 func (config NodeKeyConfig) LoadOrParseOrGenerateAndSave(file, hex, datadir string) (*ecdsa.PrivateKey, error) {
 	switch {
 	case file != "" && hex != "":
-		return nil, fmt.Errorf("P2P node key is set as both file and hex string - these options are mutually exclusive")
+		return nil, errors.New("P2P node key is set as both file and hex string - these options are mutually exclusive")
 	case file != "":
 		return config.load(file)
 	case hex != "":

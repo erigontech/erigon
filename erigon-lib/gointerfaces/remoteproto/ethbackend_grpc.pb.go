@@ -8,7 +8,7 @@ package remoteproto
 
 import (
 	context "context"
-	typesproto "github.com/ledgerwatch/erigon-lib/gointerfaces/typesproto"
+	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -21,21 +21,26 @@ import (
 const _ = grpc.SupportPackageIsVersion8
 
 const (
-	ETHBACKEND_Etherbase_FullMethodName       = "/remote.ETHBACKEND/Etherbase"
-	ETHBACKEND_NetVersion_FullMethodName      = "/remote.ETHBACKEND/NetVersion"
-	ETHBACKEND_NetPeerCount_FullMethodName    = "/remote.ETHBACKEND/NetPeerCount"
-	ETHBACKEND_Version_FullMethodName         = "/remote.ETHBACKEND/Version"
-	ETHBACKEND_ProtocolVersion_FullMethodName = "/remote.ETHBACKEND/ProtocolVersion"
-	ETHBACKEND_ClientVersion_FullMethodName   = "/remote.ETHBACKEND/ClientVersion"
-	ETHBACKEND_Subscribe_FullMethodName       = "/remote.ETHBACKEND/Subscribe"
-	ETHBACKEND_SubscribeLogs_FullMethodName   = "/remote.ETHBACKEND/SubscribeLogs"
-	ETHBACKEND_Block_FullMethodName           = "/remote.ETHBACKEND/Block"
-	ETHBACKEND_TxnLookup_FullMethodName       = "/remote.ETHBACKEND/TxnLookup"
-	ETHBACKEND_NodeInfo_FullMethodName        = "/remote.ETHBACKEND/NodeInfo"
-	ETHBACKEND_Peers_FullMethodName           = "/remote.ETHBACKEND/Peers"
-	ETHBACKEND_AddPeer_FullMethodName         = "/remote.ETHBACKEND/AddPeer"
-	ETHBACKEND_PendingBlock_FullMethodName    = "/remote.ETHBACKEND/PendingBlock"
-	ETHBACKEND_BorEvent_FullMethodName        = "/remote.ETHBACKEND/BorEvent"
+	ETHBACKEND_Etherbase_FullMethodName               = "/remote.ETHBACKEND/Etherbase"
+	ETHBACKEND_NetVersion_FullMethodName              = "/remote.ETHBACKEND/NetVersion"
+	ETHBACKEND_NetPeerCount_FullMethodName            = "/remote.ETHBACKEND/NetPeerCount"
+	ETHBACKEND_Version_FullMethodName                 = "/remote.ETHBACKEND/Version"
+	ETHBACKEND_Syncing_FullMethodName                 = "/remote.ETHBACKEND/Syncing"
+	ETHBACKEND_ProtocolVersion_FullMethodName         = "/remote.ETHBACKEND/ProtocolVersion"
+	ETHBACKEND_ClientVersion_FullMethodName           = "/remote.ETHBACKEND/ClientVersion"
+	ETHBACKEND_Subscribe_FullMethodName               = "/remote.ETHBACKEND/Subscribe"
+	ETHBACKEND_SubscribeLogs_FullMethodName           = "/remote.ETHBACKEND/SubscribeLogs"
+	ETHBACKEND_Block_FullMethodName                   = "/remote.ETHBACKEND/Block"
+	ETHBACKEND_CanonicalBodyForStorage_FullMethodName = "/remote.ETHBACKEND/CanonicalBodyForStorage"
+	ETHBACKEND_CanonicalHash_FullMethodName           = "/remote.ETHBACKEND/CanonicalHash"
+	ETHBACKEND_HeaderNumber_FullMethodName            = "/remote.ETHBACKEND/HeaderNumber"
+	ETHBACKEND_TxnLookup_FullMethodName               = "/remote.ETHBACKEND/TxnLookup"
+	ETHBACKEND_NodeInfo_FullMethodName                = "/remote.ETHBACKEND/NodeInfo"
+	ETHBACKEND_Peers_FullMethodName                   = "/remote.ETHBACKEND/Peers"
+	ETHBACKEND_AddPeer_FullMethodName                 = "/remote.ETHBACKEND/AddPeer"
+	ETHBACKEND_PendingBlock_FullMethodName            = "/remote.ETHBACKEND/PendingBlock"
+	ETHBACKEND_BorTxnLookup_FullMethodName            = "/remote.ETHBACKEND/BorTxnLookup"
+	ETHBACKEND_BorEvents_FullMethodName               = "/remote.ETHBACKEND/BorEvents"
 )
 
 // ETHBACKENDClient is the client API for ETHBACKEND service.
@@ -47,6 +52,8 @@ type ETHBACKENDClient interface {
 	NetPeerCount(ctx context.Context, in *NetPeerCountRequest, opts ...grpc.CallOption) (*NetPeerCountReply, error)
 	// Version returns the service version number
 	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error)
+	// Syncing returns a data object detailing the status of the sync process
+	Syncing(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*SyncingReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
 	ProtocolVersion(ctx context.Context, in *ProtocolVersionRequest, opts ...grpc.CallOption) (*ProtocolVersionReply, error)
 	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
@@ -58,6 +65,12 @@ type ETHBACKENDClient interface {
 	// it doesn't provide consistency
 	// Request fields are optional - it's ok to request block only by hash or only by number
 	Block(ctx context.Context, in *BlockRequest, opts ...grpc.CallOption) (*BlockReply, error)
+	// High-level method - can read block body (only storage metadata) from db, snapshots or apply any other logic
+	CanonicalBodyForStorage(ctx context.Context, in *CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*CanonicalBodyForStorageReply, error)
+	// High-level method - can find block hash by block number
+	CanonicalHash(ctx context.Context, in *CanonicalHashRequest, opts ...grpc.CallOption) (*CanonicalHashReply, error)
+	// High-level method - can find block number by block hash
+	HeaderNumber(ctx context.Context, in *HeaderNumberRequest, opts ...grpc.CallOption) (*HeaderNumberReply, error)
 	// High-level method - can find block number by txn hash
 	// it doesn't provide consistency
 	TxnLookup(ctx context.Context, in *TxnLookupRequest, opts ...grpc.CallOption) (*TxnLookupReply, error)
@@ -68,7 +81,8 @@ type ETHBACKENDClient interface {
 	AddPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error)
-	BorEvent(ctx context.Context, in *BorEventRequest, opts ...grpc.CallOption) (*BorEventReply, error)
+	BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error)
+	BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -113,6 +127,16 @@ func (c *eTHBACKENDClient) Version(ctx context.Context, in *emptypb.Empty, opts 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(typesproto.VersionReply)
 	err := c.cc.Invoke(ctx, ETHBACKEND_Version_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) Syncing(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*SyncingReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SyncingReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_Syncing_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +238,36 @@ func (c *eTHBACKENDClient) Block(ctx context.Context, in *BlockRequest, opts ...
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) CanonicalBodyForStorage(ctx context.Context, in *CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*CanonicalBodyForStorageReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CanonicalBodyForStorageReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_CanonicalBodyForStorage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) CanonicalHash(ctx context.Context, in *CanonicalHashRequest, opts ...grpc.CallOption) (*CanonicalHashReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CanonicalHashReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_CanonicalHash_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) HeaderNumber(ctx context.Context, in *HeaderNumberRequest, opts ...grpc.CallOption) (*HeaderNumberReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HeaderNumberReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_HeaderNumber_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *eTHBACKENDClient) TxnLookup(ctx context.Context, in *TxnLookupRequest, opts ...grpc.CallOption) (*TxnLookupReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TxnLookupReply)
@@ -264,10 +318,20 @@ func (c *eTHBACKENDClient) PendingBlock(ctx context.Context, in *emptypb.Empty, 
 	return out, nil
 }
 
-func (c *eTHBACKENDClient) BorEvent(ctx context.Context, in *BorEventRequest, opts ...grpc.CallOption) (*BorEventReply, error) {
+func (c *eTHBACKENDClient) BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(BorEventReply)
-	err := c.cc.Invoke(ctx, ETHBACKEND_BorEvent_FullMethodName, in, out, cOpts...)
+	out := new(BorTxnLookupReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_BorTxnLookup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BorEventsReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_BorEvents_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +347,8 @@ type ETHBACKENDServer interface {
 	NetPeerCount(context.Context, *NetPeerCountRequest) (*NetPeerCountReply, error)
 	// Version returns the service version number
 	Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error)
+	// Syncing returns a data object detailing the status of the sync process
+	Syncing(context.Context, *emptypb.Empty) (*SyncingReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
 	ProtocolVersion(context.Context, *ProtocolVersionRequest) (*ProtocolVersionReply, error)
 	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
@@ -294,6 +360,12 @@ type ETHBACKENDServer interface {
 	// it doesn't provide consistency
 	// Request fields are optional - it's ok to request block only by hash or only by number
 	Block(context.Context, *BlockRequest) (*BlockReply, error)
+	// High-level method - can read block body (only storage metadata) from db, snapshots or apply any other logic
+	CanonicalBodyForStorage(context.Context, *CanonicalBodyForStorageRequest) (*CanonicalBodyForStorageReply, error)
+	// High-level method - can find block hash by block number
+	CanonicalHash(context.Context, *CanonicalHashRequest) (*CanonicalHashReply, error)
+	// High-level method - can find block number by block hash
+	HeaderNumber(context.Context, *HeaderNumberRequest) (*HeaderNumberReply, error)
 	// High-level method - can find block number by txn hash
 	// it doesn't provide consistency
 	TxnLookup(context.Context, *TxnLookupRequest) (*TxnLookupReply, error)
@@ -304,7 +376,8 @@ type ETHBACKENDServer interface {
 	AddPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error)
-	BorEvent(context.Context, *BorEventRequest) (*BorEventReply, error)
+	BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error)
+	BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -324,6 +397,9 @@ func (UnimplementedETHBACKENDServer) NetPeerCount(context.Context, *NetPeerCount
 func (UnimplementedETHBACKENDServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
 }
+func (UnimplementedETHBACKENDServer) Syncing(context.Context, *emptypb.Empty) (*SyncingReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Syncing not implemented")
+}
 func (UnimplementedETHBACKENDServer) ProtocolVersion(context.Context, *ProtocolVersionRequest) (*ProtocolVersionReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProtocolVersion not implemented")
 }
@@ -338,6 +414,15 @@ func (UnimplementedETHBACKENDServer) SubscribeLogs(ETHBACKEND_SubscribeLogsServe
 }
 func (UnimplementedETHBACKENDServer) Block(context.Context, *BlockRequest) (*BlockReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Block not implemented")
+}
+func (UnimplementedETHBACKENDServer) CanonicalBodyForStorage(context.Context, *CanonicalBodyForStorageRequest) (*CanonicalBodyForStorageReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CanonicalBodyForStorage not implemented")
+}
+func (UnimplementedETHBACKENDServer) CanonicalHash(context.Context, *CanonicalHashRequest) (*CanonicalHashReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CanonicalHash not implemented")
+}
+func (UnimplementedETHBACKENDServer) HeaderNumber(context.Context, *HeaderNumberRequest) (*HeaderNumberReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HeaderNumber not implemented")
 }
 func (UnimplementedETHBACKENDServer) TxnLookup(context.Context, *TxnLookupRequest) (*TxnLookupReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TxnLookup not implemented")
@@ -354,8 +439,11 @@ func (UnimplementedETHBACKENDServer) AddPeer(context.Context, *AddPeerRequest) (
 func (UnimplementedETHBACKENDServer) PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PendingBlock not implemented")
 }
-func (UnimplementedETHBACKENDServer) BorEvent(context.Context, *BorEventRequest) (*BorEventReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method BorEvent not implemented")
+func (UnimplementedETHBACKENDServer) BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BorTxnLookup not implemented")
+}
+func (UnimplementedETHBACKENDServer) BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BorEvents not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 
@@ -438,6 +526,24 @@ func _ETHBACKEND_Version_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ETHBACKENDServer).Version(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_Syncing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).Syncing(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_Syncing_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).Syncing(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -543,6 +649,60 @@ func _ETHBACKEND_Block_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_CanonicalBodyForStorage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CanonicalBodyForStorageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).CanonicalBodyForStorage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_CanonicalBodyForStorage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).CanonicalBodyForStorage(ctx, req.(*CanonicalBodyForStorageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_CanonicalHash_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CanonicalHashRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).CanonicalHash(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_CanonicalHash_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).CanonicalHash(ctx, req.(*CanonicalHashRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_HeaderNumber_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HeaderNumberRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).HeaderNumber(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_HeaderNumber_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).HeaderNumber(ctx, req.(*HeaderNumberRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ETHBACKEND_TxnLookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TxnLookupRequest)
 	if err := dec(in); err != nil {
@@ -633,20 +793,38 @@ func _ETHBACKEND_PendingBlock_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ETHBACKEND_BorEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BorEventRequest)
+func _ETHBACKEND_BorTxnLookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BorTxnLookupRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ETHBACKENDServer).BorEvent(ctx, in)
+		return srv.(ETHBACKENDServer).BorTxnLookup(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: ETHBACKEND_BorEvent_FullMethodName,
+		FullMethod: ETHBACKEND_BorTxnLookup_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).BorEvent(ctx, req.(*BorEventRequest))
+		return srv.(ETHBACKENDServer).BorTxnLookup(ctx, req.(*BorTxnLookupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_BorEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BorEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).BorEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_BorEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).BorEvents(ctx, req.(*BorEventsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -675,6 +853,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ETHBACKEND_Version_Handler,
 		},
 		{
+			MethodName: "Syncing",
+			Handler:    _ETHBACKEND_Syncing_Handler,
+		},
+		{
 			MethodName: "ProtocolVersion",
 			Handler:    _ETHBACKEND_ProtocolVersion_Handler,
 		},
@@ -685,6 +867,18 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Block",
 			Handler:    _ETHBACKEND_Block_Handler,
+		},
+		{
+			MethodName: "CanonicalBodyForStorage",
+			Handler:    _ETHBACKEND_CanonicalBodyForStorage_Handler,
+		},
+		{
+			MethodName: "CanonicalHash",
+			Handler:    _ETHBACKEND_CanonicalHash_Handler,
+		},
+		{
+			MethodName: "HeaderNumber",
+			Handler:    _ETHBACKEND_HeaderNumber_Handler,
 		},
 		{
 			MethodName: "TxnLookup",
@@ -707,8 +901,12 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ETHBACKEND_PendingBlock_Handler,
 		},
 		{
-			MethodName: "BorEvent",
-			Handler:    _ETHBACKEND_BorEvent_Handler,
+			MethodName: "BorTxnLookup",
+			Handler:    _ETHBACKEND_BorTxnLookup_Handler,
+		},
+		{
+			MethodName: "BorEvents",
+			Handler:    _ETHBACKEND_BorEvents_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

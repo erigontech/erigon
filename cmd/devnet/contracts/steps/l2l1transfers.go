@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package contracts_steps
 
 import (
@@ -6,19 +22,19 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/accounts/abi/bind"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/blocks"
+	"github.com/erigontech/erigon/cmd/devnet/contracts"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	"github.com/erigontech/erigon/cmd/devnet/requests"
+	"github.com/erigontech/erigon/cmd/devnet/scenarios"
+	"github.com/erigontech/erigon/cmd/devnet/services"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
 func init() {
@@ -31,7 +47,7 @@ func init() {
 
 func DeployChildChainSender(ctx context.Context, deployerName string) (context.Context, error) {
 	deployer := accounts.GetAccount(deployerName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.BorDevnet)
 
 	auth, backend, err := contracts.DeploymentTransactor(ctx, deployer.Address)
 
@@ -56,7 +72,7 @@ func DeployChildChainSender(ctx context.Context, deployerName string) (context.C
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("ChildSender deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
+	devnet.Logger(ctx).Info("ChildSender deployed", "chain", networkname.BorDevnet, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "childSenderAddress", address).
 		WithParam("childSender", contract), nil
@@ -64,7 +80,7 @@ func DeployChildChainSender(ctx context.Context, deployerName string) (context.C
 
 func DeployRootChainReceiver(ctx context.Context, deployerName string) (context.Context, error) {
 	deployer := accounts.GetAccount(deployerName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.Dev)
 
 	auth, backend, err := contracts.DeploymentTransactor(ctx, deployer.Address)
 
@@ -89,7 +105,7 @@ func DeployRootChainReceiver(ctx context.Context, deployerName string) (context.
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("RootReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
+	devnet.Logger(ctx).Info("RootReceiver deployed", "chain", networkname.BorDevnet, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "rootReceiverAddress", address).
 		WithParam("rootReceiver", contract), nil
@@ -97,7 +113,7 @@ func DeployRootChainReceiver(ctx context.Context, deployerName string) (context.
 
 func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
 	source := accounts.GetAccount(sourceName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.Dev)
 
 	auth, err := contracts.TransactOpts(ctx, source.Address)
 

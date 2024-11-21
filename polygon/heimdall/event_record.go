@@ -1,16 +1,33 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package heimdall
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/polygon/bor/borabi"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // EventRecord represents state record
@@ -28,7 +45,7 @@ type EventRecordWithTime struct {
 	Time time.Time `json:"record_time" yaml:"record_time"`
 }
 
-var ErrEventRecordNotFound = fmt.Errorf("event record not found")
+var ErrEventRecordNotFound = errors.New("event record not found")
 
 // String returns the string representation of a state record
 func (e *EventRecordWithTime) String() string {
@@ -55,40 +72,54 @@ func (e *EventRecordWithTime) BuildEventRecord() *EventRecord {
 	}
 }
 
-func (e *EventRecordWithTime) Pack(stateContract abi.ABI) (rlp.RawValue, error) {
-	eventRecordWithoutTime := e.BuildEventRecord()
-	recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := stateContract.Pack("commitState", big.NewInt(e.Time.Unix()), recordBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	return data, nil
+func (e *EventRecordWithTime) MarshallIdBytes() []byte {
+	var id [8]byte
+	binary.BigEndian.PutUint64(id[:], e.ID)
+	return id[:]
 }
 
-func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue) (*EventRecordWithTime, error) {
+func (e *EventRecordWithTime) MarshallBytes() ([]byte, error) {
+	eventRecordWithoutTime := e.BuildEventRecord()
+	rlpBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+	if err != nil {
+		return nil, err
+	}
+
+	stateContract := borabi.StateReceiverContractABI()
+	packedBytes, err := stateContract.Pack("commitState", big.NewInt(e.Time.Unix()), rlpBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return packedBytes, nil
+}
+
+func (e *EventRecordWithTime) UnmarshallBytes(v []byte) error {
+	stateContract := borabi.StateReceiverContractABI()
 	commitStateInputs := stateContract.Methods["commitState"].Inputs
 	methodId := stateContract.Methods["commitState"].ID
 
-	if bytes.Equal(methodId, encodedEvent[0:4]) {
-		t := time.Unix((&big.Int{}).SetBytes(encodedEvent[4:36]).Int64(), 0)
-		args, _ := commitStateInputs.Unpack(encodedEvent[4:])
-
-		if len(args) == 2 {
-			var eventRecord EventRecord
-			if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err != nil {
-				return nil, err
-			}
-
-			return &EventRecordWithTime{EventRecord: eventRecord, Time: t}, nil
-		}
+	if !bytes.Equal(methodId, v[0:4]) {
+		return errors.New("no valid record - method mismatch")
 	}
 
-	return nil, errors.New("no valid record")
+	t := time.Unix((&big.Int{}).SetBytes(v[4:36]).Int64(), 0)
+	args, err := commitStateInputs.Unpack(v[4:])
+	if err != nil {
+		return err
+	}
+
+	if len(args) != 2 {
+		return errors.New("no valid record - args count mismatch")
+	}
+
+	var eventRecord EventRecord
+	if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err != nil {
+		return err
+	}
+
+	*e = EventRecordWithTime{EventRecord: eventRecord, Time: t}
+	return nil
 }
 
 type StateSyncEventsResponse struct {
@@ -99,4 +130,30 @@ type StateSyncEventsResponse struct {
 type StateSyncEventResponse struct {
 	Height string              `json:"height"`
 	Result EventRecordWithTime `json:"result"`
+}
+
+var methodId []byte = borabi.StateReceiverContractABI().Methods["commitState"].ID
+
+func EventTime(encodedEvent rlp.RawValue) time.Time {
+	if bytes.Equal(methodId, encodedEvent[0:4]) {
+		return time.Unix((&big.Int{}).SetBytes(encodedEvent[4:36]).Int64(), 0)
+	}
+
+	return time.Time{}
+}
+
+var commitStateInputs = borabi.StateReceiverContractABI().Methods["commitState"].Inputs
+
+func EventId(encodedEvent rlp.RawValue) uint64 {
+	if bytes.Equal(methodId, encodedEvent[0:4]) {
+		args, _ := commitStateInputs.Unpack(encodedEvent[4:])
+
+		if len(args) == 2 {
+			var eventRecord EventRecord
+			if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err == nil {
+				return eventRecord.ID
+			}
+		}
+	}
+	return 0
 }

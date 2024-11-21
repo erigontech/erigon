@@ -1,21 +1,37 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package networks
 
 import (
 	"strconv"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/args"
-	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
-	account_services "github.com/ledgerwatch/erigon/cmd/devnet/services/accounts"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/cmd/devnet/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/args"
+	"github.com/erigontech/erigon/cmd/devnet/devnet"
+	account_services "github.com/erigontech/erigon/cmd/devnet/services/accounts"
+	"github.com/erigontech/erigon/cmd/devnet/services/polygon"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 func NewBorDevnetWithoutHeimdall(
@@ -31,7 +47,7 @@ func NewBorDevnetWithoutHeimdall(
 
 	network := devnet.Network{
 		DataDir:            dataDir,
-		Chain:              networkname.BorDevnetChainName,
+		Chain:              networkname.BorDevnet,
 		Logger:             logger,
 		BasePort:           40303,
 		BasePrivateApiAddr: "localhost:10090",
@@ -45,7 +61,7 @@ func NewBorDevnetWithoutHeimdall(
 			GasLimit: gasLimit,
 		},
 		Services: []devnet.Service{
-			account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource),
+			account_services.NewFaucet(networkname.BorDevnet, faucetSource),
 		},
 		Nodes: []devnet.Node{
 			&args.BlockProducer{
@@ -109,7 +125,7 @@ func NewBorDevnetWithHeimdall(
 
 	borNetwork := devnet.Network{
 		DataDir:            dataDir,
-		Chain:              networkname.BorDevnetChainName,
+		Chain:              networkname.BorDevnet,
 		Logger:             logger,
 		BasePort:           40303,
 		BasePrivateApiAddr: "localhost:10090",
@@ -117,7 +133,7 @@ func NewBorDevnetWithHeimdall(
 		BaseRPCPort:        baseRpcPort,
 		BorStateSyncDelay:  5 * time.Second,
 		BorWithMilestones:  &withMilestones,
-		Services:           append(services, account_services.NewFaucet(networkname.BorDevnetChainName, faucetSource)),
+		Services:           append(services, account_services.NewFaucet(networkname.BorDevnet, faucetSource)),
 		Genesis: &types.Genesis{
 			Alloc: types.GenesisAlloc{
 				faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
@@ -136,13 +152,13 @@ func NewBorDevnetWithHeimdall(
 
 	devNetwork := devnet.Network{
 		DataDir:            dataDir,
-		Chain:              networkname.DevChainName,
+		Chain:              networkname.Dev,
 		Logger:             logger,
 		BasePort:           30403,
 		BasePrivateApiAddr: "localhost:10190",
 		BaseRPCHost:        baseRpcHost,
 		BaseRPCPort:        baseRpcPort + 1000,
-		Services:           append(services, account_services.NewFaucet(networkname.DevChainName, faucetSource)),
+		Services:           append(services, account_services.NewFaucet(networkname.Dev, faucetSource)),
 		Genesis: &types.Genesis{
 			Alloc: types.GenesisAlloc{
 				faucetSource.Address:    {Balance: accounts.EtherAmount(200_000)},

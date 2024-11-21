@@ -1,25 +1,28 @@
 // Copyright 2018 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package netutil
 
 import (
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/mclock"
+	"github.com/erigontech/erigon/common/mclock"
 )
 
 // IPTracker predicts the external endpoint, i.e. IP address and port, of the local host
@@ -79,15 +82,15 @@ func (it *IPTracker) PredictEndpoint() string {
 
 	// The current strategy is simple: find the endpoint with most statements.
 	counts := make(map[string]int)
-	maxcount, max := 0, ""
+	maxcount, _max := 0, ""
 	for _, s := range it.statements {
 		c := counts[s.endpoint] + 1
 		counts[s.endpoint] = c
 		if c > maxcount && c >= it.minStatements {
-			maxcount, max = c, s.endpoint
+			maxcount, _max = c, s.endpoint
 		}
 	}
-	return max
+	return _max
 }
 
 // AddStatement records that a certain host thinks our external endpoint is the one given.

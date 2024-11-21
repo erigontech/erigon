@@ -1,18 +1,21 @@
 // Copyright 2017 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package clique
 
@@ -21,22 +24,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/erigontech/erigon/core/types"
 )
 
 // Vote represents a single vote that an authorized signer made to modify the
@@ -67,7 +71,7 @@ type Snapshot struct {
 	Tally   map[libcommon.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
 }
 
-// signersAscending implements the sort interface to allow sorting a list of addresses
+// SignersAscending implements the sort interface to allow sorting a list of addresses
 type SignersAscending []libcommon.Address
 
 func (s SignersAscending) Len() int           { return len(s) }
@@ -309,12 +313,12 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Addres
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
-			logger.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
+			logger.Info("Reconstructing voting history", "processed", i, "total", len(headers), "elapsed", libcommon.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
 	}
 	if time.Since(start) > 8*time.Second {
-		logger.Info("Reconstructed voting history", "processed", len(headers), "elapsed", common.PrettyDuration(time.Since(start)))
+		logger.Info("Reconstructed voting history", "processed", len(headers), "elapsed", libcommon.PrettyDuration(time.Since(start)))
 	}
 	snap.Number += uint64(len(headers))
 	snap.Hash = headers[len(headers)-1].Hash()
@@ -324,27 +328,15 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[libcommon.Hash, libcommon.Addres
 
 // copy creates a deep copy of the snapshot, though not the individual votes.
 func (s *Snapshot) copy() *Snapshot {
-	cpy := &Snapshot{
+	return &Snapshot{
 		config:  s.config,
 		Number:  s.Number,
 		Hash:    s.Hash,
-		Signers: make(map[libcommon.Address]struct{}),
-		Recents: make(map[uint64]libcommon.Address),
-		Votes:   make([]*Vote, len(s.Votes)),
-		Tally:   make(map[libcommon.Address]Tally),
+		Signers: maps.Clone(s.Signers),
+		Recents: maps.Clone(s.Recents),
+		Votes:   slices.Clone(s.Votes),
+		Tally:   maps.Clone(s.Tally),
 	}
-	for signer := range s.Signers {
-		cpy.Signers[signer] = struct{}{}
-	}
-	for block, signer := range s.Recents {
-		cpy.Recents[block] = signer
-	}
-	for address, tally := range s.Tally {
-		cpy.Tally[address] = tally
-	}
-	copy(cpy.Votes, s.Votes)
-
-	return cpy
 }
 
 // signers retrieves the list of authorized signers in ascending order.

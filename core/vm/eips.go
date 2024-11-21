@@ -1,33 +1,38 @@
 // Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package vm
 
 import (
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/params"
 )
 
 var activators = map[int]func(*JumpTable){
+	7702: enable7702,
 	7516: enable7516,
 	6780: enable6780,
 	5656: enable5656,
@@ -36,7 +41,6 @@ var activators = map[int]func(*JumpTable){
 	3855: enable3855,
 	3529: enable3529,
 	3198: enable3198,
-	2935: enable2935,
 	2929: enable2929,
 	2200: enable2200,
 	1884: enable1884,
@@ -64,7 +68,7 @@ func ValidEip(eipNum int) bool {
 func ActivateableEips() []string {
 	var nums []string //nolint:prealloc
 	for k := range activators {
-		nums = append(nums, fmt.Sprintf("%d", k))
+		nums = append(nums, strconv.Itoa(k))
 	}
 	sort.Strings(nums)
 	return nums
@@ -318,7 +322,12 @@ func enable7516(jt *JumpTable) {
 	}
 }
 
-// enable2935 applies EIP-2935 (Historical block hashes in state)
-func enable2935(jt *JumpTable) {
-	jt[BLOCKHASH].execute = opBlockhash2935
+func enable7702(jt *JumpTable) {
+	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP7702
+	jt[EXTCODESIZE].dynamicGas = gasEip7702CodeCheck
+	jt[EXTCODEHASH].dynamicGas = gasEip7702CodeCheck
+	jt[CALL].dynamicGas = gasCallEIP7702
+	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
+	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702
+	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7702
 }

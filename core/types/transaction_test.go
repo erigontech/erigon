@@ -1,18 +1,21 @@
 // Copyright 2014 The go-ethereum Authors
-// This file is part of the go-ethereum library.
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package types
 
@@ -29,22 +32,16 @@ import (
 	"testing"
 	"time"
 
-	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/erigon-lib/txpool"
-	libtypes "github.com/ledgerwatch/erigon-lib/types"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/rlp"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/core/types/typestest"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // The values in those tests are from the Transaction Tests
@@ -377,7 +374,7 @@ func TestTransactionCoding(t *testing.T) {
 		signer    = LatestSignerForChainID(libcommon.Big1)
 		addr      = libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
 		recipient = libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-		accesses  = types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
+		accesses  = AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
 	)
 	for i := uint64(0); i < 500; i++ {
 		var txdata Transaction
@@ -548,8 +545,8 @@ const N = 50
 var dummyBlobTxs = [N]*BlobTx{}
 var dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
 
-func randIntInRange(min, max int) int {
-	return (rand.Intn(max-min) + min)
+func randIntInRange(_min, _max int) int {
+	return (rand.Intn(_max-_min) + _min)
 }
 
 func randAddr() *libcommon.Address {
@@ -576,11 +573,11 @@ func randHashes(n int) []libcommon.Hash {
 	return h
 }
 
-func randAccessList() types2.AccessList {
+func randAccessList() AccessList {
 	size := randIntInRange(4, 10)
-	var result types2.AccessList
+	var result AccessList
 	for i := 0; i < size; i++ {
-		var tup types2.AccessTuple
+		var tup AccessTuple
 
 		tup.Address = *randAddr()
 		tup.StorageKeys = append(tup.StorageKeys, randHash())
@@ -690,10 +687,10 @@ func newRandBlobs(size int) Blobs {
 }
 
 func newRandBlobWrapper() *BlobTxWrapper {
-	btxw := *newRandBlobTx()
+	btxw := newRandBlobTx()
 	l := len(btxw.BlobVersionedHashes)
 	return &BlobTxWrapper{
-		Tx:          btxw,
+		Tx:          *btxw, //nolint
 		Commitments: newRandCommitments(l),
 		Blobs:       newRandBlobs(l),
 		Proofs:      newRandProofs(l),
@@ -737,78 +734,9 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 	}
 }
 
-func makeBlobTxRlp() []byte {
-	bodyRlp := hexutility.MustDecodeHex(txpool.BodyRlpHex)
-
-	blobsRlpPrefix := hexutility.MustDecodeHex("fa040008")
-	blobRlpPrefix := hexutility.MustDecodeHex("ba020000")
-
-	var blob0, blob1 = gokzg4844.Blob{}, gokzg4844.Blob{}
-	copy(blob0[:], hexutility.MustDecodeHex(txpool.ValidBlob1Hex))
-	copy(blob1[:], hexutility.MustDecodeHex(txpool.ValidBlob2Hex))
-
-	var err error
-	proofsRlpPrefix := hexutility.MustDecodeHex("f862")
-	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0, 0)
-	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1, 0)
-
-	proof0, err := kzg.Ctx().ComputeBlobKZGProof(blob0, commitment0, 0)
-	if err != nil {
-		fmt.Println("error", err)
-	}
-	proof1, err := kzg.Ctx().ComputeBlobKZGProof(blob1, commitment1, 0)
-	if err != nil {
-		fmt.Println("error", err)
-	}
-
-	wrapperRlp := hexutility.MustDecodeHex("03fa0401fe")
-	wrapperRlp = append(wrapperRlp, bodyRlp...)
-	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, blob0[:]...)
-	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, blob1[:]...)
-	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, 0xb0)
-	wrapperRlp = append(wrapperRlp, commitment0[:]...)
-	wrapperRlp = append(wrapperRlp, 0xb0)
-	wrapperRlp = append(wrapperRlp, commitment1[:]...)
-	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
-	wrapperRlp = append(wrapperRlp, 0xb0)
-	wrapperRlp = append(wrapperRlp, proof0[:]...)
-	wrapperRlp = append(wrapperRlp, 0xb0)
-	wrapperRlp = append(wrapperRlp, proof1[:]...)
-
-	return wrapperRlp
-}
-
-// This test is for reference
 func TestShortUnwrap(t *testing.T) {
-	blobTxRlp := makeBlobTxRlp()
+	blobTxRlp, _ := typestest.MakeBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
-	if err != nil {
-		t.Errorf("short rlp stripping failed: %v", err)
-		return
-	}
-	prefixedRlp := append([]byte{0x03}, shortRlp...) // Added the 0x3 prefix for DecodeTransaction func
-	bbtx, err := DecodeTransaction(prefixedRlp)
-
-	if err != nil {
-		t.Errorf("short rlp decoding failed : %v", err)
-	}
-	wrappedBlobTx := BlobTxWrapper{}
-	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(blobTxRlp[1:]), 0))
-	if err != nil {
-		t.Errorf("long rlp decoding failed: %v", err)
-	}
-	assertEqual(bbtx, &wrappedBlobTx.Tx)
-}
-
-// This test actually applies to testing the behaviour as seen from the
-// onNewTx behaviour in filters.go
-func TestShortUnwrapLib(t *testing.T) {
-	blobTxRlp := makeBlobTxRlp()
-	shortRlp, err := libtypes.UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {
 		t.Errorf("short rlp stripping failed: %v", err)
 		return
@@ -819,7 +747,8 @@ func TestShortUnwrapLib(t *testing.T) {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
 	wrappedBlobTx := BlobTxWrapper{}
-	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(makeBlobTxRlp()[1:]), 0))
+	blockTxRlp2, _ := typestest.MakeBlobTxnRlp()
+	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(blockTxRlp2[1:]), 0))
 	if err != nil {
 		t.Errorf("long rlp decoding failed: %v", err)
 	}

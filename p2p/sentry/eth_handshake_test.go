@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package sentry
 
 import (
@@ -7,18 +23,18 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentryproto"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/params"
 )
 
 func TestCheckPeerStatusCompatibility(t *testing.T) {
-	var version uint = direct.ETH66
+	var version uint = direct.ETH67
 	networkID := params.MainnetChainConfig.ChainID.Uint64()
 	heightForks, timeForks := forkid.GatherForks(params.MainnetChainConfig, 0 /* genesisTime */)
 	goodReply := eth.StatusPacket{
@@ -54,14 +70,14 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 	})
 	t.Run("version mismatch min", func(t *testing.T) {
 		reply := goodReply
-		reply.ProtocolVersion = direct.ETH66 - 1
+		reply.ProtocolVersion = direct.ETH67 - 1
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
 		assert.NotNil(t, err)
 		assert.Contains(t, err.Error(), "version is less")
 	})
 	t.Run("version mismatch max", func(t *testing.T) {
 		reply := goodReply
-		reply.ProtocolVersion = direct.ETH66 + 1
+		reply.ProtocolVersion = direct.ETH67 + 1
 		err := checkPeerStatusCompatibility(&reply, &status, version, version)
 		assert.NotNil(t, err)
 		assert.Contains(t, err.Error(), "version is more")

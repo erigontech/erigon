@@ -1,19 +1,36 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package jsonrpc
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/rpc"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
@@ -21,8 +38,7 @@ var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg := m.HistoryV3Components()
-	baseApi := NewBaseApi(nil, nil, m.BlockReader, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	baseApi := NewBaseApi(nil, nil, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 	api := NewParityAPIImpl(baseApi, m.DB)
 	answers := []string{
 		"0000000000000000000000000000000000000000000000000000000000000000",
@@ -107,5 +123,5 @@ func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcaef")
 	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil, latestBlock)
-	assert.Error(err, fmt.Errorf("acc not found"))
+	assert.Error(err, errors.New("acc not found"))
 }
