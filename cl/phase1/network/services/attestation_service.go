@@ -99,7 +99,7 @@ func NewAttestationService(
 		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 
-	go a.loop(ctx)
+	//go a.loop(ctx)
 	return a
 }
 
@@ -289,47 +289,47 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	return ErrIgnore
 }
 
-type attestationJob struct {
-	att          *AttestationWithGossipData
-	creationTime time.Time
-	subnet       uint64
-}
+// type attestationJob struct {
+// 	att          *AttestationWithGossipData
+// 	creationTime time.Time
+// 	subnet       uint64
+// }
 
-func (a *attestationService) scheduleAttestationForLaterProcessing(att *AttestationWithGossipData) {
-	key, err := att.Attestation.HashSSZ()
-	if err != nil {
-		return
-	}
-	a.attestationsToBeLaterProcessed.Store(key, &attestationJob{
-		att:          att,
-		creationTime: time.Now(),
-	})
-}
+// func (a *attestationService) scheduleAttestationForLaterProcessing(att *AttestationWithGossipData) {
+// 	key, err := att.Attestation.HashSSZ()
+// 	if err != nil {
+// 		return
+// 	}
+// 	a.attestationsToBeLaterProcessed.Store(key, &attestationJob{
+// 		att:          att,
+// 		creationTime: time.Now(),
+// 	})
+// }
 
-func (a *attestationService) loop(ctx context.Context) {
-	ticker := time.NewTicker(singleAttestationIntervalTick)
-	defer ticker.Stop()
+// func (a *attestationService) loop(ctx context.Context) {
+// 	ticker := time.NewTicker(singleAttestationIntervalTick)
+// 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		a.attestationsToBeLaterProcessed.Range(func(key, value any) bool {
-			k := key.([32]byte)
-			v := value.(*attestationJob)
-			if time.Now().After(v.creationTime.Add(singleAttestationJobExpiry)) {
-				a.attestationsToBeLaterProcessed.Delete(k)
-				return true
-			}
+// 	for {
+// 		select {
+// 		case <-ctx.Done():
+// 			return
+// 		case <-ticker.C:
+// 		}
+// 		a.attestationsToBeLaterProcessed.Range(func(key, value any) bool {
+// 			k := key.([32]byte)
+// 			v := value.(*attestationJob)
+// 			if time.Now().After(v.creationTime.Add(singleAttestationJobExpiry)) {
+// 				a.attestationsToBeLaterProcessed.Delete(k)
+// 				return true
+// 			}
 
-			root := v.att.Attestation.Data.BeaconBlockRoot
-			if _, ok := a.forkchoiceStore.GetHeader(root); !ok {
-				return true
-			}
-			a.ProcessMessage(ctx, &v.subnet, v.att)
-			return true
-		})
-	}
-}
+// 			root := v.att.Attestation.Data.BeaconBlockRoot
+// 			if _, ok := a.forkchoiceStore.GetHeader(root); !ok {
+// 				return true
+// 			}
+// 			a.ProcessMessage(ctx, &v.subnet, v.att)
+// 			return true
+// 		})
+// 	}
+// }
