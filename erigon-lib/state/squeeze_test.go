@@ -114,7 +114,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
-	acit, err := ac.DomainRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
+	acit, err := ac.RangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	require.NoError(t, err)
 	defer acit.Close()
 
