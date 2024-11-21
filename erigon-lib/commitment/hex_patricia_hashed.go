@@ -783,7 +783,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 					return nil, err
 				}
 				cell.setFromUpdate(update)
-				fmt.Printf("Storage %x was not loaded\n", cell.storageAddr[:cell.storageAddrLen])
+				panic(fmt.Sprintf("Storage %x was not loaded: %v\n", cell.storageAddr[:cell.storageAddrLen], cell.String()))
 			}
 
 			leafHash, err := hph.leafHashWithKeyVal(buf, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], singleton)
@@ -853,19 +853,16 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 
 		var valBuf [128]byte
 		valLen := cell.accountForHashing(valBuf[:], storageRootHash)
-		if hph.trace {
-			fmt.Printf("accountLeafHashWithKey for [%x]=>[%x]\n", cell.hashedExtension[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
-		}
-		leafHash, err := hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+		buf, err = hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 		if err != nil {
 			return nil, err
 		}
 		if hph.trace {
-			fmt.Printf("STATE HASH account memoized %x\n", leafHash)
+			fmt.Printf("accountLeafHashWithKey {%x} (memorised) for [%x]=>[%x]\n", buf, cell.hashedExtension[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 		}
-		copy(cell.stateHash[:], leafHash[1:])
-		cell.stateHashLen = len(leafHash) - 1
-		return leafHash, nil
+		copy(cell.stateHash[:], buf[1:])
+		cell.stateHashLen = len(buf) - 1
+		return buf, nil
 	}
 
 	buf = append(buf, 0x80+32)
@@ -874,11 +871,10 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			if hph.trace {
 				fmt.Printf("extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
 			}
-			var hash [length.Hash]byte
-			if hash, err = hph.extensionHash(cell.extension[:cell.extLen], cell.hash[:cell.hashLen]); err != nil {
+			if storageRootHash, err = hph.extensionHash(cell.extension[:cell.extLen], cell.hash[:cell.hashLen]); err != nil {
 				return nil, err
 			}
-			buf = append(buf, hash[:]...)
+			buf = append(buf, storageRootHash[:]...)
 		} else {
 			return nil, errors.New("computeCellHash extension without hash")
 		}
@@ -890,9 +886,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		cell.hashLen = len(storageRootHash)
 	} else {
 		buf = append(buf, EmptyRootHash...)
-	}
-	if len(buf) != 32 && len(buf) != 33 {
-		fmt.Printf("%d buf=%x\n", len(buf), buf)
 	}
 	return buf, nil
 }
