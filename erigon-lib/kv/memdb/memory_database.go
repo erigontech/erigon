@@ -32,10 +32,8 @@ func New(tmpDir string, label kv.Label) kv.RwDB {
 }
 
 func NewStateDB(tmpDir string) kv.RwDB {
-	return mdbx.NewMDBX(log.New()).InMem(tmpDir).GrowthStep(32 * datasize.MB).
-		MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	return mdbx.NewMDBX(log.New()).InMem(tmpDir).Label(kv.ChainDB).GrowthStep(32 * datasize.MB).
+		MapSize(2 * datasize.GB).MustOpen()
 }
 
 func NewWithLabel(tmpDir string, label kv.Label) kv.RwDB {
