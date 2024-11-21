@@ -1259,11 +1259,11 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	return val[8:], true, nil
 }
 
-func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if !asc {
 		panic("implement me")
 	}
-	hi := &StateAsOfIterF{
+	hi := &HistoryRangeAsOfFiles{
 		from: from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 
 		hc:         ht,
@@ -1275,7 +1275,7 @@ func (ht *HistoryRoTx) WalkAsOf(ctx context.Context, startTxNum uint64, from, to
 		return nil, err
 	}
 
-	dbit := &StateAsOfIterDB{
+	dbit := &HistoryRangeAsOfDB{
 		largeValues: ht.h.historyLargeValues,
 		roTx:        roTx,
 		valsTable:   ht.h.historyValsTable,
