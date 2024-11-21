@@ -196,7 +196,7 @@ func (tx *Tx) Commit() error {
 }
 
 func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.filesTx.DomainRange(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
+	it, err := tx.filesTx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
