@@ -765,21 +765,17 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		cell.hashedExtension[64-hashedKeyOffset] = 16 // Add terminator
 
 		if cell.stateHashLen > 0 {
-			res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
 			hph.keccak.Reset()
 			if hph.trace {
-				fmt.Printf("REUSED stateHash %x spk %x\n", res, cell.storageAddr[:cell.storageAddrLen])
+				fmt.Printf("REUSED stateHash %x spk %x\n", cell.stateHash[:cell.stateHashLen], cell.storageAddr[:cell.storageAddrLen])
 			}
 			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
-				return res, nil
-			} else {
-				storageRootHashIsSet = true
-				storageRootHash = *(*[length.Hash]byte)(res[1:])
-				//copy(storageRootHash[:], res[1:])
-				//cell.stateHashLen = 0
+				return append([]byte{160}, cell.stateHash[:cell.stateHashLen]...), nil
 			}
+			storageRootHashIsSet = true
+			storageRootHash = *(*[length.Hash]byte)(cell.stateHash[:cell.stateHashLen])
 		} else {
 			if !cell.loaded.storage() {
 				update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
@@ -852,15 +848,14 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		}
 		if !cell.loaded.account() {
 			if cell.stateHashLen > 0 {
-				res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
 				hph.keccak.Reset()
 
 				mxTrieStateSkipRate.Inc()
 				skippedLoad.Add(1)
 				if hph.trace {
-					fmt.Printf("REUSED stateHash %x apk %x\n", res, cell.accountAddr[:cell.accountAddrLen])
+					fmt.Printf("REUSED stateHash %x apk %x\n", cell.stateHash[:cell.stateHashLen], cell.accountAddr[:cell.accountAddrLen])
 				}
-				return res, nil
+				return append([]byte{160}, cell.stateHash[:cell.stateHashLen]...), nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
@@ -909,6 +904,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		cell.hashLen = len(storageRootHash)
 	} else {
 		buf = append(buf, EmptyRootHash...)
+	}
+	if len(buf) != 32 && len(buf) != 33 {
+		fmt.Printf("%d buf=%x\n", len(buf), buf)
 	}
 	return buf, nil
 }
