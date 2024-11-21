@@ -389,10 +389,10 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 				if exists {
 					btM := DefaultBtreeM
-					if toStep == 0 || math.Log2(float64(toStep-fromStep)) > 10 { // 2^9 = 512, decrease M for large step ranges
+					if toStep == 0 || math.Log2(float64(toStep-fromStep)) >= 9 { // 2^9 = 512, decrease M for large step ranges
 						btM = 128
 						if d.filenameBase == "commitment" {
-							btM = 64
+							btM = 16
 						}
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, btM, item.decompressor, d.compression); err != nil {
@@ -1131,10 +1131,10 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 	{
 		btPath := d.kvBtFilePath(stepFrom, stepTo)
 		btM := DefaultBtreeM
-		if stepFrom == 0 || math.Log2(float64(stepTo-stepFrom)) > 10 { // 2^9 = 512, decrease M for large step ranges
+		if stepFrom == 0 || math.Log2(float64(stepTo-stepFrom)) >= 9 { // 2^9 = 512, decrease M for large step ranges
 			btM = 128
 			if d.filenameBase == "commitment" {
-				btM = 64
+				btM = 16
 			}
 		}
 
