@@ -113,7 +113,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
 
-	fmt.Println("received", *subnet)
 	if *subnet == 0 {
 		debug.PrintStack()
 	}
