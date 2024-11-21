@@ -28,16 +28,16 @@ import (
 )
 
 func New(tmpDir string, label kv.Label) kv.RwDB {
-	return mdbx.New(log.New()).InMem(tmpDir).Label(label).MustOpen()
+	return mdbx.New(label, log.New()).InMem(tmpDir).MustOpen()
 }
 
 func NewStateDB(tmpDir string) kv.RwDB {
-	return mdbx.New(log.New()).InMem(tmpDir).Label(kv.ChainDB).GrowthStep(32 * datasize.MB).
+	return mdbx.New(kv.ChainDB, log.New()).InMem(tmpDir).GrowthStep(32 * datasize.MB).
 		MapSize(2 * datasize.GB).MustOpen()
 }
 
 func NewWithLabel(tmpDir string, label kv.Label) kv.RwDB {
-	return mdbx.New(log.New()).InMem(tmpDir).Label(label).MustOpen()
+	return mdbx.New(label, log.New()).InMem(tmpDir).MustOpen()
 }
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {

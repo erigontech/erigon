@@ -155,6 +155,7 @@ const (
 	HeimdallDB
 	DiagnosticsDB
 	PolygonBridgeDB
+	TemporaryDB
 	CaplinDB
 )
 
@@ -178,6 +179,8 @@ func (l Label) String() string {
 		return "polygon-bridge"
 	case CaplinDB:
 		return "caplin"
+	case TemporaryDB:
+		return "temporary"
 	default:
 		return "unknown"
 	}
