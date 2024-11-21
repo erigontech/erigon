@@ -416,7 +416,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				l++
 				continue
 			}
-			v, _ = g.Next(v[:0])
+			v, _ = g.Next(nil)
 			offset = b.offt.Get(m)
 			return v, true, offset, nil
 		}
