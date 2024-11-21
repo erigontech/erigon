@@ -70,7 +70,6 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var cachedBytes uint64
-	// var b0 [256][]*Node
 	for i := 0; i < len(nodes); i++ {
 		if envAssertBTKeys {
 			eq, r, err := keyCmp(nodes[i].key, nodes[i].di, kv, nil)
@@ -84,8 +83,6 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 		cachedBytes += nsz + uint64(len(nodes[i].key))
 
 		nodes[i].off = offt.Get(nodes[i].di)
-		// k0 := nodes[i].key[0]
-		// b0[k0] = append(b0[k0], nodes[i])
 	}
 
 	return bt
@@ -94,7 +91,6 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 type BpsTree struct {
 	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
 	mx    []*Node
-	b0mx  [256][]*Node
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
 
@@ -271,8 +267,6 @@ func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
 
 	for l < r {
 		m = (l + r) >> 1
-		// m = l
-		// n = b.b0mx[x[0]][m]
 		n = b.mx[m]
 
 		if b.trace {
