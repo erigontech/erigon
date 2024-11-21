@@ -56,6 +56,8 @@ var (
 
 	chainTipMode bool
 	syncCfg      = ethconfig.Defaults.Sync
+
+	csvOutput string
 )
 
 func must(err error) {
