@@ -280,6 +280,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.DeprecatedTxPool.Disable = !withTxPool
 	cfg.DeprecatedTxPool.StartOnInit = true
 	cfg.Dirs = dirs
+	cfg.AlwaysGenerateChangesets = true
 
 	logger := log.Root()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
@@ -532,7 +533,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			mock.Notifications,
 			cfg.StateStream,
 			/*stateStream=*/ false,
-			/*alwaysGenerateChangesets=*/ true,
 			dirs,
 			mock.BlockReader,
 			mock.sentriesClient.Hd,
@@ -569,7 +569,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				mock.Notifications,
 				cfg.StateStream,
 				/*stateStream=*/ false,
-				/*alwaysGenerateChangesets=*/ true,
 				dirs,
 				mock.BlockReader,
 				mock.sentriesClient.Hd,
