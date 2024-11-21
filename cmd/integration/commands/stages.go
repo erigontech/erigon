@@ -562,6 +562,7 @@ func init() {
 	withHeimdall(cmdStageExec)
 	withWorkers(cmdStageExec)
 	withChaosMonkey(cmdStageExec)
+	withCommitEveryBlock(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withConfig(cmdStageCustomTrace)
@@ -1060,7 +1061,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
-	syncCfg.ChaosMonkey = chaosMonkey
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
@@ -1398,7 +1398,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
 	cfg.DeprecatedTxPool.Disable = true
-	cfg.ChaosMonkey = chaosMonkey
+	cfg.Sync = syncCfg
 	cfg.Genesis = genesis
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig

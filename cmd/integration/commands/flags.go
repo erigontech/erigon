@@ -58,7 +58,8 @@ var (
 
 	workers, reconWorkers uint64
 	dbWriteMap            bool
-	chaosMonkey           bool
+
+	syncCfg = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -207,5 +208,8 @@ func withUnwindTypes(cmd *cobra.Command) {
 }
 
 func withChaosMonkey(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&chaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
+	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
+}
+func withCommitEveryBlock(cmd *cobra.Command) {
+	cmd.Flags().UintVar(&syncCfg.LoopBlockLimit, cli.SyncLoopBlockLimitFlag.Name, cli.SyncLoopBlockLimitFlag.Value, cli.SyncLoopBlockLimitFlag.Usage)
 }
