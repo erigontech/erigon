@@ -196,5 +196,5 @@ func withChaosMonkey(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
 }
 func withChainTipMode(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "`CalcCommitment` every block, `rwtx.Commit()` every block")
+	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
 }

@@ -1058,14 +1058,13 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
+	if chainTipMode {
+		s.CurrentSyncCycle.IsFirstCycle = false
+		s.CurrentSyncCycle.IsInitialCycle = false
+	}
+
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-
-	if chainTipMode {
-		syncCfg.LoopBlockLimit = 1
-		syncCfg.AlwaysGenerateChangesets = true
-		noCommit = false
-	}
 
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
@@ -1145,6 +1144,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		}
 
 		for bn := execProgress; bn < block; bn++ {
+			fmt.Printf("dbg: %d\n", bn)
 			if err := db.Update(ctx, func(tx kv.RwTx) error {
 				txc.Tx = tx
 				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
@@ -1435,7 +1435,13 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	cfg := ethconfig.Defaults
+	if chainTipMode {
+		syncCfg.LoopBlockLimit = 1
+		syncCfg.AlwaysGenerateChangesets = true
+		noCommit = false
+	}
 	cfg.Sync = syncCfg
+
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
 	cfg.DeprecatedTxPool.Disable = true
