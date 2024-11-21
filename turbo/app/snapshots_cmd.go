@@ -113,7 +113,7 @@ var snapshotCommand = cli.Command{
 		},
 		{
 			Name:    "accessor",
-			Aliases: {"index"},
+			Aliases: []string{"index"},
 			Action: func(c *cli.Context) error {
 				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
