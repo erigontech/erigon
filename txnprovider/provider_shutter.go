@@ -25,16 +25,16 @@ import (
 
 const shutterProviderPriority = 110
 
-var _ Provider = ShutterProvider{}
+var _ Provider = ShutterTxnProvider{}
 
-type ShutterProvider struct {
+type ShutterTxnProvider struct {
 	shutterPool *shutter.Pool
 }
 
-func (s ShutterProvider) Priority() uint64 {
+func (s ShutterTxnProvider) Priority() uint64 {
 	return shutterProviderPriority
 }
 
-func (s ShutterProvider) Yield(_ context.Context, _ ...YieldOption) ([]types.Transaction, error) {
+func (s ShutterTxnProvider) Yield(_ context.Context, _ ...YieldOption) ([]types.Transaction, error) {
 	return s.shutterPool.Yield()
 }

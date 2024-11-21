@@ -22,17 +22,17 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
-var _ Provider = CompositeProvider{}
+var _ Provider = CompositeTxnProvider{}
 
-type CompositeProvider struct {
+type CompositeTxnProvider struct {
 }
 
-func (c CompositeProvider) Priority() uint64 {
+func (c CompositeTxnProvider) Priority() uint64 {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (c CompositeProvider) Yield(_ context.Context, _ ...YieldOption) ([]types.Transaction, error) {
+func (c CompositeTxnProvider) Yield(_ context.Context, _ ...YieldOption) ([]types.Transaction, error) {
 	//TODO implement me
 	panic("implement me")
 }
