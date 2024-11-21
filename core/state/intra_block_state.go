@@ -96,7 +96,7 @@ type IntraBlockState struct {
 	validRevisions []revision
 	nextRevisionID int
 	trace          bool
-	logger         *tracing.Hooks
+	tracingHooks   *tracing.Hooks
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 }
 
@@ -117,8 +117,8 @@ func New(stateReader StateReader) *IntraBlockState {
 	}
 }
 
-func (sdb *IntraBlockState) SetLogger(l *tracing.Hooks) {
-	sdb.logger = l
+func (sdb *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
+	sdb.tracingHooks = hooks
 }
 
 func (sdb *IntraBlockState) SetTrace(trace bool) {
@@ -172,8 +172,8 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
-	if sdb.logger != nil && sdb.logger.OnLog != nil {
-		sdb.logger.OnLog(log2)
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
+		sdb.tracingHooks.OnLog(log2)
 	}
 	sdb.logSize++
 	for len(sdb.logs) <= sdb.txIndex {
@@ -409,7 +409,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			sdb.balanceInc[addr] = bi
 		}
 
-		if sdb.logger != nil && sdb.logger.OnBalanceChange != nil {
+		if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
 			// TODO: discuss if we should ignore error
 			prev := new(uint256.Int)
 			account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
@@ -419,7 +419,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 				prev.Add(prev, &bi.increase)
 			}
 
-			sdb.logger.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
+			sdb.tracingHooks.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
 		}
 
 		bi.increase.Add(&bi.increase, amount)
@@ -520,8 +520,8 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 		prevbalance: prevBalance,
 	})
 
-	if sdb.logger != nil && sdb.logger.OnBalanceChange != nil && !prevBalance.IsZero() {
-		sdb.logger.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestruct)
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
+		sdb.tracingHooks.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestruct)
 	}
 
 	stateObject.markSelfdestructed()
@@ -715,11 +715,11 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, logger *tracing.Hooks) error {
+func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, tracingHooks *tracing.Hooks) error {
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
-		if logger != nil && logger.OnBalanceChange != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
-			logger.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
+		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
+			tracingHooks.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
 		}
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
@@ -792,7 +792,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		}
 
 		//fmt.Printf("FinalizeTx: %x, balance=%d %T\n", addr, so.data.Balance.Uint64(), stateWriter)
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.logger); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.tracingHooks); err != nil {
 			return err
 		}
 		so.newlyCreated = false
@@ -848,7 +848,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.logger); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.tracingHooks); err != nil {
 			return err
 		}
 	}

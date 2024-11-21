@@ -177,5 +177,5 @@ type IntraBlockState interface {
 
 	AddLog(*types.Log)
 
-	SetLogger(hooks *tracing.Hooks)
+	SetHooks(hooks *tracing.Hooks)
 }
