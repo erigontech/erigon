@@ -1058,9 +1058,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	syncCfg.ExecWorkerCount = int(workers)
-	syncCfg.ReconWorkerCount = int(reconWorkers)
-
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
@@ -1154,9 +1151,6 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
-	syncCfg := ethconfig.Defaults.Sync
-	syncCfg.ExecWorkerCount = int(workers)
-	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
