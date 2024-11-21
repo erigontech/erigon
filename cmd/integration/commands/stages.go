@@ -1064,7 +1064,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	if chainTipMode {
 		syncCfg.LoopBlockLimit = 1
 		syncCfg.AlwaysGenerateChangesets = true
-		noCommit = true
+		noCommit = false
 	}
 
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
