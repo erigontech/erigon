@@ -314,22 +314,45 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, er
 	}
 	var m uint64
 	var cmp int
+	var offset uint64
+	cur := b.cursorGetter(nil, nil, m, g)
 	for l < r {
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
 			m = l
+			_ = offset
+
+			err = b.dataLookupFuncCursor(m, g, cur)
+			if cmp = bytes.Compare(cur.key, seekKey); cmp < 0 {
+				l++
+				continue
+			}
+			return cur, cmp == 0, err
+
+			// if offset == 0 {
+			// 	offset = b.offt.Get(m)
+			// 	g.Reset(offset)
+			// }
+			// key, _ = g.Next(key[:0])
+			// if cmp = bytes.Compare(key, seekKey); cmp < 0 {
+			// 	g.Skip()
+			// 	l++
+			// 	continue
+			// }
+			// v, _ := g.Next(nil)
+			// cur := b.cursorGetter(key, v, m, g)
+			// return cur, cmp == 0, err
 		}
 
-		cmp, key, err = b.keyCmpFunc(seekKey, m, g, key[:0])
+		cmp, cur.key, err = b.keyCmpFunc(seekKey, m, g, cur.key[:0])
 		if err != nil {
 			return nil, false, err
 		}
 		if b.trace {
-			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, key)
+			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, cur.key)
 		}
 
 		if cmp == 0 {
-			l, r = m, m
 			break
 		} else if cmp > 0 {
 			r = m
@@ -342,7 +365,6 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, er
 		m = l
 	}
 
-	cur := b.cursorGetter(nil, nil, m, g)
 	err = b.dataLookupFuncCursor(m, g, cur)
 	cmp = bytes.Compare(cur.Key(), seekKey)
 	if err != nil || cmp < 0 {
@@ -376,14 +398,34 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	var m uint64
 	for l < r {
 		m = (l + r) >> 1
+		if r-l <= DefaultBtreeStartSkip {
+			m = l
+			if offset == 0 {
+				offset = b.offt.Get(m)
+				g.Reset(offset)
+			}
+			v, _ = g.Next(v[:0])
+			if cmp = bytes.Compare(v, key); cmp > 0 {
+				return nil, false, 0, err
+			} else if cmp < 0 {
+				g.Skip()
+				l++
+				continue
+			}
+
+			v, _ = g.Next(v[:0])
+			offset = b.offt.Get(m)
+			return v, true, offset, nil
+		}
+
 		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}
 		if cmp == 0 {
 			offset = b.offt.Get(m)
-			g.Reset(offset)
-			g.Skip()
+			// g.Reset(offset)
+			// g.Skip()
 			if !g.HasNext() {
 				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
 			}
