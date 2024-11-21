@@ -1524,7 +1524,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.indexList&withExistence != 0
-	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	useCache := maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(filekey)
 	if useCache && dt.getFromFileCache == nil {
