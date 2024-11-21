@@ -1118,15 +1118,21 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	}
 
 	if chainTipMode {
-		var execProgress uint64
+		var sendersProgress, execProgress uint64
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			var err error
 			if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 				return err
 			}
+			if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
+				return err
+			}
 			return nil
 		}); err != nil {
 			return err
+		}
+		if block == 0 {
+			block = sendersProgress
 		}
 
 		for bn := execProgress; bn < block; bn++ {
