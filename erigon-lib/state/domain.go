@@ -392,7 +392,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					if toStep == 0 || math.Log2(float64(toStep-fromStep)) >= 9 { // 2^9 = 512, decrease M for large step ranges
 						btM = 128
 						if d.filenameBase == "commitment" {
-							btM = 16
+							btM = 64
 						}
 					}
 					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, btM, item.decompressor, d.compression); err != nil {
@@ -1134,7 +1134,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		if stepFrom == 0 || math.Log2(float64(stepTo-stepFrom)) >= 9 { // 2^9 = 512, decrease M for large step ranges
 			btM = 128
 			if d.filenameBase == "commitment" {
-				btM = 16
+				btM = 64
 			}
 		}
 
@@ -1240,7 +1240,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		if step == 0 {
 			btM = 128
 			if d.filenameBase == "commitment" {
-				btM = 16
+				btM = 64
 			}
 		}
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
