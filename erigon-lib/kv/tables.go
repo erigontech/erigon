@@ -781,7 +781,7 @@ var ReconTablesCfg = TableCfg{
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case ChainDB, Unknown:
+	case ChainDB:
 		return ChaindataTablesCfg
 	case TxPoolDB:
 		return TxpoolTablesCfg
