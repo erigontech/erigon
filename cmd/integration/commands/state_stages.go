@@ -184,12 +184,9 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	notifications := shards.NewNotifications(nil)
 
 	genesis := core.GenesisBlockByChainName(chain)
-	syncCfg := ethconfig.Defaults.Sync
-	syncCfg.ExecWorkerCount = int(workers)
-	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	br, _ := blocksIO(db, logger1)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, false, chaosMonkey, dirs, br, nil, genesis, syncCfg, nil)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, genesis, syncCfg, nil)
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
 		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
@@ -414,10 +411,6 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger)
 	to := from + unwind
 
 	genesis := core.GenesisBlockByChainName(chain)
-	syncCfg := ethconfig.Defaults.Sync
-	syncCfg.ExecWorkerCount = int(workers)
-	syncCfg.ReconWorkerCount = int(reconWorkers)
-	syncCfg.ChaosMonkey = chaosMonkey
 
 	initialCycle := false
 	br, _ := blocksIO(db, logger)
