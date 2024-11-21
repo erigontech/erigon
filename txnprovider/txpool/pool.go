@@ -729,7 +729,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	return true, count, nil
 }
 
-func (p *TxPool) YieldBestTransactions(
+func (p *TxPool) YieldBestTxns(
 	ctx context.Context,
 	amount int,
 	parentBlockNum uint64,

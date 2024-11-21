@@ -45,7 +45,7 @@ func (p OrderedTxnPoolProvider) Priority() uint64 {
 
 func (p OrderedTxnPoolProvider) Yield(ctx context.Context, opts ...YieldOption) ([]types.Transaction, error) {
 	params := yieldParamsFromOptions(opts...)
-	return p.txnPool.YieldBestTransactions(
+	return p.txnPool.YieldBestTxns(
 		ctx,
 		params.Amount,
 		params.ParentBlockNum,
