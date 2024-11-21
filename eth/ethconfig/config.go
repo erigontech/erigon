@@ -260,8 +260,6 @@ type Config struct {
 	SilkwormRpcJsonCompatibility bool
 
 	DisableTxPoolGossip bool
-
-	ChaosMonkey bool
 }
 
 type Sync struct {
@@ -279,4 +277,6 @@ type Sync struct {
 	UploadLocation   string
 	UploadFrom       rpc.BlockNumber
 	FrozenBlockLimit uint64
+
+	ChaosMonkey bool
 }

@@ -91,8 +91,6 @@ type ExecuteBlockCfg struct {
 	blockProduction   bool
 	keepAllChangesets bool
 
-	chaosMonkey bool
-
 	applyWorker, applyWorkerMining *exec3.Worker
 }
 
@@ -107,7 +105,6 @@ func StageExecuteBlocksCfg(
 	stateStream bool,
 	badBlockHalt bool,
 	keepAllChangesets bool,
-	chaosMonkey bool,
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -140,7 +137,6 @@ func StageExecuteBlocksCfg(
 		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
 		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
 		keepAllChangesets: keepAllChangesets,
-		chaosMonkey:       chaosMonkey,
 	}
 }
 
