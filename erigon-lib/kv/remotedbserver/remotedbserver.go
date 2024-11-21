@@ -659,7 +659,7 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remote.HistoryRangeReq) 
 	return reply, nil
 }
 
-func (s *KvServer) DomainRange(_ context.Context, req *remote.RangeAsOfReq) (*remote.Pairs, error) {
+func (s *KvServer) RangeAsOf(_ context.Context, req *remote.RangeAsOfReq) (*remote.Pairs, error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err
