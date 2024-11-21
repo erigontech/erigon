@@ -90,8 +90,7 @@ func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDir
 }
 
 func createDb(ctx context.Context, dbDir string) (db kv.RwDB, err error) {
-	db, err = mdbx.NewMDBX(log.New()).
-		Label(kv.DiagnosticsDB).
+	db, err = mdbx.New(kv.DiagnosticsDB, log.New()).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DiagnosticsTablesCfg }).
 		GrowthStep(4 * datasize.MB).
 		MapSize(16 * datasize.GB).

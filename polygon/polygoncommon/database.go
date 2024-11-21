@@ -67,8 +67,7 @@ func (db *Database) open(ctx context.Context) error {
 	}
 
 	var err error
-	opts := mdbx.NewMDBX(db.logger).
-		Label(db.label).
+	opts := mdbx.New(db.label, db.logger).
 		Path(dbPath).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).

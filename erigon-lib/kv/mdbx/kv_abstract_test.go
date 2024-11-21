@@ -164,7 +164,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	}
 	ctx := context.Background()
 	logger := log.New()
-	writeDB := mdbx.NewMDBX(logger).InMem("").MustOpen()
+	writeDB := mdbx.New(kv.ChainDB, logger).InMem("").MustOpen()
 	defer writeDB.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -336,8 +336,8 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	t.Helper()
 	ctx := context.Background()
 	writeDBs = []kv.RwDB{
-		mdbx.NewMDBX(logger).InMem("").WithTableCfg(f).MustOpen(),
-		mdbx.NewMDBX(logger).InMem("").WithTableCfg(f).MustOpen(), // for remote db
+		mdbx.New(kv.ChainDB, logger).InMem("").WithTableCfg(f).MustOpen(),
+		mdbx.New(kv.ChainDB, logger).InMem("").WithTableCfg(f).MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)

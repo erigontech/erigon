@@ -329,8 +329,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
-		opts := mdbx.NewMDBX(logger).
-			Path(dbPath).Label(label).
+		opts := mdbx.New(label, logger).
+			Path(dbPath).
 			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
 			WriteMap(config.MdbxWriteMap)

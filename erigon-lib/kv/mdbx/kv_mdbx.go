@@ -78,7 +78,7 @@ type MdbxOpts struct {
 const DefaultMapSize = 2 * datasize.TB
 const DefaultGrowthStep = 1 * datasize.GB
 
-func NewMDBX(log log.Logger) MdbxOpts {
+func New(label kv.Label, log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
@@ -89,7 +89,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		growthStep:      DefaultGrowthStep,
 		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
-		label:           kv.Unknown,
+		label:           label,
 	}
 	return opts
 }
@@ -102,7 +102,6 @@ func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
 }
 func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
 
-func (opts MdbxOpts) Label(label kv.Label) MdbxOpts               { opts.label = label; return opts }
 func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts                { opts.dirtySpace = s; return opts }
 func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLimiter = l; return opts }
 func (opts MdbxOpts) PageSize(v uint64) MdbxOpts                  { opts.pageSize = v; return opts }

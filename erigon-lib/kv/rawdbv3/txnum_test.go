@@ -31,7 +31,7 @@ import (
 func TestName(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.NewMDBX(log.New()).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.New(log.New()).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
