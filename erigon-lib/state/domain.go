@@ -1531,9 +1531,6 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
 	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
-		if dt.d.name == kv.CommitmentDomain {
-			log.Warn(fmt.Sprintf("[dbg] key: %x\n", filekey))
-		}
 		cv, ok := dt.getFromFileCache.Get(hi)
 		if ok {
 			if !cv.exists {
