@@ -588,7 +588,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		if iit.files[i].endTxNum <= txNum {
 			continue
 		}
-		offset, ok := iit.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
+		offset, ok := iit.statelessIdxReader(i).LookupHash(hi, lo)
 		if !ok {
 			continue
 		}
