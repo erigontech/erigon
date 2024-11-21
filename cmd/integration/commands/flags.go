@@ -56,8 +56,7 @@ var (
 	startTxNum     uint64
 	traceFromTx    uint64
 
-	workers, reconWorkers uint64
-	dbWriteMap            bool
+	dbWriteMap bool
 
 	syncCfg = ethconfig.Defaults.Sync
 )
@@ -181,8 +180,7 @@ func withHeimdall(cmd *cobra.Command) {
 }
 
 func withWorkers(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&workers, "exec.workers", uint64(ethconfig.Defaults.Sync.ExecWorkerCount), "")
-	cmd.Flags().Uint64Var(&reconWorkers, "recon.workers", uint64(ethconfig.Defaults.Sync.ReconWorkerCount), "")
+	cmd.Flags().IntVar(&syncCfg.ExecWorkerCount, "exec.workers", ethconfig.Defaults.Sync.ExecWorkerCount, "")
 }
 
 func withStartTx(cmd *cobra.Command) {
@@ -210,6 +208,6 @@ func withUnwindTypes(cmd *cobra.Command) {
 func withChaosMonkey(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
 }
-func withCommitEveryBlock(cmd *cobra.Command) {
+func withLoopBlockLimit(cmd *cobra.Command) {
 	cmd.Flags().UintVar(&syncCfg.LoopBlockLimit, cli.SyncLoopBlockLimitFlag.Name, cli.SyncLoopBlockLimitFlag.Value, cli.SyncLoopBlockLimitFlag.Usage)
 }

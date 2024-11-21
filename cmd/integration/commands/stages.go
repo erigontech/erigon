@@ -562,7 +562,7 @@ func init() {
 	withHeimdall(cmdStageExec)
 	withWorkers(cmdStageExec)
 	withChaosMonkey(cmdStageExec)
-	withCommitEveryBlock(cmdStageExec)
+	withLoopBlockLimit(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withConfig(cmdStageCustomTrace)
@@ -1058,7 +1058,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
 
