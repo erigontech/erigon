@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime/debug"
 	"sync"
 	"time"
 
@@ -112,10 +111,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
 		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
 	)
-
-	if *subnet == 0 {
-		debug.PrintStack()
-	}
 
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
 		index, err := att.Attestation.ElectraSingleCommitteeIndex()
