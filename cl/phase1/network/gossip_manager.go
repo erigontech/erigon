@@ -246,10 +246,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		if err := obj.SignedAggregateAndProof.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 			return err
 		}
-		if g.aggregateAndProofLimiter.tryAcquire() {
-			return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
-		}
-		return services.ErrIgnore
+		//if g.aggregateAndProofLimiter.tryAcquire() {
+		return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
+		// }
+		// return services.ErrIgnore
 	default:
 		switch {
 		case gossip.IsTopicBlobSidecar(data.Name):
