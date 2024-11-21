@@ -848,10 +848,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 		}
 	}()
 
-	if strings.Contains(indexPath, "commitment") {
-		M = 64
-	}
-
 	s, err := os.Stat(indexPath)
 	if err != nil {
 		return nil, err

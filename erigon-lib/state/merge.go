@@ -529,11 +529,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if UseBpsTree {
 		btPath := dt.d.kvBtFilePath(fromStep, toStep)
 		btM := DefaultBtreeM
-		if toStep == 0 || math.Log2(float64(toStep-fromStep)) > 10 { // 2^9 = 512, decrease M for large step ranges
+		if toStep == 0 {
 			btM = 128
-			if dt.d.filenameBase == "commitment" {
-				btM = 64
-			}
 		}
 		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesIn.decompressor, dt.d.compression, *dt.d.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync)
 		if err != nil {
