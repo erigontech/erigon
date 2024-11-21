@@ -35,7 +35,7 @@ import (
 type ServiceConfig struct {
 	Store     Store
 	BorConfig *borcfg.BorConfig
-	Client    HeimdallClient
+	Client    Client
 	Logger    log.Logger
 }
 
@@ -100,7 +100,7 @@ func NewService(config ServiceConfig) *Service {
 	}
 }
 
-func NewCheckpointFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Checkpoint] {
+func NewCheckpointFetcher(client Client, logger log.Logger) *EntityFetcher[*Checkpoint] {
 	return NewEntityFetcher(
 		"CheckpointFetcher",
 		func(ctx context.Context) (int64, error) {
@@ -115,7 +115,7 @@ func NewCheckpointFetcher(client HeimdallClient, logger log.Logger) *EntityFetch
 	)
 }
 
-func NewMilestoneFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Milestone] {
+func NewMilestoneFetcher(client Client, logger log.Logger) *EntityFetcher[*Milestone] {
 	return NewEntityFetcher(
 		"MilestoneFetcher",
 		client.FetchFirstMilestoneNum,
@@ -128,7 +128,7 @@ func NewMilestoneFetcher(client HeimdallClient, logger log.Logger) *EntityFetche
 	)
 }
 
-func NewSpanFetcher(client HeimdallClient, logger log.Logger) *EntityFetcher[*Span] {
+func NewSpanFetcher(client Client, logger log.Logger) *EntityFetcher[*Span] {
 	fetchLastEntityId := func(ctx context.Context) (int64, error) {
 		span, err := client.FetchLatestSpan(ctx)
 		if err != nil {
@@ -228,6 +228,15 @@ func (s *Service) RegisterMilestoneObserver(callback func(*Milestone), opts ...O
 	})
 }
 
+func (s *Service) RegisterCheckpointObserver(callback func(*Checkpoint), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+	options := NewObserverOptions(opts...)
+	return s.checkpointScraper.RegisterObserver(func(entities []*Checkpoint) {
+		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
+			callback(entity)
+		}
+	})
+}
+
 func (s *Service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
 	options := NewObserverOptions(opts...)
 	return s.spanScraper.RegisterObserver(func(entities []*Span) {
@@ -303,6 +312,16 @@ func (s *Service) Run(ctx context.Context) error {
 	s.RegisterSpanObserver(func(span *Span) {
 		s.spanBlockProducersTracker.ObserveSpanAsync(span)
 	})
+
+	milestoneObserver := s.RegisterMilestoneObserver(func(milestone *Milestone) {
+		UpdateObservedWaypointMilestoneLength(milestone.Length())
+	})
+	defer milestoneObserver()
+
+	checkpointObserver := s.RegisterCheckpointObserver(func(checkpoint *Checkpoint) {
+		UpdateObservedWaypointCheckpointLength(checkpoint.Length())
+	}, WithEventsLimit(5))
+	defer checkpointObserver()
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {

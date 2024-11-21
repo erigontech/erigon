@@ -881,19 +881,18 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	return compPath
 }
 
-func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {
-	t.Helper()
-	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
-	logger := log.New()
+func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator) {
+	tb.Helper()
+	require, logger := require.New(tb), log.New()
+	dirs := datadir.New(tb.TempDir())
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
-	t.Cleanup(db.Close)
+	tb.Cleanup(db.Close)
 
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
-	t.Cleanup(agg.Close)
+	tb.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
 	agg.DisableFsync()

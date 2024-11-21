@@ -27,10 +27,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+
+	"github.com/erigontech/erigon-lib/kv/order"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -64,7 +65,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	blockReader := m.BlockReader
 	borConsensusDB := memdb.NewTestDB(t, kv.ChainDB)
 	ctrl := gomock.NewController(t)
-	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
+	heimdallClient := heimdall.NewMockClient(ctrl)
 	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
 	bridgeStore := bridge.NewDbStore(m.DB)
 	heimdallStore := heimdall.NewDbStore(m.DB)
@@ -92,6 +93,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 		logger,
+		stages.ModeApplyingBlocks,
 	)
 	miningSyncStages := stagedsync.MiningStages(
 		ctx,
@@ -108,6 +110,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
 		logger,
+		stages.ModeBlockProduction,
 	)
 	validatorKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -180,7 +183,7 @@ type Harness struct {
 	miningSync                 *stagedsync.Sync
 	miningState                stagedsync.MiningState
 	bhCfg                      stagedsync.BorHeimdallCfg
-	heimdallClient             *heimdall.MockHeimdallClient
+	heimdallClient             *heimdall.MockClient
 	heimdallNextMockSpan       *heimdall.Span
 	heimdallLastEventID        uint64
 	heimdallLastEventHeaderNum uint64

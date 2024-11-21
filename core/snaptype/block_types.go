@@ -245,9 +245,9 @@ var (
 
 				chainId, _ := uint256.FromBig(chainConfig.ChainID)
 
-				parseCtx := txpool.NewTxParseContext(*chainId)
+				parseCtx := txpool.NewTxnParseContext(*chainId)
 				parseCtx.WithSender(false)
-				slot := txpool.TxSlot{}
+				slot := txpool.TxnSlot{}
 				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
 				defer d.EnableReadAhead().DisableReadAhead()

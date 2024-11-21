@@ -678,7 +678,7 @@ func NewDefaultStages(ctx context.Context,
 	agg *state.Aggregator,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	bridgeStore bridge.Store,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
@@ -763,6 +763,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */
 		logger,
+		stages.ModeForkValidation,
 	)
 }
 
@@ -780,7 +781,7 @@ func NewPolygonSyncStages(
 	agg *state.Aggregator,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	bridgeStore bridge.Store,
 	sentry sentryproto.SentryClient,

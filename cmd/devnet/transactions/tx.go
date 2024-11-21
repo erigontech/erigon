@@ -160,7 +160,7 @@ func SendTxLoad(ctx context.Context, to, from string, amount uint64, txPerSec ui
 		tx, err := CreateManyEIP1559TransactionsHigherThanBaseFee(ctx, to, from, int(batchCount))
 
 		if err != nil {
-			logger.Error("failed Create Txs", "error", err)
+			logger.Error("failed Create Txns", "error", err)
 			return err
 		}
 

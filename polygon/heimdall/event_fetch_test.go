@@ -16,7 +16,7 @@ func TestOver50EventBlockFetch(t *testing.T) {
 		return
 	}
 
-	heimdallClient := NewHeimdallClient("https://heimdall-api.polygon.technology/", log.New())
+	heimdallClient := NewHttpClient("https://heimdall-api.polygon.technology/", log.New())
 
 	// block      := 48077376
 	// block time := Sep-28-2023 08:13:58 AM

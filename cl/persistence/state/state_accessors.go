@@ -340,3 +340,21 @@ func ReadActiveIndicies(getFn GetValFn, slot uint64) ([]uint64, error) {
 	buf := bytes.NewBuffer(v)
 	return base_encoding.ReadRabbits(nil, buf)
 }
+
+func ReadProposersInEpoch(getFn GetValFn, epoch uint64) ([]uint64, error) {
+	key := base_encoding.Encode64ToBytes4(epoch)
+
+	indiciesBytes, err := getFn(kv.Proposers, key)
+	if err != nil {
+		return nil, err
+	}
+	if len(indiciesBytes) == 0 {
+		return nil, nil
+	}
+	var ret []uint64
+	for i := 0; i < len(indiciesBytes); i += 4 {
+		validatorIndex := binary.BigEndian.Uint32(indiciesBytes[i : i+4])
+		ret = append(ret, uint64(validatorIndex))
+	}
+	return ret, nil
+}

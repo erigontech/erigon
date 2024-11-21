@@ -24,13 +24,11 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
-	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 )
 
 type proposerDuties struct {
@@ -56,26 +54,27 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 			return nil, err
 		}
 		defer tx.Rollback()
-		key := base_encoding.Encode64ToBytes4(epoch)
-		indiciesBytes, err := tx.GetOne(kv.Proposers, key)
+		view := a.caplinStateSnapshots.View()
+		defer view.Close()
+
+		indicies, err := state_accessors.ReadProposersInEpoch(state_accessors.GetValFnTxAndSnapshot(tx, view), epoch)
 		if err != nil {
 			return nil, err
 		}
-		if len(indiciesBytes) != int(a.beaconChainCfg.SlotsPerEpoch*4) {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("proposer duties is corrupted"))
+		if len(indicies) == 0 {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no proposers for this epoch. either this range was prune or not backfilled"))
 		}
-		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
-		for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
-			validatorIndex := binary.BigEndian.Uint32(indiciesBytes[i*4 : i*4+4])
+		duties := make([]proposerDuties, len(indicies))
+		for i, validatorIndex := range indicies {
 			var pk libcommon.Bytes48
-			pk, err := state_accessors.ReadPublicKeyByIndex(tx, uint64(validatorIndex))
+			pk, err := state_accessors.ReadPublicKeyByIndex(tx, validatorIndex)
 			if err != nil {
 				return nil, err
 			}
 			duties[i] = proposerDuties{
 				Pubkey:         pk,
-				ValidatorIndex: uint64(validatorIndex),
-				Slot:           epoch*a.beaconChainCfg.SlotsPerEpoch + i,
+				ValidatorIndex: validatorIndex,
+				Slot:           epoch*a.beaconChainCfg.SlotsPerEpoch + uint64(i),
 			}
 		}
 		return newBeaconResponse(duties).

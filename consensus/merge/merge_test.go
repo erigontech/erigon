@@ -70,7 +70,7 @@ func (r readerMock) BorSpan(spanId uint64) []byte {
 	return nil
 }
 
-// The thing only that changes beetwen normal ethash checks other than POW, is difficulty
+// The thing only that changes between normal ethash checks other than POW, is difficulty
 // and nonce so we are gonna test those
 func TestVerifyHeaderDifficulty(t *testing.T) {
 	header := &types.Header{
