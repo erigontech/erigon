@@ -799,15 +799,15 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *seg.Decompressor, com
 	key := make([]byte, 0, 64)
 	var pos uint64
 
-	//var b0 [256]bool
+	var b0 [256]bool
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
-		//keep := false
-		//if !b0[key[0]] {
-		//	b0[key[0]] = true
-		//	keep = true
-		//}
-		err = iw.AddKey(key, pos, false)
+		keep := false
+		if !b0[key[0]] {
+			b0[key[0]] = true
+			keep = true
+		}
+		err = iw.AddKey(key, pos, keep)
 		if err != nil {
 			return err
 		}

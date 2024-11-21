@@ -65,11 +65,12 @@ func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLooku
 // "assert key behind offset == to stored key in bt"
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
-func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []Node) *BpsTree {
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []*Node) *BpsTree {
 	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp, mx: nodes}
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var cachedBytes uint64
+	var b0 [256][]*Node
 	for i := 0; i < len(nodes); i++ {
 		if envAssertBTKeys {
 			eq, r, err := keyCmp(nodes[i].key, nodes[i].di, kv, nil)
@@ -81,7 +82,10 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 			}
 		}
 		cachedBytes += nsz + uint64(len(nodes[i].key))
+
 		nodes[i].off = offt.Get(nodes[i].di)
+		k0 := nodes[i].key[0]
+		b0[k0] = append(b0[k0], nodes[i])
 	}
 
 	return bt
@@ -89,7 +93,8 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 
 type BpsTree struct {
 	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
-	mx    []Node
+	mx    []*Node
+	b0mx  [256][]*Node
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
 
@@ -184,15 +189,17 @@ func encodeListNodes(nodes []Node, w io.Writer) error {
 	return nil
 }
 
-func decodeListNodes(data []byte) ([]Node, error) {
+func decodeListNodes(data []byte) ([]*Node, error) {
 	count := binary.BigEndian.Uint64(data[:8])
-	nodes := make([]Node, count)
+	nodes := make([]*Node, count)
 	pos := 8
 	for ni := 0; ni < int(count); ni++ {
-		dp, err := (&nodes[ni]).Decode(data[pos:])
+		node := new(Node)
+		dp, err := node.Decode(data[pos:])
 		if err != nil {
 			return nil, fmt.Errorf("decode node %d: %w", ni, err)
 		}
+		nodes[ni] = node
 		pos += int(dp)
 	}
 	return nodes, nil
@@ -226,7 +233,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 	if N == 0 {
 		return nil
 	}
-	b.mx = make([]Node, 0, N/b.M)
+	b.mx = make([]*Node, 0, N/b.M)
 	if b.trace {
 		fmt.Printf("mx cap %d N=%d M=%d\n", cap(b.mx), N, b.M)
 	}
@@ -246,7 +253,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 		if err != nil {
 			return err
 		}
-		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
+		b.mx = append(b.mx, &Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
 		cachedBytes += nsz + uint64(len(key))
 	}
 
@@ -258,12 +265,14 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 }
 
 // bs performs pre-seach over warmed-up list of nodes to figure out left and right bounds on di for key
-func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
+func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
 	dr = b.offt.Count()
-	m, l, r := 0, 0, len(b.mx) //nolint
+	m, l, r := 0, 0, len(b.b0mx[x[0]]) //nolint
+
 	for l < r {
 		m = (l + r) >> 1
-		n = b.mx[m]
+		// m = l
+		n = b.b0mx[x[0]][m]
 
 		if b.trace {
 			fmt.Printf("bs di:%d k:%x\n", n.di, n.key)
@@ -423,8 +432,6 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 		if cmp == 0 {
 			offset = b.offt.Get(m)
-			// g.Reset(offset)
-			// g.Skip()
 			if !g.HasNext() {
 				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
 			}
@@ -446,8 +453,6 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	}
 
 	offset = b.offt.Get(l)
-	g.Reset(offset)
-	g.Skip()
 	if !g.HasNext() {
 		return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
 	}
