@@ -1335,7 +1335,7 @@ func (d *Domain) missedAccessors() (l []*filesItem) {
 func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedAccessors(ctx, g, ps)
 	for _, item := range d.missedBtreeAccessors() {
-		if !UseBpsTree {
+		if d.indexList&withBTree == 0 {
 			continue
 		}
 		if item.decompressor == nil {
@@ -1353,7 +1353,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		})
 	}
 	for _, item := range d.missedAccessors() {
-		if UseBpsTree {
+		if d.indexList&withHashMap == 0 {
 			continue
 		}
 		if item.decompressor == nil {
@@ -1361,10 +1361,6 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		}
 		item := item
 		g.Go(func() error {
-			if UseBpsTree {
-				return nil
-			}
-
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			err := d.buildAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 			if err != nil {
@@ -1515,10 +1511,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	}
 	return nil
 }
-
-var (
-	UseBtree = true // if true, will use btree for all files
-)
 
 // getFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 // of file where the value is stored (not exact step when kv has been set)

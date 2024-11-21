@@ -827,7 +827,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				if UseBtree || UseBpsTree {
+				indexList := sd.aggTx.d[kv.StorageDomain].d.indexList
+				if indexList&withBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
@@ -835,7 +836,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 							heap.Push(cpPtr, ci1)
 						}
 					}
-				} else {
+				}
+				if indexList&withHashMap != 0 {
 					ci1.dg.Reset(ci1.latestOffset)
 					if !ci1.dg.HasNext() {
 						break
@@ -972,7 +974,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, st
 	return v, step, nil
 }
 
-// getAsOfFile returns value from domain with respect to limit ofMaxTxnum
+// GetAsOfFile returns value from domain with respect to limit ofMaxTxnum
 func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
@@ -981,7 +983,7 @@ func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum 
 		k = append(k, k2...)
 	}
 
-	v, ok, err := sd.aggTx.getAsOfFile(domain, k, ofMaxTxnum)
+	v, ok, err := sd.aggTx.GetAsOfFile(domain, k, ofMaxTxnum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
 	}
@@ -1109,6 +1111,8 @@ type SharedDomainsCommitmentContext struct {
 	patriciaTrie  commitment.Trie
 	justRestored  atomic.Bool
 
+	traverser *commitment.HexPatriciaReader
+
 	limitReadAsOfTxNum uint64
 }
 
@@ -1126,6 +1130,11 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, 
 
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(trieVariant, mode, sd.aggTx.a.tmpdir)
 	ctx.patriciaTrie.ResetContext(ctx)
+	t, err := commitment.NewPatriciaReader(ctx, length.Addr, nil)
+	if err != nil {
+		panic(err)
+	}
+	ctx.traverser = t
 	return ctx
 }
 
@@ -1263,6 +1272,9 @@ func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitme
 func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
+		if sdc.traverser != nil {
+			sdc.traverser.Reset()
+		}
 	}
 }
 
@@ -1281,6 +1293,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		return
 	}
 	ks := []byte(key)
+
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchAccount)
@@ -1360,6 +1373,9 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 		fmt.Printf("[commitment] store txn %d block %d rootHash %x\n", sdc.sharedDomains.txNum, blockNum, rootHash)
 	}
 	sdc.sharedDomains.put(kv.CommitmentDomain, string(keyCommitmentState), encodedState)
+	if sdc.traverser != nil {
+		sdc.traverser.SetState(encodedState)
+	}
 	return sdc.sharedDomains.domainWriters[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
@@ -1425,6 +1441,9 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(tx kv.Tx, cd *DomainRo
 		return 0, 0, false, err
 	}
 	blockNum, txNum, err = sdc.restorePatriciaState(state)
+	if sdc.traverser != nil {
+		sdc.traverser.SetState(state)
+	}
 	return blockNum, txNum, true, err
 }
 
