@@ -66,6 +66,8 @@ type GossipManager struct {
 	voluntaryExitService         services.VoluntaryExitService
 	blsToExecutionChangeService  services.BLSToExecutionChangeService
 	proposerSlashingService      services.ProposerSlashingService
+	attestationsLimiter          *timeBasedRateLimiter
+	aggregateAndProofLimiter     *timeBasedRateLimiter
 }
 
 func NewGossipReceiver(
@@ -103,6 +105,8 @@ func NewGossipReceiver(
 		voluntaryExitService:         voluntaryExitService,
 		blsToExecutionChangeService:  blsToExecutionChangeService,
 		proposerSlashingService:      proposerSlashingService,
+		attestationsLimiter:          newTimeBasedRateLimiter(4*time.Second, 250),
+		aggregateAndProofLimiter:     newTimeBasedRateLimiter(4*time.Second, 75),
 	}
 }
 
@@ -242,7 +246,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		if err := obj.SignedAggregateAndProof.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 			return err
 		}
-		return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
+		if g.aggregateAndProofLimiter.tryAcquire() {
+			return g.aggregateAndProofService.ProcessMessage(ctx, data.SubnetId, obj)
+		}
+		return services.ErrIgnore
 	default:
 		switch {
 		case gossip.IsTopicBlobSidecar(data.Name):
@@ -273,10 +280,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}
-			//if g.committeeSub.NeedToAggregate(obj.Attestation) {
-			return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
-			//}
-
+			if g.committeeSub.NeedToAggregate(obj.Attestation) || g.attestationsLimiter.tryAcquire() {
+				return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
+			}
+			return services.ErrIgnore
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)
 		}
