@@ -929,7 +929,7 @@ func (db *HermezDbReader) GetBatchGlobalExitRootsProto(fromBatchNum, toBatchNum 
 	return gersProto, nil
 }
 
-// GetBatchGlobalExitRoot deprecated: post etrog this will not work
+// Deprecated: GetBatchGlobalExitRoot will not work post etrog
 func (db *HermezDbReader) GetBatchGlobalExitRoot(batchNum uint64) (*dstypes.GerUpdate, error) {
 	gerUpdateBytes, err := db.tx.GetOne(GLOBAL_EXIT_ROOTS_BATCHES, Uint64ToBytes(batchNum))
 	if err != nil {

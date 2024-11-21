@@ -6,6 +6,8 @@ import (
 	"github.com/iden3/go-iden3-crypto/keccak256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"errors"
 )
 
 func CalculateBananaAccInputHash(
@@ -194,4 +196,100 @@ func calculatePreEtrogAccInputHash(
 // transactionBytes are as taken from the sequenceBatches calldata
 func CalculateBatchHashData(transactions []byte) []byte {
 	return crypto.Keccak256(transactions)
+}
+
+type AccHashInputs struct {
+	// common
+	OldAccInputHash *common.Hash
+	Sequencer       common.Address
+	BatchData       []byte
+
+	// etrog
+	L1InfoRoot      *common.Hash
+	LimitTimestamp  uint64
+	ForcedBlockHash *common.Hash
+
+	// pre etrog
+	GlobalExitRoot *common.Hash
+	Timestamp      uint64
+
+	// validium
+	IsValidium           bool
+	BatchTransactionData *common.Hash
+}
+
+func CalculateAccInputHashByForkId(input AccHashInputs, forkId uint64) (*common.Hash, error) {
+	var newAccInputHash *common.Hash
+
+	if forkId >= uint64(chain.ForkID7Etrog) {
+		// etrog
+		if !input.IsValidium {
+			// rollup
+			if input.BatchData == nil || len(input.BatchData) == 0 {
+				return nil, errors.New("batchData is required for etrog rollup")
+			}
+			if input.L1InfoRoot == nil {
+				return nil, errors.New("l1InfoRoot is required for etrog rollup")
+			}
+			if input.ForcedBlockHash == nil {
+				return nil, errors.New("forcedBlockHash is required for etrog rollup")
+			}
+			newAccInputHash = CalculateEtrogAccInputHash(
+				*input.OldAccInputHash,
+				input.BatchData,
+				*input.L1InfoRoot,
+				input.LimitTimestamp,
+				input.Sequencer,
+				*input.ForcedBlockHash,
+			)
+		} else {
+			// validium
+			if input.L1InfoRoot == nil {
+				return nil, errors.New("l1InfoRoot is required for etrog validium")
+			}
+			if input.ForcedBlockHash == nil {
+				return nil, errors.New("forcedBlockHash is required for etrog validium")
+			}
+			newAccInputHash = CalculateEtrogValidiumAccInputHash(
+				*input.OldAccInputHash,
+				*input.BatchTransactionData,
+				*input.L1InfoRoot,
+				input.LimitTimestamp,
+				input.Sequencer,
+				*input.ForcedBlockHash,
+			)
+		}
+	} else {
+		// pre-etrog
+		if !input.IsValidium {
+			// rollup
+			if input.BatchData == nil || len(input.BatchData) == 0 {
+				return nil, errors.New("batchData is required for pre-etrog rollup")
+			}
+			if input.GlobalExitRoot == nil {
+				return nil, errors.New("globalExitRoot is required for pre-etrog rollup")
+			}
+			newAccInputHash = CalculatePreEtrogAccInputHash(
+				*input.OldAccInputHash,
+				input.BatchData,
+				*input.GlobalExitRoot,
+				input.Timestamp,
+				input.Sequencer,
+			)
+		} else {
+			// validium
+			if input.GlobalExitRoot == nil {
+				return nil, errors.New("globalExitRoot is required for pre-etrog validium")
+			}
+			newAccInputHash = CalculatePreEtrogValidiumAccInputHash(
+				*input.OldAccInputHash,
+				*input.BatchTransactionData,
+				*input.GlobalExitRoot,
+				input.Timestamp,
+				input.Sequencer,
+			)
+		}
+	}
+
+	return newAccInputHash, nil
 }

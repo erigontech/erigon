@@ -457,7 +457,7 @@ func TestGetBatchByNumber(t *testing.T) {
 	EthermanMock.EXPECT().TransactionByHash(ctx, common.HexToHash("0x22ddb9a356815c3fac1026b6dec5df3124afbadb485c9ba5a3e3398a04b7ba97")).Return(txByHashResponse, true, nil).AnyTimes()
 
 	storageAtResponse := []byte{}
-	EthermanMock.EXPECT().StorageAt(ctx, common.HexToAddress("0x000"), common.HexToHash("0xb5ad54240dc61c51d3a3e8d3f925722e010966ae263d67344c5fb60bddebddae"), nil).Return(storageAtResponse, nil).AnyTimes()
+	EthermanMock.EXPECT().StorageAt(ctx, common.HexToAddress("0x000"), common.HexToHash("0x5317d76ba28a4ffb21ed890613e0cdfc6847329136ad56bef014d23f3b6b63b2"), nil).Return(storageAtResponse, nil).AnyTimes()
 
 	var response2 []byte
 	response2 = append(response2, accInputHash.Bytes()...)
@@ -480,7 +480,7 @@ func TestGetBatchByNumber(t *testing.T) {
 	assert.Equal(gers[len(gers)-1], batch.GlobalExitRoot)
 	assert.Equal(mainnetExitRoots[len(mainnetExitRoots)-1], batch.MainnetExitRoot)
 	assert.Equal(rollupExitRoots[len(rollupExitRoots)-1], batch.RollupExitRoot)
-	assert.Equal(common.HexToHash("0x97d1524156ccb46723e5c3c87951da9a390499ba288161d879df1dbc03d49afc"), batch.AccInputHash)
+	assert.Equal(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), batch.AccInputHash)
 	assert.Equal(common.HexToHash("0x22ddb9a356815c3fac1026b6dec5df3124afbadb485c9ba5a3e3398a04b7ba97"), *batch.SendSequencesTxHash)
 	assert.Equal(rpctypes.ArgUint64(1714427009), batch.Timestamp)
 	assert.Equal(true, batch.Closed)
