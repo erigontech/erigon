@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -338,28 +338,31 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
-func mergeEfs(preval, val, buf []byte) ([]byte, error) {
-	preef, _ := eliasfano32.ReadEliasFano(preval)
-	ef, _ := eliasfano32.ReadEliasFano(val)
-	preIt := preef.Iterator()
-	efIt := ef.Iterator()
-	newEf := eliasfano32.NewEliasFano(preef.Count()+ef.Count(), ef.Max())
+func mergeNumSeqs(preval, val, buf []byte, experimentalEFOptimization bool) ([]byte, error) {
+	// TODO: calculate baseNum
+	preSeq := multiencseq.ReadMultiEncSeq(0, preval)
+	// TODO: calculate baseNum
+	seq := multiencseq.ReadMultiEncSeq(0, val)
+	preIt := preSeq.Iterator(0)
+	efIt := seq.Iterator(0)
+	// TODO: calculate baseNum
+	newSeq := multiencseq.NewBuilder(0, preSeq.Count()+seq.Count(), seq.Max(), experimentalEFOptimization)
 	for preIt.HasNext() {
 		v, err := preIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newEf.AddOffset(v)
+		newSeq.AddOffset(v)
 	}
 	for efIt.HasNext() {
 		v, err := efIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newEf.AddOffset(v)
+		newSeq.AddOffset(v)
 	}
-	newEf.Build()
-	return newEf.AppendBytes(buf), nil
+	newSeq.Build()
+	return newSeq.AppendBytes(buf), nil
 }
 
 type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, error)
@@ -628,7 +631,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if mergedOnce {
-				if lastVal, err = mergeEfs(ci1.val, lastVal, nil); err != nil {
+				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, nil, iit.ii.experimentalEFOptimization); err != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.filenameBase, err)
 				}
 			} else {
@@ -778,6 +781,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				})
 			}
 		}
+		// TODO: read multiencseq
 		// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
 		// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
 		// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
@@ -790,7 +794,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			// Advance all the items that have this key (including the top)
 			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 				ci1 := heap.Pop(&cp).(*CursorItem)
-				count := eliasfano32.Count(ci1.val)
+				// TODO: calculate baseNum
+				count := multiencseq.Count(0, ci1.val)
 				for i := uint64(0); i < count; i++ {
 					if !ci1.dg2.HasNext() {
 						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.dg2.FileName(), i, count, lastKey, ci1.key))
@@ -853,10 +858,11 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			for g.HasNext() {
 				keyBuf, _ = g.Next(nil)
 				valBuf, _ = g.Next(nil)
-				ef, _ := eliasfano32.ReadEliasFano(valBuf)
-				efIt := ef.Iterator()
-				for efIt.HasNext() {
-					txNum, err := efIt.Next()
+				// TODO: calculate baseNum
+				seq := multiencseq.ReadMultiEncSeq(0, valBuf)
+				it := seq.Iterator(0)
+				for it.HasNext() {
+					txNum, err := it.Next()
 					if err != nil {
 						return nil, nil, err
 					}

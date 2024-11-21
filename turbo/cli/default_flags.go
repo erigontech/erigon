@@ -233,4 +233,5 @@ var DefaultFlags = []cli.Flag{
 	&SyncParallelStateFlushing,
 
 	&utils.ChaosMonkeyFlag,
+	&utils.ExperimentalEFOptimizationFlag,
 }

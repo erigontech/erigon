@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -390,10 +390,11 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
-			ef, _ := eliasfano32.ReadEliasFano(valBuf)
-			efIt := ef.Iterator()
-			for efIt.HasNext() {
-				txNum, err := efIt.Next()
+			// TODO: calculate baseNum
+			seq := multiencseq.ReadMultiEncSeq(0, valBuf)
+			it := seq.Iterator(0)
+			for it.HasNext() {
+				txNum, err := it.Next()
 				if err != nil {
 					return "", err
 				}
@@ -555,6 +556,7 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
+// TODO: rename ef* fields
 type HistoryCollation struct {
 	historyComp   *seg.Writer
 	efHistoryComp *seg.Writer
@@ -579,10 +581,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	}
 
 	var (
-		historyComp   *seg.Writer
-		efHistoryComp *seg.Writer
-		txKey         [8]byte
-		err           error
+		historyComp *seg.Writer
+		seqWriter   *seg.Writer
+		txKey       [8]byte
+		err         error
 
 		historyPath   = h.vFilePath(step, step+1)
 		efHistoryPath = h.efFilePath(step, step+1)
@@ -595,8 +597,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			if historyComp != nil {
 				historyComp.Close()
 			}
-			if efHistoryComp != nil {
-				efHistoryComp.Close()
+			if seqWriter != nil {
+				seqWriter.Close()
 			}
 		}
 	}()
@@ -652,23 +654,23 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		defer cd.Close()
 	}
 
-	efComp, err := seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.compressorCfg, log.LvlTrace, h.logger)
+	seqComp, err := seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.compressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 	}
 	if h.noFsync {
-		efComp.DisableFsync()
+		seqComp.DisableFsync()
 	}
 
 	var (
 		keyBuf      = make([]byte, 0, 256)
 		numBuf      = make([]byte, 8)
 		bitmap      = bitmapdb.NewBitmap64()
-		prevEf      []byte
+		prevSeq     []byte
 		prevKey     []byte
 		initialized bool
 	)
-	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no compression
+	seqWriter = seg.NewWriter(seqComp, seg.CompressNone) // coll+build must be fast - no compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
@@ -685,7 +687,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			return nil
 		}
 
-		ef := eliasfano32.NewEliasFano(bitmap.GetCardinality(), bitmap.Maximum())
+		// TODO: configure base tx num
+		seqBuilder := multiencseq.NewBuilder(0, bitmap.GetCardinality(), bitmap.Maximum(), h.experimentalEFOptimization)
 		it := bitmap.Iterator()
 
 		for it.HasNext() {
@@ -718,17 +721,17 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				}
 			}
 
-			ef.AddOffset(vTxNum)
+			seqBuilder.AddOffset(vTxNum)
 		}
 		bitmap.Clear()
-		ef.Build()
+		seqBuilder.Build()
 
-		prevEf = ef.AppendBytes(prevEf[:0])
+		prevSeq = seqBuilder.AppendBytes(prevSeq[:0])
 
-		if err = efHistoryComp.AddWord(prevKey); err != nil {
+		if err = seqWriter.AddWord(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
 		}
-		if err = efHistoryComp.AddWord(prevEf); err != nil {
+		if err = seqWriter.AddWord(prevSeq); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
 		}
 
@@ -753,7 +756,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
 
 	return HistoryCollation{
-		efHistoryComp: efHistoryComp,
+		efHistoryComp: seqWriter,
 		efHistoryPath: efHistoryPath,
 		historyPath:   historyPath,
 		historyComp:   historyComp,
