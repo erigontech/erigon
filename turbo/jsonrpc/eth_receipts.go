@@ -423,6 +423,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if !ok && chainConfig.Bor == nil {
 		return nil, nil
 	}
+	println("txNum", txNum)
 
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
@@ -456,21 +457,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			txnIndex = uint64(idx)
 			break
 		}
-	}
-
-	if txNum-1 == txnIndex {
-		txNumNew, err := rawdbv3.TxNums.Min(tx, blockNum)
-		if err != nil {
-			return nil, err
-		}
-		txNumNew += txNum
-		txNum = txNumNew
-	} else {
-		txNum1, err := rawdbv3.TxNums.Min(tx, blockNum)
-		if err != nil {
-			return nil, err
-		}
-		println("txn", txNum1+txnIndex, txNum)
 	}
 
 	if txn == nil && chainConfig.Bor != nil {

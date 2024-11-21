@@ -53,6 +53,7 @@ func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, *uint64, 
 	var numberTxNum uint64
 	if len(data) >= 8 {
 		numberTxNum = new(big.Int).SetBytes(data[8:]).Uint64()
+		numberTxNum += 2
 	} else {
 		return &numberBlockNum, nil, nil
 	}
