@@ -109,7 +109,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	if msg.SubnetId == nil {
 		fmt.Println("publishing gossip", msg.Name)
 	} else {
-		fmt.Println("publishing gossip", msg.Name, msg.SubnetId)
+		fmt.Println("publishing gossip", msg.Name, *msg.SubnetId)
 	}
 
 	switch msg.Name {
