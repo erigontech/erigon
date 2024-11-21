@@ -525,19 +525,19 @@ func addTransactionsToMiningBlock(
 		// Start executing the transaction
 		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
 		if errors.Is(err, core.ErrGasLimitReached) {
-			// Pop the env out-of-gas transaction without shifting in the next from the account
+			// Skip the env out-of-gas transaction
 			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
 			continue
 		} else if errors.Is(err, core.ErrNonceTooLow) {
-			// New head notification data race between the transaction pool and miner, shift
+			// New head notification data race between the transaction pool and miner, skip
 			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "err", err)
 			continue
 		} else if errors.Is(err, core.ErrNonceTooHigh) {
-			// Reorg notification data race between the transaction pool and miner, skip account =
+			// Reorg notification data race between the transaction pool and miner, skip
 			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with high nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
 			continue
 		} else if err == nil {
-			// Everything ok, collect the logs and shift in the next transaction from the same account
+			// Everything ok, collect the logs and proceed to the next transaction
 			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", payloadId)
 			coalescedLogs = append(coalescedLogs, logs...)
 			txnIdx++
