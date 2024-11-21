@@ -92,7 +92,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 					}
 				}
 			}
-			if se.cfg.chaosMonkey {
+			if se.cfg.syncCfg.chaosMonkey {
 				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, txTask.Error)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")
