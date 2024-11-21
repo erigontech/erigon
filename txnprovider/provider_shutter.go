@@ -1,7 +1,4 @@
-// Copyright 2014 The go-ethereum Authors
-// (original work)
 // Copyright 2024 The Erigon Authors
-// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -17,30 +14,27 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package txnprovider
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"context"
 
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
-// NewTxnsEvent is posted when a batch of transactions enter the transaction pool.
-type NewTxnsEvent struct {
-	Txns []types.Transaction
+const shutterProviderPriority = 110
+
+var _ Provider = ShutterProvider{}
+
+type ShutterProvider struct {
+	shutterPool *shutter.Pool
 }
 
-// RemovedLogsEvent is posted when a reorg happens
-type RemovedLogsEvent struct{ Logs []*types.Log }
-
-type ChainEvent struct {
-	Block *types.Block
-	Hash  libcommon.Hash
-	Logs  []*types.Log
+func (s ShutterProvider) Priority() uint64 {
+	return shutterProviderPriority
 }
 
-type ChainSideEvent struct {
-	Block *types.Block
+func (s ShutterProvider) Yield(_ context.Context, _ ...YieldOption) ([]types.Transaction, error) {
+	return s.shutterPool.Yield()
 }
-
-type ChainHeadEvent struct{ Block *types.Block }

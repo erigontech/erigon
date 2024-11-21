@@ -48,10 +48,10 @@ type MiningBlock struct {
 	ParentHeaderTime uint64
 	Header           *types.Header
 	Uncles           []*types.Header
-	Txs              types.Transactions
+	Txns             types.Transactions
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
-	PreparedTxs      types.TransactionsStream
+	PreparedTxns     types.Transactions
 	Requests         types.FlatRequests
 }
 
@@ -76,33 +76,37 @@ type MiningCreateBlockCfg struct {
 	miner                  MiningState
 	chainConfig            chain.Config
 	engine                 consensus.Engine
-	txPoolDB               kv.RoDB
 	tmpdir                 string
 	blockBuilderParameters *core.BlockBuilderParameters
 	blockReader            services.FullBlockReader
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig chain.Config, engine consensus.Engine, txPoolDB kv.RoDB, blockBuilderParameters *core.BlockBuilderParameters, tmpdir string, blockReader services.FullBlockReader) MiningCreateBlockCfg {
+func StageMiningCreateBlockCfg(
+	db kv.RwDB,
+	miner MiningState,
+	chainConfig chain.Config,
+	engine consensus.Engine,
+	blockBuilderParameters *core.BlockBuilderParameters,
+	tmpdir string,
+	blockReader services.FullBlockReader,
+) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
 		db:                     db,
 		miner:                  miner,
 		chainConfig:            chainConfig,
 		engine:                 engine,
-		txPoolDB:               txPoolDB,
 		tmpdir:                 tmpdir,
 		blockBuilderParameters: blockBuilderParameters,
 		blockReader:            blockReader,
 	}
 }
 
-var maxTransactions uint16 = 1000
-
 // SpawnMiningCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, txc wrap.TxContainer, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
 	current := cfg.miner.MiningBlock
-	txPoolLocals := []libcommon.Address{} //txPoolV2 has no concept of local addresses (yet?)
+	var txPoolLocals []libcommon.Address //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
 
 	const (

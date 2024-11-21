@@ -311,7 +311,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, txc,
-					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, dirs.Tmp, br),
+					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, dirs.Tmp, br),
 					quit, logger)
 				if err != nil {
 					return err
@@ -321,7 +321,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 				miner.MiningBlock.Header.GasLimit = nextBlock.GasLimit()
 				miner.MiningBlock.Header.Difficulty = nextBlock.Difficulty()
 				miner.MiningBlock.Header.Nonce = nextBlock.Nonce()
-				miner.MiningBlock.PreparedTxs = types.NewTransactionsFixedOrder(nextBlock.Transactions())
+				miner.MiningBlock.PreparedTxns = nextBlock.Transactions()
 				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
 				return err
 			})
