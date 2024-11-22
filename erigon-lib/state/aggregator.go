@@ -347,12 +347,24 @@ func (a *Aggregator) closeDirtyFiles() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
+	wg := &sync.WaitGroup{}
 	for _, d := range a.d {
-		d.Close()
+		d := d
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.Close()
+		}()
 	}
 	for _, ii := range a.iis {
-		ii.Close()
+		ii := ii
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ii.Close()
+		}()
 	}
+	wg.Wait()
 }
 
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
