@@ -106,7 +106,9 @@ type histCfg struct {
 
 func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	cfg.compressorCfg = seg.DefaultCfg
-	cfg.indexList = withHashMap
+	if cfg.indexList == 0 {
+		cfg.indexList = withHashMap
+	}
 	if cfg.iiCfg.filenameBase == "" {
 		cfg.iiCfg.filenameBase = cfg.filenameBase
 	}

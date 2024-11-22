@@ -162,10 +162,13 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		compress:  seg.CompressNone,
 
 		hist: histCfg{
+			valuesTable: kv.TblAccountHistoryVals,
+			compression: seg.CompressNone,
+
+			withLocalityIndex: false, historyLargeValues: false,
+
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
 				aggregationStep: aggregationStep, keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx},
-			withLocalityIndex: false, compression: seg.CompressNone, historyLargeValues: false,
-			valuesTable: kv.TblAccountHistoryVals,
 		},
 	}
 	if a.d[kv.AccountsDomain], err = NewDomain(cfg, logger); err != nil {
