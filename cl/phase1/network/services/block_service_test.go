@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -34,7 +35,7 @@ import (
 )
 
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
