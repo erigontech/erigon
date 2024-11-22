@@ -28,7 +28,7 @@ Here is a pie chart showing the proportional time spent on each stage (it was
 taken from the full sync). It is by all means just an estimation, but it gives
 an idea.
 
-![](/docs/stagedsync_proportions.png)
+![Full sync breakdown](/docs/assets/stagedsync_proportions.png)
 
 ## Reorgs / Unwinds
 
@@ -38,14 +38,14 @@ This happens backward from the last stage to the first one with one caveat that 
 
 That is the example of stages order to be unwound (unwind happens from right to left).
 
-```
+```golang
 state.unwindOrder = []*Stage{
-		// Unwinding of txn pool (reinjecting transactions into the pool needs to happen after unwinding execution)
-		stages[0], stages[1], stages[2], stages[9], stages[3], stages[4], stages[5], stages[6], stages[7], stages[8],
-	}
+        // Unwinding of txn pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+        stages[0], stages[1], stages[2], stages[9], stages[3], stages[4], stages[5], stages[6], stages[7], stages[8],
+}
 ```
 
-## Preprocessing with [ETL](https://github.com/erigontech/erigon-lib/tree/main/etl)
+## Preprocessing with [ETL](https://github.com/erigontech/erigon/tree/main/erigon-lib/etl)
 
 Some stages use our ETL framework to sort data by keys before inserting it into the database.
 
@@ -61,9 +61,9 @@ This optimization sometimes leads to dramatic (orders of magnitude) write speed 
 ## What happens after the Merge?
 
 In the Proof-of-Stake world staged sync becomes somewhat more complicated, as the following diagram shows.
-![](/docs/pos_downloader.png)
+![Staged Sync in PoS](/docs/assets/pos_downloader.png)
 
-## Stages (for the up to date list see [`stages.go`](/eth/stagedsync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go)):
+## Stages (for the up to date list see [`stages.go`](/eth/stagedsync/stages/stages.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go))
 
 Each stage consists of 2 functions `ExecFunc` that progresses the stage forward and `UnwindFunc` that unwinds the stage backwards.
 

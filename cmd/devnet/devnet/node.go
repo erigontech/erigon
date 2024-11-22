@@ -178,7 +178,11 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
-	n.nodeCfg = enode.NewNodConfigUrfave(ctx, logger)
+	nodeConf, err := enode.NewNodConfigUrfave(ctx, logger)
+	if err != nil {
+		return err
+	}
+	n.nodeCfg = nodeConf
 	n.ethCfg = enode.NewEthConfigUrfave(ctx, n.nodeCfg, logger)
 
 	// These are set to prevent disk and page size churn which can be excessive

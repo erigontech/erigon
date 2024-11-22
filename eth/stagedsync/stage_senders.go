@@ -60,11 +60,10 @@ type SendersCfg struct {
 	chainConfig     *chain.Config
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
-	loopBreakCheck  func(int) bool
 	syncCfg         ethconfig.Sync
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -81,13 +80,12 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync,
 		prune:           prune,
 		hd:              hd,
 		blockReader:     blockReader,
-		loopBreakCheck:  loopBreakCheck,
 		syncCfg:         syncCfg,
 	}
 }
 
 func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, logger log.Logger) error {
-	if cfg.blockReader.FreezingCfg().Enabled && s.BlockNumber < cfg.blockReader.FrozenBlocks() {
+	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
 		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 	}
 
@@ -217,10 +215,6 @@ Loop:
 			break
 		}
 
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNumber-startFrom)) {
-			break
-		}
-
 		has, err := cfg.blockReader.HasSenders(ctx, tx, blockHash, blockNumber)
 		if err != nil {
 			return err
@@ -288,7 +282,7 @@ Loop:
 			return minBlockErr
 		}
 		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
-		if cfg.hd != nil && errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
+		if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
 			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
 		}
 
@@ -413,14 +407,8 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-	if cfg.blockReader.FreezingCfg().Enabled {
-		// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
-	} else if cfg.prune.TxIndex.Enabled() {
-		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
-		if err = rawdb.PruneTable(tx, kv.Senders, to, ctx, 100); err != nil {
-			return err
-		}
-	}
+
+	// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

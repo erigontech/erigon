@@ -43,7 +43,7 @@ func TestSimulatorStart(t *testing.T) {
 	// logger.SetHandler(log.StdoutHandler)
 	dataDir := t.TempDir()
 
-	sim, err := simulator.NewSentry(ctx, "mumbai", dataDir, 1, logger)
+	sim, err := simulator.NewSentry(ctx, "amoy", dataDir, 1, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,83 +132,6 @@ func TestSimulatorStart(t *testing.T) {
 	blockNum := uint64(10)
 
 	for _, header := range packet.BlockHeadersPacket {
-		if header.Number.Uint64() != blockNum {
-			t.Fatal("unexpected block number: expected:", blockNum, "got:", header.Number)
-		}
-
-		blockNum++
-	}
-
-	simClient65 := direct.NewSentryClientDirect(65, sim)
-
-	getHeaders65 := &eth.GetBlockHeadersPacket{
-		Origin: eth.HashOrNumber{Number: 100},
-		Amount: 50,
-	}
-
-	data.Reset()
-
-	err = rlp.Encode(&data, getHeaders65)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	peers65, err := simClient65.SendMessageById(ctx, &sentry_if.SendMessageByIdRequest{
-		Data: &sentry.OutboundMessageData{
-			Id:   sentry_if.MessageId_GET_BLOCK_HEADERS_65,
-			Data: data.Bytes(),
-		},
-		PeerId: peers.Peers[0],
-	})
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(peers65.Peers) != 1 {
-		t.Fatal("message sent to unexpected number of peers:", len(peers65.Peers))
-	}
-
-	if peers65.Peers[0].String() != peers.Peers[0].String() {
-		t.Fatal("message sent to unexpected number of peers", peers65.Peers[0])
-	}
-
-	receiver65, err := simClient65.Messages(ctx, &sentry.MessagesRequest{
-		Ids: []sentry.MessageId{sentry.MessageId_BLOCK_HEADERS_65},
-	})
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	message, err = receiver65.Recv()
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if message.Id != sentry_if.MessageId_BLOCK_HEADERS_65 {
-		t.Fatal("unexpected message id expected:", sentry_if.MessageId_BLOCK_HEADERS_65, "got:", message.Id)
-	}
-
-	if message.PeerId.String() != peers.Peers[0].String() {
-		t.Fatal("message received from unexpected peer:", message.PeerId)
-	}
-
-	packet65 := eth.BlockHeadersPacket{}
-
-	if err := rlp.DecodeBytes(message.Data, &packet65); err != nil {
-		t.Fatal("failed to decode packet:", err)
-	}
-
-	if len(packet65) != 50 {
-		t.Fatal("unexpected header count: expected:", 50, "got:", len(packet.BlockHeadersPacket))
-	}
-
-	blockNum = uint64(100)
-
-	for _, header := range packet65 {
 		if header.Number.Uint64() != blockNum {
 			t.Fatal("unexpected block number: expected:", blockNum, "got:", header.Number)
 		}

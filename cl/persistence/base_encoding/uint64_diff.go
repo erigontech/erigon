@@ -72,7 +72,7 @@ type repeatedPatternEntry struct {
 
 func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) error {
 	if len(old) > len(new) {
-		return fmt.Errorf("old list is longer than new list")
+		return errors.New("old list is longer than new list")
 	}
 
 	compressor := compressorPool.Get().(*zstd.Encoder)
@@ -136,7 +136,7 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 
 func ComputeCompressedSerializedEffectiveBalancesDiff(w io.Writer, old, new []byte) error {
 	if len(old) > len(new) {
-		return fmt.Errorf("old list is longer than new list")
+		return errors.New("old list is longer than new list")
 	}
 
 	compressor := compressorPool.Get().(*zstd.Encoder)
@@ -264,7 +264,7 @@ func ApplyCompressedSerializedUint64ListDiff(in, out []byte, diff []byte, revers
 
 func ComputeCompressedSerializedValidatorSetListDiff(w io.Writer, old, new []byte) error {
 	if len(old) > len(new) {
-		return fmt.Errorf("old list is longer than new list")
+		return errors.New("old list is longer than new list")
 	}
 
 	validatorLength := 121

@@ -26,7 +26,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net"
 	"sort"
 	"strconv"
@@ -37,12 +36,11 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/common/mclock"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -181,6 +179,8 @@ type Config struct {
 	TmpDir string
 
 	MetricsEnabled bool
+
+	DiscoveryDNS []string
 }
 
 func (config *Config) ListenPort() int {
@@ -653,7 +653,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			Unhandled:   unhandled,
 			Log:         srv.logger,
 		}
-		ntab, err := discover.ListenV4(ctx, fmt.Sprint(srv.Config.Protocols[0].Version), conn, srv.localnode, cfg)
+		ntab, err := discover.ListenV4(ctx, strconv.FormatUint(uint64(srv.Config.Protocols[0].Version), 10), conn, srv.localnode, cfg)
 		if err != nil {
 			return err
 		}
@@ -669,11 +669,12 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			Bootnodes:   srv.BootstrapNodesV5,
 			Log:         srv.logger,
 		}
+		version := uint64(srv.Config.Protocols[0].Version)
 		var err error
 		if sconn != nil {
-			srv.DiscV5, err = discover.ListenV5(ctx, fmt.Sprint(srv.Config.Protocols[0].Version), sconn, srv.localnode, cfg)
+			srv.DiscV5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), sconn, srv.localnode, cfg)
 		} else {
-			srv.DiscV5, err = discover.ListenV5(ctx, fmt.Sprint(srv.Config.Protocols[0].Version), conn, srv.localnode, cfg)
+			srv.DiscV5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), conn, srv.localnode, cfg)
 		}
 		if err != nil {
 			return err
@@ -850,7 +851,7 @@ running:
 
 		case pd := <-srv.delpeer:
 			// A peer disconnected.
-			d := common.PrettyDuration(mclock.Now() - pd.created)
+			d := libcommon.PrettyDuration(mclock.Now() - pd.created)
 			delete(peers, pd.ID())
 			srv.logger.Trace("Removing p2p peer", "peercount", len(peers), "url", pd.Node(), "duration", d, "err", pd.err)
 			srv.dialsched.peerRemoved(pd.rw)
@@ -987,13 +988,13 @@ func (srv *Server) checkInboundConn(fd net.Conn, remoteIP net.IP) error {
 	}
 	// Reject connections that do not match NetRestrict.
 	if srv.NetRestrict != nil && !srv.NetRestrict.Contains(remoteIP) {
-		return fmt.Errorf("not whitelisted in NetRestrict")
+		return errors.New("not whitelisted in NetRestrict")
 	}
 	// Reject Internet peers that try too often.
 	now := srv.clock.Now()
 	srv.inboundHistory.expire(now, nil)
 	if !netutil.IsLAN(remoteIP) && srv.inboundHistory.contains(remoteIP.String()) {
-		return fmt.Errorf("too many attempts")
+		return errors.New("too many attempts")
 	}
 	srv.inboundHistory.add(remoteIP.String(), now.Add(inboundThrottleTime))
 	return nil

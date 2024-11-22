@@ -40,13 +40,13 @@ func TestMdbxPieceCompletion(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, b.Ok)
 
-	require.NoError(t, pc.Set(pk, false))
+	require.NoError(t, pc.Set(pk, false, false))
 
 	b, err = pc.Get(pk)
 	require.NoError(t, err)
 	assert.Equal(t, storage.Completion{Complete: false, Ok: true}, b)
 
-	require.NoError(t, pc.Set(pk, true))
+	require.NoError(t, pc.Set(pk, true, false))
 
 	b, err = pc.Get(pk)
 	require.NoError(t, err)

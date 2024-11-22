@@ -17,8 +17,6 @@
 package state
 
 import (
-	"bytes"
-
 	"github.com/erigontech/erigon-lib/common"
 
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -55,6 +53,11 @@ func (cr *CachedReader) ReadAccountData(address common.Address) (*accounts.Accou
 	return a, nil
 }
 
+// ReadAccountDataForDebug is called when an account needs to be fetched from the state
+func (cr *CachedReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return cr.ReadAccountData(address)
+}
+
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
 func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	addrBytes := address.Bytes()
@@ -76,7 +79,7 @@ func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation u
 // ReadAccountCode is called when code of an account needs to be fetched from the state
 // Usually, one of (address;incarnation) or codeHash is enough to uniquely identify the code
 func (cr *CachedReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if bytes.Equal(codeHash[:], emptyCodeHash) {
+	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
 	if c, ok := cr.cache.GetCode(address.Bytes(), incarnation); ok {

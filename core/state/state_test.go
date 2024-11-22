@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -38,11 +39,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	stateLib "github.com/erigontech/erigon-lib/state"
-
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
 )
 
 var toAddr = common.BytesToAddress
@@ -85,7 +83,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	}
 	defer tx.Rollback()
 
-	got := string(NewDumper(tx, 1).DefaultDump())
+	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -121,8 +119,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	cr := rawdb.NewCanonicalReader()
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -153,7 +150,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	s.tx = tx
 	//s.r = NewWriterV4(s.tx)
-	s.r = NewReaderV4(domains)
+	s.r = NewReaderV3(domains)
 	s.w = NewWriterV4(domains)
 	s.state = New(s.r)
 }
@@ -263,7 +260,7 @@ func TestSnapshot2(t *testing.T) {
 
 	w := NewWriterV4(domains)
 
-	state := New(NewReaderV4(domains))
+	state := New(NewReaderV3(domains))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -339,8 +336,8 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	if so0.data.Root != so1.data.Root {
 		t.Errorf("Root mismatch: have %x, want %x", so0.data.Root[:], so1.data.Root[:])
 	}
-	if !bytes.Equal(so0.CodeHash(), so1.CodeHash()) {
-		t.Fatalf("CodeHash mismatch: have %v, want %v", so0.CodeHash(), so1.CodeHash())
+	if so0.data.CodeHash != so1.data.CodeHash {
+		t.Fatalf("CodeHash mismatch: have %v, want %v", so0.data.CodeHash, so1.data.CodeHash)
 	}
 	if !bytes.Equal(so0.code, so1.code) {
 		t.Fatalf("Code mismatch: have %v, want %v", so0.code, so1.code)
@@ -379,8 +376,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader()
-	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -411,7 +407,7 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV4(domains))
+	st := New(NewReaderV3(domains))
 
 	// generate a few entries
 	obj1 := st.GetOrNewStateObject(toAddr([]byte{0x01}))
@@ -438,7 +434,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(tx, 1).DefaultDump())
+	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

@@ -18,13 +18,14 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -127,7 +128,7 @@ func decodeRef(buf []byte) (node, []byte, error) {
 	switch {
 	case kind == rlp.List:
 		if len(buf)-len(rest) >= length.Hash {
-			return nil, nil, fmt.Errorf("embedded nodes must be less than hash size")
+			return nil, nil, errors.New("embedded nodes must be less than hash size")
 		}
 		n, err := decodeNode(buf)
 		if err != nil {
@@ -192,7 +193,7 @@ func decodeShort(elems []byte) (*shortNode, error) {
 
 func decodeNode(encoded []byte) (node, error) {
 	if len(encoded) == 0 {
-		return nil, fmt.Errorf("nodes must not be zero length")
+		return nil, errors.New("nodes must not be zero length")
 	}
 	elems, _, err := rlp.SplitList(encoded)
 	if err != nil {
@@ -240,7 +241,7 @@ func verifyProof(root libcommon.Hash, key []byte, proofs map[libcommon.Hash]node
 		switch nt := node.(type) {
 		case *fullNode:
 			if len(key) == 0 {
-				return nil, fmt.Errorf("full nodes should not have values")
+				return nil, errors.New("full nodes should not have values")
 			}
 			node, key = nt.Children[key[0]], key[1:]
 			if node == nil {
@@ -307,13 +308,13 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 		// A nil value proves the account does not exist.
 		switch {
 		case proof.Nonce != 0:
-			return fmt.Errorf("account is not in state, but has non-zero nonce")
+			return errors.New("account is not in state, but has non-zero nonce")
 		case proof.Balance.ToInt().Sign() != 0:
-			return fmt.Errorf("account is not in state, but has balance")
+			return errors.New("account is not in state, but has balance")
 		case proof.StorageHash != libcommon.Hash{}:
-			return fmt.Errorf("account is not in state, but has non-empty storage hash")
+			return errors.New("account is not in state, but has non-empty storage hash")
 		case proof.CodeHash != libcommon.Hash{}:
-			return fmt.Errorf("account is not in state, but has non-empty code hash")
+			return errors.New("account is not in state, but has non-empty code hash")
 		default:
 			return nil
 		}
@@ -347,7 +348,7 @@ func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResu
 func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash, proof accounts.StorProofResult) error {
 	if storageRoot == EmptyRoot || storageRoot == (libcommon.Hash{}) {
 		if proof.Value.ToInt().Sign() != 0 {
-			return fmt.Errorf("empty storage root cannot have non-zero values")
+			return errors.New("empty storage root cannot have non-zero values")
 		}
 		// The spec here is a bit unclear.  The yellow paper makes it clear that the
 		// EmptyRoot hash is a special case where the trie is empty.  Since the trie
@@ -357,7 +358,7 @@ func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash
 		// pre-image of the EmptyRoot) should be included.  This implementation
 		// chooses to require the proof be empty.
 		if len(proof.Proof) > 0 {
-			return fmt.Errorf("empty storage root should not have proof nodes")
+			return errors.New("empty storage root should not have proof nodes")
 		}
 		return nil
 	}

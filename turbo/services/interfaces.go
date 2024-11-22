@@ -27,7 +27,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 type All struct {
@@ -45,6 +47,7 @@ type BlockReader interface {
 type HeaderReader interface {
 	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error)
 	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
+	HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error)
 	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
 	ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64)
 
@@ -55,30 +58,32 @@ type HeaderReader interface {
 
 type BorEventReader interface {
 	LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error)
+	EventLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error)
 	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
-	BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error)
+	BorStartEventId(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) (uint64, error)
 	LastFrozenEventId() uint64
+	LastFrozenEventBlockNum() uint64
 }
 
 type BorSpanReader interface {
-	Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error)
+	Span(ctx context.Context, tx kv.Tx, spanId uint64) (*heimdall.Span, bool, error)
 	LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	LastFrozenSpanId() uint64
 }
 
 type BorMilestoneReader interface {
 	LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	Milestone(ctx context.Context, tx kv.Getter, milestoneId uint64) ([]byte, error)
+	Milestone(ctx context.Context, tx kv.Tx, milestoneId uint64) (*heimdall.Milestone, bool, error)
 }
 
 type BorCheckpointReader interface {
 	LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
-	Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error)
+	Checkpoint(ctx context.Context, tx kv.Tx, checkpointId uint64) (*heimdall.Checkpoint, bool, error)
 }
 
 type CanonicalReader interface {
-	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, error)
+	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (h common.Hash, ok bool, err error)
+	IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
 	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error)
 }
 
@@ -86,6 +91,7 @@ type BodyReader interface {
 	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error)
 	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error)
 	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
+	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error)
 	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
 }
 
@@ -123,28 +129,18 @@ type FullBlockReader interface {
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
-	Snapshots() BlockSnapshots
-	BorSnapshots() BlockSnapshots
+	Snapshots() snapshotsync.BlockSnapshots
+	BorSnapshots() snapshotsync.BlockSnapshots
+
+	Ready(ctx context.Context) <-chan error
 
 	AllTypes() []snaptype.Type
-}
-
-type BlockSnapshots interface {
-	LogStat(label string)
-	ReopenFolder() error
-	ReopenSegments(types []snaptype.Type, allowGaps bool) error
-	SegmentsMax() uint64
-	SegmentsMin() uint64
-	Delete(fileName string) error
-	Types() []snaptype.Type
-	Close()
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int) (deleted int, err error)
-	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
-	HasNewFrozenFiles() bool
+	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []snapshotsync.DownloadRequest) error, onDelete func(l []string) error, onFinishRetire func() error)
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
 	SetWorkers(workers int)
 	GetWorkers() int
@@ -152,16 +148,6 @@ type BlockRetire interface {
 
 type DBEventNotifier interface {
 	OnNewSnapshot()
-}
-
-type DownloadRequest struct {
-	Version     uint8
-	Path        string
-	TorrentHash string
-}
-
-func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
-	return DownloadRequest{Path: path, TorrentHash: torrentHash}
 }
 
 type Range struct {

@@ -42,11 +42,14 @@ type Dirs struct {
 	SnapHistory     string
 	SnapDomain      string
 	SnapAccessors   string
+	SnapCaplin      string
 	Downloader      string
 	TxPool          string
 	Nodes           string
 	CaplinBlobs     string
 	CaplinIndexing  string
+	CaplinLatest    string
+	CaplinGenesis   string
 }
 
 func New(datadir string) Dirs {
@@ -70,16 +73,19 @@ func New(datadir string) Dirs {
 		SnapHistory:     filepath.Join(datadir, "snapshots", "history"),
 		SnapDomain:      filepath.Join(datadir, "snapshots", "domain"),
 		SnapAccessors:   filepath.Join(datadir, "snapshots", "accessor"),
+		SnapCaplin:      filepath.Join(datadir, "snapshots", "caplin"),
 		Downloader:      filepath.Join(datadir, "downloader"),
 		TxPool:          filepath.Join(datadir, "txpool"),
 		Nodes:           filepath.Join(datadir, "nodes"),
 		CaplinBlobs:     filepath.Join(datadir, "caplin", "blobs"),
 		CaplinIndexing:  filepath.Join(datadir, "caplin", "indexing"),
+		CaplinLatest:    filepath.Join(datadir, "caplin", "latest"),
+		CaplinGenesis:   filepath.Join(datadir, "caplin", "genesis"),
 	}
 
 	dir.MustExist(dirs.Chaindata, dirs.Tmp,
-		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors,
-		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing)
+		dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin,
+		dirs.Downloader, dirs.TxPool, dirs.Nodes, dirs.CaplinBlobs, dirs.CaplinIndexing, dirs.CaplinLatest, dirs.CaplinGenesis)
 	return dirs
 }
 
@@ -161,32 +167,14 @@ func downloaderV2Migration(dirs Dirs) error {
 	from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
 	if err := os.Rename(from, to); err != nil {
 		//fall back to copy-file if folders are on different disks
-		if err := copyFile(from, to); err != nil {
+		if err := CopyFile(from, to); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// nolint
-func moveFiles(from, to string, ext string) error {
-	files, err := dir.ReadDir(from)
-	if err != nil {
-		return fmt.Errorf("ReadDir: %w, %s", err, from)
-	}
-	for _, f := range files {
-		if f.Type().IsDir() || !f.Type().IsRegular() {
-			continue
-		}
-		if filepath.Ext(f.Name()) != ext {
-			continue
-		}
-		_ = os.Rename(filepath.Join(from, f.Name()), filepath.Join(to, f.Name()))
-	}
-	return nil
-}
-
-func copyFile(from, to string) error {
+func CopyFile(from, to string) error {
 	r, err := os.Open(from)
 	if err != nil {
 		return fmt.Errorf("please manually move file: from %s to %s. error: %w", from, to, err)

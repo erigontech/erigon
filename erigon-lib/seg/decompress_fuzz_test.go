@@ -51,7 +51,10 @@ func FuzzDecompressMatch(f *testing.F) {
 		ctx := context.Background()
 		tmpDir := t.TempDir()
 		file := filepath.Join(tmpDir, fmt.Sprintf("compressed-%d", rand.Int31()))
-		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, 2, int(workers), log.LvlDebug, logger)
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 2
+		cfg.Workers = int(workers)
+		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +86,7 @@ func FuzzDecompressMatch(f *testing.F) {
 				t.Fatalf("MatchCmp: expected match: %v\n", expected)
 			}
 			g.Reset(savePos)
-			ok := g.Match(expected)
+			ok := g.MatchCmp(expected)
 			pos2 := g.dataP
 			if ok != 0 {
 				t.Fatalf("MatchBool: expected match: %v\n", expected)

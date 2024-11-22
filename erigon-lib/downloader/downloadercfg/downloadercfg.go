@@ -17,6 +17,8 @@
 package downloadercfg
 
 import (
+	"context"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -24,6 +26,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon-lib/chain/networkname"
 
 	"github.com/anacrolix/dht/v2"
 	lg "github.com/anacrolix/log"
@@ -52,7 +56,7 @@ type Cfg struct {
 	DownloadSlots int
 
 	WebSeedUrls                     []*url.URL
-	WebSeedFiles                    []string
+	WebSeedFileProviders            []string
 	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
 	AddTorrentsFromDisk             bool
@@ -105,7 +109,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots, mdbxWriteMap bool) (*Cfg, error) {
+func New(ctx context.Context, dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots, mdbxWriteMap bool) (*Cfg, error) {
 	torrentConfig := Default()
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
@@ -149,7 +153,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 				for _, seed := range staticPeers {
 					if network == "udp" {
 						var addr *net.UDPAddr
-						addr, err := net.ResolveUDPAddr(network, seed+":80")
+						addr, err := net.ResolveUDPAddr(network, seed)
 						if err != nil {
 							log.Warn("[downloader] Cannot UDP resolve address", "network", network, "addr", seed)
 							continue
@@ -158,7 +162,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 					}
 					if network == "tcp" {
 						var addr *net.TCPAddr
-						addr, err := net.ResolveTCPAddr(network, seed+":80")
+						addr, err := net.ResolveTCPAddr(network, seed)
 						if err != nil {
 							log.Warn("[downloader] Cannot TCP resolve address", "network", network, "addr", seed)
 							continue
@@ -194,13 +198,13 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		}
 
 		if strings.HasPrefix(webseed, "v1:") {
-			withoutVerisonPrefix := webseed[3:]
-			if !strings.HasPrefix(withoutVerisonPrefix, "https:") {
+			withoutVersionPrefix := webseed[3:]
+			if !strings.HasPrefix(withoutVersionPrefix, "https:") {
 				continue
 			}
-			uri, err := url.ParseRequestURI(withoutVerisonPrefix)
+			uri, err := url.ParseRequestURI(withoutVersionPrefix)
 			if err != nil {
-				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVerisonPrefix)
+				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVersionPrefix)
 				continue
 			}
 			webseedHttpProviders = append(webseedHttpProviders, uri)
@@ -218,13 +222,57 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
 
+	// TODO: constructor must not do http requests
+	preverifiedCfg, err := LoadSnapshotsHashes(ctx, dirs, chainName)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
-		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders,
+		WebSeedUrls: webseedHttpProviders, WebSeedFileProviders: webseedFileProviders,
 		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
-		SnapshotConfig: snapcfg.KnownCfg(chainName),
+		SnapshotConfig: preverifiedCfg,
 		MdbxWriteMap:   mdbxWriteMap,
 	}, nil
+}
+
+// LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
+// If there are no such file, try to fetch hashes from the web and create local file.
+func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) (*snapcfg.Cfg, error) {
+	if !networkname.IsKnownNetwork(chainName) {
+		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
+		return snapcfg.NewNonSeededCfg(chainName), nil
+	}
+
+	preverifiedPath := filepath.Join(dirs.Snap, "preverified.toml")
+	exists, err := dir.FileExist(preverifiedPath)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		// Load hashes from local preverified.toml
+		haveToml, err := os.ReadFile(preverifiedPath)
+		if err != nil {
+			return nil, err
+		}
+		snapcfg.SetToml(chainName, haveToml)
+	} else {
+		// Fetch the snapshot hashes from the web
+		fetched, err := snapcfg.LoadRemotePreverified(ctx)
+		if err != nil {
+			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName, "err", err)
+			return nil, fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
+		}
+		if !fetched {
+			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName)
+			return nil, fmt.Errorf("remote snapshot hashes was not fetched for chain %s", chainName)
+		}
+		if err := dir.WriteFileWithFsync(preverifiedPath, snapcfg.GetToml(chainName), 0644); err != nil {
+			return nil, err
+		}
+	}
+	return snapcfg.KnownCfg(chainName), nil
 }
 
 func getIpv6Enabled() bool {

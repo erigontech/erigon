@@ -18,6 +18,7 @@ package aura
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -28,8 +29,8 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/common"
@@ -37,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/consensus/aura/auraabi"
 	"github.com/erigontech/erigon/consensus/aura/aurainterfaces"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -333,7 +333,7 @@ func (s *SimpleList) defaultCaller(blockHash libcommon.Hash) (Call, error) {
 }
 func (s *SimpleList) getWithCaller(parentHash libcommon.Hash, nonce uint, caller consensus.Call) (libcommon.Address, error) {
 	if len(s.validators) == 0 {
-		return libcommon.Address{}, fmt.Errorf("cannot operate with an empty validator set")
+		return libcommon.Address{}, errors.New("cannot operate with an empty validator set")
 	}
 	return s.validators[nonce%uint(len(s.validators))], nil
 }

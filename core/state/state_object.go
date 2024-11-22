@@ -20,7 +20,6 @@
 package state
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -29,10 +28,9 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/trie"
 )
@@ -95,7 +93,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.IsZero() && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && (so.data.CodeHash == emptyCodeHashH)
 }
 
 // newObject creates a state object.
@@ -119,7 +117,6 @@ func newObject(db *IntraBlockState, address libcommon.Address, data, original *a
 		so.data.Root = trie.EmptyRoot
 	}
 	so.original.Copy(original)
-
 	return &so
 }
 
@@ -225,8 +222,8 @@ func (so *stateObject) SetState(key *libcommon.Hash, value uint256.Int) {
 		key:      *key,
 		prevalue: prev,
 	})
-	if so.db.logger != nil && so.db.logger.OnStorageChange != nil {
-		so.db.logger.OnStorageChange(so.address, key, prev, value)
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
+		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
 	}
 	so.setState(key, value)
 }
@@ -301,8 +298,8 @@ func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceCha
 		account: &so.address,
 		prev:    so.data.Balance,
 	})
-	if so.db.logger != nil && so.db.logger.OnBalanceChange != nil {
-		so.db.logger.OnBalanceChange(so.address, so.Balance(), amount, reason)
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
+		so.db.tracingHooks.OnBalanceChange(so.address, so.Balance(), amount, reason)
 	}
 	so.setBalance(amount)
 }
@@ -333,12 +330,12 @@ func (so *stateObject) Code() []byte {
 	if so.code != nil {
 		return so.code
 	}
-	if bytes.Equal(so.CodeHash(), emptyCodeHash) {
+	if so.data.CodeHash == emptyCodeHashH {
 		return nil
 	}
-	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, libcommon.BytesToHash(so.CodeHash()))
+	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, so.data.CodeHash)
 	if err != nil {
-		so.setError(fmt.Errorf("can't load code hash %x: %w", so.CodeHash(), err))
+		so.setError(fmt.Errorf("can't load code hash %x: %w", so.data.CodeHash, err))
 	}
 	so.code = code
 	return code
@@ -351,8 +348,8 @@ func (so *stateObject) SetCode(codeHash libcommon.Hash, code []byte) {
 		prevhash: so.data.CodeHash,
 		prevcode: prevcode,
 	})
-	if so.db.logger != nil && so.db.logger.OnCodeChange != nil {
-		so.db.logger.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
+		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
 	}
 	so.setCode(codeHash, code)
 }
@@ -368,18 +365,14 @@ func (so *stateObject) SetNonce(nonce uint64) {
 		account: &so.address,
 		prev:    so.data.Nonce,
 	})
-	if so.db.logger != nil && so.db.logger.OnNonceChange != nil {
-		so.db.logger.OnNonceChange(so.address, so.data.Nonce, nonce)
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
+		so.db.tracingHooks.OnNonceChange(so.address, so.data.Nonce, nonce)
 	}
 	so.setNonce(nonce)
 }
 
 func (so *stateObject) setNonce(nonce uint64) {
 	so.data.Nonce = nonce
-}
-
-func (so *stateObject) CodeHash() []byte {
-	return so.data.CodeHash[:]
 }
 
 func (so *stateObject) Balance() *uint256.Int {

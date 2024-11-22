@@ -21,14 +21,15 @@ package enode
 
 import (
 	"crypto/ecdsa"
-	"fmt"
+	"errors"
 	"io"
 
-	"github.com/erigontech/erigon/crypto"
+	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/p2p/discover/v4wire"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/rlp"
-	"golang.org/x/crypto/sha3"
 )
 
 // List of known secure identity schemes.
@@ -69,7 +70,7 @@ func (V4ID) Verify(r *enr.Record, sig []byte) error {
 	if err := r.Load(&entry); err != nil {
 		return err
 	} else if len(entry) != 33 {
-		return fmt.Errorf("invalid public key")
+		return errors.New("invalid public key")
 	}
 
 	h := sha3.NewLegacyKeccak256()

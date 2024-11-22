@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -99,7 +100,7 @@ func manifest(cliCtx *cli.Context, command string) error {
 	pos := 0
 
 	if cliCtx.Args().Len() == 0 {
-		return fmt.Errorf("missing manifest location")
+		return errors.New("missing manifest location")
 	}
 
 	arg := cliCtx.Args().Get(pos)
@@ -144,7 +145,7 @@ func manifest(cliCtx *cli.Context, command string) error {
 	}
 
 	if src != nil && srcSession == nil {
-		return fmt.Errorf("no src session established")
+		return errors.New("no src session established")
 	}
 
 	logger.Debug("Starting manifest " + command)

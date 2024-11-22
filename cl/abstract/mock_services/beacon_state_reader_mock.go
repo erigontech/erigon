@@ -22,6 +22,7 @@ import (
 type MockBeaconStateReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockBeaconStateReaderMockRecorder
+	isgomock struct{}
 }
 
 // MockBeaconStateReaderMockRecorder is the mock recorder for MockBeaconStateReader.
@@ -42,17 +43,17 @@ func (m *MockBeaconStateReader) EXPECT() *MockBeaconStateReaderMockRecorder {
 }
 
 // CommitteeCount mocks base method.
-func (m *MockBeaconStateReader) CommitteeCount(arg0 uint64) uint64 {
+func (m *MockBeaconStateReader) CommitteeCount(epoch uint64) uint64 {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CommitteeCount", arg0)
+	ret := m.ctrl.Call(m, "CommitteeCount", epoch)
 	ret0, _ := ret[0].(uint64)
 	return ret0
 }
 
 // CommitteeCount indicates an expected call of CommitteeCount.
-func (mr *MockBeaconStateReaderMockRecorder) CommitteeCount(arg0 any) *MockBeaconStateReaderCommitteeCountCall {
+func (mr *MockBeaconStateReaderMockRecorder) CommitteeCount(epoch any) *MockBeaconStateReaderCommitteeCountCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitteeCount", reflect.TypeOf((*MockBeaconStateReader)(nil).CommitteeCount), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitteeCount", reflect.TypeOf((*MockBeaconStateReader)(nil).CommitteeCount), epoch)
 	return &MockBeaconStateReaderCommitteeCountCall{Call: call}
 }
 
@@ -117,19 +118,58 @@ func (c *MockBeaconStateReaderGenesisValidatorsRootCall) DoAndReturn(f func() co
 	return c
 }
 
-// GetDomain mocks base method.
-func (m *MockBeaconStateReader) GetDomain(arg0 [4]byte, arg1 uint64) ([]byte, error) {
+// GetBeaconProposerIndexForSlot mocks base method.
+func (m *MockBeaconStateReader) GetBeaconProposerIndexForSlot(slot uint64) (uint64, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetDomain", arg0, arg1)
+	ret := m.ctrl.Call(m, "GetBeaconProposerIndexForSlot", slot)
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetBeaconProposerIndexForSlot indicates an expected call of GetBeaconProposerIndexForSlot.
+func (mr *MockBeaconStateReaderMockRecorder) GetBeaconProposerIndexForSlot(slot any) *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBeaconProposerIndexForSlot", reflect.TypeOf((*MockBeaconStateReader)(nil).GetBeaconProposerIndexForSlot), slot)
+	return &MockBeaconStateReaderGetBeaconProposerIndexForSlotCall{Call: call}
+}
+
+// MockBeaconStateReaderGetBeaconProposerIndexForSlotCall wrap *gomock.Call
+type MockBeaconStateReaderGetBeaconProposerIndexForSlotCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall) Return(arg0 uint64, arg1 error) *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall) Do(f func(uint64) (uint64, error)) *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall) DoAndReturn(f func(uint64) (uint64, error)) *MockBeaconStateReaderGetBeaconProposerIndexForSlotCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// GetDomain mocks base method.
+func (m *MockBeaconStateReader) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDomain", domainType, epoch)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetDomain indicates an expected call of GetDomain.
-func (mr *MockBeaconStateReaderMockRecorder) GetDomain(arg0, arg1 any) *MockBeaconStateReaderGetDomainCall {
+func (mr *MockBeaconStateReaderMockRecorder) GetDomain(domainType, epoch any) *MockBeaconStateReaderGetDomainCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDomain", reflect.TypeOf((*MockBeaconStateReader)(nil).GetDomain), arg0, arg1)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDomain", reflect.TypeOf((*MockBeaconStateReader)(nil).GetDomain), domainType, epoch)
 	return &MockBeaconStateReaderGetDomainCall{Call: call}
 }
 
@@ -157,18 +197,18 @@ func (c *MockBeaconStateReaderGetDomainCall) DoAndReturn(f func([4]byte, uint64)
 }
 
 // ValidatorForValidatorIndex mocks base method.
-func (m *MockBeaconStateReader) ValidatorForValidatorIndex(arg0 int) (solid.Validator, error) {
+func (m *MockBeaconStateReader) ValidatorForValidatorIndex(index int) (solid.Validator, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ValidatorForValidatorIndex", arg0)
+	ret := m.ctrl.Call(m, "ValidatorForValidatorIndex", index)
 	ret0, _ := ret[0].(solid.Validator)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ValidatorForValidatorIndex indicates an expected call of ValidatorForValidatorIndex.
-func (mr *MockBeaconStateReaderMockRecorder) ValidatorForValidatorIndex(arg0 any) *MockBeaconStateReaderValidatorForValidatorIndexCall {
+func (mr *MockBeaconStateReaderMockRecorder) ValidatorForValidatorIndex(index any) *MockBeaconStateReaderValidatorForValidatorIndexCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidatorForValidatorIndex", reflect.TypeOf((*MockBeaconStateReader)(nil).ValidatorForValidatorIndex), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidatorForValidatorIndex", reflect.TypeOf((*MockBeaconStateReader)(nil).ValidatorForValidatorIndex), index)
 	return &MockBeaconStateReaderValidatorForValidatorIndexCall{Call: call}
 }
 
@@ -196,18 +236,18 @@ func (c *MockBeaconStateReaderValidatorForValidatorIndexCall) DoAndReturn(f func
 }
 
 // ValidatorPublicKey mocks base method.
-func (m *MockBeaconStateReader) ValidatorPublicKey(arg0 int) (common.Bytes48, error) {
+func (m *MockBeaconStateReader) ValidatorPublicKey(index int) (common.Bytes48, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ValidatorPublicKey", arg0)
+	ret := m.ctrl.Call(m, "ValidatorPublicKey", index)
 	ret0, _ := ret[0].(common.Bytes48)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ValidatorPublicKey indicates an expected call of ValidatorPublicKey.
-func (mr *MockBeaconStateReaderMockRecorder) ValidatorPublicKey(arg0 any) *MockBeaconStateReaderValidatorPublicKeyCall {
+func (mr *MockBeaconStateReaderMockRecorder) ValidatorPublicKey(index any) *MockBeaconStateReaderValidatorPublicKeyCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidatorPublicKey", reflect.TypeOf((*MockBeaconStateReader)(nil).ValidatorPublicKey), arg0)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidatorPublicKey", reflect.TypeOf((*MockBeaconStateReader)(nil).ValidatorPublicKey), index)
 	return &MockBeaconStateReaderValidatorPublicKeyCall{Call: call}
 }
 

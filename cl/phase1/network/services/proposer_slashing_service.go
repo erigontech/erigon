@@ -18,8 +18,10 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -34,6 +36,7 @@ type proposerSlashingService struct {
 	syncedDataManager synced_data.SyncedData
 	beaconCfg         *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
+	emitters          *beaconevents.EventEmitter
 	cache             *lru.Cache[uint64, struct{}]
 }
 
@@ -42,6 +45,7 @@ func NewProposerSlashingService(
 	syncedDataManager synced_data.SyncedData,
 	beaconCfg *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
+	emitters *beaconevents.EventEmitter,
 ) *proposerSlashingService {
 	cache, err := lru.New[uint64, struct{}]("proposer_slashing", proposerSlashingCacheSize)
 	if err != nil {
@@ -53,6 +57,7 @@ func NewProposerSlashingService(
 		beaconCfg:         beaconCfg,
 		ethClock:          ethClock,
 		cache:             cache,
+		emitters:          emitters,
 	}
 }
 
@@ -83,43 +88,41 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 
 	// Verify the headers are different
 	if *h1 == *h2 {
-		return fmt.Errorf("proposee slashing headers are the same")
+		return errors.New("proposee slashing headers are the same")
 	}
 
-	// Verify the proposer is slashable
-	state := s.syncedDataManager.HeadStateReader()
-	if state == nil {
-		return ErrIgnore
-	}
-	proposer, err := state.ValidatorForValidatorIndex(int(h1.ProposerIndex))
-	if err != nil {
-		return fmt.Errorf("unable to retrieve state: %v", err)
-	}
-	if !proposer.IsSlashable(s.ethClock.GetCurrentEpoch()) {
-		return fmt.Errorf("proposer is not slashable: %v", proposer)
-	}
+	return s.syncedDataManager.ViewHeadState(func(state *st.CachingBeaconState) error {
+		proposer, err := state.ValidatorForValidatorIndex(int(h1.ProposerIndex))
+		if err != nil {
+			return fmt.Errorf("unable to retrieve state: %v", err)
+		}
+		if !proposer.IsSlashable(s.ethClock.GetCurrentEpoch()) {
+			return fmt.Errorf("proposer is not slashable: %v", proposer)
+		}
 
-	// Verify signatures for both headers
-	for _, signedHeader := range []*cltypes.SignedBeaconBlockHeader{msg.Header1, msg.Header2} {
-		domain, err := state.GetDomain(s.beaconCfg.DomainBeaconProposer, st.GetEpochAtSlot(s.beaconCfg, signedHeader.Header.Slot))
-		if err != nil {
-			return fmt.Errorf("unable to get domain: %v", err)
+		// Verify signatures for both headers
+		for _, signedHeader := range []*cltypes.SignedBeaconBlockHeader{msg.Header1, msg.Header2} {
+			domain, err := state.GetDomain(s.beaconCfg.DomainBeaconProposer, st.GetEpochAtSlot(s.beaconCfg, signedHeader.Header.Slot))
+			if err != nil {
+				return fmt.Errorf("unable to get domain: %v", err)
+			}
+			pk := proposer.PublicKey()
+			signingRoot, err := computeSigningRoot(signedHeader, domain)
+			if err != nil {
+				return fmt.Errorf("unable to compute signing root: %v", err)
+			}
+			valid, err := blsVerify(signedHeader.Signature[:], signingRoot[:], pk[:])
+			if err != nil {
+				return fmt.Errorf("unable to verify signature: %v", err)
+			}
+			if !valid {
+				return fmt.Errorf("invalid signature: signature %v, root %v, pubkey %v", signedHeader.Signature[:], signingRoot[:], pk)
+			}
 		}
-		pk := proposer.PublicKey()
-		signingRoot, err := computeSigningRoot(signedHeader, domain)
-		if err != nil {
-			return fmt.Errorf("unable to compute signing root: %v", err)
-		}
-		valid, err := blsVerify(signedHeader.Signature[:], signingRoot[:], pk[:])
-		if err != nil {
-			return fmt.Errorf("unable to verify signature: %v", err)
-		}
-		if !valid {
-			return fmt.Errorf("invalid signature: signature %v, root %v, pubkey %v", signedHeader.Signature[:], signingRoot[:], pk)
-		}
-	}
 
-	s.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(msg), msg)
-	s.cache.Add(pIndex, struct{}{})
-	return nil
+		s.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(msg), msg)
+		s.cache.Add(pIndex, struct{}{})
+		s.emitters.Operation().SendProposerSlashing(msg)
+		return nil
+	})
 }

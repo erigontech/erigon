@@ -110,7 +110,7 @@ func (c *RCloneClient) start(logger log.Logger) error {
 	rclone, _ := exec.LookPath("rclone")
 
 	if len(rclone) == 0 {
-		return fmt.Errorf("rclone not found in PATH")
+		return errors.New("rclone not found in PATH")
 	}
 
 	logger.Info("[downloader] rclone found in PATH: enhanced upload/download enabled")
@@ -687,7 +687,7 @@ var ErrAccessDenied = errors.New("access denied")
 
 func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.DirEntry, error) {
 	if len(c.remoteFs) == 0 {
-		return nil, fmt.Errorf("remote fs undefined")
+		return nil, errors.New("remote fs undefined")
 	}
 
 	c.oplock.Lock()
@@ -871,7 +871,7 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 		if syncQueue != nil {
 			syncQueue <- request
 		} else {
-			request.cerr <- fmt.Errorf("no sync queue available")
+			request.cerr <- errors.New("no sync queue available")
 		}
 	}
 

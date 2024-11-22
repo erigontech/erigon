@@ -29,7 +29,7 @@ func VerifyBlocks(blocks []*types.Block) error {
 			return err
 		}
 
-		if err := block.HashCheck(); err != nil {
+		if err := block.HashCheck(true); err != nil {
 			return err
 		}
 

@@ -17,6 +17,7 @@
 package sync
 
 import (
+	"context"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -25,29 +26,18 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-type HeaderValidator interface {
-	ValidateHeader(header *types.Header, parent *types.Header, now time.Time) error
-}
-
-type headerValidator struct {
+type HeaderValidator struct {
 	chainConfig         *chain.Config
 	borConfig           *borcfg.BorConfig
-	headerTimeValidator HeaderTimeValidator
+	headerTimeValidator *HeaderTimeValidator
 }
 
-func NewHeaderValidator(
-	chainConfig *chain.Config,
-	borConfig *borcfg.BorConfig,
-	headerTimeValidator HeaderTimeValidator,
-) HeaderValidator {
-	return &headerValidator{
-		chainConfig:         chainConfig,
-		borConfig:           borConfig,
-		headerTimeValidator: headerTimeValidator,
-	}
-}
-
-func (hv *headerValidator) ValidateHeader(header *types.Header, parent *types.Header, now time.Time) error {
+func (hv *HeaderValidator) ValidateHeader(
+	ctx context.Context,
+	header *types.Header,
+	parent *types.Header,
+	now time.Time,
+) error {
 	if err := bor.ValidateHeaderUnusedFields(header); err != nil {
 		return err
 	}
@@ -59,14 +49,13 @@ func (hv *headerValidator) ValidateHeader(header *types.Header, parent *types.He
 	if err := bor.ValidateHeaderExtraLength(header.Extra); err != nil {
 		return err
 	}
+
 	if err := bor.ValidateHeaderSprintValidators(header, hv.borConfig); err != nil {
 		return err
 	}
 
-	if hv.headerTimeValidator != nil {
-		if err := hv.headerTimeValidator.ValidateHeaderTime(header, now, parent); err != nil {
-			return err
-		}
+	if err := hv.headerTimeValidator.ValidateHeaderTime(ctx, header, now, parent); err != nil {
+		return err
 	}
 
 	return nil

@@ -17,14 +17,17 @@
 package forkchoice
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 
-	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -40,17 +43,18 @@ type checkpointState struct {
 	shuffledSet  []uint64 // shuffled set of active validators
 	// validator data
 	balances []uint64
-	// These are flattened to save memory and anchor public keys are static and shared.
-	anchorPublicKeys []byte // flattened base public keys
-	publicKeys       []byte // flattened public keys
-	actives          []byte
-	slasheds         []byte
+	// bitlists of active indexes and slashed indexes
+	actives  []byte
+	slasheds []byte
+
+	publicKeysRegistry public_keys_registry.PublicKeyRegistry
 
 	validatorSetSize int
 	// fork data
 	genesisValidatorsRoot libcommon.Hash
 	fork                  *cltypes.Fork
 	activeBalance, epoch  uint64 // current active balance and epoch
+	checkpoint            solid.Checkpoint
 }
 
 func writeToBitset(bitset []byte, i int, value bool) {
@@ -69,9 +73,8 @@ func readFromBitset(bitset []byte, i int) bool {
 	return (bitset[sliceIndex] & (1 << uint(bitIndex))) > 0
 }
 
-func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKeys []byte, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
-	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64) *checkpointState {
-	publicKeys := make([]byte, (len(validatorSet)-(len(anchorPublicKeys)/length.Bytes48))*length.Bytes48)
+func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegistry public_keys_registry.PublicKeyRegistry, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
+	genesisValidatorsRoot libcommon.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint) *checkpointState {
 	balances := make([]uint64, len(validatorSet))
 
 	bitsetSize := (len(validatorSet) + 7) / 8
@@ -82,11 +85,6 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 		writeToBitset(actives, i, validatorSet[i].Active(epoch))
 		writeToBitset(slasheds, i, validatorSet[i].Slashed())
 	}
-	// Add the post-anchor public keys as surplus
-	for i := len(anchorPublicKeys) / length.Bytes48; i < len(validatorSet); i++ {
-		pos := i - len(anchorPublicKeys)/length.Bytes48
-		copy(publicKeys[pos*length.Bytes48:(pos+1)*length.Bytes48], validatorSet[i].PublicKeyBytes())
-	}
 
 	mixes := solid.NewHashVector(randaoMixesLength)
 	randaoMixes.CopyTo(mixes)
@@ -96,36 +94,47 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 		beaconConfig:          beaconConfig,
 		randaoMixes:           mixes,
 		balances:              balances,
-		anchorPublicKeys:      anchorPublicKeys,
-		publicKeys:            publicKeys,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		fork:                  fork,
 		activeBalance:         activeBalance,
 		slasheds:              slasheds,
 		actives:               actives,
 		validatorSetSize:      len(validatorSet),
-
-		epoch: epoch,
+		checkpoint:            checkpoint,
+		epoch:                 epoch,
+		publicKeysRegistry:    publicKeysRegistry,
 	}
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	activeIndicies := c.getActiveIndicies(epoch)
+	monitor.ObserveActiveValidatorsCount(len(activeIndicies))
 	c.shuffledSet = make([]uint64, len(activeIndicies))
+	start := time.Now()
 	c.shuffledSet = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), c.shuffledSet, activeIndicies, epoch*beaconConfig.SlotsPerEpoch)
+	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
 	return c
 }
 
 // getAttestingIndicies retrieves the beacon committee.
-func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationData, aggregationBits []byte) ([]uint64, error) {
+func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, aggregationBits []byte) ([]uint64, error) {
 	// First get beacon committee
-	slot := attestation.Slot()
+	slot := attestation.Data.Slot
 	epoch := c.epochAtSlot(slot)
-	// Compute shuffled indicies
+	cIndex := attestation.Data.CommitteeIndex
+	clversion := c.beaconConfig.GetCurrentStateVersion(epoch)
+	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := attestation.ElectraSingleCommitteeIndex()
+		if err != nil {
+			return nil, err
+		}
+		cIndex = index
+	}
 
+	// Compute shuffled indicies
 	lenIndicies := uint64(len(c.shuffledSet))
 	committeesPerSlot := c.committeeCount(epoch, lenIndicies)
 	count := committeesPerSlot * c.beaconConfig.SlotsPerEpoch
-	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + attestation.CommitteeIndex()
+	index := (slot%c.beaconConfig.SlotsPerEpoch)*committeesPerSlot + cIndex
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	committee := c.shuffledSet[start:end]
@@ -135,7 +144,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.AttestationDat
 		bitIndex := i % 8
 		sliceIndex := i / 8
 		if sliceIndex >= len(aggregationBits) {
-			return nil, fmt.Errorf("GetAttestingIndicies: committee is too big")
+			return nil, errors.New("GetAttestingIndicies: committee is too big")
 		}
 		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
 			attestingIndices = append(attestingIndices, member)
@@ -177,21 +186,10 @@ func (c *checkpointState) getDomain(domainType [4]byte, epoch uint64) ([]byte, e
 func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
 	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
+		return false, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
-	pks := [][]byte{}
-	inds.Range(func(_ int, v uint64, _ int) bool {
-		if v < uint64(len(c.anchorPublicKeys))/length.Bytes48 {
-			pks = append(pks, c.anchorPublicKeys[v*length.Bytes48:(v+1)*length.Bytes48])
-		} else {
-			offset := uint64(len(c.anchorPublicKeys) / length.Bytes48)
-			pks = append(pks, c.publicKeys[(v-offset)*length.Bytes48:(v-offset+1)*length.Bytes48])
-		}
-		return true
-	})
-
-	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target().Epoch())
+	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -201,12 +199,12 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 		return false, fmt.Errorf("unable to get signing root: %v", err)
 	}
 
-	valid, err := bls.VerifyAggregate(att.Signature[:], signingRoot[:], pks)
+	valid, err := c.publicKeysRegistry.VerifyAggregateSignature(c.checkpoint, inds, signingRoot[:], att.Signature)
 	if err != nil {
 		return false, fmt.Errorf("error while validating signature: %v", err)
 	}
 	if !valid {
-		return false, fmt.Errorf("invalid aggregate signature")
+		return false, errors.New("invalid aggregate signature")
 	}
 	return true, nil
 }

@@ -17,6 +17,7 @@
 package snaptype
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,12 +30,11 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 
-	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dir"
 )
 
 var (
-	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
+	ErrInvalidFileName = errors.New("invalid compressed file name")
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {
@@ -124,6 +124,9 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			}
 		}
 	}
+	if strings.Contains(fileName, "caplin/") {
+		return res, isStateFile, true
+	}
 	return res, isStateFile, isStateFile
 }
 
@@ -152,6 +155,8 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		return
 	}
 	res.To = to * 1_000
+	res.TypeString = parts[3]
+
 	res.Type, ok = ParseFileType(parts[3])
 	if !ok {
 		return res, ok
@@ -201,12 +206,20 @@ func SeedableV2Extensions() []string {
 	return []string{".seg"}
 }
 
+func AllV2Extensions() []string {
+	return []string{".seg", ".idx", ".txt"}
+}
+
 func SeedableV3Extensions() []string {
-	return []string{".kv", ".v", ".ef"}
+	return []string{".kv", ".v", ".ef", ".ap"}
+}
+
+func AllV3Extensions() []string {
+	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt"}
 }
 
 func IsSeedableExtension(name string) bool {
-	for _, ext := range append(SeedableV2Extensions(), SeedableV3Extensions()...) {
+	for _, ext := range append(AllV2Extensions(), AllV3Extensions()...) {
 		if strings.HasSuffix(name, ext) {
 			return true
 		}
@@ -224,6 +237,7 @@ const Erigon3SeedableSteps = 64
 //     less files - means small files will be removed after merge (no peers for this files).
 const Erigon2OldMergeLimit = 500_000
 const Erigon2MergeLimit = 100_000
+const CaplinMergeLimit = 10_000
 const Erigon2MinSegmentSize = 1_000
 
 var MergeSteps = []uint64{100_000, 10_000}
@@ -234,6 +248,7 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
+	TypeString      string // This is for giulio's generic snapshots
 }
 
 func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
@@ -241,6 +256,9 @@ func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Pat
 func (f FileInfo) Name() string { return f.name }
 func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }
 func (f FileInfo) Len() uint64  { return f.To - f.From }
+
+func (f FileInfo) GetRange() (from, to uint64) { return f.From, f.To }
+func (f FileInfo) GetType() Type               { return f.Type }
 
 func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.From, o.From); res != 0 {
@@ -251,8 +269,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 		return res
 	}
 
-	// this is a lexical comparison (don't use enum)
-	return strings.Compare(f.Type.Name(), o.Type.Name())
+	return strings.Compare(f.name, o.name)
 }
 
 func (f FileInfo) As(t Type) FileInfo {

@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
+	"errors"
 	"io"
 	"math"
 	"testing"
@@ -166,7 +166,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
-			require.NoError(t, fmt.Errorf("null fork digest"))
+			require.NoError(t, errors.New("null fork digest"))
 		}
 		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
@@ -288,7 +288,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
-			require.NoError(t, fmt.Errorf("null fork digest"))
+			require.NoError(t, errors.New("null fork digest"))
 		}
 		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {

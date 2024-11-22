@@ -37,6 +37,7 @@ const (
 
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
+	ReadAccountDataForDebug(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
 	ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error)
 	ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error)

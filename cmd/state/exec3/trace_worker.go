@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -76,13 +75,18 @@ func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine consensus.EngineR
 		stateReader:  stateReader,
 		tracer:       tracer,
 		evm:          vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cc, vm.Config{}),
-		vmConfig:     &vm.Config{},
+		vmConfig:     &vm.Config{NoBaseFee: true},
 		ibs:          state.New(stateReader),
 	}
 	if tracer != nil {
-		ie.vmConfig = &vm.Config{Debug: true, Tracer: tracer.TracingHooks()}
+		ie.vmConfig.Debug = true
+		ie.vmConfig.Tracer = tracer.TracingHooks()
 	}
 	return ie
+}
+
+func (e *TraceWorker) Close() {
+	e.evm.JumpDestCache.LogStats()
 }
 
 func (e *TraceWorker) ChangeBlock(header *types.Header) {
@@ -96,21 +100,21 @@ func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 
-func (e *TraceWorker) GetLogs(txIdx int, txn types.Transaction) types.Logs {
-	return e.ibs.GetLogs(txn.Hash())
+func (e *TraceWorker) GetRawLogs(txIdx int) types.Logs { return e.ibs.GetRawLogs(txIdx) }
+func (e *TraceWorker) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) []*types.Log {
+	return e.ibs.GetLogs(txIndex, txnHash, blockNumber, blockHash)
 }
 
-func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) (*evmtypes.ExecutionResult, error) {
+func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	e.stateReader.SetTxNum(txNum)
-	txHash := txn.Hash()
 	e.ibs.Reset()
-	e.ibs.SetTxContext(txHash, e.blockHash, txIndex)
-	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
+	e.ibs.SetTxContext(txIndex)
+
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
 		return nil, err
 	}
-	e.evm.ResetBetweenBlocks(*e.blockCtx, core.NewEVMTxContext(msg), e.ibs, *e.vmConfig, e.rules)
+	msg.SetCheckNonce(!e.vmConfig.StatelessExec)
 	if msg.FeeCap().IsZero() {
 		// Only zero-gas transactions may be service ones
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
@@ -118,14 +122,24 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction) 
 		}
 		msg.SetIsFree(e.engine.IsServiceTransaction(msg.From(), syscall))
 	}
-	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
+
+	txContext := core.NewEVMTxContext(msg)
+	if e.vmConfig.TraceJumpDest {
+		txContext.TxHash = txn.Hash()
+	}
+	e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
+
+	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
+	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 	if err != nil {
 		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
+	e.ibs.SoftFinalise()
 	if e.vmConfig.Tracer != nil {
 		if e.tracer.Found() {
 			e.tracer.SetTransaction(txn)
 		}
 	}
+
 	return res, nil
 }

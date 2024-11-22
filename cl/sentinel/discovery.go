@@ -18,7 +18,7 @@ package sentinel
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -30,19 +30,26 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
+	"golang.org/x/sync/semaphore"
 )
 
-const peerSubnetTarget = 4
+const (
+	peerSubnetTarget                 = 4
+	goRoutinesOpeningPeerConnections = 4
+)
 
 // ConnectWithPeer is used to attempt to connect and add the peer to our pool
 // it errors when if fail to connect with the peer, for instance, if it fails the handshake
 // if it does not return an error, the peer is attempted to be added to the pool
-func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo) (err error) {
+func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem *semaphore.Weighted) (err error) {
+	if sem != nil {
+		defer sem.Release(1)
+	}
 	if info.ID == s.host.ID() {
 		return nil
 	}
 	if s.peers.BanStatus(info.ID) {
-		return fmt.Errorf("refused to connect to bad peer")
+		return errors.New("refused to connect to bad peer")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
@@ -63,7 +70,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.ConnectWithPeer(s.ctx, peerInfo); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, peerInfo, nil); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -89,6 +96,9 @@ func (s *Sentinel) listenForPeers() {
 	if err := s.connectWithAllPeers(multiAddresses); err != nil {
 		log.Warn("Could not connect to static peers", "reason", err)
 	}
+
+	// limit the number of goroutines opening connection with peers
+	sem := semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections))
 
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
@@ -122,9 +132,20 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		if err := s.ConnectWithPeer(s.ctx, *peerInfo); err != nil {
-			log.Trace("[Sentinel] Could not connect with peer", "err", err)
+		if err := sem.Acquire(s.ctx, 1); err != nil {
+			if errors.Is(err, context.Canceled) {
+				break
+			}
+			log.Error("[caplin] Failed to acquire sem for opening peer connection", "err", err)
+			continue
 		}
+
+		go func() {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo, sem); err != nil {
+				log.Trace("[Sentinel] Could not connect with peer", "err", err)
+			}
+		}()
+
 	}
 }
 

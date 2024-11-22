@@ -31,13 +31,12 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/tests"
 	"github.com/erigontech/erigon/turbo/stages/mock"
@@ -106,7 +105,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
-	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber, m.HistoryV3)
+	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage("{}"))

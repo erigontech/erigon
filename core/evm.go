@@ -20,7 +20,6 @@
 package core
 
 import (
-	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -49,7 +48,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	if header.BaseFee != nil {
 		overflow := baseFee.SetFromBig(header.BaseFee)
 		if overflow {
-			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
+			panic("header.BaseFee higher than 2^256-1")
 		}
 	}
 

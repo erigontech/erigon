@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"sync"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -47,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -62,18 +65,19 @@ type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
 
-	blockReader     freezeblocks.BeaconSnapshotReader
-	indiciesDB      kv.RwDB
-	netConfig       *clparams.NetworkConfig
-	ethClock        eth_clock.EthereumClock
-	beaconChainCfg  *clparams.BeaconChainConfig
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	operationsPool  pool.OperationsPool
-	syncedData      *synced_data.SyncedDataManager
-	stateReader     *historical_states_reader.HistoricalStatesReader
-	sentinel        sentinel.SentinelClient
-	blobStoage      blob_storage.BlobStorage
-	caplinSnapshots *freezeblocks.CaplinSnapshots
+	blockReader          freezeblocks.BeaconSnapshotReader
+	indiciesDB           kv.RwDB
+	netConfig            *clparams.NetworkConfig
+	ethClock             eth_clock.EthereumClock
+	beaconChainCfg       *clparams.BeaconChainConfig
+	forkchoiceStore      forkchoice.ForkChoiceStorage
+	operationsPool       pool.OperationsPool
+	syncedData           synced_data.SyncedData
+	stateReader          *historical_states_reader.HistoricalStatesReader
+	sentinel             sentinel.SentinelClient
+	blobStoage           blob_storage.BlobStorage
+	caplinSnapshots      *freezeblocks.CaplinSnapshots
+	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
 	version string // Node's version
 
@@ -82,7 +86,7 @@ type ApiHandler struct {
 
 	// caches
 	lighthouseInclusionCache sync.Map
-	emitters                 *beaconevents.Emitters
+	emitters                 *beaconevents.EventEmitter
 
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
@@ -105,6 +109,8 @@ type ApiHandler struct {
 	blsToExecutionChangeService      services.BLSToExecutionChangeService
 	proposerSlashingService          services.ProposerSlashingService
 	builderClient                    builder.BuilderClient
+	validatorsMonitor                monitor.ValidatorMonitor
+	enableMemoizedHeadState          bool
 }
 
 func NewApiHandler(
@@ -116,12 +122,12 @@ func NewApiHandler(
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	operationsPool pool.OperationsPool,
 	rcsn freezeblocks.BeaconSnapshotReader,
-	syncedData *synced_data.SyncedDataManager,
+	syncedData synced_data.SyncedData,
 	stateReader *historical_states_reader.HistoricalStatesReader,
 	sentinel sentinel.SentinelClient,
 	version string,
 	routerCfg *beacon_router_configuration.RouterConfiguration,
-	emitters *beaconevents.Emitters,
+	emitters *beaconevents.EventEmitter,
 	blobStoage blob_storage.BlobStorage,
 	caplinSnapshots *freezeblocks.CaplinSnapshots,
 	validatorParams *validator_params.ValidatorParams,
@@ -138,24 +144,28 @@ func NewApiHandler(
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
+	validatorMonitor monitor.ValidatorMonitor,
+	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
+	enableMemoizedHeadState bool,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
 		panic(err)
 	}
 	return &ApiHandler{
-		logger:          logger,
-		validatorParams: validatorParams,
-		o:               sync.Once{},
-		netConfig:       netConfig,
-		ethClock:        ethClock,
-		beaconChainCfg:  beaconChainConfig,
-		indiciesDB:      indiciesDB,
-		forkchoiceStore: forkchoiceStore,
-		operationsPool:  operationsPool,
-		blockReader:     rcsn,
-		syncedData:      syncedData,
-		stateReader:     stateReader,
+		logger:               logger,
+		validatorParams:      validatorParams,
+		o:                    sync.Once{},
+		netConfig:            netConfig,
+		ethClock:             ethClock,
+		beaconChainCfg:       beaconChainConfig,
+		indiciesDB:           indiciesDB,
+		forkchoiceStore:      forkchoiceStore,
+		operationsPool:       operationsPool,
+		blockReader:          rcsn,
+		syncedData:           syncedData,
+		stateReader:          stateReader,
+		caplinStateSnapshots: caplinStateSnapshots,
 		randaoMixesPool: sync.Pool{New: func() interface{} {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
@@ -179,6 +189,8 @@ func NewApiHandler(
 		blsToExecutionChangeService:      blsToExecutionChangeService,
 		proposerSlashingService:          proposerSlashingService,
 		builderClient:                    builderClient,
+		validatorsMonitor:                validatorMonitor,
+		enableMemoizedHeadState:          enableMemoizedHeadState,
 	}
 }
 
@@ -332,7 +344,7 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Validator {
 				r.Route("/validator", func(r chi.Router) {
-					r.Post("/blocks/{slot}", http.NotFound)
+					r.Get("/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock)) // deprecate
 				})
 			}
 		})
@@ -347,4 +359,18 @@ func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.init()
 	})
 	a.mux.ServeHTTP(w, r)
+}
+
+func (a *ApiHandler) getHead() (common.Hash, uint64, int, error) {
+	if a.enableMemoizedHeadState {
+		if a.syncedData.Syncing() {
+			return common.Hash{}, 0, http.StatusServiceUnavailable, errors.New("beacon node is syncing")
+		}
+		return a.syncedData.HeadRoot(), a.syncedData.HeadSlot(), 0, nil
+	}
+	blockRoot, blockSlot, err := a.forkchoiceStore.GetHead(nil)
+	if err != nil {
+		return common.Hash{}, 0, http.StatusInternalServerError, err
+	}
+	return blockRoot, blockSlot, 0, nil
 }

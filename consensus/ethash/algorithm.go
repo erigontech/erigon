@@ -30,18 +30,14 @@ import (
 	"time"
 	"unsafe"
 
-	common2 "github.com/erigontech/erigon-lib/common"
-
 	"golang.org/x/crypto/sha3"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/crypto"
 )
 
 const (
@@ -141,7 +137,7 @@ func seedHash(block uint64) []byte {
 		return seed
 	}
 
-	h := common2.NewHasher()
+	h := libcommon.NewHasher()
 
 	for i := 0; i < int(block/epochLength); i++ {
 		h.Sha.Reset()
@@ -157,7 +153,7 @@ func seedHash(block uint64) []byte {
 		}
 	}
 
-	common2.ReturnHasherToPool(h)
+	libcommon.ReturnHasherToPool(h)
 
 	return seed
 }
@@ -192,7 +188,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 		if elapsed > 5*time.Second {
 			logFn = logger.Info
 		}
-		logFn("Generated ethash verification cache", "elapsed", common.PrettyDuration(elapsed))
+		logFn("Generated ethash verification cache", "elapsed", libcommon.PrettyDuration(elapsed))
 	}()
 	// Convert our destination slice to a byte buffer
 	var cache []byte
@@ -218,7 +214,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 			case <-done:
 				return
 			case <-time.After(3 * time.Second):
-				logger.Info("Generating ethash verification cache", "percentage", atomic.LoadUint32(&progress)*100/uint32(rows)/4, "elapsed", common.PrettyDuration(time.Since(start)))
+				logger.Info("Generating ethash verification cache", "percentage", atomic.LoadUint32(&progress)*100/uint32(rows)/4, "elapsed", libcommon.PrettyDuration(time.Since(start)))
 			}
 		}
 	}()
@@ -348,7 +344,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 		if elapsed > 3*time.Second {
 			logFn = logger.Info
 		}
-		logFn("Generated ethash verification cache", "elapsed", common.PrettyDuration(elapsed))
+		logFn("Generated ethash verification cache", "elapsed", libcommon.PrettyDuration(elapsed))
 	}()
 
 	// Figure out whether the bytes need to be swapped for the machine
@@ -396,7 +392,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 				})
 
 				if status := atomic.AddUint64(&progress, 1); status%percent == 0 {
-					logger.Info("Generating DAG in progress", "percentage", (status*100)/(size/hashBytes), "elapsed", common.PrettyDuration(time.Since(start)))
+					logger.Info("Generating DAG in progress", "percentage", (status*100)/(size/hashBytes), "elapsed", libcommon.PrettyDuration(time.Since(start)))
 				}
 			}
 		}(i)

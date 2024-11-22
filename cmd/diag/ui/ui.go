@@ -30,7 +30,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigonwatch"
+	"github.com/erigontech/erigonwatch"
 
 	"github.com/erigontech/erigon/cmd/diag/flags"
 )
@@ -40,7 +40,7 @@ var (
 		Name:     "ui.addr",
 		Usage:    "URL to serve UI web application",
 		Required: false,
-		Value:    "127.0.0.1:6060",
+		Value:    "127.0.0.1:5137",
 	}
 )
 
@@ -128,8 +128,8 @@ func runUI(cli *cli.Context) error {
 		}
 	}()
 
-	uiUrl := fmt.Sprintf("http://%s", listenUrl)
-	fmt.Println(text.Hyperlink(uiUrl, fmt.Sprintf("UI running on %s", uiUrl)))
+	uiUrl := "http://" + listenUrl
+	fmt.Println(text.Hyperlink(uiUrl, "UI running on "+uiUrl))
 
 	wg.Wait() // Wait for the server goroutine to finish
 	return nil

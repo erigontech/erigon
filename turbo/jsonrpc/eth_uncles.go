@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -39,7 +38,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	}
 	defer tx.Rollback()
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -51,11 +50,6 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
-	if err != nil {
-		return nil, err
-	}
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {
@@ -81,13 +75,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	if block == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	number := block.NumberU64()
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {
@@ -109,7 +97,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 	}
 	defer tx.Rollback()
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return &n, err
 	}
@@ -134,7 +122,10 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, hash)
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if number == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}

@@ -19,28 +19,23 @@ package p2p
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/direct"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 )
 
-type PeerPenalizer interface {
-	Penalize(ctx context.Context, peerId *PeerId) error
-}
-
-func NewPeerPenalizer(sentryClient direct.SentryClient) PeerPenalizer {
-	return &peerPenalizer{
+func NewPeerPenalizer(sentryClient sentryproto.SentryClient) *PeerPenalizer {
+	return &PeerPenalizer{
 		sentryClient: sentryClient,
 	}
 }
 
-type peerPenalizer struct {
-	sentryClient direct.SentryClient
+type PeerPenalizer struct {
+	sentryClient sentryproto.SentryClient
 }
 
-func (p *peerPenalizer) Penalize(ctx context.Context, peerId *PeerId) error {
-	_, err := p.sentryClient.PenalizePeer(ctx, &sentry.PenalizePeerRequest{
+func (p PeerPenalizer) Penalize(ctx context.Context, peerId *PeerId) error {
+	_, err := p.sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
 		PeerId:  peerId.H512(),
-		Penalty: sentry.PenaltyKind_Kick,
+		Penalty: sentryproto.PenaltyKind_Kick,
 	})
 
 	return err

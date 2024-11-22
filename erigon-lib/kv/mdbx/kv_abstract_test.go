@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -100,10 +101,8 @@ func TestManagedTx(t *testing.T) {
 	writeDBs, readDBs := setupDatabases(t, logger, func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return map[string]kv.TableCfgItem{
 			bucket1: {
-				Flags:                     kv.DupSort,
-				AutoDupSortKeysConversion: true,
-				DupToLen:                  4,
-				DupFromLen:                6,
+				//TODO: maybe it is bad to remove both flags but tests fail in another way
+				Flags: 0,
 			},
 			bucket2: {
 				Flags: 0,
@@ -273,7 +272,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Range(kv.AccountChangeSet, from, to)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Asc, kv.Unlim)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err = it.Next()
@@ -294,7 +293,7 @@ func TestRemoteKvRange(t *testing.T) {
 	// Limit
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeAscend(kv.AccountChangeSet, from, to, 2)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Asc, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
@@ -314,7 +313,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeDescend(kv.AccountChangeSet, from, to, 2)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Desc, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()

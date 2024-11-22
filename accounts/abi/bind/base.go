@@ -27,12 +27,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
 	ethereum "github.com/erigontech/erigon"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/event"
 )
 
@@ -218,7 +217,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *libcommon.Address
 	if opts.Value != nil {
 		overflow := value.SetFromBig(opts.Value)
 		if overflow {
-			return nil, fmt.Errorf("opts.Value higher than 2^256-1")
+			return nil, errors.New("opts.Value higher than 2^256-1")
 		}
 	}
 	var nonce uint64
@@ -240,7 +239,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *libcommon.Address
 	}
 	gasPrice, overflow := uint256.FromBig(gasPriceBig)
 	if overflow {
-		return nil, fmt.Errorf("gasPriceBig higher than 2^256-1")
+		return nil, errors.New("gasPriceBig higher than 2^256-1")
 	}
 	gasLimit := opts.GasLimit
 	if gasLimit == 0 {

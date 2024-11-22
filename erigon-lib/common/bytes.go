@@ -74,9 +74,20 @@ func EnsureEnoughSize(in []byte, size int) []byte {
 func BitLenToByteLen(bitLen int) (byteLen int) {
 	return (bitLen + 7) / 8
 }
+
 func Shorten(k []byte, l int) []byte {
 	if len(k) > l {
 		return k[:l]
 	}
 	return k
+}
+
+func BytesToUint64(buf []byte) (x uint64) {
+	for i, b := range buf {
+		x = x<<8 + uint64(b)
+		if i == 7 {
+			return
+		}
+	}
+	return
 }

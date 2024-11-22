@@ -16,7 +16,10 @@
 
 package state
 
-import "github.com/erigontech/erigon-lib/metrics"
+import (
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/metrics"
+)
 
 var (
 	//LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
@@ -56,4 +59,60 @@ var (
 	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
 	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
+)
+
+var (
+	branchKeyDerefSpent = []metrics.Summary{
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L0"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L1"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L2"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L3"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="L4"}`),
+		metrics.GetOrCreateSummary(`branch_key_deref{level="recent"}`),
+	}
+)
+
+var (
+	mxsKVGet = [kv.DomainLen][]metrics.Summary{
+		kv.AccountsDomain: {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="account"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="account"}`),
+		},
+		kv.StorageDomain: {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="storage"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="storage"}`),
+		},
+		kv.CodeDomain: {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="code"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="code"}`),
+		},
+		kv.CommitmentDomain: {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="commitment"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="commitment"}`),
+		},
+		kv.ReceiptDomain: {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="receipt"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="receipt"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="receipt"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="receipt"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="receipt"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="receipt"}`),
+		},
+	}
 )

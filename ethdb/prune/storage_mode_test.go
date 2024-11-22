@@ -17,30 +17,27 @@
 package prune
 
 import (
-	"math/rand"
 	"strconv"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	prune, err := Get(tx)
 	assert.NoError(t, err)
-	assert.Equal(t, Mode{true, Distance(math.MaxUint64), Distance(math.MaxUint64),
-		Distance(math.MaxUint64), Distance(math.MaxUint64), Distance(math.MaxUint64), Experiments{}}, prune)
+	assert.Equal(t, Mode{true, Distance(math.MaxUint64), Distance(math.MaxUint64), Experiments{}}, prune)
 
-	err = setIfNotExist(tx, Mode{true, Distance(1), Distance(2),
-		Before(3), Before(4), Before(100), Experiments{}})
+	err = setIfNotExist(tx, Mode{true, Distance(1), Distance(2), Experiments{}})
 	assert.NoError(t, err)
 
 	prune, err = Get(tx)
 	assert.NoError(t, err)
-	assert.Equal(t, Mode{true, Distance(1), Distance(2),
-		Before(3), Before(4), Before(100), Experiments{}}, prune)
+	assert.Equal(t, Mode{true, Distance(1), Distance(2), Experiments{}}, prune)
 }
 
 var distanceTests = []struct {
@@ -60,28 +57,6 @@ func TestDistancePruneTo(t *testing.T) {
 			stageHead := tt.stageHead
 			d := Distance(tt.pruneTo)
 			pruneTo := d.PruneTo(stageHead)
-
-			if pruneTo != tt.expected {
-				t.Errorf("got %d, want %d", pruneTo, tt.expected)
-			}
-		})
-	}
-}
-
-var beforeTests = []struct {
-	pruneTo  uint64
-	expected uint64
-}{
-	{0, 0},
-	{1_000_000, 999_999},
-}
-
-func TestBeforePruneTo(t *testing.T) {
-	for _, tt := range beforeTests {
-		t.Run(strconv.FormatUint(tt.pruneTo, 10), func(t *testing.T) {
-			stageHead := uint64(rand.Int63n(10_000_000))
-			b := Before(tt.pruneTo)
-			pruneTo := b.PruneTo(stageHead)
 
 			if pruneTo != tt.expected {
 				t.Errorf("got %d, want %d", pruneTo, tt.expected)

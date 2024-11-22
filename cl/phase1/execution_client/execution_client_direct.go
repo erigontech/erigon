@@ -19,6 +19,7 @@ package execution_client
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -58,7 +59,7 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 		return PayloadStatusInvalidated, err
 	}
 
-	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals, body.Requests)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
 		return PayloadStatusNone, err
 	}
 
@@ -75,13 +76,13 @@ func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltype
 	// check status
 	switch status {
 	case execution.ExecutionStatus_BadBlock, execution.ExecutionStatus_InvalidForkchoice:
-		return PayloadStatusInvalidated, fmt.Errorf("bad block")
+		return PayloadStatusInvalidated, errors.New("bad block")
 	case execution.ExecutionStatus_Busy, execution.ExecutionStatus_MissingSegment, execution.ExecutionStatus_TooFarAway:
 		return PayloadStatusNotValidated, nil
 	case execution.ExecutionStatus_Success:
 		return PayloadStatusValidated, nil
 	}
-	return PayloadStatusNone, fmt.Errorf("unexpected status")
+	return PayloadStatusNone, errors.New("unexpected status")
 }
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
@@ -90,10 +91,10 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
 	if status == execution.ExecutionStatus_InvalidForkchoice {
-		return nil, fmt.Errorf("forkchoice was invalid")
+		return nil, errors.New("forkchoice was invalid")
 	}
 	if status == execution.ExecutionStatus_BadBlock {
-		return nil, fmt.Errorf("bad block as forkchoice")
+		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
 		return nil, nil

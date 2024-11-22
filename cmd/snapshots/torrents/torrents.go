@@ -18,6 +18,7 @@ package torrents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -136,7 +137,7 @@ func torrents(cliCtx *cli.Context, command string) error {
 	}
 
 	if src == nil {
-		return fmt.Errorf("missing data source")
+		return errors.New("missing data source")
 	}
 
 	var rcCli *downloader.RCloneClient
@@ -188,7 +189,7 @@ func torrents(cliCtx *cli.Context, command string) error {
 	}
 
 	if src != nil && srcSession == nil {
-		return fmt.Errorf("no src session established")
+		return errors.New("no src session established")
 	}
 
 	logger.Debug("Starting torrents " + command)
@@ -199,14 +200,14 @@ func torrents(cliCtx *cli.Context, command string) error {
 	case "update":
 		startTime := time.Now()
 
-		logger.Info(fmt.Sprintf("Starting update: %s", src.String()), "first", firstBlock, "last", lastBlock, "dir", tempDir)
+		logger.Info("Starting update: "+src.String(), "first", firstBlock, "last", lastBlock, "dir", tempDir)
 
 		err := updateTorrents(cliCtx.Context, srcSession, firstBlock, lastBlock, logger)
 
 		if err == nil {
-			logger.Info(fmt.Sprintf("Finished update: %s", src.String()), "elapsed", time.Since(startTime))
+			logger.Info("Finished update: "+src.String(), "elapsed", time.Since(startTime))
 		} else {
-			logger.Info(fmt.Sprintf("Aborted update: %s", src.String()), "err", err)
+			logger.Info("Aborted update: "+src.String(), "err", err)
 		}
 
 		return err
@@ -214,14 +215,14 @@ func torrents(cliCtx *cli.Context, command string) error {
 	case "verify":
 		startTime := time.Now()
 
-		logger.Info(fmt.Sprintf("Starting verify: %s", src.String()), "first", firstBlock, "last", lastBlock, "dir", tempDir)
+		logger.Info("Starting verify: "+src.String(), "first", firstBlock, "last", lastBlock, "dir", tempDir)
 
 		err := verifyTorrents(cliCtx.Context, srcSession, firstBlock, lastBlock, logger)
 
 		if err == nil {
-			logger.Info(fmt.Sprintf("Verified: %s", src.String()), "elapsed", time.Since(startTime))
+			logger.Info("Verified: "+src.String(), "elapsed", time.Since(startTime))
 		} else {
-			logger.Info(fmt.Sprintf("Verification failed: %s", src.String()), "err", err)
+			logger.Info("Verification failed: "+src.String(), "err", err)
 		}
 
 		return err
@@ -388,7 +389,7 @@ func updateTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				}
 			}
 
-			logger.Info(fmt.Sprintf("Updating %s", file+".torrent"))
+			logger.Info("Updating " + file + ".torrent")
 
 			err := srcSession.Download(gctx, file)
 
@@ -445,7 +446,7 @@ func verifyTorrents(ctx context.Context, srcSession *downloader.RCloneSession, f
 				}
 			}
 
-			logger.Info(fmt.Sprintf("Validating %s", file+".torrent"))
+			logger.Info("Validating " + file + ".torrent")
 
 			var mi *metainfo.MetaInfo
 

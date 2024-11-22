@@ -18,11 +18,12 @@ package p2p
 
 import (
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 type NodeKeyConfig struct {
@@ -87,7 +88,7 @@ func (config NodeKeyConfig) LoadOrGenerateAndSave(keyfile string) (*ecdsa.Privat
 func (config NodeKeyConfig) LoadOrParseOrGenerateAndSave(file, hex, datadir string) (*ecdsa.PrivateKey, error) {
 	switch {
 	case file != "" && hex != "":
-		return nil, fmt.Errorf("P2P node key is set as both file and hex string - these options are mutually exclusive")
+		return nil, errors.New("P2P node key is set as both file and hex string - these options are mutually exclusive")
 	case file != "":
 		return config.load(file)
 	case hex != "":

@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
@@ -143,8 +142,7 @@ func aggregateResultsFromStateTests(
 		MustOpen()
 	defer _db.Close()
 
-	cr := rawdb.NewCanonicalReader()
-	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, cr, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +166,7 @@ func aggregateResultsFromStateTests(
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
-			statedb, root, err := test.Run(tx, st, cfg)
+			statedb, root, err := test.Run(tx, st, cfg, dirs)
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()

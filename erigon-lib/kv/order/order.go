@@ -16,9 +16,53 @@
 
 package order
 
+import (
+	"bytes"
+	"fmt"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+)
+
 type By bool
 
 const (
 	Asc  By = true
 	Desc By = false
 )
+
+func FromBool(v bool) By {
+	if v {
+		return Asc
+	}
+	return Desc
+}
+
+func (asc By) Assert(k1, k2 []byte) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	if k1 == nil || k2 == nil {
+		return
+	}
+	if asc {
+		if bytes.Compare(k1, k2) > 0 {
+			panic(fmt.Sprintf("epect: %x <= %x", k1, k2))
+		}
+		return
+	}
+	if bytes.Compare(k1, k2) < 0 {
+		panic(fmt.Sprintf("epect: %x >= %x", k1, k2))
+	}
+}
+
+func (asc By) AssertList(keys [][]byte) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	if len(keys) < 2 {
+		return
+	}
+	for i := 0; i < len(keys)-2; i++ {
+		asc.Assert(keys[i], keys[i+1])
+	}
+}

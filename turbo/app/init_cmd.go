@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"os"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
+
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -29,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/node"
 )
@@ -78,7 +79,10 @@ func initGenesis(cliCtx *cli.Context) error {
 	}
 
 	// Open and initialise both full and light databases
-	stack := MakeConfigNodeDefault(cliCtx, logger)
+	stack, err := MakeNodeWithDefaultConfig(cliCtx, logger)
+	if err != nil {
+		return err
+	}
 	defer stack.Close()
 
 	chaindb, err := node.OpenDatabase(cliCtx.Context, stack.Config(), kv.ChainDB, "", false, logger)
@@ -86,14 +90,12 @@ func initGenesis(cliCtx *cli.Context) error {
 		utils.Fatalf("Failed to open database: %v", err)
 	}
 
-	var tracingHooks *tracing.Hooks
 	if tracer != nil {
-		tracingHooks = tracer.Hooks
 		if tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
 			tracer.Hooks.OnBlockchainInit(genesis.Config)
 		}
 	}
-	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, "", logger, tracingHooks)
+	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, datadir.New(cliCtx.String(utils.DataDirFlag.Name)), logger)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}

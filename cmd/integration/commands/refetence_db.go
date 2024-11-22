@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -57,7 +58,6 @@ var stateBuckets = []string{
 	kv.E2AccountsHistory,
 	kv.E2StorageHistory,
 	kv.TxLookup,
-	kv.ContractTEVMCode,
 }
 
 var cmdWarmup = &cobra.Command{
@@ -198,11 +198,8 @@ func init() {
 
 func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
-
-	if dbWriteMap {
-		dbOpts = dbOpts.WriteMap()
-	}
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+		WriteMap(dbWriteMap)
 
 	db := dbOpts.MustOpen()
 	defer db.Close()
@@ -258,11 +255,8 @@ func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.L
 
 func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit))
-
-	if dbWriteMap {
-		dbOpts = dbOpts.WriteMap()
-	}
+	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+		WriteMap(dbWriteMap)
 
 	db := dbOpts.MustOpen()
 	defer db.Close()
@@ -427,10 +421,7 @@ func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	}
 	defer file.Close()
 
-	dstOpts := mdbx2.NewMDBX(logger).Path(to)
-	if dbWriteMap {
-		dstOpts = dstOpts.WriteMap()
-	}
+	dstOpts := mdbx2.NewMDBX(logger).Path(to).WriteMap(dbWriteMap)
 	dst := dstOpts.MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
@@ -508,7 +499,7 @@ MainLoop:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-commitEvery.C:
-				logger.Info("Progress", "bucket", bucket, "key", fmt.Sprintf("%x", k))
+				logger.Info("Progress", "bucket", bucket, "key", hex.EncodeToString(k))
 			}
 		}
 		err = fileScanner.Err()

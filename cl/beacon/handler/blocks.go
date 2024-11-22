@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -34,29 +35,25 @@ type headerResponse struct {
 	Header    *cltypes.SignedBeaconBlockHeader `json:"header"`
 }
 
-type getHeadersRequest struct {
-	Slot       *uint64         `json:"slot,omitempty,string"`
-	ParentRoot *libcommon.Hash `json:"root,omitempty"`
-}
-
 func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *beaconhttp.SegmentID) (root libcommon.Hash, err error) {
 	switch {
 	case blockId.Head():
-		root, _, err = a.forkchoiceStore.GetHead()
+		var statusCode int
+		root, _, statusCode, err = a.getHead()
 		if err != nil {
-			return libcommon.Hash{}, err
+			return libcommon.Hash{}, beaconhttp.NewEndpointError(statusCode, err)
 		}
 	case blockId.Finalized():
-		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.FinalizedCheckpoint().Root
 	case blockId.Justified():
-		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.JustifiedCheckpoint().Root
 	case blockId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
 		if root == (libcommon.Hash{}) {
-			return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("genesis block not found"))
+			return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("genesis block not found"))
 		}
 	case blockId.GetSlot() != nil:
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *blockId.GetSlot())
@@ -70,7 +67,7 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *bea
 		// first check if it exists
 		root = *blockId.GetRoot()
 	default:
-		return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("cannot parse block id"))
+		return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("cannot parse block id"))
 	}
 	return
 }
@@ -200,6 +197,7 @@ func (a *ApiHandler) GetEthV1BeaconBlockRoot(w http.ResponseWriter, r *http.Requ
 		return nil, err
 	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
+
 	// check if the root exist
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {

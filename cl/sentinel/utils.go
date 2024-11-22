@@ -18,12 +18,13 @@ package sentinel
 
 import (
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -38,16 +39,16 @@ import (
 )
 
 func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
-	xVal, yVal := new(btcec.FieldVal), new(btcec.FieldVal)
+	xVal, yVal := new(secp256k1.FieldVal), new(secp256k1.FieldVal)
 	overflows := xVal.SetByteSlice(pubkey.X.Bytes())
 	if overflows {
-		return nil, fmt.Errorf("x value overflows")
+		return nil, errors.New("x value overflows")
 	}
 	overflows = yVal.SetByteSlice(pubkey.Y.Bytes())
 	if overflows {
-		return nil, fmt.Errorf("y value overflows")
+		return nil, errors.New("y value overflows")
 	}
-	newKey := crypto.PubKey((*crypto.Secp256k1PublicKey)(btcec.NewPublicKey(xVal, yVal)))
+	newKey := crypto.PubKey((*crypto.Secp256k1PublicKey)(secp256k1.NewPublicKey(xVal, yVal)))
 	// Zero out temporary values.
 	xVal.Zero()
 	yVal.Zero()
@@ -85,7 +86,7 @@ func multiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (
 		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
 	}
 	if id.String() == "" {
-		return nil, fmt.Errorf("empty peer id given")
+		return nil, errors.New("empty peer id given")
 	}
 	if parsedIP.To4() != nil {
 		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/%s/%d/p2p/%s", ipAddr, protocol, port, id.String()))

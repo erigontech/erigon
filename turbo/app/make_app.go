@@ -168,10 +168,13 @@ func doMigrateFlags(ctx *cli.Context) {
 	}
 }
 
-func NewNodeConfig(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
-	nodeConfig := enode.NewNodConfigUrfave(ctx, logger)
+func NewNodeConfig(ctx *cli.Context, logger log.Logger) (*nodecfg.Config, error) {
+	nodeConfig, err := enode.NewNodConfigUrfave(ctx, logger)
+	if err != nil {
+		return nil, err
+	}
 
-	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
+	// see similar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {
@@ -185,11 +188,15 @@ func NewNodeConfig(ctx *cli.Context, logger log.Logger) *nodecfg.Config {
 		nodeConfig.Dirs = datadir.New(ctx.String(utils.DataDirFlag.Name))
 	}
 
-	return nodeConfig
+	return nodeConfig, nil
 }
 
-func MakeConfigNodeDefault(cliCtx *cli.Context, logger log.Logger) *node.Node {
-	return makeConfigNode(cliCtx.Context, NewNodeConfig(cliCtx, logger), logger)
+func MakeNodeWithDefaultConfig(cliCtx *cli.Context, logger log.Logger) (*node.Node, error) {
+	conf, err := NewNodeConfig(cliCtx, logger)
+	if err != nil {
+		return nil, err
+	}
+	return makeConfigNode(cliCtx.Context, conf, logger), nil
 }
 
 func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {

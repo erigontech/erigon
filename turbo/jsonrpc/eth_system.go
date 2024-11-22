@@ -18,19 +18,17 @@ package jsonrpc
 
 import (
 	"context"
-	"math"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv"
-
+	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/gasprice"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 )
@@ -51,59 +49,29 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 
 // Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	highestBlock, err := rawdb.ReadLastNewBlockSeen(tx)
+	reply, err := api.ethBackend.Syncing(ctx)
 	if err != nil {
 		return false, err
 	}
-
-	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return false, err
-	}
-
-	frozenBlocks := api._blockReader.FrozenBlocks()
-	if highestBlock < frozenBlocks {
-		highestBlock = frozenBlocks
-	}
-
-	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
-	if highestBlock == 0 {
-		return map[string]interface{}{
-			"startingBlock": "0x0", // TODO: this is a placeholder, I do not think it matters what we return here, but 0x0 is probably a good placeholder.
-			"currentBlock":  hexutil.Uint64(currentBlock),
-			"highestBlock":  hexutil.Uint64(math.MaxUint64),
-		}, nil
-	}
-	reorgRange := 8
-
-	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
-	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
+	if !reply.Syncing {
 		return false, nil
 	}
 
-	// Otherwise gather the block sync stats
+	// Still sync-ing, gather the block sync stats
+	highestBlock := reply.LastNewBlockSeen
+	currentBlock := reply.CurrentBlock
 	type S struct {
 		StageName   string         `json:"stage_name"`
 		BlockNumber hexutil.Uint64 `json:"block_number"`
 	}
-	stagesMap := make([]S, len(stages.AllStages))
-	for i, stage := range stages.AllStages {
-		progress, err := stages.GetStageProgress(tx, stage)
-		if err != nil {
-			return nil, err
-		}
-		stagesMap[i].StageName = string(stage)
-		stagesMap[i].BlockNumber = hexutil.Uint64(progress)
+	stagesMap := make([]S, len(reply.Stages))
+	for i, stage := range reply.Stages {
+		stagesMap[i].StageName = stage.StageName
+		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
 	}
 
 	return map[string]interface{}{
-		"startingBlock": "0x0", // TODO: this is a placeholder, I do not think it matters what we return here, but 0x0 is probably a good placeholder.
+		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
 		"stages":        stagesMap,
@@ -177,10 +145,12 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 }
 
 type feeHistoryResult struct {
-	OldestBlock  *hexutil.Big     `json:"oldestBlock"`
-	Reward       [][]*hexutil.Big `json:"reward,omitempty"`
-	BaseFee      []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
-	GasUsedRatio []float64        `json:"gasUsedRatio"`
+	OldestBlock      *hexutil.Big     `json:"oldestBlock"`
+	Reward           [][]*hexutil.Big `json:"reward,omitempty"`
+	BaseFee          []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
+	GasUsedRatio     []float64        `json:"gasUsedRatio"`
+	BlobBaseFee      []*hexutil.Big   `json:"baseFeePerBlobGas,omitempty"`
+	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
 }
 
 func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
@@ -191,7 +161,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	defer tx.Rollback()
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.logger.New("app", "gasPriceOracle"))
 
-	oldest, reward, baseFee, gasUsed, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
+	oldest, reward, baseFee, gasUsed, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +184,67 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 			results.BaseFee[i] = (*hexutil.Big)(v)
 		}
 	}
+	if blobBaseFee != nil {
+		results.BlobBaseFee = make([]*hexutil.Big, len(blobBaseFee))
+		for i, v := range blobBaseFee {
+			results.BlobBaseFee[i] = (*hexutil.Big)(v)
+		}
+	}
+	if blobGasUsedRatio != nil {
+		results.BlobGasUsedRatio = blobGasUsedRatio
+	}
 	return results, nil
+}
+
+// BlobBaseFee returns the base fee for blob gas at the current head.
+func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
+	// read current header
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	header := rawdb.ReadCurrentHeader(tx)
+	if header == nil || header.BlobGasUsed == nil {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	config, err := api.BaseAPI.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header))
+	if err != nil {
+		return nil, err
+	}
+	return (*hexutil.Big)(ret256.ToBig()), nil
+}
+
+// BaseFee returns the base fee at the current head.
+func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
+	// read current header
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	header := rawdb.ReadCurrentHeader(tx)
+	if header == nil {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	config, err := api.BaseAPI.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	if !config.IsLondon(header.Number.Uint64() + 1) {
+		return (*hexutil.Big)(common.Big0), nil
+	}
+	return (*hexutil.Big)(misc.CalcBaseFee(config, header)), nil
 }
 
 type GasPriceOracleBackend struct {
@@ -244,7 +274,7 @@ func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	return cc
 }
 func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
-	return b.baseApi.getReceipts(ctx, b.tx, block, nil)
+	return b.baseApi.getReceipts(ctx, b.tx, block)
 }
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return nil, nil

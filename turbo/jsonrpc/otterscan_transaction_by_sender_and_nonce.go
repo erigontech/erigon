@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error) {
@@ -57,7 +58,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 			continue
 		}
 
-		v, ok, err := ttx.HistorySeek(kv.AccountsHistory, addr[:], txnID)
+		v, ok, err := ttx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 			return nil, err
@@ -97,7 +98,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
 	idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 		txnID := uint64(i) + prevTxnID
-		v, ok, err := ttx.HistorySeek(kv.AccountsHistory, addr[:], txnID)
+		v, ok, err := ttx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 			panic(err)
@@ -125,20 +126,22 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		}
 		return true
 	})
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
 	if searchErr != nil {
 		return nil, searchErr
 	}
 	if creationTxnID == 0 {
-		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
+		return nil, nil
 	}
-	ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
+	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("block not found by txnID=%d", creationTxnID)
 	}
-	minTxNum, err := rawdbv3.TxNums.Min(tx, bn)
+	minTxNum, err := txNumsReader.Min(tx, bn)
 	if err != nil {
 		return nil, err
 	}
@@ -160,30 +163,4 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	}
 	txHash := txn.Hash()
 	return &txHash, nil
-}
-
-func (api *OtterscanAPIImpl) findNonce(ctx context.Context, tx kv.Tx, addr common.Address, nonce uint64, blockNum uint64) (bool, common.Hash, error) {
-	hash, err := api._blockReader.CanonicalHash(ctx, tx, blockNum)
-	if err != nil {
-		return false, common.Hash{}, err
-	}
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
-	if err != nil {
-		return false, common.Hash{}, err
-	}
-	senders := block.Body().SendersFromTxs()
-
-	txs := block.Transactions()
-	for i, s := range senders {
-		if s != addr {
-			continue
-		}
-
-		t := txs[i]
-		if t.GetNonce() == nonce {
-			return true, t.Hash(), nil
-		}
-	}
-
-	return false, common.Hash{}, nil
 }

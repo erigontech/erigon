@@ -19,6 +19,7 @@ package cmp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -160,7 +161,7 @@ func cmp(cliCtx *cli.Context) error {
 
 	if loc1.LType == sync.TorrentFs || loc2.LType == sync.TorrentFs {
 		config := sync.NewTorrentClientConfigFromCobra(cliCtx, chain)
-		torrentCli, err = sync.NewTorrentClient(config)
+		torrentCli, err = sync.NewTorrentClient(cliCtx.Context, config)
 		if err != nil {
 			return fmt.Errorf("can't create torrent: %w", err)
 		}
@@ -221,11 +222,11 @@ func cmp(cliCtx *cli.Context) error {
 	}
 
 	if session1 == nil {
-		return fmt.Errorf("no first session established")
+		return errors.New("no first session established")
 	}
 
 	if session1 == nil {
-		return fmt.Errorf("no second session established")
+		return errors.New("no second session established")
 	}
 
 	logger.Info(fmt.Sprintf("Starting compare: %s==%s", loc1.String(), loc2.String()), "first", firstBlock, "last", lastBlock, "types", snapTypes, "dir", tempDir)
@@ -439,7 +440,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				g.SetLimit(2)
 
 				g.Go(func() error {
-					logger.Info(fmt.Sprintf("Downloading %s", ent1.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
+					logger.Info("Downloading ", ent1.Name(), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
 					startTime := time.Now()
 					defer func() {
 						atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
@@ -460,7 +461,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 						atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Downloading %s", ent2.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)), "size", datasize.ByteSize(ent2Info.Size()))
+					logger.Info("Downloading "+ent2.Name(), "entry", fmt.Sprint(i2+1, "/", len(f2ents)), "size", datasize.ByteSize(ent2Info.Size()))
 					err := c.session2.Download(gctx, ent2.Name())
 
 					if err != nil {
@@ -477,22 +478,20 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Name())
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					Enabled:      true,
 					ProduceE2:    false,
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
 
-				f1snaps.ReopenList([]string{ent1.Name()}, false)
+				f1snaps.OpenList([]string{ent1.Name()}, false)
 
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent1.Name())
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					Enabled:      true,
 					ProduceE2:    false,
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)
 
-				f2snaps.ReopenList([]string{ent2.Name()}, false)
+				f2snaps.OpenList([]string{ent2.Name()}, false)
 
 				err = func() error {
 					logger.Info(fmt.Sprintf("Comparing %s %s", ent1.Name(), ent2.Name()))
@@ -502,8 +501,8 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil, nil)
 
 					g, gctx = errgroup.WithContext(ctx)
 					g.SetLimit(2)
@@ -615,7 +614,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 						}()
 
-						logger.Info(fmt.Sprintf("Downloading %s", ent1.Body.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
+						logger.Info("Downloading "+ent1.Body.Name(), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
 						return c.session1.Download(ctx, ent1.Body.Name())
 					}()
 
@@ -631,9 +630,9 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Indexing %s", ent1.Body.Name()))
+					logger.Info("Indexing " + ent1.Body.Name())
 
-					return coresnaptype.Bodies.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					return coresnaptype.Bodies.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
@@ -647,7 +646,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						defer func() {
 							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 						}()
-						logger.Info(fmt.Sprintf("Downloading %s", ent1.Transactions.Name()), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
+						logger.Info("Downloading "+ent1.Transactions.Name(), "entry", fmt.Sprint(i1+1, "/", len(f1ents)))
 						return c.session1.Download(ctx, ent1.Transactions.Name())
 					}()
 
@@ -670,8 +669,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Indexing %s", ent1.Transactions.Name()))
-					return coresnaptype.Transactions.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					logger.Info("Indexing " + ent1.Transactions.Name())
+					return coresnaptype.Transactions.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				b2err := make(chan error, 1)
@@ -690,7 +689,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 						}()
 
-						logger.Info(fmt.Sprintf("Downloading %s", ent2.Body.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
+						logger.Info("Downloading "+ent2.Body.Name(), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
 						return c.session2.Download(ctx, ent2.Body.Name())
 					}()
 
@@ -706,8 +705,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Indexing %s", ent2.Body.Name()))
-					return coresnaptype.Bodies.BuildIndexes(ctx, info, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					logger.Info("Indexing " + ent2.Body.Name())
+					return coresnaptype.Bodies.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
@@ -724,7 +723,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 						}()
 
-						logger.Info(fmt.Sprintf("Downloading %s", ent2.Transactions.Name()), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
+						logger.Info("Downloading "+ent2.Transactions.Name(), "entry", fmt.Sprint(i2+1, "/", len(f2ents)))
 						return c.session2.Download(ctx, ent2.Transactions.Name())
 					}()
 
@@ -747,8 +746,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&indexTime, uint64(time.Since(startTime)))
 					}()
 
-					logger.Info(fmt.Sprintf("Indexing %s", ent2.Transactions.Name()))
-					return coresnaptype.Transactions.BuildIndexes(ctx, info, c.chainConfig(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
+					logger.Info("Indexing " + ent2.Transactions.Name())
+					return coresnaptype.Transactions.BuildIndexes(ctx, info, nil, c.chainConfig(), c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				if err := g.Wait(); err != nil {
@@ -758,22 +757,20 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					Enabled:      true,
 					ProduceE2:    false,
 					NoDownloader: true,
 				}, info1.Dir(), info1.From, logger)
 
-				f1snaps.ReopenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
+				f1snaps.OpenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
 
 				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent2.Body.Name())
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-					Enabled:      true,
 					ProduceE2:    false,
 					NoDownloader: true,
 				}, info2.Dir(), info2.From, logger)
 
-				f2snaps.ReopenList([]string{ent2.Body.Name(), ent2.Transactions.Name()}, false)
+				f2snaps.OpenList([]string{ent2.Body.Name(), ent2.Transactions.Name()}, false)
 
 				err := func() error {
 					logger.Info(fmt.Sprintf("Comparing %s %s", ent1.Body.Name(), ent2.Body.Name()))
@@ -784,8 +781,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 						atomic.AddUint64(&compareTime, uint64(time.Since(startTime)))
 					}()
 
-					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil)
-					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
+					blockReader1 := freezeblocks.NewBlockReader(f1snaps, nil, nil, nil)
+					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil, nil, nil)
 
 					return func() error {
 						for i := ent1.From; i < ent1.To; i++ {

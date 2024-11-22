@@ -29,21 +29,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/core/rawdb"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core"
@@ -51,7 +49,6 @@ import (
 	state2 "github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -71,8 +68,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	}).MustOpen()
 	t.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader()
-	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, cr, logger)
+	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
@@ -202,7 +198,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domains.Close()
 	agg.Close()
 	db.Close()
-	db = nil
 
 	// ======== delete DB, reset domains ========
 	ffs := os.DirFS(datadir)
@@ -393,7 +388,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domains.Close()
 	agg.Close()
 	db.Close()
-	db = nil
 
 	// ======== delete datadir and restart domains ========
 	err = os.RemoveAll(datadir)

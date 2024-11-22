@@ -24,7 +24,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 
@@ -104,9 +103,9 @@ func (ma *MixedcaseAddress) UnmarshalJSON(input []byte) error {
 // MarshalJSON marshals the original value
 func (ma *MixedcaseAddress) MarshalJSON() ([]byte, error) {
 	if strings.HasPrefix(ma.original, "0x") || strings.HasPrefix(ma.original, "0X") {
-		return json.Marshal(fmt.Sprintf("0x%s", ma.original[2:]))
+		return json.Marshal("0x" + ma.original[2:])
 	}
-	return json.Marshal(fmt.Sprintf("0x%s", ma.original))
+	return json.Marshal("0x" + ma.original)
 }
 
 // Address returns the address
@@ -117,9 +116,9 @@ func (ma *MixedcaseAddress) Address() libcommon.Address {
 // String implements fmt.Stringer
 func (ma *MixedcaseAddress) String() string {
 	if ma.ValidChecksum() {
-		return fmt.Sprintf("%s [chksum ok]", ma.original)
+		return ma.original + " [chksum ok]"
 	}
-	return fmt.Sprintf("%s [chksum INVALID]", ma.original)
+	return ma.original + " [chksum INVALID]"
 }
 
 // ValidChecksum returns true if the address has valid checksum

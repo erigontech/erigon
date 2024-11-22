@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package vm
+package vm_test
 
 import (
 	"context"
@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/vm"
 
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -58,9 +58,9 @@ func TestMemoryGasCost(t *testing.T) {
 		{0x1fffffffe1, 0, true},
 	}
 	for i, tt := range tests {
-		v, err := memoryGasCost(&Memory{}, tt.size)
-		if (err == ErrGasUintOverflow) != tt.overflow {
-			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, err == ErrGasUintOverflow, tt.overflow)
+		v, err := vm.MemoryGasCost(&vm.Memory{}, tt.size)
+		if (err == vm.ErrGasUintOverflow) != tt.overflow {
+			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, err == vm.ErrGasUintOverflow, tt.overflow)
 		}
 		if v != tt.cost {
 			t.Errorf("test %d: gas cost mismatch: have %v, want %v", i, v, tt.cost)
@@ -93,7 +93,7 @@ var eip2200Tests = []struct {
 	{1, math.MaxUint64, "0x60016000556001600055", 1612, 0, nil},                // 1 -> 1 -> 1
 	{0, math.MaxUint64, "0x600160005560006000556001600055", 40818, 19200, nil}, // 0 -> 1 -> 0 -> 1
 	{1, math.MaxUint64, "0x600060005560016000556000600055", 10818, 19200, nil}, // 1 -> 0 -> 1 -> 0
-	{1, 2306, "0x6001600055", 2306, 0, ErrOutOfGas},                            // 1 -> 1 (2300 sentry + 2xPUSH)
+	{1, 2306, "0x6001600055", 2306, 0, vm.ErrOutOfGas},                         // 1 -> 1 (2300 sentry + 2xPUSH)
 	{1, 2307, "0x6001600055", 806, 0, nil},                                     // 1 -> 1 (2301 sentry + 2xPUSH)
 }
 
@@ -102,8 +102,7 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader()
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -135,7 +134,7 @@ func TestEIP2200(t *testing.T) {
 			tx, sd := testTemporalTxSD(t, testTemporalDB(t))
 			defer tx.Rollback()
 
-			r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+			r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
 			s := state.New(r)
 
 			address := libcommon.BytesToAddress([]byte("contract"))
@@ -148,9 +147,9 @@ func TestEIP2200(t *testing.T) {
 				CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
 				Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
 			}
-			vmenv := NewEVM(vmctx, evmtypes.TxContext{}, s, params.AllProtocolChanges, Config{ExtraEips: []int{2200}})
+			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, params.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
-			_, gas, err := vmenv.Call(AccountRef(libcommon.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
+			_, gas, err := vmenv.Call(vm.AccountRef(libcommon.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
@@ -200,7 +199,7 @@ func TestCreateGas(t *testing.T) {
 		txc.Doms = domains
 
 		stateReader = rpchelper.NewLatestStateReader(tx)
-		stateWriter = rpchelper.NewLatestStateWriter(txc, 0)
+		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
@@ -211,15 +210,15 @@ func TestCreateGas(t *testing.T) {
 			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
 			Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
 		}
-		config := Config{}
+		config := vm.Config{}
 		if tt.eip3860 {
 			config.ExtraEips = []int{3860}
 		}
 
-		vmenv := NewEVM(vmctx, evmtypes.TxContext{}, s, params.TestChainConfig, config)
+		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, params.TestChainConfig, config)
 
 		var startGas uint64 = math.MaxUint64
-		_, gas, err := vmenv.Call(AccountRef(libcommon.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
+		_, gas, err := vmenv.Call(vm.AccountRef(libcommon.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}

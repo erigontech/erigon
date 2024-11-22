@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -85,6 +86,7 @@ func (h *hashVector) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < h.Length()*length.Hash {
 		return ssz.ErrBadDynamicLength
 	}
+	h.u.MerkleTree = nil
 	copy(h.u.u, buf)
 	return nil
 }
@@ -115,4 +117,12 @@ func (h *hashVector) Range(fn func(int, libcommon.Hash, int) bool) {
 
 func (h *hashVector) Pop() libcommon.Hash {
 	panic("didnt ask, dont need it, go fuck yourself")
+}
+
+func (h *hashVector) ReadMerkleTree(r io.Reader) error {
+	return h.u.ReadMerkleTree(r)
+}
+
+func (h *hashVector) WriteMerkleTree(w io.Writer) error {
+	return h.u.WriteMerkleTree(w)
 }

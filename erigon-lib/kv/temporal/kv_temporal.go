@@ -68,8 +68,8 @@ type DB struct {
 func New(db kv.RwDB, agg *state.Aggregator) (*DB, error) {
 	return &DB{RwDB: db, agg: agg}, nil
 }
-func (db *DB) Agg() *state.Aggregator { return db.agg }
-func (db *DB) InternalDB() kv.RwDB    { return db.RwDB }
+func (db *DB) Agg() any            { return db.agg }
+func (db *DB) InternalDB() kv.RwDB { return db.RwDB }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -168,7 +168,7 @@ func (tx *Tx) ForceReopenAggCtx() {
 
 func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
 func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggTx() interface{}        { return tx.filesTx }
+func (tx *Tx) AggTx() any                { return tx.filesTx }
 func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
@@ -195,7 +195,7 @@ func (tx *Tx) Commit() error {
 	return mdbxTx.Commit()
 }
 
-func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.filesTx.DomainRange(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
@@ -204,7 +204,7 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return it, nil
 }
 
-func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+func (tx *Tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
 	v, step, ok, err := tx.filesTx.GetLatest(name, k, k2, tx.MdbxTx)
 	if err != nil {
 		return nil, step, err
@@ -214,14 +214,14 @@ func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, er
 	}
 	return v, step, nil
 }
-func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	if key2 != nil {
 		key = append(common.Copy(key), key2...)
 	}
-	return tx.filesTx.DomainGetAsOf(tx.MdbxTx, name, key, ts)
+	return tx.filesTx.GetAsOf(tx.MdbxTx, name, key, ts)
 }
 
-func (tx *Tx) HistorySeek(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return tx.filesTx.HistorySeek(name, key, ts, tx.MdbxTx)
 }
 
@@ -234,15 +234,11 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	return timestamps, nil
 }
 
-func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.filesTx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err
 	}
 	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
-}
-
-func (tx *Tx) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
-	return tx.filesTx.AppendableGet(name, ts, tx.MdbxTx)
 }

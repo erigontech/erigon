@@ -21,18 +21,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadergrpc"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
@@ -41,12 +37,50 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
-	snaptype2 "github.com/erigontech/erigon/core/snaptype"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/ethdb/prune"
-	"github.com/erigontech/erigon/turbo/services"
 )
+
+var greatOtterBanner = `
+   _____ _             _   _                ____  _   _                                       
+  / ____| |           | | (_)              / __ \| | | |                                      
+ | (___ | |_ __ _ _ __| |_ _ _ __   __ _  | |  | | |_| |_ ___ _ __ ___ _   _ _ __   ___       
+  \___ \| __/ _ | '__| __| | '_ \ / _ | | |  | | __| __/ _ \ '__/ __| | | | '_ \ / __|      
+  ____) | || (_| | |  | |_| | | | | (_| | | |__| | |_| ||  __/ |  \__ \ |_| | | | | (__ _ _ _ 
+ |_____/ \__\__,_|_|   \__|_|_| |_|\__, |  \____/ \__|\__\___|_|  |___/\__, |_| |_|\___(_|_|_)
+                                    __/ |                               __/ |                 
+                                   |___/                               |___/                                            
+
+
+                                        .:-===++**++===-:                                 
+                                   :=##%@@@@@@@@@@@@@@@@@@%#*=.                           
+                               .=#@@@@@@%##+====--====+##@@@@@@@#=.     ...               
+                   .=**###*=:+#@@@@%*=:.                  .:=#%@@@@#==#@@@@@%#-           
+                 -#@@@@%%@@@@@@%+-.                            .=*%@@@@#*+*#@@@%=         
+                =@@@*:    -%%+:                                    -#@+.     =@@@-        
+                %@@#     +@#.                                        :%%-     %@@*        
+                @@@+    +%=.     -+=                        :=-       .#@-    %@@#        
+                *@@%:  #@-      =@@@*                      +@@@%.       =@= -*@@@:        
+                 #@@@##@+       #@@@@.                     %@@@@=        #@%@@@#-         
+                  :#@@@@:       +@@@#       :=++++==-.     *@@@@:        =@@@@-           
+                  =%@@%=         +#*.    =#%#+==-==+#%%=:  .+#*:         .#@@@#.          
+                 +@@%+.               .+%+-.          :=##-                :#@@@-         
+                -@@@=                -%#:     ..::.      +@*                 +@@%.        
+    .::-========*@@@..              -@#      +%@@@@%.     -@#               .-@@@+=======-
+.:-====----:::::#@@%:--=::::..      #@:      *@@@@@%:      *@=      ..:-:-=--:@@@+::::----
+                =@@@:.......        @@        :+@#=.       -@+        .......-@@@:        
+       .:=++####*%@@%=--::::..      @@   %#     %*    :@*  -@+      ...::---+@@@#*#*##+=-:
+  ..--==::..     :%@@@-   ..:::..   @@   +@*:.-#@@+-.-#@-  -@+   ..:::..  .+@@@#.     ..:-
+                  .#@@@##-:.        @@    :+#@%=.:+@@#=.   -@+        .-=#@@@@+           
+             -=+++=--+%@@%+=.       @@       +%*=+#%-      -@+       :=#@@@%+--++++=:     
+         .=**=:.      .=*@@@@@#=:.  @@         :--.        -@+  .-+#@@@@%+:       .:=*+-. 
+        ::.              .=*@@@@@@%#@@+=-:..         ..::=+#@%#@@@@@@%+-.             ..-.
+                            ..=*#@@@@@@@@@@@@@@@%%@@@@@@@@@@@@@@%#+-.                     
+                                  .:-==++*#######%######**+==-:                           
+
+             
+`
 
 type CaplinMode int
 
@@ -58,7 +92,17 @@ const (
 	AlsoCaplin CaplinMode = 3
 )
 
-func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downloader.AddRequest {
+type DownloadRequest struct {
+	Version     uint8
+	Path        string
+	TorrentHash string
+}
+
+func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
+	return DownloadRequest{Path: path, TorrentHash: torrentHash}
+}
+
+func BuildProtoRequest(downloadRequest []DownloadRequest) *proto_downloader.AddRequest {
 	req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(coresnaptype.BlockSnapshotTypes))}
 	for _, r := range downloadRequest {
 		if r.Path == "" {
@@ -79,7 +123,9 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *proto_downlo
 }
 
 // RequestSnapshotsDownload - builds the snapshots download request and downloads them
-func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.DownloadRequest, downloader proto_downloader.DownloaderClient) error {
+func RequestSnapshotsDownload(ctx context.Context, downloadRequest []DownloadRequest, downloader proto_downloader.DownloaderClient, logPrefix string) error {
+	preq := &proto_downloader.SetLogPrefixRequest{Prefix: logPrefix}
+	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
 	req := BuildProtoRequest(downloadRequest)
 	if _, err := downloader.Add(ctx, req); err != nil {
@@ -106,116 +152,89 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	if minBlocksToDownload < snaptype.Erigon2MergeLimit {
 		minBlocksToDownload = snaptype.Erigon2MergeLimit
 	}
-	if blocks < minBlocksToDownload {
+	if blocks > minBlocksToDownload {
 		blocks = minBlocksToDownload
 	}
-	if blocks%snaptype.Erigon2MergeLimit == 0 {
-		return blocks
-	}
-	ret := blocks + snaptype.Erigon2MergeLimit
-	// round to nearest multiple of 64. if less than 64, round to 64
-	return ret - ret%snaptype.Erigon2MergeLimit
+	return blocks - blocks%snaptype.Erigon2MergeLimit
 }
 
 func shouldUseStepsForPruning(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history")
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 
 func canSnapshotBePruned(name string) bool {
-	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions")
+	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.Contains(name, "transactions") || strings.Contains(name, "accessor")
 }
 
 func buildBlackListForPruning(pruneMode bool, stepPrune, minBlockToDownload, blockPrune uint64, preverified snapcfg.Preverified) (map[string]struct{}, error) {
-	type snapshotFileData struct {
-		from, to  uint64
-		stepBased bool
-		name      string
-	}
+
 	blackList := make(map[string]struct{})
 	if !pruneMode {
 		return blackList, nil
 	}
 	stepPrune = adjustStepPrune(stepPrune)
 	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
-	snapshotKindToNames := make(map[string][]snapshotFileData)
 	for _, p := range preverified {
 		name := p.Name
 		// Don't prune unprunable files
 		if !canSnapshotBePruned(name) {
 			continue
 		}
-		var from, to uint64
+		var _, to uint64
 		var err error
-		var kind string
 		if shouldUseStepsForPruning(name) {
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1-accounts.0-64.ef' is "idx/v1-accounts"
 			rangeString := strings.Split(name, ".")[1]
 			rangeNums := strings.Split(rangeString, "-")
 			// convert the range to uint64
-			from, err = strconv.ParseUint(rangeNums[0], 10, 64)
-			if err != nil {
-				return nil, err
-			}
 			to, err = strconv.ParseUint(rangeNums[1], 10, 64)
 			if err != nil {
 				return nil, err
 			}
-			kind = strings.Split(name, ".")[0]
+			if stepPrune < to {
+				continue
+			}
+			blackList[name] = struct{}{}
 		} else {
 			// e.g 'v1-000000-000100-beaconblocks.seg'
 			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
-			minusSplit := strings.Split(name, "-")
 			s, _, ok := snaptype.ParseFileName("", name)
 			if !ok {
 				continue
 			}
-			from = s.From
 			to = s.To
-			kind = minusSplit[3]
-		}
-		blackList[p.Name] = struct{}{} // Add all of them to the blacklist and remove the ones that are not blacklisted later.
-		snapshotKindToNames[kind] = append(snapshotKindToNames[kind], snapshotFileData{
-			from:      from,
-			to:        to,
-			stepBased: shouldUseStepsForPruning(name),
-			name:      name,
-		})
-	}
-	// sort the snapshots by "from" and "to" in ascending order
-	for _, snapshots := range snapshotKindToNames {
-		prunedDistance := uint64(0) // keep track of pruned distance for snapshots
-		// sort the snapshots by "from" and "to" in descending order
-		sort.Slice(snapshots, func(i, j int) bool {
-			if snapshots[i].from == snapshots[j].from {
-				return snapshots[i].to > snapshots[j].to
+			if blockPrune < to {
+				continue
 			}
-			return snapshots[i].from > snapshots[j].from
-		})
-		for _, snapshot := range snapshots {
-			if snapshot.stepBased {
-				if prunedDistance >= stepPrune {
-					break
-				}
-			} else if prunedDistance >= blockPrune {
-				break
-			}
-			delete(blackList, snapshot.name)
-			prunedDistance += snapshot.to - snapshot.from
+			blackList[name] = struct{}{}
 		}
 	}
+
 	return blackList, nil
 }
 
+type blockReader interface {
+	Snapshots() BlockSnapshots
+	BorSnapshots() BlockSnapshots
+	IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
+	FreezingCfg() ethconfig.BlocksFreezing
+	AllTypes() []snaptype.Type
+	FrozenFiles() (list []string)
+}
+
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
-func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, minStep uint64, expectedPruneBlockAmount, expectedPruneHistoryAmount uint64) (uint64, uint64, error) {
+func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint64, blockPruneTo, historyPruneTo uint64) (uint64, uint64, error) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
-	minStepToDownload := minStep
+	minStepToDownload := uint64(math.MaxUint32)
 	stateTxNum := minStep * config3.HistoryV3AggregationStep
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
-		if blockNum == frozenBlocks-expectedPruneHistoryAmount {
-			minStepToDownload = (baseTxNum / config3.HistoryV3AggregationStep) - 1
+		if blockNum == historyPruneTo {
+			minStepToDownload = (baseTxNum - (config3.HistoryV3AggregationStep - 1)) / config3.HistoryV3AggregationStep
+			if baseTxNum < (config3.HistoryV3AggregationStep - 1) {
+				minStepToDownload = 0
+			}
 		}
 		if stateTxNum <= baseTxNum { // only cosnider the block if it
 			return nil
@@ -231,11 +250,9 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader services.FullBlockReader, 
 	}); err != nil {
 		return 0, 0, err
 	}
-	if expectedPruneBlockAmount == 0 {
-		return minToDownload, 0, nil
-	}
+
 	// return the minimum number of blocks to download and the minimum step.
-	return minToDownload, minStep - minStepToDownload, nil
+	return frozenBlocks - minToDownload, minStepToDownload, nil
 }
 
 func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error) {
@@ -259,43 +276,28 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 	return maxTo, nil
 }
 
-func computeBlocksToPrune(blockReader services.FullBlockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
+func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
-	blocksPruneTo := p.Blocks.PruneTo(frozenBlocks)
-	historyPruneTo := p.History.PruneTo(frozenBlocks)
-	if blocksPruneTo <= frozenBlocks {
-		blocksToPrune = frozenBlocks - blocksPruneTo
-	}
-	if historyPruneTo <= frozenBlocks {
-		historyToPrune = frozenBlocks - historyPruneTo
-	}
-	return blocksToPrune, historyToPrune
+	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs, headerchain, blobs, caplinState bool, prune prune.Mode, caplin CaplinMode, agg *state.Aggregator, tx kv.RwTx, blockReader blockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 
 	// Find minimum block to download.
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
-		if err := snapshots.ReopenFolder(); err != nil {
+		if err := snapshots.OpenFolder(); err != nil {
 			return err
 		}
 		if cc.Bor != nil {
-			if err := borSnapshots.ReopenFolder(); err != nil {
+			if err := borSnapshots.OpenFolder(); err != nil {
 				return err
 			}
 		}
 		return nil
-	}
-
-	if headerchain {
-		snapshots.Close()
-		if cc.Bor != nil {
-			borSnapshots.Close()
-		}
 	}
 
 	//Corner cases:
@@ -306,7 +308,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	// send all hashes to the Downloader service
 	snapCfg := snapcfg.KnownCfg(cc.ChainName)
 	preverifiedBlockSnapshots := snapCfg.Preverified
-	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
+	downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 	blackListForPruning := make(map[string]struct{})
@@ -316,11 +318,12 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		if err != nil {
 			return err
 		}
-		minBlockAmountToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, blockPrune, historyPrune)
+		minBlockToDownload, minStepToDownload, err := getMinimumBlocksToDownload(tx, blockReader, minStep, blockPrune, historyPrune)
 		if err != nil {
 			return err
 		}
-		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockAmountToDownload, blockPrune, preverifiedBlockSnapshots)
+
+		blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 		if err != nil {
 			return err
 		}
@@ -328,13 +331,16 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 
 	// build all download requests
 	for _, p := range preverifiedBlockSnapshots {
-		if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars")) {
+		if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
 			continue
 		}
-		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") {
+		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
 			continue
 		}
 		if !blobs && strings.Contains(p.Name, "blobsidecars") {
+			continue
+		}
+		if !caplinState && strings.Contains(p.Name, "caplin/") {
 			continue
 		}
 		if headerchain && !strings.Contains(p.Name, "headers") && !strings.Contains(p.Name, "bodies") {
@@ -344,7 +350,12 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			continue
 		}
 
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
+		downloadRequest = append(downloadRequest, NewDownloadRequest(p.Name, p.Hash))
+	}
+
+	if headerchain {
+		log.Info("[OtterSync] Starting Ottersync")
+		log.Info(greatOtterBanner)
 	}
 
 	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
@@ -354,7 +365,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			return ctx.Err()
 		default:
 		}
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader); err != nil {
+		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
 			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
 			time.Sleep(10 * time.Second)
 			continue
@@ -363,28 +374,25 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 
 	}
 
-	downloadStartTime := time.Now()
-	const logInterval = 20 * time.Second
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
+	const checkInterval = 20 * time.Second
+	checkEvery := time.NewTicker(checkInterval)
+	defer checkEvery.Stop()
 
 	// Check once without delay, for faster erigon re-start
-	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
+	completedResp, err := snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
 	if err != nil {
 		return err
 	}
 
 	// Print download progress until all segments are available
-
-	for !stats.Completed {
+	for !completedResp.Completed {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-logEvery.C:
-			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+		case <-checkEvery.C:
+			completedResp, err = snapshotDownloader.Completed(ctx, &proto_downloader.CompletedRequest{})
+			if err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
 			}
 		}
 	}
@@ -393,31 +401,14 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
 		}
-
-		if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-			log.Warn("Error while waiting for snapshots progress", "err", err)
-		}
 	}
 
-	for !stats.Completed {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else {
-				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, headerchain)
-			}
-		}
-	}
-
-	if err := snapshots.ReopenFolder(); err != nil {
+	if err := snapshots.OpenFolder(); err != nil {
 		return err
 	}
 
 	if cc.Bor != nil {
-		if err := borSnapshots.ReopenFolder(); err != nil {
+		if err := borSnapshots.OpenFolder(); err != nil {
 			return err
 		}
 	}
@@ -460,7 +451,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 			return err
 		}
 	}
-	for _, p := range snaptype2.E3StateTypes {
+	for _, p := range coresnaptype.E3StateTypes {
 		snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
 			Type: p.Name(),
 		})
@@ -478,10 +469,13 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 				return err
 			}
 		}
-	}
-
-	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
-		return err
+		if caplinState {
+			if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+				Type: "caplin",
+			}); err != nil {
+				return err
+			}
+		}
 	}
 
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
@@ -491,81 +485,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, headerchain, blobs
 	if firstNonGenesis != nil {
 		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
 		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db", logPrefix), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			return fmt.Errorf("some blocks are not in snapshots and not in db. this could have happend due to the node being stopped at the wrong time, you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
 		}
 	}
 	return nil
-}
-
-func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, headerchain bool) {
-	var m runtime.MemStats
-
-	logReason := "download"
-	if headerchain {
-		logReason = "downloading header-chain"
-	}
-	logEnd := "download finished"
-	if headerchain {
-		logEnd = "header-chain download finished"
-	}
-
-	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
-		Downloaded:           stats.BytesCompleted,
-		Total:                stats.BytesTotal,
-		TotalTime:            time.Since(startTime).Round(time.Second).Seconds(),
-		DownloadRate:         stats.DownloadRate,
-		UploadRate:           stats.UploadRate,
-		Peers:                stats.PeersUnique,
-		Files:                stats.FilesTotal,
-		Connections:          stats.ConnectionsTotal,
-		Alloc:                m.Alloc,
-		Sys:                  m.Sys,
-		DownloadFinished:     stats.Completed,
-		TorrentMetadataReady: stats.MetadataReady,
-	})
-
-	if stats.Completed {
-		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logEnd), "time", time.Since(startTime).String())
-	} else {
-
-		if stats.MetadataReady < stats.FilesTotal && stats.BytesTotal == 0 {
-			log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
-		}
-
-		dbg.ReadMemStats(&m)
-
-		var remainingBytes uint64
-
-		if stats.BytesTotal > stats.BytesCompleted {
-			remainingBytes = stats.BytesTotal - stats.BytesCompleted
-		}
-
-		downloadTimeLeft := calculateTime(remainingBytes, stats.DownloadRate)
-
-		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
-			// TODO: "downloading", stats.Downloading,
-			"time-left", downloadTimeLeft,
-			"total-time", time.Since(startTime).Round(time.Second).String(),
-			"download", common.ByteCount(stats.DownloadRate)+"/s",
-			"upload", common.ByteCount(stats.UploadRate)+"/s",
-			"peers", stats.PeersUnique,
-			"files", stats.FilesTotal,
-			"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.FilesTotal),
-			"connections", stats.ConnectionsTotal,
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		)
-	}
-}
-
-func calculateTime(amountLeft, rate uint64) string {
-	if rate == 0 {
-		return "999hrs:99m"
-	}
-	timeLeftInSeconds := amountLeft / rate
-
-	hours := timeLeftInSeconds / 3600
-	minutes := (timeLeftInSeconds / 60) % 60
-
-	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }

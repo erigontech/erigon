@@ -24,16 +24,18 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/stretchr/testify/require"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
+
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
@@ -550,7 +552,7 @@ func TestStorageOnly(t *testing.T) {
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 5:
-			require.NoError(t, fmt.Errorf("not expected"))
+			require.NoError(t, errors.New("not expected"))
 		}
 
 		return nil

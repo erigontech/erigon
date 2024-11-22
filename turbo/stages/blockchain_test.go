@@ -24,15 +24,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/rlp"
 	"math"
 	"math/big"
 	"testing"
-
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -40,11 +34,13 @@ import (
 
 	libchain "github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
+	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
-	types2 "github.com/erigontech/erigon-lib/types"
-
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
@@ -52,10 +48,11 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -102,7 +99,7 @@ func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, t
 	// Assert the chains have the same header/block at #i
 	var hash1, hash2 libcommon.Hash
 	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		if hash1, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
+		if hash1, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
 		if block1, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, hash1, uint64(i)); block1 == nil {
@@ -113,7 +110,7 @@ func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, t
 	require.NoError(t, err)
 
 	canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
-		if hash2, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
+		if hash2, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
 		if block2, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, hash2, uint64(i)); block2 == nil {
@@ -157,7 +154,10 @@ func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, t
 	}
 	currentBlockHash := blockChainB.TopBlock.Hash()
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		number := rawdb.ReadHeaderNumber(tx, currentBlockHash)
+		number, err := m.BlockReader.HeaderNumber(context.Background(), tx, currentBlockHash)
+		if err != nil {
+			return err
+		}
 		currentBlock, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, currentBlockHash, *number)
 		tdPost, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
 		if err != nil {
@@ -374,48 +374,50 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 		}
 	}
 
-	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
-		RequestId:         1,
-		GetReceiptsPacket: hashPacket,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+	if sentry_multi_client.EnableP2PReceipts {
+		b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
+			RequestId:         1,
+			GetReceiptsPacket: hashPacket,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
 
-	m.ReceiveWg.Wait()
+		m.ReceiveWg.Add(1)
+		for _, err = range m.Send(&protosentry.InboundMessage{Id: protosentry.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 
-	msg := m.SentMessage(0)
+		m.ReceiveWg.Wait()
 
-	require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
+		msg := m.SentMessage(0)
 
-	encoded, err := rlp.EncodeToBytes(types.Receipts{})
-	require.NoError(err)
+		require.Equal(protosentry.MessageId_RECEIPTS_66, msg.Id)
 
-	res := make([]rlp.RawValue, 0, queryNum)
-	for i := 0; i < queryNum; i++ {
-		res = append(res, encoded)
-	}
+		encoded, err := rlp.EncodeToBytes(types.Receipts{})
+		require.NoError(err)
 
-	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
-		RequestId:         1,
-		ReceiptsRLPPacket: res,
-	})
-	require.NoError(err)
-	require.Equal(b, msg.GetData())
+		res := make([]rlp.RawValue, 0, queryNum)
+		for i := 0; i < queryNum; i++ {
+			res = append(res, encoded)
+		}
 
-	// Make sure the chain total difficulty is the correct one
-	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
-	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
-	require.NoError(err)
-	if have.Cmp(want) != 0 {
-		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
+		b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+			RequestId:         1,
+			ReceiptsRLPPacket: res,
+		})
+		require.NoError(err)
+		require.Equal(b, msg.GetData())
+
+		// Make sure the chain total difficulty is the correct one
+		want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
+		have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
+		require.NoError(err)
+		if have.Cmp(want) != 0 {
+			t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
+		}
 	}
 }
 
@@ -545,7 +547,7 @@ func TestChainTxReorgs(t *testing.T) {
 		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn != nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
-		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m.BlockReader); rcpt != nil {
+		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt != nil {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
@@ -557,12 +559,8 @@ func TestChainTxReorgs(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, found)
 
-		if m.HistoryV3 {
-			// m.HistoryV3 doesn't store
-		} else {
-			if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m.BlockReader); rcpt == nil {
-				t.Errorf("add %d: expected receipt to be found", i)
-			}
+		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt == nil {
+			t.Errorf("add %d: expected receipt to be found", i)
 		}
 	}
 	// shared tx
@@ -571,17 +569,14 @@ func TestChainTxReorgs(t *testing.T) {
 		if bn, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn == nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
-		if m.HistoryV3 {
-			// m.HistoryV3 doesn't store
-		} else {
-			if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m.BlockReader); rcpt == nil {
-				t.Errorf("share %d: expected receipt to be found", i)
-			}
+
+		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt == nil {
+			t.Errorf("share %d: expected receipt to be found", i)
 		}
 	}
 }
 
-func readReceipt(db kv.Tx, txHash libcommon.Hash, br services.FullBlockReader) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
+func readReceipt(db kv.Tx, txHash libcommon.Hash, m *mock.MockSentry) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
 	// Retrieve the context of the receipt based on the transaction hash
 	blockNumber, err := rawdb.ReadTxLookupEntry(db, txHash)
 	if err != nil {
@@ -590,19 +585,23 @@ func readReceipt(db kv.Tx, txHash libcommon.Hash, br services.FullBlockReader) (
 	if blockNumber == nil {
 		return nil, libcommon.Hash{}, 0, 0, nil
 	}
-	blockHash, err := br.CanonicalHash(context.Background(), db, *blockNumber)
+	blockHash, _, err := m.BlockReader.CanonicalHash(context.Background(), db, *blockNumber)
 	if err != nil {
 		return nil, libcommon.Hash{}, 0, 0, err
 	}
 	if blockHash == (libcommon.Hash{}) {
 		return nil, libcommon.Hash{}, 0, 0, nil
 	}
-	b, senders, err := br.BlockWithSenders(context.Background(), db, blockHash, *blockNumber)
+	b, _, err := m.BlockReader.BlockWithSenders(context.Background(), db, blockHash, *blockNumber)
 	if err != nil {
 		return nil, libcommon.Hash{}, 0, 0, err
 	}
+
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts := rawdb.ReadReceipts(db, b, senders)
+	receipts, err := m.ReceiptsReader.GetReceipts(context.Background(), m.ChainConfig, db, b)
+	if err != nil {
+		return nil, libcommon.Hash{}, 0, 0, err
+	}
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == txHash {
 			return receipt, blockHash, *blockNumber, uint64(receiptIndex), nil
@@ -630,7 +629,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 
 	for _, block := range chain.Blocks {
 		// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
-		ch, err := m.BlockReader.CanonicalHash(m.Ctx, tx, block.NumberU64())
+		ch, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, block.NumberU64())
 		require.NoError(t, err)
 		if err != nil {
 			panic(err)
@@ -769,18 +768,8 @@ func TestModes(t *testing.T) {
 	)
 }
 
-func TestBeforeModes(t *testing.T) {
-	t.Parallel()
-	mode := prune.DefaultMode
-	mode.History = prune.Before(0)
-	mode.Receipts = prune.Before(1)
-	mode.TxIndex = prune.Before(2)
-	mode.CallTraces = prune.Before(3)
-	doModesTest(t, mode)
-}
-
 func doModesTest(t *testing.T, pm prune.Mode) error {
-	fmt.Printf("h=%v, r=%v, t=%v\n", pm.History.Enabled(), pm.Receipts.Enabled(), pm.TxIndex.Enabled())
+	fmt.Printf("h=%v\n", pm.History.Enabled())
 	require := require.New(t)
 	// Configure and generate a sample block chain
 	var (
@@ -849,32 +838,6 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	if pm.Receipts.Enabled() {
-		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
-		require.NoError(err)
-		found := uint64(0)
-		err = tx.ForEach(kv.Receipts, nil, func(k, v []byte) error {
-			found++
-			return nil
-		})
-		require.NoError(err)
-		if m.HistoryV3 {
-			// receipts are not stored in erigon3
-		} else {
-			require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
-			require.Greater(found, uint64(0))
-		}
-	} else {
-		if m.HistoryV3 {
-			// receipts are not stored in erigon3
-		} else {
-			receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
-			require.NoError(err)
-			require.Equal(uint64(0), receiptsAvailable)
-		}
-
-	}
-
 	if m.HistoryV3 {
 		//TODO: e3 not implemented Prune feature yet
 		/*
@@ -916,7 +879,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		}
 	}
 
-	if pm.TxIndex.Enabled() {
+	if pm.History.Enabled() {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
 		require.NoError(err)
 		for _, txn := range b.Transactions() {
@@ -977,7 +940,7 @@ func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, prune.Mode)
 }
 
 func runPermutation(t *testing.T, testFunc func(*testing.T, prune.Mode) error, current int, pm prune.Mode) error {
-	if current == 3 {
+	if current == 1 {
 		return testFunc(t, pm)
 	}
 	if err := runPermutation(t, testFunc, current+1, pm); err != nil {
@@ -992,10 +955,6 @@ func runPermutation(t *testing.T, testFunc func(*testing.T, prune.Mode) error, c
 	switch current {
 	case 0:
 		pm.History = invert(pm.History)
-	case 1:
-		pm.Receipts = invert(pm.Receipts)
-	case 2:
-		pm.TxIndex = invert(pm.TxIndex)
 	default:
 		panic("unexpected current item")
 	}
@@ -2107,7 +2066,7 @@ func TestEIP2718Transition(t *testing.T) {
 				},
 				GasPrice: gasPrice,
 			},
-			AccessList: types2.AccessList{{
+			AccessList: types.AccessList{{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}},
@@ -2194,7 +2153,7 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 		if i == 500 {
 			// One transaction to 0xAAAA
-			accesses := types2.AccessList{types2.AccessTuple{
+			accesses := types.AccessList{types.AccessTuple{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}}

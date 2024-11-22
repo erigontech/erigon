@@ -37,13 +37,13 @@ type CallTracer struct {
 	t *tracers.Tracer
 
 	froms map[libcommon.Address]struct{}
-	tos   map[libcommon.Address]bool // address -> isCreated
+	tos   map[libcommon.Address]struct{}
 }
 
 func NewCallTracer() *CallTracer {
 	return &CallTracer{
 		froms: make(map[libcommon.Address]struct{}),
-		tos:   make(map[libcommon.Address]bool),
+		tos:   make(map[libcommon.Address]struct{}),
 	}
 }
 
@@ -58,17 +58,7 @@ func (ct *CallTracer) Tracer() *tracers.Tracer {
 // CaptureStart and CaptureEnter also capture SELFDESTRUCT opcode invocations
 func (ct *CallTracer) captureStartOrEnter(from, to libcommon.Address, create bool, code []byte) {
 	ct.froms[from] = struct{}{}
-
-	created, ok := ct.tos[to]
-	if !ok {
-		ct.tos[to] = false
-	}
-
-	if !created && create {
-		if len(code) > 0 {
-			ct.tos[to] = true
-		}
-	}
+	ct.froms[to] = struct{}{}
 }
 
 func (ct *CallTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
@@ -76,10 +66,10 @@ func (ct *CallTracer) OnEnter(depth int, typ byte, from libcommon.Address, to li
 	ct.captureStartOrEnter(from, to, create, code)
 }
 
-func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmConfig vm.Config) error {
-	ct.tos[block.Coinbase()] = false
+func (ct *CallTracer) WriteToDb(tx kv.Putter, block *types.Block, vmConfig vm.Config) error {
+	ct.tos[block.Coinbase()] = struct{}{}
 	for _, uncle := range block.Uncles() {
-		ct.tos[uncle.Coinbase] = false
+		ct.tos[uncle.Coinbase] = struct{}{}
 	}
 	list := make(common.Addresses, len(ct.froms)+len(ct.tos))
 	i := 0

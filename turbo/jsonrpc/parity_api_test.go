@@ -18,11 +18,12 @@ package jsonrpc
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -37,7 +38,7 @@ var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	baseApi := NewBaseApi(nil, nil, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	baseApi := NewBaseApi(nil, nil, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 	api := NewParityAPIImpl(baseApi, m.DB)
 	answers := []string{
 		"0000000000000000000000000000000000000000000000000000000000000000",
@@ -122,5 +123,5 @@ func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := libcommon.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcaef")
 	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil, latestBlock)
-	assert.Error(err, fmt.Errorf("acc not found"))
+	assert.Error(err, errors.New("acc not found"))
 }

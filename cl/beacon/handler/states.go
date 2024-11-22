@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -34,18 +35,16 @@ import (
 )
 
 func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *beaconhttp.SegmentID) (root libcommon.Hash, httpStatusErr int, err error) {
+
 	switch {
 	case stateId.Head():
-		root, _, err = a.forkchoiceStore.GetHead()
-		if err != nil {
-			return libcommon.Hash{}, http.StatusInternalServerError, err
-		}
+		root, _, httpStatusErr, err = a.getHead()
 		return
 	case stateId.Finalized():
-		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.FinalizedCheckpoint().Root
 		return
 	case stateId.Justified():
-		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.JustifiedCheckpoint().Root
 		return
 	case stateId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
@@ -53,7 +52,7 @@ func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
 		if root == (libcommon.Hash{}) {
-			return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("genesis block not found")
+			return libcommon.Hash{}, http.StatusNotFound, errors.New("genesis block not found")
 		}
 		return
 	case stateId.GetSlot() != nil:
@@ -72,7 +71,7 @@ func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId
 		}
 		return
 	default:
-		return libcommon.Hash{}, http.StatusInternalServerError, fmt.Errorf("cannot parse state id")
+		return libcommon.Hash{}, http.StatusInternalServerError, errors.New("cannot parse state id")
 	}
 }
 
@@ -256,16 +255,21 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
 	}
 
-	ok, finalizedCheckpoint, currentJustifiedCheckpoint, previousJustifiedCheckpoint := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
+	finalizedCheckpoint, currentJustifiedCheckpoint, previousJustifiedCheckpoint, ok := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
 	if !ok {
-		currentJustifiedCheckpoint, previousJustifiedCheckpoint, finalizedCheckpoint, err = state_accessors.ReadCheckpoints(tx, a.beaconChainCfg.RoundSlotToEpoch(*slot))
+		currentJustifiedCheckpoint, previousJustifiedCheckpoint, finalizedCheckpoint, ok, err = state_accessors.ReadCheckpoints(stateGetter, a.beaconChainCfg.RoundSlotToEpoch(*slot))
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
-		if currentJustifiedCheckpoint == nil {
+		if !ok {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read checkpoints: %x, %d", blockRoot, a.beaconChainCfg.RoundSlotToEpoch(*slot)))
 		}
 	}
@@ -315,16 +319,21 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
 	}
 
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
+
 	// Code here
 	currentSyncCommittee, nextSyncCommittee, ok := a.forkchoiceStore.GetSyncCommittees(a.beaconChainCfg.SyncCommitteePeriod(*slot))
 	if !ok {
 		syncCommitteeSlot := a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(*slot)
 		// Check the main database if it cannot be found in the forkchoice store
-		currentSyncCommittee, err = state_accessors.ReadCurrentSyncCommittee(tx, syncCommitteeSlot)
+		currentSyncCommittee, err = state_accessors.ReadCurrentSyncCommittee(stateGetter, syncCommitteeSlot)
 		if err != nil {
 			return nil, err
 		}
-		nextSyncCommittee, err = state_accessors.ReadNextSyncCommittee(tx, syncCommitteeSlot)
+		nextSyncCommittee, err = state_accessors.ReadNextSyncCommittee(stateGetter, syncCommitteeSlot)
 		if err != nil {
 			return nil, err
 		}
@@ -345,7 +354,7 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 		if requestPeriod == statePeriod+1 {
 			committee = nextSyncCommittee.GetCommittee()
 		} else if requestPeriod != statePeriod {
-			return nil, fmt.Errorf("epoch is outside the sync committee period of the state")
+			return nil, errors.New("epoch is outside the sync committee period of the state")
 		}
 	}
 	// Lastly construct the response
@@ -439,7 +448,11 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 	if canonicalRoot != blockRoot {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read randao: %x", blockRoot))
 	}
-	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(tx, slot, epoch%a.beaconChainCfg.EpochsPerHistoricalVector)
+	snRoTx := a.caplinStateSnapshots.View()
+	defer snRoTx.Close()
+
+	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(tx, stateGetter, slot, epoch%a.beaconChainCfg.EpochsPerHistoricalVector)
 	if err != nil {
 		return nil, err
 	}

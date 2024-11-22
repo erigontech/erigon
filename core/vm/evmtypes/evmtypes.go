@@ -23,8 +23,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 )
@@ -60,6 +58,7 @@ type TxContext struct {
 	TxHash     common.Hash
 	Origin     common.Address // Provides information for ORIGIN
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
+	BlobFee    *uint256.Int   // The fee for blobs(blobGas * blobGasPrice) incurred in the txn
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
 }
 
@@ -134,6 +133,12 @@ type IntraBlockState interface {
 	SetCode(common.Address, []byte)
 	GetCodeSize(common.Address) int
 
+	// eip-7702; delegated designations
+	ResolveCodeHash(common.Address) common.Hash
+	ResolveCode(common.Address) []byte
+	ResolveCodeSize(common.Address) int
+	GetDelegatedDesignation(common.Address) (common.Address, bool)
+
 	AddRefund(uint64)
 	SubRefund(uint64)
 	GetRefund() uint64
@@ -157,7 +162,7 @@ type IntraBlockState interface {
 	Empty(common.Address) bool
 
 	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
-		precompiles []common.Address, txAccesses types2.AccessList, authorities []common.Address)
+		precompiles []common.Address, txAccesses types.AccessList, authorities []common.Address)
 
 	AddressInAccessList(addr common.Address) bool
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
@@ -172,5 +177,5 @@ type IntraBlockState interface {
 
 	AddLog(*types.Log)
 
-	SetLogger(hooks *tracing.Hooks)
+	SetHooks(hooks *tracing.Hooks)
 }

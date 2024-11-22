@@ -20,15 +20,16 @@
 package misc
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
@@ -50,7 +51,7 @@ func VerifyEip1559Header(config *chain.Config, parent, header *types.Header, ski
 	}
 	// Verify the header is not malformed
 	if header.BaseFee == nil {
-		return fmt.Errorf("header is missing baseFee")
+		return errors.New("header is missing baseFee")
 	}
 	// Verify the baseFee is correct based on the parent header.
 	expectedBaseFee := CalcBaseFee(config, parent)
@@ -69,7 +70,7 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 	hash := rawdb.ReadHeadHeaderHash(db)
 
 	if hash == (common.Hash{}) {
-		return 0, 0, 0, 0, fmt.Errorf("can't get head header hash")
+		return 0, 0, 0, 0, errors.New("can't get head header hash")
 	}
 
 	currentHeader, err := rawdb.ReadHeaderByHash(db, hash)

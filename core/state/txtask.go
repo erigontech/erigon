@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -36,24 +38,25 @@ import (
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
 type TxTask struct {
-	TxNum           uint64
-	BlockNum        uint64
-	Rules           *chain.Rules
-	Header          *types.Header
-	Txs             types.Transactions
-	Uncles          []*types.Header
-	Coinbase        libcommon.Address
-	Withdrawals     types.Withdrawals
-	BlockHash       libcommon.Hash
-	Sender          *libcommon.Address
-	SkipAnalysis    bool
-	TxIndex         int // -1 for block initialisation
-	Final           bool
-	Failed          bool
-	Tx              types.Transaction
-	GetHashFn       func(n uint64) libcommon.Hash
-	TxAsMessage     types.Message
-	EvmBlockContext evmtypes.BlockContext
+	TxNum              uint64
+	BlockNum           uint64
+	Rules              *chain.Rules
+	Header             *types.Header
+	Txs                types.Transactions
+	Uncles             []*types.Header
+	Coinbase           libcommon.Address
+	Withdrawals        types.Withdrawals
+	BlockHash          libcommon.Hash
+	Sender             *libcommon.Address
+	SkipAnalysis       bool
+	PruneNonEssentials bool
+	TxIndex            int // -1 for block initialisation
+	Final              bool
+	Failed             bool
+	Tx                 types.Transaction
+	GetHashFn          func(n uint64) libcommon.Hash
+	TxAsMessage        types.Message
+	EvmBlockContext    evmtypes.BlockContext
 
 	HistoryExecution bool // use history reader for that txn instead of state reader
 
@@ -78,10 +81,38 @@ type TxTask struct {
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
 
-	Requests types.Requests
+	Config *chain.Config
 }
 
-func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
+func (t *TxTask) CreateReceipt(tx kv.Tx) {
+	if t.TxIndex < 0 || t.Final {
+		return
+	}
+
+	var cumulativeGasUsed uint64
+	var firstLogIndex uint32
+	if t.TxIndex > 0 {
+		prevR := t.BlockReceipts[t.TxIndex-1]
+		if prevR != nil {
+			cumulativeGasUsed = prevR.CumulativeGasUsed
+			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
+		} else {
+			var err error
+			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
+			if err != nil {
+				panic(err)
+			}
+		}
+	}
+
+	cumulativeGasUsed += t.UsedGas
+
+	r := t.createReceipt(cumulativeGasUsed)
+	r.FirstLogIndexWithinBlock = firstLogIndex
+	t.BlockReceipts[t.TxIndex] = r
+}
+
+func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	receipt := &types.Receipt{
 		BlockNumber:       t.Header.Number,
 		BlockHash:         t.BlockHash,
@@ -91,6 +122,12 @@ func (t *TxTask) CreateReceipt(cumulativeGasUsed uint64) *types.Receipt {
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.Tx.Hash(),
 		Logs:              t.Logs,
+	}
+	blockNum := t.Header.Number.Uint64()
+	for _, l := range receipt.Logs {
+		l.TxHash = receipt.TxHash
+		l.BlockNumber = blockNum
+		l.BlockHash = receipt.BlockHash
 	}
 	if t.Failed {
 		receipt.Status = types.ReceiptStatusFailed
@@ -289,11 +326,11 @@ type ResultsQueue struct {
 	results *TxTaskQueue
 }
 
-func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
+func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
 	r := &ResultsQueue{
 		results:  &TxTaskQueue{},
-		limit:    queueLimit,
-		resultCh: make(chan *TxTask, newTasksLimit),
+		limit:    heapLimit,
+		resultCh: make(chan *TxTask, resultChannelLimit),
 		ticker:   time.NewTicker(2 * time.Second),
 	}
 	heap.Init(r.results)
@@ -310,7 +347,7 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(task *TxTask) {
+func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) error {
 	q.Lock()
 	defer q.Unlock()
 	if task != nil {
@@ -319,16 +356,21 @@ func (q *ResultsQueue) drainNoBlock(task *TxTask) {
 
 	for {
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case txTask, ok := <-q.resultCh:
 			if !ok {
-				return
+				return nil
 			}
-			if txTask != nil {
-				heap.Push(q.results, txTask)
-				q.results.Len()
+			if txTask == nil {
+				continue
+			}
+			heap.Push(q.results, txTask)
+			if q.results.Len() > q.limit {
+				return nil
 			}
 		default: // we are inside mutex section, can't block here
-			return
+			return nil
 		}
 	}
 }
@@ -361,7 +403,9 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 		if !ok {
 			return nil
 		}
-		q.drainNoBlock(txTask)
+		if err := q.drainNoBlock(ctx, txTask); err != nil {
+			return err
+		}
 	case <-q.ticker.C:
 		// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
 		// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
@@ -375,14 +419,16 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	return nil
 }
 
-func (q *ResultsQueue) DrainNonBlocking() { q.drainNoBlock(nil) }
+func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) error { return q.drainNoBlock(ctx, nil) }
 
-func (q *ResultsQueue) DropResults(f func(t *TxTask)) {
+func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *TxTask)) {
 	q.Lock()
 	defer q.Unlock()
 Loop:
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case txTask, ok := <-q.resultCh:
 			if !ok {
 				break Loop

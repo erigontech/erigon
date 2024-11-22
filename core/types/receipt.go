@@ -21,6 +21,7 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,11 +30,11 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/rlp"
 )
 
-// go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
+//(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
 
 var (
 	receiptStatusFailedRLP     = []byte{}
@@ -71,7 +72,7 @@ type Receipt struct {
 	BlockNumber      *big.Int       `json:"blockNumber,omitempty"`
 	TransactionIndex uint           `json:"transactionIndex"`
 
-	FirstLogIndex uint32 `json:"-"` // field which used to store in db and re-calc
+	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
 }
 
 type receiptMarshaling struct {
@@ -333,7 +334,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.FirstLogIndex = stored.FirstLogIndex
+	r.FirstLogIndexWithinBlock = stored.FirstLogIndex
 
 	//r.Logs = make([]*Log, len(stored.Logs))
 	//for i, log := range stored.Logs {
@@ -438,25 +439,12 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Hash, blockNum uint64, txn Transaction) (*Receipt, error) {
-	r := rl[i]
-	var prevReceipt *Receipt
-	if i > 0 {
-		prevReceipt = rl[i-1]
-	}
-	err := r.DeriveFieldsV3ForSingleReceipt(i, blockHash, blockNum, txn, prevReceipt)
-	if err != nil {
-		return nil, err
-	}
-	return r, nil
-}
-
-func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevReceipt *Receipt) error {
-	logIndex := r.FirstLogIndex // logIdx is unique within the block and starts from 0
+func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
+	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	sender, ok := txn.cachedSender()
 	if !ok {
-		return fmt.Errorf("tx must have cached sender")
+		return errors.New("tx must have cached sender")
 	}
 
 	blockNumber := new(big.Int).SetUint64(blockNum)
@@ -480,7 +468,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 	if txnIdx == 0 {
 		r.GasUsed = r.CumulativeGasUsed
 	} else {
-		r.GasUsed = r.CumulativeGasUsed - prevReceipt.CumulativeGasUsed
+		r.GasUsed = r.CumulativeGasUsed - prevCumulativeGasUsed
 	}
 
 	// The derived log fields can simply be set from the block and transaction
@@ -497,6 +485,9 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 
 // TODO: maybe make it more prettier (only for debug purposes)
 func (r *Receipt) String() string {
-	str := fmt.Sprintf("Receipt of tx %+v", *r)
-	return str
+	j, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Sprintf("Error during JSON marshalling, receipt: %+v, error: %s", *r, err)
+	}
+	return string(j)
 }

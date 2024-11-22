@@ -26,8 +26,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 )
 
 const (
@@ -37,81 +38,18 @@ const (
 	ETH68 = 68
 )
 
-var ProtoIds = map[uint]map[sentry.MessageId]struct{}{
-	ETH65: {
-		sentry.MessageId_GET_BLOCK_HEADERS_65:             struct{}{},
-		sentry.MessageId_BLOCK_HEADERS_65:                 struct{}{},
-		sentry.MessageId_GET_BLOCK_BODIES_65:              struct{}{},
-		sentry.MessageId_BLOCK_BODIES_65:                  struct{}{},
-		sentry.MessageId_GET_NODE_DATA_65:                 struct{}{},
-		sentry.MessageId_NODE_DATA_65:                     struct{}{},
-		sentry.MessageId_GET_RECEIPTS_65:                  struct{}{},
-		sentry.MessageId_RECEIPTS_65:                      struct{}{},
-		sentry.MessageId_NEW_BLOCK_HASHES_65:              struct{}{},
-		sentry.MessageId_NEW_BLOCK_65:                     struct{}{},
-		sentry.MessageId_TRANSACTIONS_65:                  struct{}{},
-		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65: struct{}{},
-		sentry.MessageId_GET_POOLED_TRANSACTIONS_65:       struct{}{},
-		sentry.MessageId_POOLED_TRANSACTIONS_65:           struct{}{},
-	},
-	ETH66: {
-		sentry.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
-		sentry.MessageId_BLOCK_HEADERS_66:                 struct{}{},
-		sentry.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
-		sentry.MessageId_BLOCK_BODIES_66:                  struct{}{},
-		sentry.MessageId_GET_NODE_DATA_66:                 struct{}{},
-		sentry.MessageId_NODE_DATA_66:                     struct{}{},
-		sentry.MessageId_GET_RECEIPTS_66:                  struct{}{},
-		sentry.MessageId_RECEIPTS_66:                      struct{}{},
-		sentry.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
-		sentry.MessageId_NEW_BLOCK_66:                     struct{}{},
-		sentry.MessageId_TRANSACTIONS_66:                  struct{}{},
-		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: struct{}{},
-		sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
-		sentry.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
-	},
-	ETH67: {
-		sentry.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
-		sentry.MessageId_BLOCK_HEADERS_66:                 struct{}{},
-		sentry.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
-		sentry.MessageId_BLOCK_BODIES_66:                  struct{}{},
-		sentry.MessageId_GET_RECEIPTS_66:                  struct{}{},
-		sentry.MessageId_RECEIPTS_66:                      struct{}{},
-		sentry.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
-		sentry.MessageId_NEW_BLOCK_66:                     struct{}{},
-		sentry.MessageId_TRANSACTIONS_66:                  struct{}{},
-		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: struct{}{},
-		sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
-		sentry.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
-	},
-	ETH68: {
-		sentry.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
-		sentry.MessageId_BLOCK_HEADERS_66:                 struct{}{},
-		sentry.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
-		sentry.MessageId_BLOCK_BODIES_66:                  struct{}{},
-		sentry.MessageId_GET_RECEIPTS_66:                  struct{}{},
-		sentry.MessageId_RECEIPTS_66:                      struct{}{},
-		sentry.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
-		sentry.MessageId_NEW_BLOCK_66:                     struct{}{},
-		sentry.MessageId_TRANSACTIONS_66:                  struct{}{},
-		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: struct{}{},
-		sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
-		sentry.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
-	},
-}
-
 //go:generate mockgen -typed=true -destination=./sentry_client_mock.go -package=direct . SentryClient
 type SentryClient interface {
-	sentry.SentryClient
+	sentryproto.SentryClient
 	Protocol() uint
 	Ready() bool
 	MarkDisconnected()
 }
 
 type SentryClientRemote struct {
-	sentry.SentryClient
+	sentryproto.SentryClient
 	sync.RWMutex
-	protocol uint
+	protocol sentryproto.Protocol
 	ready    bool
 }
 
@@ -121,14 +59,14 @@ var _ SentryClient = (*SentryClientDirect)(nil) // compile-time interface check
 // NewSentryClientRemote - app code must use this class
 // to avoid concurrency - it accepts protocol (which received async by SetStatus) in constructor,
 // means app can't use client which protocol unknown yet
-func NewSentryClientRemote(client sentry.SentryClient) *SentryClientRemote {
+func NewSentryClientRemote(client sentryproto.SentryClient) *SentryClientRemote {
 	return &SentryClientRemote{SentryClient: client}
 }
 
 func (c *SentryClientRemote) Protocol() uint {
 	c.RLock()
 	defer c.RUnlock()
-	return c.protocol
+	return ETH65 + uint(c.protocol)
 }
 
 func (c *SentryClientRemote) Ready() bool {
@@ -143,7 +81,7 @@ func (c *SentryClientRemote) MarkDisconnected() {
 	c.ready = false
 }
 
-func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentry.HandShakeReply, error) {
+func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
 	reply, err := c.SentryClient.HandShake(ctx, in, opts...)
 	if err != nil {
 		return nil, err
@@ -151,30 +89,26 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	c.Lock()
 	defer c.Unlock()
 	switch reply.Protocol {
-	case sentry.Protocol_ETH65:
-		c.protocol = ETH65
-	case sentry.Protocol_ETH66:
-		c.protocol = ETH66
-	case sentry.Protocol_ETH67:
-		c.protocol = ETH67
-	case sentry.Protocol_ETH68:
-		c.protocol = ETH68
+	case sentryproto.Protocol_ETH67, sentryproto.Protocol_ETH68:
+		c.protocol = reply.Protocol
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
 	c.ready = true
 	return reply, nil
 }
-func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentry.StatusData, opts ...grpc.CallOption) (*sentry.SetStatusReply, error) {
+func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentryproto.StatusData, opts ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
 	return c.SentryClient.SetStatus(ctx, in, opts...)
 }
 
-func (c *SentryClientRemote) Messages(ctx context.Context, in *sentry.MessagesRequest, opts ...grpc.CallOption) (sentry.Sentry_MessagesClient, error) {
-	in.Ids = filterIds(in.Ids, c.Protocol())
+func (c *SentryClientRemote) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
+	in = &sentryproto.MessagesRequest{
+		Ids: filterIds(in.Ids, c.protocol),
+	}
 	return c.SentryClient.Messages(ctx, in, opts...)
 }
 
-func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentry.PeerCountRequest, opts ...grpc.CallOption) (*sentry.PeerCountReply, error) {
+func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentryproto.PeerCountRequest, opts ...grpc.CallOption) (*sentryproto.PeerCountReply, error) {
 	return c.SentryClient.PeerCount(ctx, in)
 }
 
@@ -187,66 +121,68 @@ func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentry.PeerCount
 // SentryClientDirect implements SentryClient interface by connecting the instance of the client directly with the corresponding
 // instance of SentryServer
 type SentryClientDirect struct {
-	server   sentry.SentryServer
-	protocol uint
+	server   sentryproto.SentryServer
+	protocol sentryproto.Protocol
 }
 
-func NewSentryClientDirect(protocol uint, sentryServer sentry.SentryServer) *SentryClientDirect {
-	return &SentryClientDirect{protocol: protocol, server: sentryServer}
+func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer) *SentryClientDirect {
+	return &SentryClientDirect{protocol: sentryproto.Protocol(protocol - ETH65), server: sentryServer}
 }
 
-func (c *SentryClientDirect) Protocol() uint    { return c.protocol }
+func (c *SentryClientDirect) Protocol() uint    { return uint(c.protocol) + ETH65 }
 func (c *SentryClientDirect) Ready() bool       { return true }
 func (c *SentryClientDirect) MarkDisconnected() {}
 
-func (c *SentryClientDirect) PenalizePeer(ctx context.Context, in *sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *SentryClientDirect) PenalizePeer(ctx context.Context, in *sentryproto.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.PenalizePeer(ctx, in)
 }
 
-func (c *SentryClientDirect) PeerMinBlock(ctx context.Context, in *sentry.PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *SentryClientDirect) PeerMinBlock(ctx context.Context, in *sentryproto.PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.PeerMinBlock(ctx, in)
 }
 
-func (c *SentryClientDirect) SendMessageByMinBlock(ctx context.Context, in *sentry.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (c *SentryClientDirect) SendMessageByMinBlock(ctx context.Context, in *sentryproto.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	return c.server.SendMessageByMinBlock(ctx, in)
 }
 
-func (c *SentryClientDirect) SendMessageById(ctx context.Context, in *sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (c *SentryClientDirect) SendMessageById(ctx context.Context, in *sentryproto.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	return c.server.SendMessageById(ctx, in)
 }
 
-func (c *SentryClientDirect) SendMessageToRandomPeers(ctx context.Context, in *sentry.SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (c *SentryClientDirect) SendMessageToRandomPeers(ctx context.Context, in *sentryproto.SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	return c.server.SendMessageToRandomPeers(ctx, in)
 }
 
-func (c *SentryClientDirect) SendMessageToAll(ctx context.Context, in *sentry.OutboundMessageData, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (c *SentryClientDirect) SendMessageToAll(ctx context.Context, in *sentryproto.OutboundMessageData, opts ...grpc.CallOption) (*sentryproto.SentPeers, error) {
 	return c.server.SendMessageToAll(ctx, in)
 }
 
-func (c *SentryClientDirect) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentry.HandShakeReply, error) {
+func (c *SentryClientDirect) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
 	return c.server.HandShake(ctx, in)
 }
 
-func (c *SentryClientDirect) SetStatus(ctx context.Context, in *sentry.StatusData, opts ...grpc.CallOption) (*sentry.SetStatusReply, error) {
+func (c *SentryClientDirect) SetStatus(ctx context.Context, in *sentryproto.StatusData, opts ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
 	return c.server.SetStatus(ctx, in)
 }
 
-func (c *SentryClientDirect) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentry.PeersReply, error) {
+func (c *SentryClientDirect) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
 	return c.server.Peers(ctx, in)
 }
 
-func (c *SentryClientDirect) PeerCount(ctx context.Context, in *sentry.PeerCountRequest, opts ...grpc.CallOption) (*sentry.PeerCountReply, error) {
+func (c *SentryClientDirect) PeerCount(ctx context.Context, in *sentryproto.PeerCountRequest, opts ...grpc.CallOption) (*sentryproto.PeerCountReply, error) {
 	return c.server.PeerCount(ctx, in)
 }
 
-func (c *SentryClientDirect) PeerById(ctx context.Context, in *sentry.PeerByIdRequest, opts ...grpc.CallOption) (*sentry.PeerByIdReply, error) {
+func (c *SentryClientDirect) PeerById(ctx context.Context, in *sentryproto.PeerByIdRequest, opts ...grpc.CallOption) (*sentryproto.PeerByIdReply, error) {
 	return c.server.PeerById(ctx, in)
 }
 
 // -- start Messages
 
-func (c *SentryClientDirect) Messages(ctx context.Context, in *sentry.MessagesRequest, opts ...grpc.CallOption) (sentry.Sentry_MessagesClient, error) {
-	in.Ids = filterIds(in.Ids, c.Protocol())
+func (c *SentryClientDirect) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
+	in = &sentryproto.MessagesRequest{
+		Ids: filterIds(in.Ids, c.protocol),
+	}
 	ch := make(chan *inboundMessageReply, 16384)
 	streamServer := &SentryMessagesStreamS{ch: ch, ctx: ctx}
 	go func() {
@@ -257,18 +193,18 @@ func (c *SentryClientDirect) Messages(ctx context.Context, in *sentry.MessagesRe
 }
 
 type inboundMessageReply struct {
-	r   *sentry.InboundMessage
+	r   *sentryproto.InboundMessage
 	err error
 }
 
-// SentryMessagesStreamS implements proto_sentry.Sentry_ReceiveMessagesServer
+// SentryMessagesStreamS implements proto_sentryproto.Sentry_ReceiveMessagesServer
 type SentryMessagesStreamS struct {
 	ch  chan *inboundMessageReply
 	ctx context.Context
 	grpc.ServerStream
 }
 
-func (s *SentryMessagesStreamS) Send(m *sentry.InboundMessage) error {
+func (s *SentryMessagesStreamS) Send(m *sentryproto.InboundMessage) error {
 	s.ch <- &inboundMessageReply{r: m}
 	return nil
 }
@@ -288,7 +224,7 @@ type SentryMessagesStreamC struct {
 	grpc.ClientStream
 }
 
-func (c *SentryMessagesStreamC) Recv() (*sentry.InboundMessage, error) {
+func (c *SentryMessagesStreamC) Recv() (*sentryproto.InboundMessage, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
 		return nil, io.EOF
@@ -303,7 +239,7 @@ func (c *SentryMessagesStreamC) RecvMsg(anyMessage interface{}) error {
 	if err != nil {
 		return err
 	}
-	outMessage := anyMessage.(*sentry.InboundMessage)
+	outMessage := anyMessage.(*sentryproto.InboundMessage)
 	proto.Merge(outMessage, m)
 	return nil
 }
@@ -311,7 +247,7 @@ func (c *SentryMessagesStreamC) RecvMsg(anyMessage interface{}) error {
 // -- end Messages
 // -- start Peers
 
-func (c *SentryClientDirect) PeerEvents(ctx context.Context, in *sentry.PeerEventsRequest, opts ...grpc.CallOption) (sentry.Sentry_PeerEventsClient, error) {
+func (c *SentryClientDirect) PeerEvents(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
 	ch := make(chan *peersReply, 16384)
 	streamServer := &SentryPeersStreamS{ch: ch, ctx: ctx}
 	go func() {
@@ -321,23 +257,23 @@ func (c *SentryClientDirect) PeerEvents(ctx context.Context, in *sentry.PeerEven
 	return &SentryPeersStreamC{ch: ch, ctx: ctx}, nil
 }
 
-func (c *SentryClientDirect) AddPeer(ctx context.Context, in *sentry.AddPeerRequest, opts ...grpc.CallOption) (*sentry.AddPeerReply, error) {
+func (c *SentryClientDirect) AddPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
 	return c.server.AddPeer(ctx, in)
 }
 
 type peersReply struct {
-	r   *sentry.PeerEvent
+	r   *sentryproto.PeerEvent
 	err error
 }
 
-// SentryPeersStreamS - implements proto_sentry.Sentry_ReceivePeersServer
+// SentryPeersStreamS - implements proto_sentryproto.Sentry_ReceivePeersServer
 type SentryPeersStreamS struct {
 	ch  chan *peersReply
 	ctx context.Context
 	grpc.ServerStream
 }
 
-func (s *SentryPeersStreamS) Send(m *sentry.PeerEvent) error {
+func (s *SentryPeersStreamS) Send(m *sentryproto.PeerEvent) error {
 	s.ch <- &peersReply{r: m}
 	return nil
 }
@@ -357,7 +293,7 @@ type SentryPeersStreamC struct {
 	grpc.ClientStream
 }
 
-func (c *SentryPeersStreamC) Recv() (*sentry.PeerEvent, error) {
+func (c *SentryPeersStreamC) Recv() (*sentryproto.PeerEvent, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
 		return nil, io.EOF
@@ -372,7 +308,7 @@ func (c *SentryPeersStreamC) RecvMsg(anyMessage interface{}) error {
 	if err != nil {
 		return err
 	}
-	outMessage := anyMessage.(*sentry.PeerEvent)
+	outMessage := anyMessage.(*sentryproto.PeerEvent)
 	proto.Merge(outMessage, m)
 	return nil
 }
@@ -383,9 +319,9 @@ func (c *SentryClientDirect) NodeInfo(ctx context.Context, in *emptypb.Empty, op
 	return c.server.NodeInfo(ctx, in)
 }
 
-func filterIds(in []sentry.MessageId, protocol uint) (filtered []sentry.MessageId) {
+func filterIds(in []sentryproto.MessageId, protocol sentryproto.Protocol) (filtered []sentryproto.MessageId) {
 	for _, id := range in {
-		if _, ok := ProtoIds[protocol][id]; ok {
+		if _, ok := libsentry.ProtoIds[protocol][id]; ok {
 			filtered = append(filtered, id)
 		}
 	}

@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -88,7 +89,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
 	if encodedLn > uint64(16*datasize.MB) {
-		return fmt.Errorf("payload too big")
+		return errors.New("payload too big")
 	}
 
 	sr := snappy.NewReader(r)

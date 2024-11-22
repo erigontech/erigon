@@ -42,7 +42,7 @@ func TestBlockchain(t *testing.T) {
 
 	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
 	// TODO(yperbasis): make it work
-	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
+	bt.skipLoad(`^TransitionTests/bcArrowGlacierToParis/powToPosBlockRejection\.json`)
 	bt.skipLoad(`^TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain\.json`)
 
 	// TODO: HistoryV3: doesn't produce receipts on execution by design. But maybe we can Generate them on-the fly (on history) and enable this tests
@@ -53,27 +53,8 @@ func TestBlockchain(t *testing.T) {
 	checkStateRoot := true
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
+		t.Parallel()
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
-			t.Error(err)
-		}
-	})
-}
-
-func TestBlockchainEIP(t *testing.T) {
-	t.Skip("TODO(yperbasis): fix me")
-
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	bt := new(testMatcher)
-
-	// EOF is not supported yet
-	bt.skipLoad(`^StateTests/stEOF/`)
-
-	checkStateRoot := true
-
-	bt.walk(t, blockEipTestDir, func(t *testing.T, name string, test *BlockTest) {
 		if err := bt.checkFailure(t, test.Run(t, checkStateRoot)); err != nil {
 			t.Error(err)
 		}

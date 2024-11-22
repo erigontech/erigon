@@ -20,6 +20,7 @@
 package ethapi
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -29,11 +30,9 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers/logger"
@@ -52,7 +51,7 @@ type CallArgs struct {
 	Nonce                *hexutil.Uint64    `json:"nonce"`
 	Data                 *hexutility.Bytes  `json:"data"`
 	Input                *hexutility.Bytes  `json:"input"`
-	AccessList           *types2.AccessList `json:"accessList"`
+	AccessList           *types.AccessList  `json:"accessList"`
 	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
 }
 
@@ -98,7 +97,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 		if args.GasPrice != nil {
 			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
 			if overflow {
-				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+				return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 			}
 		}
 		gasFeeCap, gasTipCap = gasPrice, gasPrice
@@ -109,7 +108,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			gasPrice = new(uint256.Int)
 			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
 			if overflow {
-				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+				return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 			}
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
@@ -118,14 +117,14 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			if args.MaxFeePerGas != nil {
 				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
 				if overflow {
-					return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+					return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 				}
 			}
 			gasTipCap = new(uint256.Int)
 			if args.MaxPriorityFeePerGas != nil {
 				overflow := gasTipCap.SetFromBig(args.MaxPriorityFeePerGas.ToInt())
 				if overflow {
-					return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+					return types.Message{}, errors.New("args.GasPrice higher than 2^256-1")
 				}
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
@@ -137,7 +136,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 		if args.MaxFeePerBlobGas != nil {
 			blobFee, overflow := uint256.FromBig(args.MaxFeePerBlobGas.ToInt())
 			if overflow {
-				return types.Message{}, fmt.Errorf("args.MaxFeePerBlobGas higher than 2^256-1")
+				return types.Message{}, errors.New("args.MaxFeePerBlobGas higher than 2^256-1")
 			}
 			maxFeePerBlobGas = blobFee
 		}
@@ -147,7 +146,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	if args.Value != nil {
 		overflow := value.SetFromBig(args.Value.ToInt())
 		if overflow {
-			return types.Message{}, fmt.Errorf("args.Value higher than 2^256-1")
+			return types.Message{}, errors.New("args.Value higher than 2^256-1")
 		}
 	}
 	var data []byte
@@ -156,7 +155,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	} else if args.Data != nil {
 		data = *args.Data
 	}
-	var accessList types2.AccessList
+	var accessList types.AccessList
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
@@ -169,7 +168,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
 	chainID, overflow := uint256.FromBig((*big.Int)(args.ChainID))
 	if overflow {
-		return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
+		return nil, errors.New("chainId field caused an overflow (uint256)")
 	}
 
 	msg, err := args.ToMessage(globalGasCap, baseFee)
@@ -180,7 +179,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 	var tx types.Transaction
 	switch {
 	case args.MaxFeePerGas != nil:
-		al := types2.AccessList{}
+		al := types.AccessList{}
 		if args.AccessList != nil {
 			al = *args.AccessList
 		}
@@ -234,11 +233,11 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 // if statDiff is set, all diff will be applied first and then execute the call
 // message.
 type Account struct {
-	Nonce     *hexutil.Uint64                 `json:"nonce"`
-	Code      *hexutility.Bytes               `json:"code"`
-	Balance   **hexutil.Big                   `json:"balance"`
-	State     *map[libcommon.Hash]uint256.Int `json:"state"`
-	StateDiff *map[libcommon.Hash]uint256.Int `json:"stateDiff"`
+	Nonce     *hexutil.Uint64                    `json:"nonce"`
+	Code      *hexutility.Bytes                  `json:"code"`
+	Balance   **hexutil.Big                      `json:"balance"`
+	State     *map[libcommon.Hash]libcommon.Hash `json:"state"`
+	StateDiff *map[libcommon.Hash]libcommon.Hash `json:"stateDiff"`
 }
 
 func NewRevertError(result *evmtypes.ExecutionResult) *RevertError {
@@ -310,14 +309,14 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 		if trace.Stack != nil {
 			stack := make([]string, len(trace.Stack))
 			for i, stackValue := range trace.Stack {
-				stack[i] = fmt.Sprintf("%x", math.PaddedBigBytes(stackValue, 32))
+				stack[i] = hex.EncodeToString(math.PaddedBigBytes(stackValue, 32))
 			}
 			formatted[index].Stack = &stack
 		}
 		if trace.Memory != nil {
 			memory := make([]string, 0, (len(trace.Memory)+31)/32)
 			for i := 0; i+32 <= len(trace.Memory); i += 32 {
-				memory = append(memory, fmt.Sprintf("%x", trace.Memory[i:i+32]))
+				memory = append(memory, hex.EncodeToString(trace.Memory[i:i+32]))
 			}
 			formatted[index].Memory = &memory
 		}
@@ -368,8 +367,8 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.ParentBeaconBlockRoot != nil {
 		result["parentBeaconBlockRoot"] = head.ParentBeaconBlockRoot
 	}
-	if head.RequestsRoot != nil {
-		result["requestsRoot"] = head.RequestsRoot
+	if head.RequestsHash != nil {
+		result["requestsHash"] = head.RequestsHash
 	}
 
 	return result
@@ -428,36 +427,8 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		fields["withdrawals"] = block.Withdrawals()
 	}
 
-	if block.Requests() != nil {
-		fields["requests"] = block.Requests()
-	}
-
 	return fields, nil
 }
-
-/*
-
-// rpcMarshalHeader uses the generalized output filler, then adds the total difficulty field, which requires
-// a `PublicBlockchainAPI`.
-func (s *PublicBlockChainAPI) rpcMarshalHeader(ctx context.Context, header *types.Header) map[string]interface{} {
-	fields := RPCMarshalHeader(header)
-	fields["totalDifficulty"] = (*hexutil.Big)(s.b.GetTd(ctx, header.Hash()))
-	return fields
-}
-
-// rpcMarshalBlock uses the generalized output filler, then adds the total difficulty field, which requires
-// a `PublicBlockchainAPI`.
-func (s *PublicBlockChainAPI) rpcMarshalBlock(ctx context.Context, b *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
-	fields, err := RPCMarshalBlock(b, inclTx, fullTx)
-	if err != nil {
-		return nil, err
-	}
-	if inclTx {
-		fields["totalDifficulty"] = (*hexutil.Big)(s.b.GetTd(ctx, b.Hash()))
-	}
-	return fields, err
-}
-*/
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
@@ -476,7 +447,7 @@ type RPCTransaction struct {
 	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
 	Value            *hexutil.Big       `json:"value"`
 	Type             hexutil.Uint64     `json:"type"`
-	Accesses         *types2.AccessList `json:"accessList,omitempty"`
+	Accesses         *types.AccessList  `json:"accessList,omitempty"`
 	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
 	V                *hexutil.Big       `json:"v"`
 	YParity          *hexutil.Big       `json:"yParity,omitempty"`

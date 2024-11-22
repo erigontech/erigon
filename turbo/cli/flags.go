@@ -22,8 +22,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
 
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -82,62 +83,22 @@ var (
 		Value: kv.ReadersLimit - 128,
 	}
 
-	PruneFlag = cli.StringFlag{
-		Name: "prune",
-		Usage: `Choose which ancient data delete from DB:
-	h - prune history (ChangeSets, HistoryIndices - used by historical state access, like eth_getStorageAt, eth_getBalanceAt, debug_traceTransaction, trace_block, trace_transaction, etc.)
-	r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
-	t - prune transaction by it's hash index
-	c - prune call traces (used by trace_filter method)
-	Does delete data older than 90K blocks, --prune=h is shortcut for: --prune.h.older=90000.
-	Similarly, --prune=t is shortcut for: --prune.t.older=90000 and --prune=c is shortcut for: --prune.c.older=90000.
-	However, --prune=r means to prune receipts before the Beacon Chain genesis (Consensus Layer might need receipts after that).
-	If an item is NOT on the list - means NO pruning for this data.
-	Example: --prune=htc`,
-		Value: "disabled",
+	PruneModeFlag = cli.StringFlag{
+		Name: "prune.mode",
+		Usage: `Choose a pruning preset to run onto. Available values: "archive","full","minimal".
+				Archive: Keep the entire indexed database, aka. no pruning. (Pruning is flexible),
+				Full: Keep only blocks and latest state (Pruning is not flexible)
+				Minimal: Keep only latest state (Pruning is not flexible)`,
+		Value: "archive",
 	}
-	PruneBlocksFlag = cli.Uint64Flag{
-		Name:  "prune.b.older",
-		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'b', then default is 90K)`,
+	PruneDistanceFlag = cli.Uint64Flag{
+		Name:  "prune.distance",
+		Usage: `Keep state history for the latest N blocks (default: everything)`,
 	}
-	PruneHistoryFlag = cli.Uint64Flag{
-		Name:  "prune.h.older",
-		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'h', then default is 90K)`,
+	PruneBlocksDistanceFlag = cli.Uint64Flag{
+		Name:  "prune.distance.blocks",
+		Usage: `Keep block history for the latest N blocks (default: everything)`,
 	}
-	PruneReceiptFlag = cli.Uint64Flag{
-		Name:  "prune.r.older",
-		Usage: `Prune data older than this number of blocks from the tip of the chain`,
-	}
-	PruneTxIndexFlag = cli.Uint64Flag{
-		Name:  "prune.t.older",
-		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 't', then default is 90K)`,
-	}
-	PruneCallTracesFlag = cli.Uint64Flag{
-		Name:  "prune.c.older",
-		Usage: `Prune data older than this number of blocks from the tip of the chain (if --prune flag has 'c', then default is 90K)`,
-	}
-
-	PruneHistoryBeforeFlag = cli.Uint64Flag{
-		Name:  "prune.h.before",
-		Usage: `Prune data before this block`,
-	}
-	PruneReceiptBeforeFlag = cli.Uint64Flag{
-		Name:  "prune.r.before",
-		Usage: `Prune data before this block`,
-	}
-	PruneTxIndexBeforeFlag = cli.Uint64Flag{
-		Name:  "prune.t.before",
-		Usage: `Prune data before this block`,
-	}
-	PruneCallTracesBeforeFlag = cli.Uint64Flag{
-		Name:  "prune.c.before",
-		Usage: `Prune data before this block`,
-	}
-	PruneBlocksBeforeFlag = cli.Uint64Flag{
-		Name:  "prune.b.before",
-		Usage: `Prune data before this block`,
-	}
-
 	ExperimentsFlag = cli.StringFlag{
 		Name: "experiments",
 		Usage: `Enable some experimental stages:
@@ -177,12 +138,6 @@ var (
 		Value: "",
 	}
 
-	SyncLoopPruneLimitFlag = cli.UintFlag{
-		Name:  "sync.loop.prune.limit",
-		Usage: "Sets the maximum number of block to prune per loop iteration",
-		Value: 100,
-	}
-
 	SyncLoopBreakAfterFlag = cli.StringFlag{
 		Name:  "sync.loop.break.after",
 		Usage: "Sets the last stage of the sync loop to run",
@@ -193,6 +148,12 @@ var (
 		Name:  "sync.loop.block.limit",
 		Usage: "Sets the maximum number of blocks to process per loop iteration",
 		Value: 5_000,
+	}
+
+	SyncParallelStateFlushing = cli.BoolFlag{
+		Name:  "sync.parallel-state-flushing",
+		Usage: "Enables parallel state flushing",
+		Value: true,
 	}
 
 	UploadLocationFlag = cli.StringFlag{
@@ -312,28 +273,37 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
 	}
-	minimal := ctx.String(PruneFlag.Name) == "minimal"
-	pruneFlagString := ctx.String(PruneFlag.Name)
-	if minimal {
-		pruneFlagString = "htrcb"
+	// Sanitize prune flag
+	if ctx.String(PruneModeFlag.Name) != "archive" && (ctx.IsSet(PruneBlocksDistanceFlag.Name) || ctx.IsSet(PruneDistanceFlag.Name)) {
+		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
+	}
+	distance := ctx.Uint64(PruneDistanceFlag.Name)
+	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
+
+	if !ctx.IsSet(PruneBlocksDistanceFlag.Name) {
+		blockDistance = math.MaxUint64
+	}
+	if !ctx.IsSet(PruneDistanceFlag.Name) {
+		distance = math.MaxUint64
 	}
 	mode, err := prune.FromCli(
 		chainId,
-		pruneFlagString,
-		ctx.Uint64(PruneBlocksFlag.Name),
-		ctx.Uint64(PruneHistoryFlag.Name),
-		ctx.Uint64(PruneReceiptFlag.Name),
-		ctx.Uint64(PruneTxIndexFlag.Name),
-		ctx.Uint64(PruneCallTracesFlag.Name),
-		ctx.Uint64(PruneHistoryBeforeFlag.Name),
-		ctx.Uint64(PruneReceiptBeforeFlag.Name),
-		ctx.Uint64(PruneTxIndexBeforeFlag.Name),
-		ctx.Uint64(PruneCallTracesBeforeFlag.Name),
-		ctx.Uint64(PruneBlocksBeforeFlag.Name),
+		distance,
+		blockDistance,
 		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
 	)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+	// Full mode prunes all but the latest state
+	if ctx.String(PruneModeFlag.Name) == "full" {
+		mode.Blocks = prune.Distance(math.MaxUint64)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	}
+	// Minimal mode prunes all but the latest state including blocks
+	if ctx.String(PruneModeFlag.Name) == "minimal" {
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	}
 
 	if err != nil {
@@ -357,15 +327,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		etl.BufferOptimalSize = *size
 	}
 
-	if minimal {
-		// Prune them all.
-		cfg.Prune.Blocks = prune.Before(math.MaxUint64)
-		cfg.Prune.History = prune.Before(math.MaxUint64)
-		cfg.Prune.Receipts = prune.Before(math.MaxUint64)
-		cfg.Prune.TxIndex = prune.Before(math.MaxUint64)
-		cfg.Prune.CallTraces = prune.Before(math.MaxUint64)
-	}
-
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
 	if ctx.String(BodyCacheLimitFlag.Name) != "" {
 		err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(ctx.String(BodyCacheLimitFlag.Name)))
@@ -382,10 +343,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
 
-	if limit := ctx.Uint(SyncLoopPruneLimitFlag.Name); limit > 0 {
-		cfg.Sync.PruneLimit = int(limit)
-	}
-
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
 		cfg.Sync.BreakAfterStage = stage
 	}
@@ -393,6 +350,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
 		cfg.Sync.LoopBlockLimit = limit
 	}
+	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 
 	if location := ctx.String(UploadLocationFlag.Name); len(location) > 0 {
 		cfg.Sync.UploadLocation = location
@@ -430,59 +388,56 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if ctx.Bool(utils.DisableIPV4.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv4 = true
 	}
+
+	if ctx.Bool(utils.ChaosMonkeyFlag.Name) {
+		cfg.ChaosMonkey = true
+	}
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
-	if v := f.String(PruneFlag.Name, PruneFlag.Value, PruneFlag.Usage); v != nil {
-		var experiments []string
-		if exp := f.StringSlice(ExperimentsFlag.Name, nil, ExperimentsFlag.Usage); exp != nil {
-			experiments = *exp
-		}
-		var exactB, exactH, exactR, exactT, exactC uint64
-		if v := f.Uint64(PruneBlocksFlag.Name, PruneBlocksFlag.Value, PruneBlocksFlag.Usage); v != nil {
-			exactB = *v
-		}
-		if v := f.Uint64(PruneHistoryFlag.Name, PruneHistoryFlag.Value, PruneHistoryFlag.Usage); v != nil {
-			exactH = *v
-		}
-		if v := f.Uint64(PruneReceiptFlag.Name, PruneReceiptFlag.Value, PruneReceiptFlag.Usage); v != nil {
-			exactR = *v
-		}
-		if v := f.Uint64(PruneTxIndexFlag.Name, PruneTxIndexFlag.Value, PruneTxIndexFlag.Usage); v != nil {
-			exactT = *v
-		}
-		if v := f.Uint64(PruneCallTracesFlag.Name, PruneCallTracesFlag.Value, PruneCallTracesFlag.Usage); v != nil {
-			exactC = *v
-		}
+	pruneMode := f.String(PruneModeFlag.Name, PruneModeFlag.DefaultText, PruneModeFlag.Usage)
+	pruneBlockDistance := f.Uint64(PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value, PruneBlocksDistanceFlag.Usage)
+	pruneDistance := f.Uint64(PruneDistanceFlag.Name, PruneDistanceFlag.Value, PruneDistanceFlag.Usage)
 
-		var beforeB, beforeH, beforeR, beforeT, beforeC uint64
-		if v := f.Uint64(PruneBlocksBeforeFlag.Name, PruneBlocksBeforeFlag.Value, PruneBlocksBeforeFlag.Usage); v != nil {
-			beforeB = *v
-		}
-		if v := f.Uint64(PruneHistoryBeforeFlag.Name, PruneHistoryBeforeFlag.Value, PruneHistoryBeforeFlag.Usage); v != nil {
-			beforeH = *v
-		}
-		if v := f.Uint64(PruneReceiptBeforeFlag.Name, PruneReceiptBeforeFlag.Value, PruneReceiptBeforeFlag.Usage); v != nil {
-			beforeR = *v
-		}
-		if v := f.Uint64(PruneTxIndexBeforeFlag.Name, PruneTxIndexBeforeFlag.Value, PruneTxIndexBeforeFlag.Usage); v != nil {
-			beforeT = *v
-		}
-		if v := f.Uint64(PruneCallTracesBeforeFlag.Name, PruneCallTracesBeforeFlag.Value, PruneCallTracesBeforeFlag.Usage); v != nil {
-			beforeC = *v
-		}
-
-		chainId := cfg.NetworkID
-		if cfg.Genesis != nil {
-			chainId = cfg.Genesis.Config.ChainID.Uint64()
-		}
-
-		mode, err := prune.FromCli(chainId, *v, exactB, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, beforeB, experiments)
-		if err != nil {
-			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-		}
-		cfg.Prune = mode
+	chainId := cfg.NetworkID
+	if *pruneMode != "archive" && (pruneBlockDistance != nil || pruneDistance != nil) {
+		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
 	}
+	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
+	if pruneBlockDistance != nil {
+		blockDistance = *pruneBlockDistance
+	}
+	if pruneDistance != nil {
+		distance = *pruneDistance
+	}
+
+	experiments := f.String(ExperimentsFlag.Name, ExperimentsFlag.Value, ExperimentsFlag.Usage)
+	experimentsVal := ""
+	if experiments != nil {
+		experimentsVal = *experiments
+	}
+	mode, err := prune.FromCli(
+		chainId,
+		distance,
+		blockDistance,
+		libcommon.CliString2Array(experimentsVal),
+	)
+	if err != nil {
+		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+	switch *pruneMode {
+	case "archive":
+	case "full":
+		mode.Blocks = prune.Distance(math.MaxUint64)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	case "minimal":
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
+	default:
+		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
+	}
+	cfg.Prune = mode
+
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))
 		if err != nil {
@@ -502,6 +457,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	cfg.StateStream = true
 	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
 		cfg.StateStream = false
+	}
+
+	if v := f.Bool(utils.ChaosMonkeyFlag.Name, true, utils.ChaosMonkeyFlag.Usage); v != nil {
+		cfg.ChaosMonkey = true
 	}
 }
 

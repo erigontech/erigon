@@ -22,6 +22,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -56,8 +57,10 @@ type DataError interface {
 // a RPC session. Implementations must be go-routine safe since the codec can be called in
 // multiple go-routines concurrently.
 type ServerCodec interface {
+	peerInfo() PeerInfo
 	ReadBatch() (msgs []*jsonrpcMessage, isBatch bool, err error)
 	Close()
+
 	jsonWriter
 }
 
@@ -137,7 +140,7 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if blckNum > math.MaxInt64 {
-		return fmt.Errorf("block number larger than int64")
+		return errors.New("block number larger than int64")
 	}
 	*bn = BlockNumber(blckNum)
 	return nil
@@ -234,10 +237,10 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &e)
 	if err == nil {
 		if e.BlockNumber != nil && e.BlockHash != nil {
-			return fmt.Errorf("cannot specify both BlockHash and BlockNumber, choose one or the other")
+			return errors.New("cannot specify both BlockHash and BlockNumber, choose one or the other")
 		}
 		if e.BlockNumber == nil && e.BlockHash == nil {
-			return fmt.Errorf("at least one of BlockNumber or BlockHash is needed if a dictionary is provided")
+			return errors.New("at least one of BlockNumber or BlockHash is needed if a dictionary is provided")
 		}
 		bnh.BlockNumber = e.BlockNumber
 		bnh.BlockHash = e.BlockHash
@@ -248,7 +251,7 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 	blckNum, err := strconv.ParseUint(string(data), 10, 64)
 	if err == nil {
 		if blckNum > math.MaxInt64 {
-			return fmt.Errorf("blocknumber too high")
+			return errors.New("blocknumber too high")
 		}
 		bn := BlockNumber(blckNum)
 		bnh.BlockNumber = &bn
@@ -293,7 +296,7 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 				return err
 			}
 			if blckNum > math.MaxInt64 {
-				return fmt.Errorf("blocknumber too high")
+				return errors.New("blocknumber too high")
 			}
 			bn := BlockNumber(blckNum)
 			bnh.BlockNumber = &bn

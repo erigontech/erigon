@@ -147,9 +147,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	if err != nil {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("error")
-		l.stream.WriteObjectStart()
-		l.stream.WriteObjectEnd()
-		//l.stream.WriteString(err.Error())
+		l.stream.WriteString(err.Error())
 	}
 	if !l.cfg.DisableStack {
 		l.stream.WriteMore()

@@ -28,6 +28,6 @@ type Config struct { //nolint:maligned
 var DefaultConfig = Config{
 	Enabled:          false,
 	EnabledExpensive: false,
-	HTTP:             "0.0.0.0",
-	Port:             6060,
+	HTTP:             "127.0.0.1",
+	Port:             6061,
 }

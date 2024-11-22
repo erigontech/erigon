@@ -74,6 +74,9 @@ func (t *validatorTestSuite) SetupTest() {
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
+		false,
 	)
 	t.gomockCtrl = gomockCtrl
 }
@@ -109,18 +112,28 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 			method: http.MethodGet,
 			url:    "/eth/v1/validator/aggregate_attestation?attestation_data_root=" + mockDataRoot + "&slot=1",
 			mock: func() {
-				ret := *solid.NewAttestionFromParameters(
-					[]byte{},
-					solid.NewAttestionDataFromParameters(
-						123456,
-						1,
-						libcommon.HexToHash(mockDataRoot),
-						solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
-						solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
-					),
-					[96]byte{},
-				)
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret).Times(1)
+				// ret := *solid.NewAttestionFromParameters(
+				// 	[]byte{},
+				// 	solid.NewAttestionDataFromParameters(
+				// 		123456,
+				// 		1,
+				// 		libcommon.HexToHash(mockDataRoot),
+				// 		solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
+				// 		solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
+				// 	),
+				// 	[96]byte{},
+				// )
+				ret := &solid.Attestation{
+					AggregationBits: solid.NewBitList(0, 2048),
+					Data: &solid.AttestationData{
+						Slot:            123456,
+						CommitteeIndex:  1,
+						BeaconBlockRoot: libcommon.HexToHash(mockDataRoot),
+						Source:          solid.Checkpoint{Epoch: 1},
+						Target:          solid.Checkpoint{Epoch: 1},
+					},
+				}
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(ret).Times(1)
 			},
 			expCode: http.StatusBadRequest,
 			expBody: map[string]any{
@@ -133,18 +146,29 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 			method: http.MethodGet,
 			url:    "/eth/v1/validator/aggregate_attestation?attestation_data_root=" + mockDataRoot + "&slot=1",
 			mock: func() {
-				ret := *solid.NewAttestionFromParameters(
-					[]byte{0b00111111, 0b00000011, 0, 0},
-					solid.NewAttestionDataFromParameters(
-						1,
-						1,
-						libcommon.HexToHash(mockDataRoot),
-						solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
-						solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
-					),
-					[96]byte{0, 1, 2, 3, 4, 5},
-				)
-				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(&ret).Times(1)
+				// ret := *solid.NewAttestionFromParameters(
+				// 	[]byte{0b00111111, 0b00000011, 0, 0},
+				// 	solid.NewAttestionDataFromParameters(
+				// 		1,
+				// 		1,
+				// 		libcommon.HexToHash(mockDataRoot),
+				// 		solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
+				// 		solid.NewCheckpointFromParameters(libcommon.Hash{}, 1),
+				// 	),
+				// 	[96]byte{0, 1, 2, 3, 4, 5},
+				// )
+				ret := &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{0b00111111, 0b00000011, 0, 0}, 2048),
+					Data: &solid.AttestationData{
+						Slot:            1,
+						CommitteeIndex:  1,
+						BeaconBlockRoot: libcommon.HexToHash(mockDataRoot),
+						Source:          solid.Checkpoint{Epoch: 1},
+						Target:          solid.Checkpoint{Epoch: 1},
+					},
+					Signature: [96]byte{0, 1, 2, 3, 4, 5},
+				}
+				t.mockAggrPool.EXPECT().GetAggregatationByRoot(libcommon.HexToHash(mockDataRoot)).Return(ret).Times(1)
 			},
 			expCode: http.StatusOK,
 			expBody: map[string]any{

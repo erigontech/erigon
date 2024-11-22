@@ -17,6 +17,7 @@
 package eth2
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
@@ -44,17 +45,17 @@ func (I *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.Signe
 	if !I.FullValidation {
 		return nil
 	}
-	valid, err := verifyBlockSignature(s, block)
+	valid, err := VerifyBlockSignature(s, block)
 	if err != nil {
 		return fmt.Errorf("error validating block signature: %v", err)
 	}
 	if !valid {
-		return fmt.Errorf("block not valid")
+		return errors.New("block not valid")
 	}
 	return nil
 }
 
-func verifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) (bool, error) {
+func VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) (bool, error) {
 	proposer, err := s.ValidatorForValidatorIndex(int(block.Block.ProposerIndex))
 	if err != nil {
 		return false, err

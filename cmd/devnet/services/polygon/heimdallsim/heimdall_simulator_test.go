@@ -94,6 +94,9 @@ func TestSimulatorEvents(t *testing.T) {
 		t.Skip("fix me on win")
 	}
 
+	// the number of events included in v1-000000-000500-borevents.seg
+	eventsCount := 100
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -101,7 +104,7 @@ func TestSimulatorEvents(t *testing.T) {
 
 	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 100)
 	assert.NoError(t, err)
-	assert.Equal(t, 100, len(res))
+	assert.Equal(t, eventsCount, len(res))
 
 	resLimit, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 2)
 	assert.NoError(t, err)
@@ -117,7 +120,7 @@ func TestSimulatorEvents(t *testing.T) {
 	lastTime := res[len(res)-1].Time
 	resTime, err := sim.FetchStateSyncEvents(ctx, 0, lastTime.Add(-1*time.Second), 100)
 	assert.NoError(t, err)
-	assert.Equal(t, 99, len(resTime))
+	assert.Equal(t, eventsCount-1, len(resTime))
 	assert.Equal(t, res[:len(res)-1], resTime)
 }
 

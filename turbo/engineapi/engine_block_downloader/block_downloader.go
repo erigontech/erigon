@@ -193,7 +193,7 @@ func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uin
 			return saveHeader(tx, &h, h.Hash())
 		}
 
-		foundPow = h.Difficulty.Cmp(libcommon.Big0) != 0
+		foundPow = h.Difficulty.Sign() != 0
 		if foundPow {
 			if (fromHash == libcommon.Hash{}) {
 				fromHash = h.Hash()
@@ -294,7 +294,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 		if body == nil {
 			return fmt.Errorf("missing body at block=%d", number)
 		}
-		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.Requests))
+		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals))
 		if number%uint64(blockWrittenLogSize) == 0 {
 			e.logger.Info("[insertHeadersAndBodies] Written blocks", "progress", number, "to", toBlock)
 		}

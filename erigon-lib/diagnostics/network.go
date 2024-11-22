@@ -93,6 +93,7 @@ func PeerStatisticsFromMsgUpdate(msg PeerStatisticMsgUpdate, prevValue any) Peer
 
 func peerStatisticsFromMsgUpdate(msg PeerStatisticMsgUpdate, prevValue any) PeerStatistics {
 	ps := PeerStatistics{
+		PeerName:     msg.PeerName,
 		PeerType:     msg.PeerType,
 		BytesIn:      0,
 		BytesOut:     0,

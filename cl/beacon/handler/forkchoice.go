@@ -18,7 +18,7 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -27,17 +27,17 @@ import (
 
 func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
-	hash, slotNumber, err := a.forkchoiceStore.GetHead()
+	root, slot, statusCode, err := a.getHead()
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 	return newBeaconResponse(
 		[]interface{}{
 			map[string]interface{}{
-				"slot":                 strconv.FormatUint(slotNumber, 10),
-				"root":                 hash,
+				"slot":                 strconv.FormatUint(slot, 10),
+				"root":                 root,
 				"execution_optimistic": false,
 			},
 		}), nil

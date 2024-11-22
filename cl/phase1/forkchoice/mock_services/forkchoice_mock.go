@@ -51,7 +51,7 @@ type ForkChoiceStorageMock struct {
 	SlotVal                uint64
 	TimeVal                uint64
 
-	ParticipationVal *solid.BitList
+	ParticipationVal *solid.ParticipationBitList
 
 	StateAtBlockRootVal       map[common.Hash]*state.CachingBeaconState
 	StateAtSlotVal            map[uint64]*state.CachingBeaconState
@@ -168,7 +168,7 @@ func (f *ForkChoiceStorageMock) GetEth1Hash(eth2Root common.Hash) common.Hash {
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetHead() (common.Hash, uint64, error) {
+func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
@@ -197,11 +197,12 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
 
 func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(
 	blockRoot common.Hash,
-) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint) {
-	oneNil := f.GetFinalityCheckpointsVal[blockRoot][0] != nil &&
-		f.GetFinalityCheckpointsVal[blockRoot][1] != nil &&
-		f.GetFinalityCheckpointsVal[blockRoot][2] != nil
-	return oneNil, f.GetFinalityCheckpointsVal[blockRoot][0], f.GetFinalityCheckpointsVal[blockRoot][1], f.GetFinalityCheckpointsVal[blockRoot][2]
+) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool) {
+	oneNil := f.GetFinalityCheckpointsVal[blockRoot][0] != solid.Checkpoint{} &&
+		f.GetFinalityCheckpointsVal[blockRoot][1] != solid.Checkpoint{} &&
+		f.GetFinalityCheckpointsVal[blockRoot][2] != solid.Checkpoint{}
+
+	return f.GetFinalityCheckpointsVal[blockRoot][0], f.GetFinalityCheckpointsVal[blockRoot][1], f.GetFinalityCheckpointsVal[blockRoot][2], oneNil
 }
 
 func (f *ForkChoiceStorageMock) GetSyncCommittees(
@@ -209,13 +210,6 @@ func (f *ForkChoiceStorageMock) GetSyncCommittees(
 ) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
 	return f.GetSyncCommitteesVal[period][0], f.GetSyncCommitteesVal[period][1], f.GetSyncCommitteesVal[period][0] != nil &&
 		f.GetSyncCommitteesVal[period][1] != nil
-}
-
-func (f *ForkChoiceStorageMock) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	if f.GetBeaconCommitteeMock != nil {
-		return f.GetBeaconCommitteeMock(slot, committeeIndex)
-	}
-	return []uint64{1, 2, 3, 4, 5, 6, 7, 8}, nil
 }
 
 func (f *ForkChoiceStorageMock) Slot() uint64 {
@@ -230,7 +224,7 @@ func (f *ForkChoiceStorageMock) OnAttestation(
 	attestation *solid.Attestation,
 	fromBlock, insert bool,
 ) error {
-	f.Pool.AttestationsPool.Insert(attestation.Signature(), attestation)
+	f.Pool.AttestationsPool.Insert(attestation.Signature, attestation)
 	return nil
 }
 
@@ -271,11 +265,11 @@ func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.Has
 	return false
 }
 
-func (f *ForkChoiceStorageMock) LowestAvaiableSlot() uint64 {
+func (f *ForkChoiceStorageMock) LowestAvailableSlot() uint64 {
 	return f.FinalizedSlotVal
 }
 
-func (f *ForkChoiceStorageMock) Partecipation(epoch uint64) (*solid.BitList, bool) {
+func (f *ForkChoiceStorageMock) Participation(epoch uint64) (*solid.ParticipationBitList, bool) {
 	return f.ParticipationVal, f.ParticipationVal != nil
 }
 
@@ -323,9 +317,9 @@ func (f *ForkChoiceStorageMock) GetInactivitiesScores(
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetPreviousPartecipationIndicies(
+func (f *ForkChoiceStorageMock) GetPreviousParticipationIndicies(
 	blockRoot libcommon.Hash,
-) (*solid.BitList, error) {
+) (*solid.ParticipationBitList, error) {
 	panic("implement me")
 }
 
@@ -335,9 +329,9 @@ func (f *ForkChoiceStorageMock) GetValidatorSet(
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetCurrentPartecipationIndicies(
+func (f *ForkChoiceStorageMock) GetCurrentParticipationIndicies(
 	blockRoot libcommon.Hash,
-) (*solid.BitList, error) {
+) (*solid.ParticipationBitList, error) {
 	panic("implement me")
 }
 

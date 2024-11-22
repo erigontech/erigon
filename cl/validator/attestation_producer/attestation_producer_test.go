@@ -17,6 +17,8 @@
 package attestation_producer_test
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -26,14 +28,16 @@ import (
 )
 
 func TestAttestationProducer(t *testing.T) {
-	attProducer := attestation_producer.New(&clparams.MainnetBeaconConfig)
+	attProducer := attestation_producer.New(context.Background(), &clparams.MainnetBeaconConfig)
 
 	_, _, headState := tests.GetPhase0Random()
-
-	att, err := attProducer.ProduceAndCacheAttestationData(headState, headState.Slot(), 0)
+	root, err := headState.BlockRoot()
 	require.NoError(t, err)
 
-	attJson, err := att.MarshalJSON()
+	att, err := attProducer.ProduceAndCacheAttestationData(nil, headState, root, headState.Slot(), 0)
+	require.NoError(t, err)
+
+	attJson, err := json.Marshal(att)
 	require.NoError(t, err)
 
 	// check if the json match with the expected value

@@ -84,7 +84,7 @@ func uint256FromBigInt(num *big.Int) (*uint256.Int, error) {
 	num256 := new(uint256.Int)
 	overflow := num256.SetFromBig(num)
 	if overflow {
-		return nil, fmt.Errorf("uint256FromBigInt: big.Int greater than 2^256-1")
+		return nil, errors.New("uint256FromBigInt: big.Int greater than 2^256-1")
 	}
 	return num256, nil
 }

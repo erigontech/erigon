@@ -20,17 +20,17 @@ import (
 	"context"
 	"log"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
-	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
-	mockSync "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -39,8 +39,8 @@ type voluntaryExitTestSuite struct {
 	suite.Suite
 	gomockCtrl           *gomock.Controller
 	operationsPool       *pool.OperationsPool
-	emitters             *beaconevents.Emitters
-	syncedData           *mockSync.MockSyncedData
+	emitters             *beaconevents.EventEmitter
+	syncedData           synced_data.SyncedData
 	ethClock             *eth_clock.MockEthereumClock
 	beaconCfg            *clparams.BeaconChainConfig
 	voluntaryExitService VoluntaryExitService
@@ -53,19 +53,25 @@ func (t *voluntaryExitTestSuite) SetupTest() {
 		return [32]byte{}, nil
 	}
 	t.gomockCtrl = gomock.NewController(t.T())
-	t.emitters = beaconevents.NewEmitters()
+	t.emitters = beaconevents.NewEventEmitter()
 	t.operationsPool = &pool.OperationsPool{
 		VoluntaryExitsPool: pool.NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](10, "voluntaryExitsPool"),
 	}
-	t.syncedData = mockSync.NewMockSyncedData(t.gomockCtrl)
+	_, st, _ := tests.GetBellatrixRandom()
+	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0)
+	t.syncedData.OnHeadState(st)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconCfg = &clparams.BeaconChainConfig{}
-	t.voluntaryExitService = NewVoluntaryExitService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, t.ethClock)
+	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	batchCheckInterval = 1 * time.Millisecond
+	go batchSignatureVerifier.Start()
+	t.voluntaryExitService = NewVoluntaryExitService(*t.operationsPool, t.emitters, t.syncedData, t.beaconCfg, t.ethClock, batchSignatureVerifier)
 	// mock global functions
 	t.mockFuncs = &mockFuncs{
 		ctrl: t.gomockCtrl,
 	}
 	blsVerify = t.mockFuncs.BlsVerify
+	blsVerifyMultipleSignatures = t.mockFuncs.BlsVerifyMultipleSignatures
 }
 
 func (t *voluntaryExitTestSuite) TearDownTest() {
@@ -74,25 +80,42 @@ func (t *voluntaryExitTestSuite) TearDownTest() {
 func (t *voluntaryExitTestSuite) TestProcessMessage() {
 	curEpoch := uint64(100)
 	mockValidatorIndex := uint64(10)
-	mockMsg := &cltypes.SignedVoluntaryExit{
-		VoluntaryExit: &cltypes.VoluntaryExit{
-			Epoch:          1,
-			ValidatorIndex: mockValidatorIndex,
+	mockMsg := &cltypes.SignedVoluntaryExitWithGossipData{
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+			VoluntaryExit: &cltypes.VoluntaryExit{
+				Epoch:          1,
+				ValidatorIndex: mockValidatorIndex,
+			},
+			Signature: [96]byte{},
 		},
-		Signature: [96]byte{},
+		GossipData:            nil,
+		ImmediateVerification: true,
 	}
+	mockMsg2 := &cltypes.SignedVoluntaryExitWithGossipData{
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+			VoluntaryExit: &cltypes.VoluntaryExit{
+				Epoch:          1,
+				ValidatorIndex: 111111111,
+			},
+			Signature: [96]byte{},
+		},
+		GossipData:            nil,
+		ImmediateVerification: true,
+	}
+
+	_, _, _ = mockMsg, mockMsg2, curEpoch
 
 	tests := []struct {
 		name    string
 		mock    func()
-		msg     *cltypes.SignedVoluntaryExit
+		msg     *cltypes.SignedVoluntaryExitWithGossipData
 		wantErr bool
 		err     error
 	}{
 		{
 			name: "validator already in pool",
 			mock: func() {
-				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg)
+				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg.SignedVoluntaryExit)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -101,27 +124,25 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		{
 			name: "state is nil",
 			mock: func() {
-				t.syncedData.EXPECT().HeadStateReader().Return(nil)
+				t.syncedData.UnsetHeadState()
 			},
 			msg:     mockMsg,
 			wantErr: true,
-			err:     ErrIgnore,
+			err:     synced_data.ErrNotSynced,
 		},
 		{
 			name: "validator not found",
 			mock: func() {
-				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(nil, errors.New("not found")).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				//t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(int(mockEpoch))
 			},
-			msg:     mockMsg,
+			msg:     mockMsg2,
 			wantErr: true,
 			err:     ErrIgnore,
 		},
 		{
 			name: "validator is not active",
 			mock: func() {
-				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
+				_, st, _ := tests.GetBellatrixRandom()
 				mockValidator := solid.NewValidatorFromParameters(
 					[48]byte{},
 					[32]byte{},
@@ -132,8 +153,8 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					0,
 					0,
 				)
-				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				st.ValidatorSet().Set(int(mockValidatorIndex), mockValidator)
+				t.syncedData.OnHeadState(st)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 			},
 			msg:     mockMsg,
@@ -142,19 +163,18 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		{
 			name: "validator has been initialized",
 			mock: func() {
-				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
-				mockValidator := solid.NewValidatorFromParameters(
-					[48]byte{},
-					[32]byte{},
-					0,
-					false,
-					0,
-					0,
-					curEpoch+1,
-					0,
-				)
-				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				// mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
+				// mockValidator := solid.NewValidatorFromParameters(
+				// 	[48]byte{},
+				// 	[32]byte{},
+				// 	0,
+				// 	false,
+				// 	0,
+				// 	0,
+				// 	curEpoch+1,
+				// 	0,
+				// )
+				// mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 			},
 			msg:     mockMsg,
@@ -163,7 +183,6 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		{
 			name: "bls verify failed",
 			mock: func() {
-				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
 				mockValidator := solid.NewValidatorFromParameters(
 					[48]byte{},
 					[32]byte{},
@@ -174,16 +193,15 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					curEpoch+1,
 					0,
 				)
-				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				_, st, _ := tests.GetBellatrixRandom()
+				st.ValidatorSet().Set(int(mockValidatorIndex), mockValidator)
+				t.syncedData.OnHeadState(st)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
-				mockState.EXPECT().Version().Return(clparams.AltairVersion).Times(1)
-				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(1)
+				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
 			},
 			msg:     mockMsg,
 			wantErr: true,
@@ -191,7 +209,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 		{
 			name: "success",
 			mock: func() {
-				mockState := mockState.NewMockBeaconStateReader(t.gomockCtrl)
+				_, st, _ := tests.GetBellatrixRandom()
 				mockValidator := solid.NewValidatorFromParameters(
 					[48]byte{},
 					[32]byte{},
@@ -202,18 +220,18 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 					curEpoch+1,
 					0,
 				)
-				mockState.EXPECT().ValidatorForValidatorIndex(int(mockValidatorIndex)).Return(mockValidator, nil).Times(1)
-				t.syncedData.EXPECT().HeadStateReader().Return(mockState).Times(1)
+				st.ValidatorSet().Set(int(mockValidatorIndex), mockValidator)
+				t.syncedData.OnHeadState(st)
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(curEpoch).Times(1)
 				t.beaconCfg.FarFutureEpoch = mockValidator.ExitEpoch()
-				mockState.EXPECT().Version().Return(clparams.AltairVersion).Times(1)
-				mockState.EXPECT().GetDomain(t.beaconCfg.DomainVoluntaryExit, mockMsg.VoluntaryExit.Epoch).Return([]byte{}, nil).Times(1)
 				computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
 					return [32]byte{}, nil
 				}
-				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
+
+				t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
 			},
 			msg:     mockMsg,
+			err:     ErrIgnore,
 			wantErr: false,
 		},
 	}

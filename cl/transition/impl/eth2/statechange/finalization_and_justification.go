@@ -17,11 +17,15 @@
 package statechange
 
 import (
+	"runtime"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 // weighJustificationAndFinalization checks justification and finality of epochs and adds records to the state as needed.
@@ -45,7 +49,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 			return err
 		}
 
-		s.SetCurrentJustifiedCheckpoint(solid.NewCheckpointFromParameters(checkPointRoot, previousEpoch))
+		s.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: previousEpoch, Root: checkPointRoot})
 		justificationBits[1] = true
 	}
 	if currentEpochTargetBalance*3 >= totalActiveBalance*2 {
@@ -54,20 +58,20 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 			return err
 		}
 
-		s.SetCurrentJustifiedCheckpoint(solid.NewCheckpointFromParameters(checkPointRoot, currentEpoch))
+		s.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: currentEpoch, Root: checkPointRoot})
 		justificationBits[0] = true
 	}
 	// Process finalization
 	// The 2nd/3rd/4th most recent epochs are justified, the 2nd using the 4th as source
 	// The 2nd/3rd most recent epochs are justified, the 2nd using the 3rd as source
-	if (justificationBits.CheckRange(1, 4) && oldPreviousJustifiedCheckpoint.Epoch()+3 == currentEpoch) ||
-		(justificationBits.CheckRange(1, 3) && oldPreviousJustifiedCheckpoint.Epoch()+2 == currentEpoch) {
+	if (justificationBits.CheckRange(1, 4) && oldPreviousJustifiedCheckpoint.Epoch+3 == currentEpoch) ||
+		(justificationBits.CheckRange(1, 3) && oldPreviousJustifiedCheckpoint.Epoch+2 == currentEpoch) {
 		s.SetFinalizedCheckpoint(oldPreviousJustifiedCheckpoint)
 	}
 	// The 1st/2nd/3rd most recent epochs are justified, the 1st using the 3rd as source
 	// The 1st/2nd most recent epochs are justified, the 1st using the 2nd as source
-	if (justificationBits.CheckRange(0, 3) && oldCurrentJustifiedCheckpoint.Epoch()+2 == currentEpoch) ||
-		(justificationBits.CheckRange(0, 2) && oldCurrentJustifiedCheckpoint.Epoch()+1 == currentEpoch) {
+	if (justificationBits.CheckRange(0, 3) && oldCurrentJustifiedCheckpoint.Epoch+2 == currentEpoch) ||
+		(justificationBits.CheckRange(0, 2) && oldCurrentJustifiedCheckpoint.Epoch+1 == currentEpoch) {
 		s.SetFinalizedCheckpoint(oldCurrentJustifiedCheckpoint)
 	}
 	// Write justification bits
@@ -76,6 +80,7 @@ func weighJustificationAndFinalization(s abstract.BeaconState, previousEpochTarg
 }
 
 func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedParticipatingIndicies [][]bool) error {
+	defer monitor.ObserveElaspedTime(monitor.ProcessJustificationBitsAndFinalityTime).End()
 	currentEpoch := state.Epoch(s)
 	beaconConfig := s.BeaconConfig()
 	// Skip for first 2 epochs
@@ -83,7 +88,6 @@ func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedPartic
 		return nil
 	}
 	var previousTargetBalance, currentTargetBalance uint64
-	previousEpoch := state.PreviousEpoch(s)
 	if s.Version() == clparams.Phase0Version {
 		var err error
 		s.ForEachValidator(func(validator solid.Validator, idx, total int) bool {
@@ -113,29 +117,77 @@ func ProcessJustificationBitsAndFinality(s abstract.BeaconState, unslashedPartic
 			return err
 		}
 	} else {
-		// Use bitlists to determine finality.
-		currentParticipation, previousParticipation := s.EpochParticipation(true), s.EpochParticipation(false)
-		s.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-			if validator.Slashed() {
-				return true
-			}
-			effectiveBalance := validator.EffectiveBalance()
-			if unslashedParticipatingIndicies != nil {
-				if unslashedParticipatingIndicies[beaconConfig.TimelyTargetFlagIndex][i] {
-					previousTargetBalance += effectiveBalance
-				}
-			} else if validator.Active(previousEpoch) &&
-				cltypes.ParticipationFlags(previousParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-				previousTargetBalance += effectiveBalance
-			}
-
-			if validator.Active(currentEpoch) &&
-				cltypes.ParticipationFlags(currentParticipation.Get(i)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-				currentTargetBalance += effectiveBalance
-			}
-			return true
-		})
+		var err error
+		previousTargetBalance, currentTargetBalance, err = computePreviousAndCurrentTargetBalancePostAltair(s, unslashedParticipatingIndicies)
+		if err != nil {
+			return err
+		}
 	}
 
 	return weighJustificationAndFinalization(s, previousTargetBalance, currentTargetBalance)
+}
+
+func computePreviousAndCurrentTargetBalancePostAltair(s abstract.BeaconState, unslashedParticipatingIndicies [][]bool) (previousTargetBalance, currentTargetBalance uint64, err error) {
+	currentEpoch := state.Epoch(s)
+	beaconConfig := s.BeaconConfig()
+	previousEpoch := state.PreviousEpoch(s)
+
+	// Use bitlists to determine finality.
+	currentParticipation, previousParticipation := s.EpochParticipation(true), s.EpochParticipation(false)
+	numWorkers := runtime.NumCPU()
+	currentTargetBalanceShards := make([]uint64, numWorkers)
+	previousTargetBalanceShards := make([]uint64, numWorkers)
+	shardSize := s.ValidatorSet().Length() / numWorkers
+	if shardSize == 0 {
+		shardSize = s.ValidatorSet().Length()
+	}
+
+	wp := threading.NewParallelExecutor()
+	for i := 0; i < numWorkers; i++ {
+		workerID := i
+		from := workerID * shardSize
+		to := from + shardSize
+		if workerID == numWorkers-1 || to > s.ValidatorSet().Length() {
+			to = s.ValidatorSet().Length()
+		}
+		wp.AddWork(func() error {
+			for validatorIndex := from; validatorIndex < to; validatorIndex++ {
+
+				validator := s.ValidatorSet().Get(validatorIndex)
+				if validator.Slashed() {
+					continue
+				}
+				effectiveBalance := validator.EffectiveBalance()
+				if effectiveBalance == 0 {
+					continue
+				}
+				if unslashedParticipatingIndicies != nil {
+					if unslashedParticipatingIndicies[beaconConfig.TimelyTargetFlagIndex][validatorIndex] {
+						previousTargetBalanceShards[workerID] += effectiveBalance
+					}
+				} else if validator.Active(previousEpoch) &&
+					cltypes.ParticipationFlags(previousParticipation.Get(validatorIndex)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+					previousTargetBalanceShards[workerID] += effectiveBalance
+				}
+
+				if validator.Active(currentEpoch) &&
+					cltypes.ParticipationFlags(currentParticipation.Get(validatorIndex)).HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+					currentTargetBalanceShards[workerID] += effectiveBalance
+				}
+			}
+			return nil
+		})
+		if to == s.ValidatorSet().Length() {
+			break
+		}
+	}
+
+	wp.Execute()
+
+	for i := 0; i < numWorkers; i++ {
+		previousTargetBalance += previousTargetBalanceShards[i]
+		currentTargetBalance += currentTargetBalanceShards[i]
+	}
+
+	return
 }

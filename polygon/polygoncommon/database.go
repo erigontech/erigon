@@ -18,52 +18,75 @@ package polygoncommon
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon-lib/log/v3"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type Database struct {
-	db kv.RwDB
-
-	dataDir  string
-	openOnce sync.Once
-
-	logger log.Logger
+	db        kv.RoDB
+	dataDir   string
+	label     kv.Label
+	tableCfg  kv.TableCfg
+	openOnce  sync.Once
+	logger    log.Logger
+	accede    bool
+	roTxLimit int64
 }
 
-func NewDatabase(
-	dataDir string,
-	logger log.Logger,
-) *Database {
-	return &Database{dataDir: dataDir, logger: logger}
+func NewDatabase(dataDir string, label kv.Label, tableCfg kv.TableCfg, logger log.Logger, accede bool, roTxLimit int64) *Database {
+	return &Database{
+		dataDir:   dataDir,
+		label:     label,
+		tableCfg:  tableCfg,
+		logger:    logger,
+		accede:    accede,
+		roTxLimit: roTxLimit,
+	}
 }
 
-func (db *Database) open(ctx context.Context, label kv.Label, tableCfg kv.TableCfg) error {
-	dbPath := filepath.Join(db.dataDir, label.String())
-	db.logger.Info("Opening Database", "label", label.String(), "path", dbPath)
+func AsDatabase(db kv.RoDB) *Database {
+	return &Database{db: db}
+}
+
+func (db *Database) open(ctx context.Context) error {
+	dbPath := filepath.Join(db.dataDir, db.label.String())
+	db.logger.Info("Opening Database", "label", db.label.String(), "path", dbPath)
+
+	var txLimiter *semaphore.Weighted
+
+	if db.roTxLimit > 0 {
+		txLimiter = semaphore.NewWeighted(db.roTxLimit)
+	}
 
 	var err error
-	db.db, err = mdbx.NewMDBX(db.logger).
-		Label(label).
+	opts := mdbx.NewMDBX(db.logger).
+		Label(db.label).
 		Path(dbPath).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return tableCfg }).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
-		Open(ctx)
+		RoTxsLimiter(txLimiter)
+
+	if db.accede {
+		opts = opts.Accede()
+	}
+
+	db.db, err = opts.Open(ctx)
 	return err
 }
 
-func (db *Database) OpenOnce(ctx context.Context, label kv.Label, tableCfg kv.TableCfg) error {
+func (db *Database) OpenOnce(ctx context.Context) error {
 	var err error
 	db.openOnce.Do(func() {
-		err = db.open(ctx, label, tableCfg)
+		err = db.open(ctx)
 	})
 	return err
 }
@@ -74,10 +97,26 @@ func (db *Database) Close() {
 	}
 }
 
+func (db *Database) RoDB() kv.RoDB {
+	return db.db
+}
+
+func (db *Database) RwDB() kv.RwDB {
+	return db.db.(kv.RwDB)
+}
+
 func (db *Database) BeginRo(ctx context.Context) (kv.Tx, error) {
 	return db.db.BeginRo(ctx)
 }
 
 func (db *Database) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return db.db.BeginRw(ctx)
+	if db, ok := db.db.(kv.RwDB); ok {
+		return db.BeginRw(ctx)
+	}
+
+	return nil, errors.New("db is read only")
+}
+
+func (db *Database) View(ctx context.Context, f func(tx kv.Tx) error) error {
+	return db.db.View(ctx, f)
 }
