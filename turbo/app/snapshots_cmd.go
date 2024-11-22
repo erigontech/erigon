@@ -1466,11 +1466,9 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	const ThreadsLimit = 9_000
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
-	opts := mdbx.New(kv.ChainDB, log.New()).Path(path).RoTxsLimiter(limiterB)
-	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
-	// to read all options from DB, instead of overriding them
-	opts = opts.Accede()
-	return opts
+	return mdbx.New(label, log.New()).Path(path).
+		RoTxsLimiter(limiterB).
+		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
 	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, logger)
