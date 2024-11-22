@@ -30,6 +30,8 @@ import (
 
 //go:generate mockgen -typed=true -destination=./store_mock.go -package=sync . Store
 type Store interface {
+	// Prepare runs initialisation of the store
+	Prepare(ctx context.Context) error
 	// InsertBlocks queues blocks for writing into the local canonical chain.
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	// Flush makes sure that all queued blocks have been written.
@@ -69,8 +71,28 @@ type ExecutionClientStore struct {
 	tasksCount atomic.Int32
 	// tasksDoneSignal gets sent a value when tasksCount becomes 0
 	tasksDoneSignal chan bool
-	blockReplayDone bool
+	prepared        bool
 	lastQueuedBlock uint64
+}
+
+func (s *ExecutionClientStore) Prepare(ctx context.Context) error {
+	if s.prepared {
+		return nil
+	}
+
+	executionTip, err := s.executionStore.CurrentHeader(ctx)
+	if err != nil {
+		return err
+	}
+
+	executionTipBlockNum := executionTip.Number.Uint64()
+	if err := s.bridgeReplayInitialBlockIfNeeded(ctx, executionTipBlockNum); err != nil {
+		return err
+	}
+
+	s.lastQueuedBlock = executionTipBlockNum
+	s.prepared = true
+	return nil
 }
 
 func (s *ExecutionClientStore) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
@@ -78,10 +100,8 @@ func (s *ExecutionClientStore) InsertBlocks(ctx context.Context, blocks []*types
 		return nil
 	}
 
-	if s.lastQueuedBlock != 0 {
-		if blocks[0].NumberU64() > s.lastQueuedBlock+1 {
-			return fmt.Errorf("block gap inserted: expected: %d, have: %d", s.lastQueuedBlock+1, blocks[0].NumberU64())
-		}
+	if blocks[0].NumberU64() > s.lastQueuedBlock+1 {
+		return fmt.Errorf("block gap inserted: expected: %d, have: %d", s.lastQueuedBlock+1, blocks[0].NumberU64())
 	}
 
 	if lastInserted := blocks[len(blocks)-1].NumberU64(); lastInserted > s.lastQueuedBlock {
@@ -139,28 +159,6 @@ func (s *ExecutionClientStore) Run(ctx context.Context) error {
 func (s *ExecutionClientStore) insertBlocks(ctx context.Context, blocks []*types.Block) error {
 	defer s.tasksCount.Add(-1)
 	insertStartTime := time.Now()
-
-	if !s.blockReplayDone {
-		if s.lastQueuedBlock == 0 {
-			executionTip, err := s.executionStore.CurrentHeader(ctx)
-			if err != nil {
-				return err
-			}
-
-			if executionTip == nil {
-				return nil
-			}
-
-			s.lastQueuedBlock = executionTip.Number.Uint64()
-		}
-
-		if err := s.bridgeReplayInitialBlockIfNeeded(ctx); err != nil {
-			return err
-		}
-
-		s.blockReplayDone = true
-	}
-
 	err := s.executionStore.InsertBlocks(ctx, blocks)
 	if err != nil {
 		return err
@@ -172,7 +170,10 @@ func (s *ExecutionClientStore) insertBlocks(ctx context.Context, blocks []*types
 	}
 
 	if len(blocks) > 0 {
-		s.logger.Debug(syncLogPrefix("inserted blocks"), "from", blocks[0].NumberU64(), "to", blocks[len(blocks)-1].NumberU64(),
+		s.logger.Debug(
+			syncLogPrefix("inserted blocks"),
+			"from", blocks[0].NumberU64(),
+			"to", blocks[len(blocks)-1].NumberU64(),
 			"blocks", len(blocks),
 			"duration", time.Since(insertStartTime),
 			"blks/sec", float64(len(blocks))/math.Max(time.Since(insertStartTime).Seconds(), 0.0001))
@@ -189,7 +190,7 @@ func (s *ExecutionClientStore) insertBlocks(ctx context.Context, blocks []*types
 // a conscious design decision.
 //
 // The bridge store is in control of determining whether and which block need replaying.
-func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Context) error {
+func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Context, executionTipBlockNum uint64) error {
 	initialBlockNum, initialReplayNeeded, err := s.bridgeStore.InitialBlockReplayNeeded(ctx)
 	if err != nil {
 		return err
@@ -211,12 +212,12 @@ func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 		}
 	}
 
-	if s.lastQueuedBlock <= initialBlockNum {
+	if executionTipBlockNum <= initialBlockNum {
 		return nil
 	}
 
-	start, end := initialBlockNum+1, s.lastQueuedBlock
-	blocksCount := s.lastQueuedBlock - initialBlockNum
+	start, end := initialBlockNum+1, executionTipBlockNum
+	blocksCount := executionTipBlockNum - initialBlockNum
 	s.logger.Info(
 		syncLogPrefix("replaying post initial blocks for bridge store to fill gap with execution"),
 		"start", start,
@@ -235,10 +236,10 @@ func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 			return err
 		}
 		if header == nil {
-			// this should never happen, check snapshot files and/or db data integrity
-			return fmt.Errorf("unexpected block header missing when replying blocks for bridge, "+
-				"check snapshot files and/or db data integrity, "+
-				"rm -rf datadir/chaindata can fix this: %d", blockNum)
+			return fmt.Errorf("unexpected block header missing when replaying blocks for bridge, "+
+				"likely due to a gap in snapshot files and db data after restart, "+
+				"rm -rf datadir/chaindata can fix this "+
+				"(note this is quick to recover from and not equivalent to a full re-sync): %d", blockNum)
 		}
 
 		select {

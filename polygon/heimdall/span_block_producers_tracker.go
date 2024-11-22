@@ -61,8 +61,9 @@ type spanBlockProducersTracker struct {
 }
 
 func (t *spanBlockProducersTracker) Run(ctx context.Context) error {
-	defer close(t.idleSignal)
+	t.logger.Info(heimdallLogPrefix("running %s span block producers tracker component"))
 
+	defer close(t.idleSignal)
 	for {
 		select {
 		case <-ctx.Done():

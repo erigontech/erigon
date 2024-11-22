@@ -169,7 +169,7 @@ func (s *Service) Run(ctx context.Context) error {
 
 	// start syncing
 	s.logger.Info(
-		bridgeLogPrefix("running bridge component"),
+		bridgeLogPrefix("running bridge service component"),
 		"lastFetchedEventId", lastFetchedEventId,
 		"lastProcessedEventId", lastProcessedEventId,
 		"lastProcessedBlockNum", lastProcessedBlockInfo.BlockNum,

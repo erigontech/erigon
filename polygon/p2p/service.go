@@ -43,6 +43,7 @@ func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sd
 	fetcher = NewTrackingFetcher(fetcher, peerTracker)
 	publisher := NewPublisher(logger, messageSender, peerTracker)
 	return &Service{
+		logger:          logger,
 		fetcher:         fetcher,
 		messageListener: messageListener,
 		peerPenalizer:   peerPenalizer,
@@ -53,6 +54,7 @@ func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sd
 }
 
 type Service struct {
+	logger          log.Logger
 	fetcher         Fetcher
 	messageListener *MessageListener
 	peerPenalizer   *PeerPenalizer
@@ -62,6 +64,8 @@ type Service struct {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	s.logger.Info("[p2p] running p2p service component")
+
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
 		if err := s.messageListener.Run(ctx); err != nil {
