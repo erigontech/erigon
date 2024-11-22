@@ -733,7 +733,7 @@ func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs 
 	//return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
 }
 
-func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
+func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
 	panic("not supported")
 	//return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
 }
