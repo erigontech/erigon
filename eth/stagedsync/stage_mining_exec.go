@@ -481,13 +481,14 @@ func addTransactionsToMiningBlock(
 
 	done := false
 
+LOOP:
 	for _, txn := range txns {
 		// see if we need to stop now
 		if stopped != nil {
 			select {
 			case <-stopped.C:
 				done = true
-				break
+				break LOOP
 			default:
 			}
 		}
