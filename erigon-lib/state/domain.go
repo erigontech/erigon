@@ -101,7 +101,7 @@ type domainCfg struct {
 	hist histCfg
 
 	name        kv.Domain
-	compress    seg.FileCompression
+	compression seg.FileCompression
 	compressCfg seg.Cfg
 	indexList   idxList // list of indexes for given domain
 	valuesTable string  // bucket to store domain values; key -> inverted_step + values (Dupsort)
