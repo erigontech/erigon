@@ -145,27 +145,3 @@ func ExecuteBlockStatelessly(block *types.Block, prevHeader *types.Header, chain
 	_ = execResult
 	return statelessIbs.Finalize(), nil
 }
-
-// TODO: Implement
-func UnwindWitnessStage() error {
-	return nil
-}
-
-// TODO: Implement
-func PruneWitnessStage() error {
-	return nil
-}
-
-func UnwindIntermediateHashes(logPrefix string, rl *trie.RetainList, u *UnwindState, s *StageState, db kv.RwTx, cfg TrieCfg, quit <-chan struct{}, logger log.Logger) error {
-	// p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix, logger)
-	// collect := func(k, v []byte) {
-	// 	rl.AddKeyWithMarker(k, len(v) == 0)
-	// }
-	// if err := p.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, false, collect); err != nil {
-	// 	return err
-	// }
-	// if err := p.UnwindOnHistoryV3(logPrefix, s.BlockNumber, u.UnwindPoint, true, collect); err != nil {
-	// 	return err
-	// }
-	return nil
-}
