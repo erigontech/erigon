@@ -192,7 +192,7 @@ type Ethereum struct {
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
 
-	txnProvider             txnprovider.Provider
+	txnProvider             txnprovider.TxnProvider
 	txPoolDB                kv.RwDB
 	txPool                  *txpool.TxPool
 	newTxs                  chan txpool.Announcements

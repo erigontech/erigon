@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
-type Provider interface {
+type TxnProvider interface {
 	Priority() uint64
 	Yield(ctx context.Context, opts ...YieldOption) ([]types.Transaction, error)
 }

@@ -25,7 +25,7 @@ import (
 
 const orderedTxnPoolProviderPriority = 100
 
-var _ Provider = OrderedTxnPoolProvider{}
+var _ TxnProvider = OrderedTxnPoolProvider{}
 
 // OrderedTxnPoolProvider provides transactions from the devp2p transaction pool by following the ordering function
 // described at: https://github.com/erigontech/erigon/tree/main/txnprovider/txpool#ordering-function

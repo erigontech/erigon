@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
-var _ Provider = UnorderedTxnPoolProvider{}
+var _ TxnProvider = UnorderedTxnPoolProvider{}
 
 // UnorderedTxnPoolProvider provides all the available transactions in the devp2p transaction pool without any ordering.
 type UnorderedTxnPoolProvider struct {

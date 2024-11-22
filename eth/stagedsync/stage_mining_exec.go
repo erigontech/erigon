@@ -58,7 +58,7 @@ type MiningExecCfg struct {
 	tmpdir      string
 	interrupt   *int32
 	payloadId   uint64
-	txnProvider txnprovider.Provider
+	txnProvider txnprovider.TxnProvider
 }
 
 func StageMiningExecCfg(
@@ -71,7 +71,7 @@ func StageMiningExecCfg(
 	tmpdir string,
 	interrupt *int32,
 	payloadId uint64,
-	txnProvider txnprovider.Provider,
+	txnProvider txnprovider.TxnProvider,
 	blockReader services.FullBlockReader,
 ) MiningExecCfg {
 	return MiningExecCfg{

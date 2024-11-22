@@ -25,7 +25,7 @@ import (
 
 const shutterProviderPriority = 110
 
-var _ Provider = ShutterTxnProvider{}
+var _ TxnProvider = ShutterTxnProvider{}
 
 type ShutterTxnProvider struct {
 	shutterPool *shutter.Pool

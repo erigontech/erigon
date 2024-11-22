@@ -131,7 +131,7 @@ type MockSentry struct {
 	TxPoolGrpcServer *txpool.GrpcServer
 	TxPool           *txpool.TxPool
 	txPoolDB         kv.RwDB
-	TxnProvider      txnprovider.Provider
+	TxnProvider      txnprovider.TxnProvider
 
 	HistoryV3      bool
 	agg            *libstate.Aggregator

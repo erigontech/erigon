@@ -22,8 +22,13 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
-var _ Provider = CompositeTxnProvider{}
+var _ TxnProvider = CompositeTxnProvider{}
 
+// CompositeTxnProvider provides the ability to fetch transactions from multiple transaction providers. It uses the
+// priority of each provider to impose an ordering of which provider to use first. Once a provider is exhausted (i.e.
+// it has no more transactions to yield) then the composite provider moves on to the next lower priority provider
+// and continues doing this until all providers are exhausted or the relevant amount of transactions, gas target,
+// blob gas target, etc. have been reached.
 type CompositeTxnProvider struct {
 }
 
