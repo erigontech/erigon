@@ -71,7 +71,7 @@ type Genesis struct {
 type AuRaSeal struct {
 	AuthorityRound struct {
 		Step      math.HexOrDecimal64 `json:"step"`
-		Signature hexutility.Bytes `json:"signature"`
+		Signature hexutility.Bytes    `json:"signature"`
 	} `json:"authorityRound"`
 }
 
