@@ -55,8 +55,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: dirs, db: db}
-	ii, err := NewInvertedIndex(cfg, aggStep, "inv", keysTable, indexTable, nil, logger)
+	cfg := iiCfg{salt: &salt, dirs: dirs, db: db, aggregationStep: aggStep, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable}
+	ii, err := NewInvertedIndex(cfg, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
 	tb.Cleanup(ii.Close)
@@ -553,8 +553,11 @@ func TestInvIndexScanFiles(t *testing.T) {
 	// Recreate InvertedIndex to scan the files
 	var err error
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: ii.dirs, db: db}
-	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil, logger)
+	//cfg := iiCfg{salt: &salt, dirs: ii.dirs, db: db, aggregationStep: ii.aggregationStep, filenameBase: ii.filenameBase, keysTable: ii.indexKeysTable, valuesTable: ii.indexTable}
+	cfg := ii.iiCfg
+	cfg.salt = &salt
+
+	ii, err = NewInvertedIndex(cfg, logger)
 	require.NoError(err)
 	defer ii.Close()
 	err = ii.openFolder()

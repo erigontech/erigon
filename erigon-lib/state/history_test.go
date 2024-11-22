@@ -76,10 +76,15 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := histCfg{
-		iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
-		withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: largeValues,
+		filenameBase: "hist",
+		valuesTable:  valsTable,
+
+		iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
+			aggregationStep: 16, filenameBase: "hist", keysTable: keysTable, valuesTable: indexTable,
+		},
+		withLocalityIndex: false, compression: seg.CompressNone, historyLargeValues: largeValues,
 	}
-	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
+	h, err := NewHistory(cfg, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
 	tb.Cleanup(db.Close)

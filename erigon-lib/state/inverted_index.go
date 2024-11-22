@@ -94,28 +94,43 @@ type iiCfg struct {
 	salt *uint32
 	dirs datadir.Dirs
 	db   kv.RoDB // global db pointer. mostly for background warmup.
+
+	aggregationStep uint64 // amount of transactions inside single aggregation step
+	keysTable       string // bucket name for index keys
+	valuesTable     string // bucket name for index values
+	filenameBase    string // filename base for all files of this inverted index
+
+	withExistence bool                // defines if existence index should be built
+	kvCompression seg.FileCompression // compression type for inverted index keys and values
+	compressorCfg seg.Cfg             // advanced configuration for compressor encodings
+
+	// external checker for integrity of inverted index ranges
+	integrity func(fromStep uint64, toStep uint64) bool
 }
+
 type iiVisible struct {
 	files  []visibleFile
 	name   string
 	caches *sync.Pool
 }
 
-func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, integrityCheck func(fromStep uint64, toStep uint64) bool, logger log.Logger) (*InvertedIndex, error) {
+func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` varialbe")
 	}
-	compressCfg := seg.DefaultCfg
-	compressCfg.Workers = 1
+	if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
+		cfg.compressorCfg = seg.DefaultCfg
+	}
+
 	ii := InvertedIndex{
 		iiCfg:           cfg,
 		dirtyFiles:      btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		aggregationStep: aggregationStep,
-		filenameBase:    filenameBase,
-		indexKeysTable:  indexKeysTable,
-		indexTable:      indexTable,
-		compressCfg:     compressCfg,
-		integrityCheck:  integrityCheck,
+		aggregationStep: cfg.aggregationStep,
+		filenameBase:    cfg.filenameBase,
+		indexKeysTable:  cfg.keysTable,
+		indexTable:      cfg.valuesTable,
+		compressCfg:     cfg.compressorCfg,
+		integrityCheck:  cfg.integrity,
 		logger:          logger,
 		compression:     seg.CompressNone,
 	}

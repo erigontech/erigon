@@ -75,7 +75,7 @@ type History struct {
 	compression seg.FileCompression
 
 	//TODO: re-visit this check - maybe we don't need it. It's about kill in the middle of merge
-	integrityCheck func(fromStep, toStep uint64) bool
+	integrityCheck rangeIntegrityChecker
 
 	// not large:
 	//   keys: txNum -> key1+key2
@@ -90,47 +90,65 @@ type History struct {
 	keepRecentTxnInDB uint64 // When dontProduceHistoryFiles=true, keepRecentTxInDB is used to keep this amount of txn in db before pruning
 }
 
+type rangeDomainIntegrityChecker func(d kv.Domain, fromStep, toStep uint64) bool
+type rangeIntegrityChecker func(fromStep, toStep uint64) bool
+
 type histCfg struct {
-	iiCfg       iiCfg
-	compression seg.FileCompression
+	iiCfg iiCfg
+
+	valuesTable  string // bucket for history values
+	filenameBase string // filename base for all history files
+
+	keepTxInDB uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of txn in db before pruning
 
 	//historyLargeValues: used to store values > 2kb (pageSize/2)
 	//small values - can be stored in more compact ways in db (DupSort feature)
 	//historyLargeValues=true - doesn't support keys of various length (all keys must have same length)
 	historyLargeValues bool
-
+	snapshotsDisabled  bool // don't produce .v and .ef files. old data will be pruned anyway.
 	withLocalityIndex  bool
-	withExistenceIndex bool // move to iiCfg
 
-	snapshotsDisabled bool   // don't produce .v and .ef files. old data will be pruned anyway.
-	keepTxInDB        uint64 // When dontProduceHistoryFiles=true, keepTxInDB is used to keep this amount of txn in db before pruning
+	indexList      idxList
+	compressionCfg seg.Cfg             // compression settings for history files
+	compression    seg.FileCompression // defines type of compression for history files
+
+	integrity rangeIntegrityChecker
 }
 
-func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
-	compressCfg := seg.DefaultCfg
-	compressCfg.Workers = 1
+func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
+	cfg.compressionCfg = seg.DefaultCfg
+	cfg.indexList = withHashMap
+	if cfg.iiCfg.filenameBase == "" {
+		cfg.iiCfg.filenameBase = cfg.filenameBase
+	}
+
 	h := History{
 		dirtyFiles:         btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		historyValsTable:   historyValsTable,
+		historyValsTable:   cfg.valuesTable,
 		compression:        cfg.compression,
-		compressCfg:        compressCfg,
-		indexList:          withHashMap,
-		integrityCheck:     integrityCheck,
+		compressCfg:        cfg.compressionCfg,
+		indexList:          cfg.indexList,
+		integrityCheck:     cfg.integrity,
 		historyLargeValues: cfg.historyLargeValues,
-		snapshotsDisabled:  cfg.snapshotsDisabled,
-		keepRecentTxnInDB:  cfg.keepTxInDB,
+
+		snapshotsDisabled: cfg.snapshotsDisabled,
+		keepRecentTxnInDB: cfg.keepTxInDB,
 	}
 	h._visibleFiles = []visibleFile{}
-	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, func(fromStep, toStep uint64) bool {
+
+	cfg.iiCfg.integrity = func(fromStep, toStep uint64) bool {
 		exists, err := dir.FileExist(h.vFilePath(fromStep, toStep))
 		if err != nil {
 			panic(err)
 		}
 		return exists
-	}, logger)
+	}
+
+	//h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, checker, logger)
+	var err error
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, logger)
 	if err != nil {
-		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
+		return nil, fmt.Errorf("NewHistory: %s, %w", cfg.iiCfg.filenameBase, err)
 	}
 
 	return &h, nil

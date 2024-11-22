@@ -155,60 +155,101 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	}
 
 	cfg := domainCfg{
-		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
-		},
+		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
+
+		integrity: integrityCheck,
+		compress:  seg.CompressNone,
+
+		hist: histCfg{
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+				aggregationStep: aggregationStep, keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx},
+			withLocalityIndex: false, compression: seg.CompressNone, historyLargeValues: false,
+			valuesTable: kv.TblAccountHistoryVals,
+		},
 	}
-	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, kv.AccountsDomain, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.AccountsDomain], err = NewDomain(cfg, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
-		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
-		},
+		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-		compress:                    seg.CompressKeys,
+
+		integrity: integrityCheck,
+		compress:  seg.CompressKeys,
+
+		hist: histCfg{
+			valuesTable: kv.TblStorageHistoryVals,
+			compression: seg.CompressNone,
+
+			withLocalityIndex: false, historyLargeValues: false,
+
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+				aggregationStep: aggregationStep, keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx},
+		},
 	}
-	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, kv.StorageDomain, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.StorageDomain], err = NewDomain(cfg, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
-		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, historyLargeValues: true,
-			compression: seg.CompressKeys | seg.CompressVals,
-		},
-		largeVals: true,
+		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
+		restrictSubsetFileDeletions: a.commitmentValuesTransform,
+
+		integrity: integrityCheck,
 		compress:  seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		largeVals: true,
+
+		hist: histCfg{
+			valuesTable: kv.TblCodeHistoryVals,
+			compression: seg.CompressKeys | seg.CompressVals,
+
+			withLocalityIndex: false, historyLargeValues: true,
+
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+				aggregationStep: aggregationStep, keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx},
+		},
 	}
-	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, kv.CodeDomain, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.CodeDomain], err = NewDomain(cfg, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
-		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: false,
-			snapshotsDisabled: true,
-		},
-		replaceKeysInValues:         a.commitmentValuesTransform,
+		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-		compress:                    seg.CompressKeys,
+
+		replaceKeysInValues: a.commitmentValuesTransform,
+		integrity:           integrityCheck,
+		compress:            seg.CompressKeys,
+
+		hist: histCfg{
+			valuesTable: kv.TblCommitmentHistoryVals,
+			compression: seg.CompressNone,
+
+			snapshotsDisabled: true,
+			withLocalityIndex: false, historyLargeValues: false,
+
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+				aggregationStep: aggregationStep, keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx},
+		},
 	}
-	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, kv.CommitmentDomain, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, logger); err != nil {
 		return nil, err
 	}
 	cfg = domainCfg{
+		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
+		compress:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		integrity: integrityCheck,
+
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false,
-			compression: seg.CompressNone, historyLargeValues: false,
+			valuesTable: kv.TblReceiptHistoryVals,
+			compression: seg.CompressNone,
+
+			withLocalityIndex: false, historyLargeValues: false,
+
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+				aggregationStep: aggregationStep, keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx},
 		},
-		compress: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 	}
-	if a.d[kv.ReceiptDomain], err = NewDomain(cfg, aggregationStep, kv.ReceiptDomain, kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx, integrityCheck, logger); err != nil {
+	if a.d[kv.ReceiptDomain], err = NewDomain(cfg, logger); err != nil {
 		return nil, err
 	}
 	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
@@ -274,9 +315,15 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 }
 
 func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, db kv.RoDB, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
-	idxCfg := iiCfg{salt: salt, dirs: dirs, db: db}
+	idxCfg := iiCfg{
+		salt: salt, dirs: dirs, db: db,
+		aggregationStep: aggregationStep,
+		filenameBase:    filenameBase,
+		keysTable:       indexKeysTable,
+		valuesTable:     indexTable,
+	}
 	var err error
-	a.iis[idx], err = NewInvertedIndex(idxCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, nil, logger)
+	a.iis[idx], err = NewInvertedIndex(idxCfg, logger)
 	if err != nil {
 		return err
 	}

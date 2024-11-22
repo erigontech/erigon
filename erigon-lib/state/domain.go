@@ -112,6 +112,11 @@ type domainCfg struct {
 	hist     histCfg
 	compress seg.FileCompression
 
+	name        kv.Domain
+	valuesTable string // bucket to store domain values
+
+	integrity rangeDomainIntegrityChecker
+
 	largeVals                   bool
 	replaceKeysInValues         bool
 	restrictSubsetFileDeletions bool
@@ -133,31 +138,34 @@ var DomainCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
 
 	d := &Domain{
-		name:      name,
-		valsTable: valsTable,
+		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		name:       cfg.name,
 
+		valsTable:   cfg.valuesTable,
 		compressCfg: DomainCompressCfg,
 		compression: cfg.compress,
+		indexList:   withBTree | withExistence,
+		largeVals:   cfg.largeVals,
 
-		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-
-		indexList:                   withBTree | withExistence,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
-		largeVals:                   cfg.largeVals,
-		integrityCheck:              integrityCheck,
+
+		integrityCheck: cfg.integrity,
 	}
 
 	d._visible = newDomainVisible(d.name, []visibleFile{})
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, aggregationStep, name.String(), indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
+	if cfg.hist.filenameBase == "" {
+		cfg.hist.filenameBase = cfg.name.String()
+	}
+	if d.History, err = NewHistory(cfg.hist, logger); err != nil {
 		return nil, err
 	}
 

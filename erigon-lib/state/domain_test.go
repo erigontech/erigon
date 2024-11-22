@@ -95,11 +95,15 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 	cfg := domainCfg{
+		name: kv.AccountsDomain, valuesTable: valsTable,
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: true,
+			valuesTable:       historyValsTable,
+			withLocalityIndex: false, compression: seg.CompressNone, historyLargeValues: true,
+
+			iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
+				aggregationStep: aggStep, keysTable: historyKeysTable, valuesTable: indexTable},
 		}}
-	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain, valsTable, historyKeysTable, historyValsTable, indexTable, nil, logger)
+	d, err := NewDomain(cfg, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	t.Cleanup(d.Close)
