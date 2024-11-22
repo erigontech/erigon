@@ -308,6 +308,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 	// send all hashes to the Downloader service
 	snapCfg := snapcfg.KnownCfg(cc.ChainName)
 	preverifiedBlockSnapshots := snapCfg.Preverified
+	for _, p := range preverifiedBlockSnapshots {
+		if strings.HasSuffix(p.Name, "txt") {
+			fmt.Println(p.Name)
+		}
+	}
 	downloadRequest := make([]DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
@@ -364,6 +369,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+		for _, p := range downloadRequest {
+			if strings.HasSuffix(p.Path, "txt") {
+				fmt.Println(p.Path)
+			}
 		}
 		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
 			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
