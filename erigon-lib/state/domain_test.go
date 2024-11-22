@@ -1516,7 +1516,7 @@ func TestDomainRange(t *testing.T) {
 	defer dc.Close()
 
 	{
-		it, err := dc.ht.WalkAsOf(ctx, 190, nil, nil, order.Asc, -1, tx)
+		it, err := dc.ht.RangeAsOf(ctx, 190, nil, nil, order.Asc, -1, tx)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
@@ -1526,7 +1526,7 @@ func TestDomainRange(t *testing.T) {
 	}
 
 	{
-		it, err := dc.DomainRangeLatest(tx, nil, nil, -1)
+		it, err := dc.RangeLatest(tx, nil, nil, -1)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
@@ -1536,7 +1536,7 @@ func TestDomainRange(t *testing.T) {
 	}
 
 	{
-		it, err := dc.DomainRange(ctx, tx, []byte(""), nil, 190, order.Asc, -1)
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, -1)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
@@ -1546,7 +1546,7 @@ func TestDomainRange(t *testing.T) {
 	}
 
 	{
-		it, err := dc.DomainRange(ctx, tx, []byte(""), nil, 190, order.Asc, 4)
+		it, err := dc.RangeAsOf(ctx, tx, []byte(""), nil, 190, order.Asc, 4)
 		require.NoError(err)
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
@@ -2011,7 +2011,7 @@ func TestDomain_Unwind(t *testing.T) {
 		writeKeys(t, expected, tmpDb, unwindTo)
 
 		suf := fmt.Sprintf(";unwindTo=%d", unwindTo)
-		t.Run("DomainRangeLatest"+suf, func(t *testing.T) {
+		t.Run("RangeLatest"+suf, func(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
@@ -2026,10 +2026,10 @@ func TestDomain_Unwind(t *testing.T) {
 			defer ectx.Close()
 			uc := d.BeginFilesRo()
 			defer uc.Close()
-			et, err := ectx.DomainRangeLatest(etx, nil, nil, -1)
+			et, err := ectx.RangeLatest(etx, nil, nil, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.DomainRangeLatest(utx, nil, nil, -1)
+			ut, err := uc.RangeLatest(utx, nil, nil, -1)
 			require.NoError(t, err)
 			compareIterators(t, et, ut)
 		})
@@ -2049,15 +2049,15 @@ func TestDomain_Unwind(t *testing.T) {
 			defer ectx.Close()
 			uc := d.BeginFilesRo()
 			defer uc.Close()
-			et, err := ectx.DomainRange(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
+			et, err := ectx.RangeAsOf(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
-			ut, err := uc.DomainRange(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
+			ut, err := uc.RangeAsOf(context.Background(), etx, nil, nil, unwindTo, order.Asc, -1)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
 		})
-		t.Run("WalkAsOf"+suf, func(t *testing.T) {
+		t.Run("RangeAsOf"+suf, func(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
@@ -2073,10 +2073,10 @@ func TestDomain_Unwind(t *testing.T) {
 			uc := d.BeginFilesRo()
 			defer uc.Close()
 
-			et, err := ectx.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, etx)
+			et, err := ectx.ht.RangeAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, etx)
 			require.NoError(t, err)
 
-			ut, err := uc.ht.WalkAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, utx)
+			ut, err := uc.ht.RangeAsOf(context.Background(), unwindTo-1, nil, nil, order.Asc, -1, utx)
 			require.NoError(t, err)
 
 			compareIterators(t, et, ut)
