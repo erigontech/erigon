@@ -36,7 +36,7 @@ func NewTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
 		return &TemporaryMdbx{}, err
 	}
 
-	db, err := NewMDBX(log.Root()).Label(kv.Unknown).InMem(path).Open(ctx)
+	db, err := New(kv.ChainDB, log.Root()).InMem(path).Open(ctx)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
