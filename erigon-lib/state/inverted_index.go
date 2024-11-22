@@ -1227,13 +1227,13 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	//  - `vmtouch of .ef` changed from `1G/23G` to `633M/16G` (better)
 	//  - speed on hot data - not changed. speed on cold data changed from `7min` to `10min`  (worse)
 	//  - but most important i see `.ef` files became "randomly warm":
-	//from
-	// ```
+	// From:
+	//```sh
 	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
 	//[ ooooooooo ooooooo oooooooooooooooooo oooooooo  oo o o  ooo ] 93/81397
 	//```
-	//to
-	//```
+	// To:
+	//```sh
 	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
 	//[oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo] 16279/81397
 	//```
