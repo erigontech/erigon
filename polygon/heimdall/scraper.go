@@ -131,9 +131,10 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 					s.logger.Info(
 						heimdallLogPrefix("scraper periodic progress"),
 						"name", s.name,
-						"last", entities[len(entities)-1].RawId(),
 						"rangeStart", idRange.Start,
 						"rangeEnd", idRange.End,
+						"priorLastKnownId", lastKnownId,
+						"newLast", entities[len(entities)-1].RawId(),
 					)
 				}
 			default:
