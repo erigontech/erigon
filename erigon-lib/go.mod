@@ -152,6 +152,8 @@ require (
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
 
+replace github.com/erigontech/erigon => ./erigon
+
 replace (
 	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
