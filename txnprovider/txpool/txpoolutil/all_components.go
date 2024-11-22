@@ -145,8 +145,21 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		pragueTime = cfg.OverridePragueTime
 	}
 
-	txPool, err := txpool.New(newTxns, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime,
-		maxBlobsPerBlock, feeCalculator, logger)
+	txPool, err := txpool.New(
+		newTxns,
+		txPoolDB,
+		chainDB,
+		cfg,
+		cache,
+		*chainID,
+		shanghaiTime,
+		agraBlock,
+		cancunTime,
+		pragueTime,
+		maxBlobsPerBlock,
+		feeCalculator,
+		logger,
+	)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
