@@ -158,8 +158,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 
-		integrity: integrityCheck,
-		compress:  seg.CompressNone,
+		integrity:   integrityCheck,
+		compression: seg.CompressNone,
 
 		hist: histCfg{
 			valuesTable: kv.TblAccountHistoryVals,
@@ -178,8 +178,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 
-		integrity: integrityCheck,
-		compress:  seg.CompressKeys,
+		integrity:   integrityCheck,
+		compression: seg.CompressKeys,
 
 		hist: histCfg{
 			valuesTable: kv.TblStorageHistoryVals,
@@ -199,7 +199,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 
 		integrity:   integrityCheck,
-		compress:    seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 		largeValues: true,
 
 		hist: histCfg{
@@ -221,7 +221,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 
 		replaceKeysInValues: a.commitmentValuesTransform,
 		integrity:           integrityCheck,
-		compress:            seg.CompressKeys,
+		compression:         seg.CompressKeys,
 
 		hist: histCfg{
 			valuesTable: kv.TblCommitmentHistoryVals,
@@ -239,8 +239,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	}
 	cfg = domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
-		compress:  seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		integrity: integrityCheck,
+		compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		integrity:   integrityCheck,
 
 		hist: histCfg{
 			valuesTable: kv.TblReceiptHistoryVals,
