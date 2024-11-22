@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -44,7 +43,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 	src := mdbx2.New(label, logger).Path(from).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
-		AddFlags(mdbx.Accede).
+		Accede(true).
 		MustOpen()
 	if targetPageSize <= 0 {
 		targetPageSize = datasize.ByteSize(src.PageSize())
@@ -57,7 +56,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 		PageSize(targetPageSize.Bytes()).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
 		GrowthStep(4 * datasize.GB).
-		AddFlags(mdbx.WriteMap).
+		WriteMap(true).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
 		MustOpen()
 	return src, dst
