@@ -669,6 +669,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		return false, 0, err
 	}
 
+	defer tx.Rollback()
 	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
 		if availableGas < fixedgas.TxGas {
