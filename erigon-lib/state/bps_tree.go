@@ -300,15 +300,12 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, er
 		fmt.Printf("seek %x\n", seekKey)
 	}
 	var key []byte
+	cur := b.cursorGetter(nil, nil, 0, g)
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
-		cur := b.cursorGetter(nil, nil, 0, g)
-		err = b.dataLookupFuncCursor(0, g, cur)
-		// key, value, _, err = b.dataLookupFunc(0, g)
-		if err != nil {
+		if err = b.dataLookupFuncCursor(0, g, cur); err != nil {
 			return nil, false, err
 		}
 		return cur, true, nil
-		// return b.cursorGetter(key, value, 0, g), true, nil
 	}
 
 	n, l, r := b.bs(seekKey) // l===r when key is found
@@ -319,7 +316,6 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, er
 	var m uint64
 	var cmp int
 	var offset uint64
-	cur := b.cursorGetter(nil, nil, m, g)
 	for l < r {
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
