@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,10 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +137,10 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed2")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,23 +254,27 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
 	defer c.Close()
+	slices.Sort(loremStrings)
 	for k, w := range loremStrings {
-		if err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
-			t.Fatal(err)
+		if len(w) == 0 {
+			err = c.AddUncompressedWord([]byte(w))
+			require.NoError(t, err)
+			continue
 		}
+		err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k)))
+		require.NoError(t, err)
 	}
-	if err = c.Compress(); err != nil {
-		t.Fatal(err)
-	}
-	var d *Decompressor
-	if d, err = NewDecompressor(file); err != nil {
-		t.Fatal(err)
-	}
+	err = c.Compress()
+	require.NoError(t, err)
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	t.Cleanup(d.Close)
 	return d
 }
 
@@ -272,16 +283,60 @@ func TestUncompressed(t *testing.T) {
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
+	var offsets []uint64
+	offsets = append(offsets, 0)
 	for g.HasNext() {
 		w := loremStrings[i]
 		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
 		expected = expected[:len(expected)/2]
-		actual, _ := g.NextUncompressed()
+		actual, offset := g.NextUncompressed()
 		if bytes.Equal(expected, actual) {
 			t.Errorf("expected %s, actual %s", expected, actual)
 		}
 		i++
+		offsets = append(offsets, offset)
 	}
+
+	t.Run("BinarySearch middle", func(t *testing.T) {
+		require := require.New(t)
+		_, ok := g.BinarySearch([]byte("ipsum"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ := g.Next(nil)
+		require.Equal("ipsum 38", string(k))
+		_, ok = g.BinarySearch([]byte("ipsu"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ = g.Next(nil)
+		require.Equal("ipsum 38", string(k))
+	})
+	t.Run("BinarySearch end of file", func(t *testing.T) {
+		require := require.New(t)
+		//last word is `voluptate`
+		_, ok := g.BinarySearch([]byte("voluptate"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ := g.Next(nil)
+		require.Equal("voluptate 69", string(k))
+		_, ok = g.BinarySearch([]byte("voluptat"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ = g.Next(nil)
+		require.Equal("voluptate 69", string(k))
+		_, ok = g.BinarySearch([]byte("voluptatez"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.False(ok)
+	})
+
+	t.Run("BinarySearch begin of file", func(t *testing.T) {
+		require := require.New(t)
+		//first word is ``
+		_, ok := g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ := g.Next(nil)
+		require.Equal("", string(k))
+
+		_, ok = g.BinarySearch(nil, d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
+		require.True(ok)
+		k, _ = g.Next(nil)
+		require.Equal("", string(k))
+	})
+
 }
 
 func TestDecompressor_OpenCorrupted(t *testing.T) {
@@ -291,7 +346,10 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 	t.Run("uncompressed", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "unc")
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 1
+		cfg.Workers = 2
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
@@ -310,7 +368,10 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 	t.Run("uncompressed_empty", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "unc_empty")
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 1
+		cfg.Workers = 2
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		err = c.Compress()
@@ -325,7 +386,10 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 	t.Run("compressed", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "comp")
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 1
+		cfg.Workers = 2
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
@@ -344,7 +408,10 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 
 	t.Run("compressed_empty", func(t *testing.T) {
 		file := filepath.Join(tmpDir, "comp_empty")
-		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 1
+		cfg.Workers = 2
+		c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		require.NoError(t, err)
 		defer c.Close()
 		err = c.Compress()
@@ -440,12 +507,15 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 	})
 }
 
-const lorem = `Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
-dolore magna aliqua Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
-consequat Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
-Excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
+const lorem = `lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et
+dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
+consequat duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur
+excepteur sint occaecat cupidatat non proident sunt in culpa qui officia deserunt mollit anim id est laborum`
 
-var loremStrings = strings.Split(lorem, " ")
+var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+func rmNewLine(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
+}
 
 func TestDecompressTorrent(t *testing.T) {
 	t.Skip()
@@ -496,10 +566,6 @@ func generateRandWords() {
 	WORDS[N-1] = []byte{}
 }
 
-func randIntInRange(min, max int) int {
-	return (rand.Intn(max-min) + min)
-}
-
 func clearPrevDict() {
 	WORDS = [N][]byte{}
 	WORD_FLAGS = [N]bool{}
@@ -512,7 +578,10 @@ func prepareRandomDict(t *testing.T) *Decompressor {
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "complex")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug, logger)
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

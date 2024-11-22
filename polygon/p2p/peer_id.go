@@ -20,13 +20,26 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
-	erigonlibtypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
-func PeerIdFromH512(h512 *erigonlibtypes.H512) *PeerId {
+func PeerIdFromH512(h512 *typesproto.H512) *PeerId {
 	peerId := PeerId(gointerfaces.ConvertH512ToHash(h512))
 	return &peerId
+}
+
+func PeerIdFromEnode(url string) (*PeerId, error) {
+	n, err := enode.ParseV4(url)
+	if err != nil {
+		return nil, err
+	}
+
+	b := crypto.MarshalPubkey(n.Pubkey())
+	peerId := PeerId(b[:64])
+	return &peerId, nil
 }
 
 // PeerIdFromUint64 is useful for testing and that is its main intended purpose
@@ -38,7 +51,7 @@ func PeerIdFromUint64(num uint64) *PeerId {
 
 type PeerId [64]byte
 
-func (pid *PeerId) H512() *erigonlibtypes.H512 {
+func (pid *PeerId) H512() *typesproto.H512 {
 	return gointerfaces.ConvertHashToH512(*pid)
 }
 

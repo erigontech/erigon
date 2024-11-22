@@ -30,18 +30,16 @@ import (
 
 	"github.com/holiman/uint256"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	types2 "github.com/erigontech/erigon-lib/types"
-
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"
@@ -99,6 +97,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	engine := ethash.NewFaker()
 	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, &genesis, engine, false, checkStateRoot)
+
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
@@ -264,6 +263,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 		return nil, err
 	}
 	defer tx.Rollback()
+
 	// Retrieve the context of the receipt based on the transaction hash
 	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
 	if err != nil {
@@ -276,8 +276,12 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 	if err != nil {
 		return nil, err
 	}
+
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts := rawdb.ReadReceipts(tx, block, nil)
+	receipts, err := b.m.ReceiptsReader.GetReceipts(ctx, b.m.ChainConfig, tx, block)
+	if err != nil {
+		panic(err)
+	}
 	for _, receipt := range receipts {
 		if receipt.TxHash == txHash {
 			return receipt, nil
@@ -311,9 +315,12 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	if !ok {
 		return nil, false, ethereum.NotFound
 	}
-	blockHash, err := b.BlockReader().CanonicalHash(ctx, tx, blockNumber)
+	blockHash, ok, err := b.BlockReader().CanonicalHash(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, false, err
+	}
+	if !ok {
+		return nil, false, ethereum.NotFound
 	}
 	body, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 	if err != nil {
@@ -641,7 +648,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 		}
 	}
 	gasCap = hi
-	b.pendingState.SetTxContext(libcommon.Hash{}, libcommon.Hash{}, len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(len(b.pendingBlock.Transactions()))
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *evmtypes.ExecutionResult, error) {
@@ -750,7 +757,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", txn.GetNonce(), nonce)
 	}
 
-	b.pendingState.SetTxContext(txn.Hash(), libcommon.Hash{}, len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, _, err := core.ApplyTransaction(
 		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
@@ -837,7 +844,7 @@ func (m callMsg) Tip() *uint256.Int                     { return m.CallMsg.Tip }
 func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
-func (m callMsg) AccessList() types2.AccessList         { return m.CallMsg.AccessList }
+func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
 func (m callMsg) IsFree() bool                          { return false }
 

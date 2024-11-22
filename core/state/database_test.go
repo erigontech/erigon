@@ -32,10 +32,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
-
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/common"
@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -856,7 +855,7 @@ func TestReproduceCrash(t *testing.T) {
 	t.Cleanup(sd.Close)
 
 	tsw := state.NewWriterV4(sd)
-	tsr := state.NewReaderV4(sd)
+	tsr := state.NewReaderV3(sd)
 	sd.SetTxNum(1)
 	sd.SetBlockNum(1)
 
@@ -1256,7 +1255,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, tsw := state.NewReaderV4(sd), state.NewWriterV4(sd)
+	r, tsw := state.NewReaderV3(sd), state.NewWriterV4(sd)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1308,7 +1307,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1347,7 +1346,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	r, w := state.NewReaderV4(sd), state.NewWriterV4(sd)
+	r, w := state.NewReaderV3(sd), state.NewWriterV4(sd)
 
 	intraBlockState := state.New(r)
 	// Start the 1st transaction

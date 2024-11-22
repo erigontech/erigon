@@ -27,22 +27,20 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -133,8 +131,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	if !externalState {
 		db := memdb.NewStateDB(tempdir)
 		defer db.Close()
-		cr := rawdb.NewCanonicalReader()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.HistoryV3AggregationStep, db, cr, log.New())
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tempdir), config3.HistoryV3AggregationStep, db, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -153,7 +150,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer sd.Close()
-		cfg.r = state.NewReaderV4(sd)
+		cfg.r = state.NewReaderV3(sd)
 		cfg.w = state.NewWriterV4(sd)
 		cfg.State = state.New(cfg.r)
 	}
@@ -196,8 +193,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 
 		db := memdb.NewStateDB(tmp)
 		defer db.Close()
-		cr := rawdb.NewCanonicalReader()
-		agg, err := state3.NewAggregator(context.Background(), datadir.New(tmp), config3.HistoryV3AggregationStep, db, cr, log.New())
+		agg, err := state3.NewAggregator(context.Background(), datadir.New(tmp), config3.HistoryV3AggregationStep, db, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}
@@ -216,7 +212,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 			return nil, [20]byte{}, 0, err
 		}
 		defer sd.Close()
-		cfg.r = state.NewReaderV4(sd)
+		cfg.r = state.NewReaderV3(sd)
 		cfg.w = state.NewWriterV4(sd)
 		cfg.State = state.New(cfg.r)
 	}

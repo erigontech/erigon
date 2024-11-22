@@ -58,7 +58,6 @@ func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *n
 	}
 
 	metricsMux.HandleFunc("/peers", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 		writePeers(w, ctxclient, node, diag)
 	})
@@ -81,7 +80,7 @@ func peers(diag *diaglib.DiagnosticClient) []*PeerResponse {
 			ENR:   "", //TODO: find a way how to get missing data
 			Enode: "",
 			ID:    key,
-			Name:  "",
+			Name:  value.PeerName,
 			Type:  value.PeerType,
 			Caps:  []string{},
 			Network: PeerNetworkInfo{

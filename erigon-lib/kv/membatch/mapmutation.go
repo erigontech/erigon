@@ -25,6 +25,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon-lib/common"
+
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -78,12 +80,7 @@ func (m *Mapmutation) DBSize() (uint64, error) {
 	panic("implement me")
 }
 
-func (m *Mapmutation) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (m *Mapmutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
+func (m *Mapmutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -305,8 +302,8 @@ func (m *Mapmutation) Delete(table string, k []byte) error {
 func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	count := 0
-	total := float64(m.count)
+
+	keyCount, total := 0, m.count
 	for table, bucket := range m.puts {
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
 		defer collector.Close()
@@ -315,11 +312,11 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 			if err := collector.Collect([]byte(key), value); err != nil {
 				return err
 			}
-			count++
+			keyCount++
 			select {
 			default:
 			case <-logEvery.C:
-				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
+				progress := fmt.Sprintf("%s/%s", common.PrettyCounter(keyCount), common.PrettyCounter(total))
 				m.logger.Info("Write to db", "progress", progress, "current table", table)
 				tx.CollectMetrics()
 			}

@@ -20,10 +20,11 @@ import (
 	"context"
 	"io"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 )
 
 type EthBackendClientDirect struct {
@@ -48,6 +49,10 @@ func (s *EthBackendClientDirect) NetPeerCount(ctx context.Context, in *remote.Ne
 
 func (s *EthBackendClientDirect) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
 	return s.server.Version(ctx, in)
+}
+
+func (s *EthBackendClientDirect) Syncing(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.SyncingReply, error) {
+	return s.server.Syncing(ctx, in)
 }
 
 func (s *EthBackendClientDirect) ProtocolVersion(ctx context.Context, in *remote.ProtocolVersionRequest, opts ...grpc.CallOption) (*remote.ProtocolVersionReply, error) {
@@ -191,6 +196,18 @@ func (c *SubscribeLogsStreamC) Recv() (*remote.SubscribeLogsReply, error) {
 
 // -- end SubscribeLogs
 
+func (s *EthBackendClientDirect) CanonicalBodyForStorage(ctx context.Context, in *remote.CanonicalBodyForStorageRequest, opts ...grpc.CallOption) (*remote.CanonicalBodyForStorageReply, error) {
+	return s.server.CanonicalBodyForStorage(ctx, in)
+}
+
+func (s *EthBackendClientDirect) CanonicalHash(ctx context.Context, in *remote.CanonicalHashRequest, opts ...grpc.CallOption) (*remote.CanonicalHashReply, error) {
+	return s.server.CanonicalHash(ctx, in)
+}
+
+func (s *EthBackendClientDirect) HeaderNumber(ctx context.Context, in *remote.HeaderNumberRequest, opts ...grpc.CallOption) (*remote.HeaderNumberReply, error) {
+	return s.server.HeaderNumber(ctx, in)
+}
+
 func (s *EthBackendClientDirect) Block(ctx context.Context, in *remote.BlockRequest, opts ...grpc.CallOption) (*remote.BlockReply, error) {
 	return s.server.Block(ctx, in)
 }
@@ -215,6 +232,10 @@ func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.E
 	return s.server.PendingBlock(ctx, in)
 }
 
-func (s *EthBackendClientDirect) BorEvent(ctx context.Context, in *remote.BorEventRequest, opts ...grpc.CallOption) (*remote.BorEventReply, error) {
-	return s.server.BorEvent(ctx, in)
+func (s *EthBackendClientDirect) BorTxnLookup(ctx context.Context, in *remote.BorTxnLookupRequest, opts ...grpc.CallOption) (*remote.BorTxnLookupReply, error) {
+	return s.server.BorTxnLookup(ctx, in)
+}
+
+func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remote.BorEventsRequest, opts ...grpc.CallOption) (*remote.BorEventsReply, error) {
+	return s.server.BorEvents(ctx, in)
 }

@@ -182,8 +182,11 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDiscoveryPortFlag,
 	&utils.CaplinDiscoveryTCPPortFlag,
 	&utils.CaplinCheckpointSyncUrlFlag,
+	&utils.CaplinSubscribeAllTopicsFlag,
+	&utils.CaplinMaxPeerCount,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
+	&utils.SentinelBootnodes,
 
 	&utils.OtsSearchMaxCapFlag,
 
@@ -213,8 +216,13 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinBackfillingFlag,
 	&utils.CaplinBlobBackfillingFlag,
 	&utils.CaplinDisableBlobPruningFlag,
+	&utils.CaplinDisableCheckpointSyncFlag,
 	&utils.CaplinArchiveFlag,
+	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
+	&utils.CaplinValidatorMonitorFlag,
+	&utils.CaplinCustomConfigFlag,
+	&utils.CaplinCustomGenesisFlag,
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
@@ -222,5 +230,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolGossipDisableFlag,
 	&SyncLoopBlockLimitFlag,
 	&SyncLoopBreakAfterFlag,
-	&SyncLoopPruneLimitFlag,
+	&SyncParallelStateFlushing,
+
+	&utils.ChaosMonkeyFlag,
 }

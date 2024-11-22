@@ -18,31 +18,32 @@ package bor_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/heimdall"
-
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borabi"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -117,6 +118,10 @@ func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall
 	return h.currentSpan, nil
 }
 
+func (h *test_heimdall) FetchSpans(ctx context.Context, page uint64, limit uint64) ([]*heimdall.Span, error) {
+	return nil, errors.New("TODO")
+}
+
 func (h test_heimdall) currentSprintLength() int {
 	if h.currentSpan != nil {
 		return int(h.borConfig.CalculateSprintLength(h.currentSpan.StartBlock))
@@ -166,17 +171,6 @@ func (h test_heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, err
 
 func (h test_heimdall) Close() {}
 
-type test_genesisContract struct {
-}
-
-func (g test_genesisContract) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
-	return nil
-}
-
-func (g test_genesisContract) LastStateId(syscall consensus.SystemCall) (*big.Int, error) {
-	return big.NewInt(0), nil
-}
-
 type headerReader struct {
 	validator validator
 }
@@ -220,9 +214,8 @@ func (r headerReader) GetTd(libcommon.Hash, uint64) *big.Int {
 	return nil
 }
 
-func (r headerReader) BorSpan(spanId uint64) []byte {
-	b, _ := json.Marshal(&r.validator.heimdall.currentSpan)
-	return b
+func (r headerReader) BorSpan(spanId uint64) *heimdall.Span {
+	return r.validator.heimdall.currentSpan
 }
 
 type spanner struct {
@@ -240,7 +233,7 @@ func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.Syste
 	return nil
 }
 
-func (c *spanner) GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error) {
+func (c *spanner) GetCurrentValidators(spanId uint64, chain bor.ChainHeaderReader) ([]*valset.Validator, error) {
 	return []*valset.Validator{
 		{
 			ID:               1,
@@ -266,12 +259,12 @@ func (v validator) IsProposer(block *types.Block) (bool, error) {
 	return v.Engine.(*bor.Bor).IsProposer(block.Header())
 }
 
-func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
+func (v validator) sealBlocks(blocks []*types.Block, receipts []types.Receipts) ([]*types.Block, error) {
 	sealedBlocks := make([]*types.Block, 0, len(blocks))
 
 	hr := headerReader{v}
 
-	for _, block := range blocks {
+	for i, block := range blocks {
 		header := block.HeaderNoCopy()
 
 		if err := v.Engine.Prepare(hr, header, nil); err != nil {
@@ -282,15 +275,16 @@ func (v validator) sealBlocks(blocks []*types.Block) ([]*types.Block, error) {
 			header.ParentHash = parent.Hash()
 		}
 
-		sealResults := make(chan *types.Block, 1)
+		sealResults := make(chan *types.BlockWithReceipts, 1)
 
-		if err := v.Engine.Seal(hr, block, sealResults, nil); err != nil {
+		blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: receipts[i]}
+		if err := v.Engine.Seal(hr, blockWithReceipts, sealResults, nil); err != nil {
 			return nil, err
 		}
 
 		sealedBlock := <-sealResults
-		v.blocks[sealedBlock.NumberU64()] = sealedBlock
-		sealedBlocks = append(sealedBlocks, sealedBlock)
+		v.blocks[sealedBlock.Block.NumberU64()] = sealedBlock.Block
+		sealedBlocks = append(sealedBlocks, sealedBlock.Block)
 	}
 
 	return sealedBlocks, nil
@@ -310,20 +304,24 @@ func (v validator) verifyBlocks(blocks []*types.Block) error {
 
 func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*types.Block) validator {
 	logger := log.Root()
-
-	validatorKey, _ := crypto.GenerateKey()
+	ctrl := gomock.NewController(t)
+	stateReceiver := bor.NewMockStateReceiver(ctrl)
+	stateReceiver.EXPECT().CommitState(gomock.Any(), gomock.Any()).AnyTimes()
+	validatorKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
 	bor := bor.New(
 		heimdall.chainConfig,
 		memdb.New(""),
 		nil, /* blockReader */
 		&spanner{
-			ChainSpanner:     bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), heimdall.chainConfig, false, logger),
+			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), heimdall.chainConfig, false, logger),
 			validatorAddress: validatorAddress,
 		},
 		heimdall,
-		test_genesisContract{},
+		stateReceiver,
 		logger,
+		nil,
 		nil,
 	)
 
@@ -377,7 +375,7 @@ func TestVerifyHeader(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := v.sealBlocks(chain.Blocks)
+	sealedBlocks, err := v.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)
@@ -431,6 +429,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 	for bi := 0; bi < chainLength; bi++ {
 		for vi, v := range validators {
 			block := chains[vi].Blocks[bi]
+			receipts := chains[vi].Receipts[bi]
 
 			isProposer, err := v.IsProposer(block)
 
@@ -448,7 +447,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 					lastProposerIndex = vi
 				}
 
-				sealedBlocks, err := v.sealBlocks([]*types.Block{block})
+				sealedBlocks, err := v.sealBlocks([]*types.Block{block}, []types.Receipts{receipts})
 
 				if err != nil {
 					t.Fatalf("seal block failed: %v", err)
@@ -477,7 +476,7 @@ func TestSendBlock(t *testing.T) {
 		t.Fatalf("generate blocks failed: %v", err)
 	}
 
-	sealedBlocks, err := s.sealBlocks(chain.Blocks)
+	sealedBlocks, err := s.sealBlocks(chain.Blocks, chain.Receipts)
 
 	if err != nil {
 		t.Fatalf("seal block failed: %v", err)
@@ -499,7 +498,7 @@ func TestSendBlock(t *testing.T) {
 	}
 
 	r.ReceiveWg.Add(1)
-	for _, err = range r.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: s.PeerId}) {
+	for _, err = range r.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: s.PeerId}) {
 		if err != nil {
 			t.Fatal(err)
 		}

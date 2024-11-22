@@ -33,26 +33,23 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash            common.Hash                 `json:"parentHash"    gencodec:"required"`
-	FeeRecipient          common.Address              `json:"feeRecipient"  gencodec:"required"`
-	StateRoot             common.Hash                 `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot          common.Hash                 `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom             hexutility.Bytes            `json:"logsBloom"     gencodec:"required"`
-	PrevRandao            common.Hash                 `json:"prevRandao"    gencodec:"required"`
-	BlockNumber           hexutil.Uint64              `json:"blockNumber"   gencodec:"required"`
-	GasLimit              hexutil.Uint64              `json:"gasLimit"      gencodec:"required"`
-	GasUsed               hexutil.Uint64              `json:"gasUsed"       gencodec:"required"`
-	Timestamp             hexutil.Uint64              `json:"timestamp"     gencodec:"required"`
-	ExtraData             hexutility.Bytes            `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas         *hexutil.Big                `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash             common.Hash                 `json:"blockHash"     gencodec:"required"`
-	Transactions          []hexutility.Bytes          `json:"transactions"  gencodec:"required"`
-	Withdrawals           []*types.Withdrawal         `json:"withdrawals"`
-	BlobGasUsed           *hexutil.Uint64             `json:"blobGasUsed"`
-	ExcessBlobGas         *hexutil.Uint64             `json:"excessBlobGas"`
-	DepositRequests       types.DepositRequests       `json:"depositRequests"` // do not forget to add it into erigon-lib/gointerfaces/types if needed
-	WithdrawalRequests    types.WithdrawalRequests    `json:"withdrawalRequests"`
-	ConsolidationRequests types.ConsolidationRequests `json:"consolidationRequests"`
+	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom     hexutility.Bytes    `json:"logsBloom"     gencodec:"required"`
+	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
+	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
+	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
+	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
+	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
+	ExtraData     hexutility.Bytes    `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
+	Transactions  []hexutility.Bytes  `json:"transactions"  gencodec:"required"`
+	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
+	BlobGasUsed   *hexutil.Uint64     `json:"blobGasUsed"`
+	ExcessBlobGas *hexutil.Uint64     `json:"excessBlobGas"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -86,11 +83,8 @@ type BlobsBundleV1 struct {
 }
 
 type ExecutionPayloadBody struct {
-	Transactions          []hexutility.Bytes          `json:"transactions" gencodec:"required"`
-	Withdrawals           []*types.Withdrawal         `json:"withdrawals"  gencodec:"required"`
-	DepositRequests       types.DepositRequests       `json:"depositRequests"`
-	WithdrawalRequests    types.WithdrawalRequests    `json:"withdrawalRequests"`
-	ConsolidationRequests types.ConsolidationRequests `json:"consolidationRequests"`
+	Transactions []hexutility.Bytes  `json:"transactions" gencodec:"required"`
+	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
 }
 
 type PayloadStatus struct {
@@ -106,10 +100,11 @@ type ForkChoiceUpdatedResponse struct {
 }
 
 type GetPayloadResponse struct {
-	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
-	BlockValue            *hexutil.Big      `json:"blockValue"`
-	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
-	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
+	ExecutionPayload      *ExecutionPayload  `json:"executionPayload" gencodec:"required"`
+	BlockValue            *hexutil.Big       `json:"blockValue"`
+	BlobsBundle           *BlobsBundleV1     `json:"blobsBundle"`
+	ExecutionRequests     []hexutility.Bytes `json:"executionRequests"`
+	ShouldOverrideBuilder bool               `json:"shouldOverrideBuilder"`
 }
 
 type StringifiedError struct{ err error }

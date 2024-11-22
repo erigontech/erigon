@@ -26,11 +26,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stagedsynctest"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -188,15 +187,15 @@ func TestBorHeimdallForwardPersistsStateSyncEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events, 6)
 
-	firstEventNumPerBlock, err := testHarness.ReadFirstStateSyncEventNumPerBlockFromDB(ctx)
+	lastEventNumPerBlock, err := testHarness.ReadLastStateSyncEventNumPerBlockFromDB(ctx)
 	require.NoError(t, err)
-	require.Len(t, firstEventNumPerBlock, 6)
-	require.Equal(t, uint64(1), firstEventNumPerBlock[16])
-	require.Equal(t, uint64(2), firstEventNumPerBlock[32])
-	require.Equal(t, uint64(3), firstEventNumPerBlock[48])
-	require.Equal(t, uint64(4), firstEventNumPerBlock[64])
-	require.Equal(t, uint64(5), firstEventNumPerBlock[80])
-	require.Equal(t, uint64(6), firstEventNumPerBlock[96])
+	require.Len(t, lastEventNumPerBlock, 6)
+	require.Equal(t, uint64(1), lastEventNumPerBlock[16])
+	require.Equal(t, uint64(2), lastEventNumPerBlock[32])
+	require.Equal(t, uint64(3), lastEventNumPerBlock[48])
+	require.Equal(t, uint64(4), lastEventNumPerBlock[64])
+	require.Equal(t, uint64(5), lastEventNumPerBlock[80])
+	require.Equal(t, uint64(6), lastEventNumPerBlock[96])
 }
 
 func TestBorHeimdallForwardErrHeaderValidatorsLengthMismatch(t *testing.T) {
@@ -252,7 +251,6 @@ func TestBorHeimdallForwardErrHeaderValidatorsBytesMismatch(t *testing.T) {
 
 func TestBorHeimdallForwardDetectsUnauthorizedSignerError(t *testing.T) {
 	t.Parallel()
-	t.Skip("fixme(?) in ci plz")
 
 	ctx := context.Background()
 	numBlocks := 312

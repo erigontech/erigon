@@ -55,7 +55,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			h.integrateMergedDirtyFiles(nil, []*filesItem{lastOnFs}, nil, nil)
 			require.NotNil(lastOnFs.decompressor)
-			h.reCalcVisibleFiles()
+			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 			lastInView := hc.files[len(hc.files)-1]
 			g := lastInView.src.decompressor.MakeGetter()
@@ -139,7 +139,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			h.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
 			require.NotNil(lastOnFs.decompressor)
-			h.reCalcVisibleFiles()
+			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 			lastInView := hc.files[len(hc.files)-1]
 			g := lastInView.src.decompressor.MakeGetter()
@@ -179,7 +179,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			lastOnFs, _ := h.dirtyFiles.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			h.integrateMergedDirtyFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
-			h.reCalcVisibleFiles()
+			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 			require.NotNil(lastOnFs.decompressor)
 			hc.Close()

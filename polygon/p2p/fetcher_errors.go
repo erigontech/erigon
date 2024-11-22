@@ -21,8 +21,11 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 )
+
+var ErrInvalidFetchBlocksAmount = errors.New("invalid fetch blocks amount")
 
 type ErrInvalidFetchHeadersRange struct {
 	start uint64
@@ -60,6 +63,33 @@ func (e ErrIncompleteHeaders) LowestMissingBlockNum() uint64 {
 	return e.start + e.received
 }
 
+type ErrMissingHeaderHash struct {
+	requested common.Hash
+}
+
+func (e ErrMissingHeaderHash) Error() string {
+	return fmt.Sprintf("missing header hash: requested=%s", e.requested)
+}
+
+func (e ErrMissingHeaderHash) Is(err error) bool {
+	var errMissingHeaderHash *ErrMissingHeaderHash
+	return errors.As(err, &errMissingHeaderHash)
+}
+
+type ErrUnexpectedHeaderHash struct {
+	requested common.Hash
+	received  common.Hash
+}
+
+func (e ErrUnexpectedHeaderHash) Error() string {
+	return fmt.Sprintf("unexpected headers hash: requested=%s, received=%s", e.requested, e.received)
+}
+
+func (e ErrUnexpectedHeaderHash) Is(err error) bool {
+	var errUnexpectedHeaderHash *ErrUnexpectedHeaderHash
+	return errors.As(err, &errUnexpectedHeaderHash)
+}
+
 type ErrTooManyHeaders struct {
 	requested int
 	received  int
@@ -89,6 +119,24 @@ func (e ErrNonSequentialHeaderNumbers) Error() string {
 func (e ErrNonSequentialHeaderNumbers) Is(err error) bool {
 	var errDisconnectedHeaders *ErrNonSequentialHeaderNumbers
 	return errors.As(err, &errDisconnectedHeaders)
+}
+
+type ErrNonSequentialHeaderHashes struct {
+	hash       common.Hash
+	parentHash common.Hash
+	prevHash   common.Hash
+}
+
+func (e ErrNonSequentialHeaderHashes) Error() string {
+	return fmt.Sprintf(
+		"non sequential header hashes in fetch headers response: hash=%s parentHash=%s, prevHash=%s",
+		e.hash, e.parentHash, e.prevHash,
+	)
+}
+
+func (e ErrNonSequentialHeaderHashes) Is(err error) bool {
+	var errNonSequentialHeaderHashes *ErrNonSequentialHeaderHashes
+	return errors.As(err, &errNonSequentialHeaderHashes)
 }
 
 type ErrTooManyBodies struct {

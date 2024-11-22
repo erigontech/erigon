@@ -20,29 +20,29 @@ import (
 	"context"
 	"fmt"
 	"testing"
-
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	return NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
+	return NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 }
 
 func TestGetBalanceChangesInBlock(t *testing.T) {
@@ -71,7 +71,7 @@ func TestGetTransactionReceipt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), db, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
+	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), db, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
 	// Call GetTransactionReceipt for transaction which is not in the database
 	if _, err := api.GetTransactionReceipt(context.Background(), common.Hash{}); err != nil {
 		t.Errorf("calling GetTransactionReceipt with empty hash: %v", err)
@@ -250,4 +250,26 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	} else {
 		t.Error("error expected")
 	}
+}
+
+func TestUseBridgeReader(t *testing.T) {
+	// test for Go's interface nil-ness caveat - https://codefibershq.com/blog/golang-why-nil-is-not-always-nil
+	var br *mockBridgeReader
+	api := NewBaseApi(nil, nil, nil, false, time.Duration(0), nil, datadir.Dirs{}, br)
+	require.False(t, api.useBridgeReader)
+	br = &mockBridgeReader{}
+	api = NewBaseApi(nil, nil, nil, false, time.Duration(0), nil, datadir.Dirs{}, br)
+	require.True(t, api.useBridgeReader)
+}
+
+var _ bridgeReader = mockBridgeReader{}
+
+type mockBridgeReader struct{}
+
+func (m mockBridgeReader) Events(context.Context, uint64) ([]*types.Message, error) {
+	panic("mock")
+}
+
+func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
+	panic("mock")
 }

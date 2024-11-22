@@ -26,7 +26,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -55,7 +54,6 @@ type SentinelServer struct {
 	sentinel       *sentinel.Sentinel
 	gossipNotifier *gossipNotifier
 
-	mu     sync.RWMutex
 	logger log.Logger
 }
 
@@ -347,18 +345,13 @@ func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelrpc.PeersInfo
 }
 
 func (s *SentinelServer) ListenToGossip() {
-	refreshTicker := time.NewTicker(100 * time.Millisecond)
-	defer refreshTicker.Stop()
 	for {
-		s.mu.RLock()
 		select {
 		case pkt := <-s.sentinel.RecvGossip():
 			s.handleGossipPacket(pkt)
 		case <-s.ctx.Done():
 			return
-		case <-refreshTicker.C:
 		}
-		s.mu.RUnlock()
 	}
 }
 
@@ -434,6 +427,7 @@ func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap str
 	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
 		diagnostics.Send(diagnostics.PeerStatisticMsgUpdate{
+			PeerName: "TODO",
 			PeerType: "Sentinel",
 			PeerID:   peerID,
 			Inbound:  inbound,

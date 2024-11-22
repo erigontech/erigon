@@ -17,56 +17,60 @@
 package state
 
 import (
-	"context"
-	"fmt"
+	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/kv"
 )
 
-func buildSimpleMapAccessor(ctx context.Context, d *seg.Decompressor, compression FileCompression, cfg recsplit.RecSplitArgs, logger log.Logger, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
-	count := d.Count()
-
-	defer d.EnableReadAhead().DisableReadAhead()
-
-	var rs *recsplit.RecSplit
-	var err error
-	cfg.KeyCount = count
-	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
-		return fmt.Errorf("create recsplit: %w", err)
+// SaveExecV3PruneProgress saves latest pruned key in given table to the database.
+// nil key also allowed and means that latest pruning run has been finished.
+func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, prunedKey []byte) error {
+	empty := make([]byte, 1)
+	if prunedKey != nil {
+		empty[0] = 1
 	}
-	defer rs.Close()
-	rs.LogLvl(log.LvlTrace)
+	return db.Put(kv.TblPruningProgress, []byte(prunedTblName), append(empty, prunedKey...))
+}
 
-	for {
-		g := NewArchiveGetter(d.MakeGetter(), compression)
-		var i, offset, nextPos uint64
-		word := make([]byte, 0, 256)
-		for g.HasNext() {
-			word, nextPos = g.Next(word[:0])
-			if err := walker(rs, i, offset, word); err != nil {
-				return err
-			}
-			i++
-			offset = nextPos
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
-		if err = rs.Build(ctx); err != nil {
-			if rs.Collision() {
-				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-				rs.ResetNextSalt()
-			} else {
-				return fmt.Errorf("build idx: %w", err)
-			}
-		} else {
-			break
-		}
+// GetExecV3PruneProgress retrieves saved progress of given table pruning from the database.
+// For now it is latest pruned key in prunedTblName
+func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, err error) {
+	v, err := db.GetOne(kv.TblPruningProgress, []byte(prunedTblName))
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	switch len(v) {
+	case 0:
+		return nil, nil
+	case 1:
+		if v[0] == 1 {
+			return []byte{}, nil
+		}
+		// nil values returned an empty key which actually is a value
+		return nil, nil
+	default:
+		return v[1:], nil
+	}
+}
+
+// SaveExecV3PrunableProgress saves latest pruned key in given table to the database.
+func SaveExecV3PrunableProgress(db kv.RwTx, tbl []byte, step uint64) error {
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, step)
+	if err := db.Delete(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...)); err != nil {
+		return err
+	}
+	return db.Put(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...), v)
+}
+
+// GetExecV3PrunableProgress retrieves saved progress of given table pruning from the database.
+func GetExecV3PrunableProgress(db kv.Getter, tbl []byte) (step uint64, err error) {
+	v, err := db.GetOne(kv.TblPruningProgress, append(kv.MinimumPrunableStepDomainKey, tbl...))
+	if err != nil {
+		return 0, err
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(v), nil
 }

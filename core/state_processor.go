@@ -22,13 +22,12 @@ package core
 import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 )
 
 // applyTransaction attempts to apply a transaction to the given state database
@@ -39,7 +38,8 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
 	rules := evm.ChainRules()
-	msg, err := txn.AsMessage(*types.MakeSigner(config, header.Number.Uint64(), header.Time), header.BaseFee, rules)
+	blockNum := header.Number.Uint64()
+	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -60,7 +60,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
-
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, nil, err
@@ -92,10 +91,10 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 			receipt.ContractAddress = crypto.CreateAddress(evm.Origin, txn.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
-		receipt.Logs = ibs.GetLogs(txn.Hash())
+		receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum, header.Hash())
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 		receipt.BlockNumber = header.Number
-		receipt.TransactionIndex = uint(ibs.TxIndex())
+		receipt.TransactionIndex = uint(ibs.TxnIndex())
 	}
 
 	return receipt, result.ReturnData, err

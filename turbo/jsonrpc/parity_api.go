@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/erigontech/erigon/rpc"
 )
@@ -73,9 +74,10 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 	} else if a == nil {
 		return nil, errors.New("acc not found")
 	}
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	bn := rawdb.ReadCurrentBlockNumber(tx)
-	minTxNum, err := rawdbv3.TxNums.Min(tx, *bn)
+	minTxNum, err := txNumsReader.Min(tx, *bn)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +87,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon
 		from = append(from, *offset...)
 	}
 	to, _ := kv.NextSubtree(account[:])
-	r, err := tx.(kv.TemporalTx).DomainRange(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
+	r, err := tx.(kv.TemporalTx).RangeAsOf(kv.StorageDomain, from, to, minTxNum, order.Asc, quantity)
 	if err != nil {
 		return nil, err
 	}

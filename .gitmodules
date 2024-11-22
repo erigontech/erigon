@@ -1,3 +1,6 @@
 [submodule "tests"]
 	path = tests/testdata
 	url = https://github.com/ethereum/tests
+[submodule "eest-fixtures"]
+	path = tests/execution-spec-tests
+	url = https://github.com/erigontech/eest-fixtures

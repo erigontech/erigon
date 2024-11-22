@@ -30,8 +30,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -273,8 +271,7 @@ func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
 
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
-	blobTx := txw.Tx
-	l1 := len(blobTx.BlobVersionedHashes)
+	l1 := len(txw.Tx.BlobVersionedHashes)
 	if l1 == 0 {
 		return errors.New("a blob txn must contain at least one blob")
 	}
@@ -295,7 +292,7 @@ func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	if err != nil {
 		return fmt.Errorf("error during proof verification: %v", err)
 	}
-	for i, h := range blobTx.BlobVersionedHashes {
+	for i, h := range txw.Tx.BlobVersionedHashes {
 		if computed := txw.Commitments[i].ComputeVersionedHash(); computed != h {
 			return fmt.Errorf("versioned hash %d supposedly %s but does not match computed %s", i, h, computed)
 		}
@@ -328,10 +325,6 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 	return txw.Tx.WithSignature(signer, sig)
 }
 
-func (txw *BlobTxWrapper) FakeSign(address libcommon.Address) Transaction {
-	return txw.Tx.FakeSign(address)
-}
-
 func (txw *BlobTxWrapper) Hash() libcommon.Hash { return txw.Tx.Hash() }
 
 func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) libcommon.Hash {
@@ -340,7 +333,7 @@ func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) libcommon.Hash {
 
 func (txw *BlobTxWrapper) GetData() []byte { return txw.Tx.GetData() }
 
-func (txw *BlobTxWrapper) GetAccessList() types2.AccessList { return txw.Tx.GetAccessList() }
+func (txw *BlobTxWrapper) GetAccessList() AccessList { return txw.Tx.GetAccessList() }
 
 func (txw *BlobTxWrapper) Protected() bool { return txw.Tx.Protected() }
 

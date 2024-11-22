@@ -31,11 +31,12 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
+
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -86,6 +87,223 @@ func TestCoinbaseBalance(t *testing.T) {
 	// Expect balance increase of the coinbase (zero address)
 	if _, ok := results[1].StateDiff[libcommon.Address{}]; !ok {
 		t.Errorf("expected balance increase for coinbase (zero address)")
+	}
+}
+
+func TestSwapBalance(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	// Call GetTransactionReceipt for transaction which is not in the database
+	var latest = rpc.LatestBlockNumber
+	results, err := api.CallMany(context.Background(), json.RawMessage(`
+[
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},["trace", "stateDiff"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
+]
+`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+
+	/*
+		Let's assume A - 0x71562b71999873db5b286df957af199ec94617f7 B - 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b
+		A has big balance.
+		1. Sending 2 wei from rich existing account to empty account. Gp: 0 wei. Spent: 2 wei
+		2. Return 1 wei to initial sender. Gp: 0 wei. Spent: 1 wei.
+		Balance new: 1 wei
+		Balance old diff is 1 wei.
+	*/
+	if err != nil {
+		t.Errorf("calling CallMany: %v", err)
+	}
+	if results == nil {
+		t.Errorf("expected empty array, got nil")
+	}
+
+	if len(results) != 2 {
+		t.Errorf("expected array with 2 elements, got %d elements", len(results))
+	}
+
+	// Checking state diff
+	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+		t.Errorf("don't found B in first tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
+		for i := range b {
+			require.Equal(t, uint64(2), b[i].Uint64())
+		}
+	}
+
+	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+		t.Errorf("don't found A in first tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*StateDiffBalance)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
+		for i := range b {
+			require.Equal(t, uint64(2), b[i].From.Uint64()-b[i].To.Uint64())
+		}
+	}
+
+	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+		t.Errorf("don't found A in second tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*StateDiffBalance)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
+		for i := range b {
+			require.Equal(t, uint64(1), b[i].To.Uint64()-b[i].From.Uint64())
+		}
+	}
+
+	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+		t.Errorf("don't found B in second tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		if !okConv {
+			b := res.Balance.(map[string]*StateDiffBalance)
+			for i := range b {
+				require.Equal(t, uint64(1), b[i].From.Uint64()-b[i].To.Uint64())
+			}
+		} else {
+			for i := range b {
+				require.Equal(t, uint64(1), b[i].Uint64())
+			}
+		}
+	}
+}
+
+func TestCorrectStateDiff(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	// Call GetTransactionReceipt for transaction which is not in the database
+	var latest = rpc.LatestBlockNumber
+	results, err := api.CallMany(context.Background(), json.RawMessage(`
+[
+	[{"from":"0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]],
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},["trace", "stateDiff"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
+]
+`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+
+	/*
+		C->D 1 wei
+		A->B 2 wei
+		B->A 1 wei
+	*/
+	if err != nil {
+		t.Errorf("calling CallMany: %v", err)
+	}
+	if results == nil {
+		t.Errorf("expected empty array, got nil")
+	}
+
+	if len(results) != 3 {
+		t.Errorf("expected array with 3 elements, got %d elements", len(results))
+	}
+
+	// Checking state diff
+	if _, ok := results[0].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; ok {
+		t.Errorf("A shouldn't be in first sd")
+	}
+	if _, ok := results[0].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; ok {
+		t.Errorf("B shouldn't be in first sd")
+	}
+
+	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; !ok {
+		t.Errorf("don't found C in first tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		if !okConv {
+			b := res.Balance.(map[string]*StateDiffBalance)
+			for i := range b {
+				require.Equal(t, uint64(1), b[i].To.Uint64()-b[i].From.Uint64())
+			}
+		} else {
+			for i := range b {
+				require.Equal(t, uint64(1), b[i].Uint64())
+			}
+		}
+	}
+
+	if res, ok := results[0].StateDiff[libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; !ok {
+		t.Errorf("don't found C in first tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*StateDiffBalance)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
+		for i := range b {
+			require.Equal(t, uint64(1), b[i].From.Uint64()-b[i].To.Uint64())
+		}
+	}
+
+	if _, ok := results[1].StateDiff[libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
+		t.Errorf("C shouldn't be in second sd")
+	}
+	if _, ok := results[1].StateDiff[libcommon.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
+		t.Errorf("D shouldn't be in second sd")
+	}
+
+	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+		t.Errorf("don't found B in first tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
+		for i := range b {
+			require.Equal(t, uint64(2), b[i].Uint64())
+		}
+	}
+
+	if res, ok := results[1].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+		t.Errorf("don't found A in first tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*StateDiffBalance)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
+		for i := range b {
+			require.Equal(t, uint64(2), b[i].From.Uint64()-b[i].To.Uint64())
+		}
+	}
+
+	if _, ok := results[2].StateDiff[libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
+		t.Errorf("C shouldn't be in third sd")
+	}
+	if _, ok := results[2].StateDiff[libcommon.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
+		t.Errorf("D shouldn't be in third sd")
+	}
+
+	if res, ok := results[2].StateDiff[libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+		t.Errorf("don't found A in second tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*StateDiffBalance)
+		if !okConv {
+			t.Errorf("bad interface %+v", res.Balance)
+		}
+		for i := range b {
+			require.Equal(t, uint64(1), b[i].To.Uint64()-b[i].From.Uint64())
+		}
+	}
+
+	if res, ok := results[2].StateDiff[libcommon.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+		t.Errorf("don't found B in second tx")
+	} else {
+		b, okConv := res.Balance.(map[string]*hexutil.Big)
+		if !okConv {
+			b := res.Balance.(map[string]*StateDiffBalance)
+			for i := range b {
+				require.Equal(t, uint64(1), b[i].From.Uint64()-b[i].To.Uint64())
+			}
+		} else {
+			for i := range b {
+				require.Equal(t, uint64(1), b[i].Uint64())
+			}
+		}
 	}
 }
 
@@ -194,7 +412,7 @@ func TestOeTracer(t *testing.T) {
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 
-			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber, m.HistoryV3)
+			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
 			require.NoError(t, err)
 			txContext := core.NewEVMTxContext(msg)

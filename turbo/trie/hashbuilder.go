@@ -28,16 +28,16 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	length2 "github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
 
-var EmptyCodeHash = crypto.Keccak256Hash(nil)
+var EmptyCodeHash = crypto.Keccak256Hash(nil) //c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
 
 // HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of

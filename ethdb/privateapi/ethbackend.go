@@ -17,12 +17,12 @@
 package privateapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"math"
 
 	"google.golang.org/protobuf/types/known/emptypb"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/direct"
@@ -30,8 +30,9 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
-
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/builder"
@@ -54,7 +55,7 @@ type EthBackendServer struct {
 
 	ctx                   context.Context
 	eth                   EthBackend
-	events                *shards.Events
+	notifications         *shards.Notifications
 	db                    kv.RoDB
 	blockReader           services.FullBlockReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
@@ -72,16 +73,21 @@ type EthBackend interface {
 	AddPeer(ctx context.Context, url *remote.AddPeerRequest) (*remote.AddPeerReply, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.FullBlockReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
 	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore,
 ) *EthBackendServer {
-	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader,
-		logsFilter:            NewLogsFilterAggregator(events),
+	s := &EthBackendServer{
+		ctx:                   ctx,
+		eth:                   eth,
+		notifications:         notifications,
+		db:                    db,
+		blockReader:           blockReader,
+		logsFilter:            NewLogsFilterAggregator(notifications.Events),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 	}
 
-	ch, clean := s.events.AddLogsSubscription()
+	ch, clean := s.notifications.Events.AddLogsSubscription()
 	go func() {
 		var err error
 		defer clean()
@@ -110,6 +116,58 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
 	return EthBackendAPIVersion, nil
+}
+
+func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remote.SyncingReply, error) {
+	highestBlock := s.notifications.LastNewBlockSeen.Load()
+	frozenBlocks := s.blockReader.FrozenBlocks()
+
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+
+	if highestBlock < frozenBlocks {
+		highestBlock = frozenBlocks
+	}
+
+	reply := &remote.SyncingReply{
+		CurrentBlock:     currentBlock,
+		FrozenBlocks:     frozenBlocks,
+		LastNewBlockSeen: highestBlock,
+		Syncing:          true,
+	}
+
+	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
+	if highestBlock == 0 {
+		return reply, nil
+	}
+
+	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
+	reorgRange := 8
+	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
+		reply.Syncing = false
+		return reply, nil
+	}
+
+	reply.Stages = make([]*remote.SyncingReply_StageProgress, len(stages.AllStages))
+	for i, stage := range stages.AllStages {
+		progress, err := stages.GetStageProgress(tx, stage)
+		if err != nil {
+			return nil, err
+		}
+		reply.Stages[i] = &remote.SyncingReply_StageProgress{}
+		reply.Stages[i].StageName = string(stage)
+		reply.Stages[i].BlockNumber = progress
+	}
+
+	return reply, nil
 }
 
 func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (*remote.PendingBlockReply, error) {
@@ -165,9 +223,9 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) (err error) {
 	s.logger.Debug("Establishing event subscription channel with the RPC daemon ...")
-	ch, clean := s.events.AddHeaderSubscription()
+	ch, clean := s.notifications.Events.AddHeaderSubscription()
 	defer clean()
-	newSnCh, newSnClean := s.events.AddNewSnapshotSubscription()
+	newSnCh, newSnClean := s.notifications.Events.AddNewSnapshotSubscription()
 	defer newSnClean()
 	s.logger.Info("new subscription to newHeaders established")
 	defer func() {
@@ -204,7 +262,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
-	return &remote.ProtocolVersionReply{Id: direct.ETH66}, nil
+	return &remote.ProtocolVersionReply{Id: direct.ETH67}, nil
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
@@ -251,6 +309,62 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
 }
 
+func (s *EthBackendServer) CanonicalBodyForStorage(ctx context.Context, req *remote.CanonicalBodyForStorageRequest) (*remote.CanonicalBodyForStorageReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	bd, err := s.blockReader.CanonicalBodyForStorage(ctx, tx, req.BlockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if bd == nil {
+		return &remote.CanonicalBodyForStorageReply{}, nil
+	}
+	b := bytes.Buffer{}
+	if err := bd.EncodeRLP(&b); err != nil {
+		return nil, err
+	}
+	return &remote.CanonicalBodyForStorageReply{Body: b.Bytes()}, nil
+}
+
+func (s *EthBackendServer) CanonicalHash(ctx context.Context, req *remote.CanonicalHashRequest) (*remote.CanonicalHashReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hash, ok, err := s.blockReader.CanonicalHash(ctx, tx, req.BlockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return &remote.CanonicalHashReply{Hash: gointerfaces.ConvertHashToH256(hash)}, nil
+}
+
+func (s *EthBackendServer) HeaderNumber(ctx context.Context, req *remote.HeaderNumberRequest) (*remote.HeaderNumberReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	headerNum, err := s.blockReader.HeaderNumber(ctx, tx, gointerfaces.ConvertH256ToHash(req.Hash))
+	if err != nil {
+		return nil, err
+	}
+
+	if headerNum == nil {
+		return &remote.HeaderNumberReply{}, nil
+	}
+	return &remote.HeaderNumberReply{Number: headerNum}, nil
+}
+
 func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoRequest) (*remote.NodesInfoReply, error) {
 	nodesInfo, err := s.eth.NodesInfo(int(r.Limit))
 	if err != nil {
@@ -274,18 +388,41 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	return errors.New("no logs filter available")
 }
 
-func (s *EthBackendServer) BorEvent(ctx context.Context, req *remote.BorEventRequest) (*remote.BorEventReply, error) {
+func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remote.BorTxnLookupRequest) (*remote.BorTxnLookupReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	_, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
+
+	blockNum, ok, err := s.blockReader.EventLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return &remote.BorEventReply{}, nil
+	return &remote.BorTxnLookupReply{
+		BlockNumber: blockNum,
+		Present:     ok,
+	}, nil
+}
+
+func (s *EthBackendServer) BorEvents(ctx context.Context, req *remote.BorEventsRequest) (*remote.BorEventsReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return &remote.BorEventReply{}, nil
+	defer tx.Rollback()
+
+	events, err := s.blockReader.EventsByBlock(ctx, tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	eventsRaw := make([][]byte, len(events))
+	for i, event := range events {
+		eventsRaw[i] = event
+	}
+
+	return &remote.BorEventsReply{
+		EventRlps: eventsRaw,
+	}, nil
 }

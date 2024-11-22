@@ -19,56 +19,63 @@ package p2p
 import (
 	"context"
 	"errors"
+	"fmt"
 
-	"github.com/erigontech/erigon-lib/direct"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/rlp"
 )
 
 var ErrPeerNotFound = errors.New("peer not found")
 
-type MessageSender interface {
-	SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error
-	SendGetBlockBodies(ctx context.Context, peerId *PeerId, req eth.GetBlockBodiesPacket66) error
-}
-
-func NewMessageSender(sentryClient direct.SentryClient) MessageSender {
-	return &messageSender{
+func NewMessageSender(sentryClient sentryproto.SentryClient) *MessageSender {
+	return &MessageSender{
 		sentryClient: sentryClient,
 	}
 }
 
-type messageSender struct {
-	sentryClient direct.SentryClient
+type MessageSender struct {
+	sentryClient sentryproto.SentryClient
 }
 
-func (ms *messageSender) SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error {
-	return ms.sendMessage(ctx, sentry.MessageId_GET_BLOCK_HEADERS_66, req, peerId)
+func (ms *MessageSender) SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_GET_BLOCK_HEADERS_66, req, peerId)
 }
 
-func (ms *messageSender) SendGetBlockBodies(ctx context.Context, peerId *PeerId, req eth.GetBlockBodiesPacket66) error {
-	return ms.sendMessage(ctx, sentry.MessageId_GET_BLOCK_BODIES_66, req, peerId)
+func (ms *MessageSender) SendGetBlockBodies(ctx context.Context, peerId *PeerId, req eth.GetBlockBodiesPacket66) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_GET_BLOCK_BODIES_66, req, peerId)
 }
 
-func (ms *messageSender) sendMessage(ctx context.Context, messageId sentry.MessageId, data any, peerId *PeerId) error {
+func (ms *MessageSender) SendNewBlockHashes(ctx context.Context, peerId *PeerId, req eth.NewBlockHashesPacket) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_NEW_BLOCK_HASHES_66, req, peerId)
+}
+
+func (ms *MessageSender) SendNewBlock(ctx context.Context, peerId *PeerId, req eth.NewBlockPacket) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_NEW_BLOCK_66, req, peerId)
+}
+
+func (ms *MessageSender) sendMessageToPeer(ctx context.Context, messageId sentryproto.MessageId, data any, peerId *PeerId) error {
 	rlpData, err := rlp.EncodeToBytes(data)
 	if err != nil {
 		return err
 	}
 
-	sent, err := ms.sentryClient.SendMessageById(ctx, &sentry.SendMessageByIdRequest{
+	sent, err := ms.sentryClient.SendMessageById(ctx, &sentryproto.SendMessageByIdRequest{
 		PeerId: peerId.H512(),
-		Data: &sentry.OutboundMessageData{
+		Data: &sentryproto.OutboundMessageData{
 			Id:   messageId,
 			Data: rlpData,
 		},
 	})
 	if err != nil {
+		if sentry.IsPeerNotFoundErr(err) {
+			return fmt.Errorf("%w: %s", ErrPeerNotFound, peerId.String())
+		}
 		return err
 	}
 	if len(sent.Peers) == 0 {
-		return ErrPeerNotFound
+		return fmt.Errorf("%w: %s", ErrPeerNotFound, peerId.String())
 	}
 
 	return nil

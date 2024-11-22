@@ -51,7 +51,10 @@ func FuzzDecompressMatch(f *testing.F) {
 		ctx := context.Background()
 		tmpDir := t.TempDir()
 		file := filepath.Join(tmpDir, fmt.Sprintf("compressed-%d", rand.Int31()))
-		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, 2, int(workers), log.LvlDebug, logger)
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 2
+		cfg.Workers = int(workers)
+		c, err := NewCompressor(ctx, t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 		if err != nil {
 			t.Fatal(err)
 		}

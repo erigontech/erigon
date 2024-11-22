@@ -22,25 +22,27 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto/cryptopool"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
 )
 
@@ -92,7 +94,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	defer func(start time.Time) { log.Trace("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
-	stateBlockNumber, hash, latest, err := rpchelper.GetBlockNumber(stateBlockNumberOrHash, tx, api.filters)
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+	stateBlockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, stateBlockNumberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +107,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber+1, 0, chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, txNumsReader, stateBlockNumber+1, 0, chainConfig.ChainName)
 		if err != nil {
 			return nil, err
 		}
@@ -226,6 +229,9 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, nil
 	}
 	additionalFields := make(map[string]interface{})
+
+	// =============================
+	// TODO - remove this after https://github.com/ethereum/execution-apis/pull/570 is implemented by Hive and rest of the community
 	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
 	if err != nil {
 		return nil, err
@@ -233,7 +239,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if td != nil {
 		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	}
-
+	// =================================
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -287,11 +293,16 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
+	// =============================
+	// TODO - remove this after https://github.com/ethereum/execution-apis/pull/570 is implemented by Hive and rest of the community
 	td, err := rawdb.ReadTd(tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
-	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	if td != nil {
+		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+	}
+	// ==============================
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -342,7 +353,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return &n, nil
 	}
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -355,9 +366,12 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, nil
 	}
 
-	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if body == nil {
+		return nil, nil
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -367,7 +381,16 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 
 	if chainConfig.Bor != nil {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+
+		var ok bool
+		var err error
+
+		if api.useBridgeReader {
+			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
+		} else {
+			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -389,7 +412,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, nil)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, api._blockReader, nil)
 	if err != nil {
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
@@ -408,7 +431,15 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 
 	if chainConfig.Bor != nil {
 		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+
+		var ok bool
+		var err error
+
+		if api.useBridgeReader {
+			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
+		} else {
+			_, ok, err = api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		}
 		if err != nil {
 			return nil, err
 		}

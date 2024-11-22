@@ -25,8 +25,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/mdbx-go/mdbx"
+
+	"github.com/erigontech/erigon-lib/common/hexutility"
 
 	"github.com/erigontech/erigon-lib/common"
 )

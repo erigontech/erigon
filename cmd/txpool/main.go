@@ -37,14 +37,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv/remotedb"
 	"github.com/erigontech/erigon-lib/kv/remotedbserver"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/txpool"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
-	"github.com/erigontech/erigon-lib/txpool/txpoolutil"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	common2 "github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/ethdb/privateapi"
+	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolutil"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/paths"
@@ -144,7 +143,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	log.Info("TxPool started", "db", filepath.Join(datadirCli, "txpool"))
 
-	sentryClients := make([]direct.SentryClient, len(sentryAddr))
+	sentryClients := make([]proto_sentry.SentryClient, len(sentryAddr))
 	for i := range sentryAddr {
 		creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 		if err != nil {
@@ -185,7 +184,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		cfg.TracedSenders[i] = string(sender[:])
 	}
 
-	newTxs := make(chan types.Announcements, 1024)
+	newTxs := make(chan txpool.Announcements, 1024)
 	defer close(newTxs)
 	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpoolutil.AllComponents(ctx, cfg,
 		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient, misc.Eip1559FeeCalculator, logger)

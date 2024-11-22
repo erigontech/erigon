@@ -39,7 +39,7 @@ import (
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	dirs := datadir2.New(filepath.Dir(db.(*mdbx.MdbxKV).Path()))
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, dirs.Snap, 0, log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), nil, nil, nil)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }
@@ -74,9 +74,13 @@ func ValidateTxLookups(chaindata string, logger log.Logger) error {
 		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
-		blockHash, err := br.CanonicalHash(ctx, tx, blockNum)
+		blockHash, ok, err := br.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			logger.Error("no canonnical hash", "blocknum", blockNum)
+			break
 		}
 		body, err := br.BodyWithTransactions(ctx, tx, blockHash, blockNum)
 		if err != nil {

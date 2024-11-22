@@ -122,7 +122,8 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		hd.stats.RejectedBadHeaders++
-		hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
+		dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&hd.logger))
+		hd.logger.Warn("[downloader] SingleHeaderAsSegment: Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
 		return nil, BadBlockPenalty, nil
 	}
 	if penalizePoSBlocks && header.Difficulty.Sign() == 0 {
@@ -175,6 +176,11 @@ func (hd *HeaderDownload) IsBadHeaderPoS(tipHash libcommon.Hash) (bad bool, last
 func (hd *HeaderDownload) removeUpwards(link *Link) {
 	if link == nil {
 		return
+	}
+	if link.header != nil {
+		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+			parentLink.RemoveChild(link)
+		}
 	}
 	var toRemove = []*Link{link}
 	for len(toRemove) > 0 {
@@ -392,6 +398,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 	defer hd.lock.Unlock()
 	var penalties []PenaltyItem
 	var req *HeaderRequest
+
 	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
 		if anchor.blockHeight == 0 { //has no parent
 			return true
@@ -533,12 +540,11 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 		if bad {
 			// If the link or its parent is marked bad, throw it out
-			hd.moveLinkToQueue(link, NoQueue)
-			delete(hd.links, link.hash)
 			hd.removeUpwards(link)
 			dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderBad)
 			hd.stats.RejectedBadHeaders++
-			hd.logger.Warn("[downloader] Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
+			dbg.SaveHeapProfileNearOOM(dbg.SaveHeapWithLogger(&hd.logger))
+			hd.logger.Warn("[downloader] InsertHeader: Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
 			return true, false, 0, lastTime, nil
 		}
 		if !link.verified {
@@ -550,12 +556,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					return false, false, 0, lastTime, nil // prevent removal of the link from the hd.linkQueue
 				} else {
 					hd.logger.Debug("[downloader] Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
-					hd.moveLinkToQueue(link, NoQueue)
-					delete(hd.links, link.hash)
 					hd.removeUpwards(link)
-					if parentLink, ok := hd.links[link.header.ParentHash]; ok {
-						parentLink.RemoveChild(link)
-					}
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
 					hd.stats.InvalidHeaders++
 					return true, false, 0, lastTime, nil
@@ -848,9 +849,13 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
 		ch = fromCache
 	} else {
-		if ch, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
+		if ch, ok, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
 			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
 		}
+		if !ok {
+			log.Warn("[dbg] HeaderInserter.ForkPoint0", "blockHeight", blockHeight)
+		}
+
 	}
 	if ch == header.ParentHash {
 		forkingPoint = blockHeight - 1
@@ -876,7 +881,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 		}
 		// Now look in the DB
 		for {
-			ch, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
+			ch, _, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
 			if err != nil {
 				return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
 			}
@@ -886,6 +891,9 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
 			if err != nil {
 				return 0, err
+			}
+			if ancestor == nil {
+				return 0, fmt.Errorf("[%s] not found header: %d, %x", hi.logPrefix, ancestorHeight, ancestorHash)
 			}
 			ancestorHash = ancestor.ParentHash
 			ancestorHeight--

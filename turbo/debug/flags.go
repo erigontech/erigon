@@ -58,11 +58,11 @@ var (
 	metricsAddrFlag = cli.StringFlag{
 		Name:  "metrics.addr",
 		Usage: "Prometheus HTTP server listening interface",
-		Value: "0.0.0.0",
+		Value: "127.0.0.1",
 	}
 	metricsPortFlag = cli.UintFlag{
 		Name:  "metrics.port",
-		Value: 6060,
+		Value: 6061,
 	}
 	pprofFlag = cli.BoolFlag{
 		Name:  "pprof",
@@ -76,7 +76,7 @@ var (
 	pprofAddrFlag = cli.StringFlag{
 		Name:  "pprof.addr",
 		Usage: "pprof HTTP server listening interface",
-		Value: "0.0.0.0",
+		Value: "127.0.0.1",
 	}
 	cpuprofileFlag = cli.StringFlag{
 		Name:  "pprof.cpuprofile",

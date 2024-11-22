@@ -62,7 +62,10 @@ type Eth1Block struct {
 
 // NewEth1Block creates a new Eth1Block.
 func NewEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
-	return &Eth1Block{version: version, beaconCfg: beaconCfg}
+	return &Eth1Block{
+		version:   version,
+		beaconCfg: beaconCfg,
+	}
 }
 
 // NewEth1BlockFromHeaderAndBody with given header/body.
@@ -361,7 +364,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error)
 
 	// If the header hash does not match the block hash, return an error.
 	if header.Hash() != b.BlockHash {
-		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash: %s != %s", header.Hash(), b.BlockHash)
+		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash: %s != %s, %d", header.Hash(), b.BlockHash, header.Number)
 	}
 
 	return header, nil

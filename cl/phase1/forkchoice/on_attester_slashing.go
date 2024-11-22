@@ -35,24 +35,32 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	if f.syncedDataManager.Syncing() {
+		s, err := f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).Root, false)
+		if err != nil {
+			return err
+		}
+		return f.onProcessAttesterSlashing(attesterSlashing, s, test)
+	}
+
+	return f.syncedDataManager.ViewHeadState(func(s *state.CachingBeaconState) error {
+		return f.onProcessAttesterSlashing(attesterSlashing, s, test)
+	})
+}
+
+func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, s *state.CachingBeaconState, test bool) error {
+	if s == nil {
+		return errors.New("no state accessible")
+	}
+
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
 		return errors.New("attestation data is not slashable")
 	}
-	var err error
-	s := f.syncedDataManager.HeadState()
-	if s == nil {
-		// Retrieve justified state
-		s, err = f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).BlockRoot(), false)
-		if err != nil {
-			return err
-		}
-	}
-	if s == nil {
-		return errors.New("no state accessible")
-	}
+
 	attestation1PublicKeys, err := getIndexedAttestationPublicKeys(s, attestation1)
 	if err != nil {
 		return err
@@ -61,11 +69,11 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	if err != nil {
 		return err
 	}
-	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target().Epoch())
+	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target.Epoch)
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
 	}
-	domain2, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation2.Data.Target().Epoch())
+	domain2, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation2.Data.Target.Epoch)
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -114,6 +122,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	}
 	if anySlashed {
 		f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
+		f.emitters.Operation().SendAttesterSlashing(attesterSlashing)
 	}
 	return nil
 }

@@ -30,9 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	types2 "github.com/erigontech/erigon-lib/types"
-
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -41,7 +38,7 @@ type DynamicFeeTransaction struct {
 	ChainID    *uint256.Int
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
-	AccessList types2.AccessList
+	AccessList AccessList
 }
 
 func (tx *DynamicFeeTransaction) GetPrice() *uint256.Int  { return tx.Tip }
@@ -81,7 +78,7 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			Value: new(uint256.Int),
 		},
 		ChainID:    new(uint256.Int),
-		AccessList: make(types2.AccessList, len(tx.AccessList)),
+		AccessList: make(AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
 	}
@@ -104,7 +101,7 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	return cpy
 }
 
-func (tx *DynamicFeeTransaction) GetAccessList() types2.AccessList {
+func (tx *DynamicFeeTransaction) GetAccessList() AccessList {
 	return tx.AccessList
 }
 
@@ -168,15 +165,6 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 	cpy.V.Set(v)
 	cpy.ChainID = signer.ChainID()
 	return cpy, nil
-}
-
-func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) Transaction {
-	cpy := tx.copy()
-	cpy.R.Set(u256.Num1)
-	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
-	return cpy
 }
 
 // MarshalBinary returns the canonical encoding of the transaction.
@@ -318,7 +306,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode AccessList
-	tx.AccessList = types2.AccessList{}
+	tx.AccessList = AccessList{}
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
@@ -374,7 +362,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 // Hash computes the hash (but not for signatures!)
 func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
 		tx.ChainID,
@@ -424,20 +412,19 @@ func (tx *DynamicFeeTransaction) cachedSender() (sender libcommon.Address, ok bo
 	if s == nil {
 		return sender, false
 	}
-	return s.(libcommon.Address), true
+	return *s, true
 }
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
-	if sc := tx.from.Load(); sc != nil {
-		zeroAddr := libcommon.Address{}
-		if sc.(libcommon.Address) != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return sc.(libcommon.Address), nil
+	if from := tx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
 		}
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return libcommon.Address{}, err
 	}
-	tx.from.Store(addr)
+	tx.from.Store(&addr)
 	return addr, nil
 }
 

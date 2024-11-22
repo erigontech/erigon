@@ -24,18 +24,16 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -101,7 +99,7 @@ func TestCallMany(t *testing.T) {
 
 	db := contractBackend.DB()
 	engine := contractBackend.Engine()
-	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), false, rpccfg.DefaultEvmCallTimeout, engine, datadir.New(t.TempDir())), db, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
+	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), false, rpccfg.DefaultEvmCallTimeout, engine, datadir.New(t.TempDir()), nil), db, nil, nil, nil, 5000000, 1e18, 100_000, false, 100_000, 128, log.New())
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),

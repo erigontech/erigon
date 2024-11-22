@@ -121,7 +121,7 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	sn, bsn, agg, _ := allSnapshots(ctx, chainDb, logger)
+	sn, bsn, agg, _, _, _ := allSnapshots(ctx, chainDb, logger)
 	defer sn.Close()
 	defer bsn.Close()
 	defer agg.Close()
@@ -138,7 +138,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	}
 	defer agg.Close()
 
-	r := state.NewReaderV4(domains)
+	r := state.NewReaderV3(domains)
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)
 	}

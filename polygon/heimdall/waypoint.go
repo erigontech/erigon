@@ -23,6 +23,14 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
+func AsWaypoints[T Waypoint](wp []T) Waypoints {
+	waypoints := make(Waypoints, len(wp))
+	for i, w := range wp {
+		waypoints[i] = w
+	}
+	return waypoints
+}
+
 type Waypoint interface {
 	Entity
 	fmt.Stringer
@@ -43,19 +51,12 @@ type WaypointFields struct {
 	Timestamp  uint64            `json:"timestamp"`
 }
 
-func (a *WaypointFields) Length() uint64 {
-	return a.EndBlock.Uint64() - a.StartBlock.Uint64() + 1
+func (wf *WaypointFields) Length() uint64 {
+	return wf.EndBlock.Uint64() - wf.StartBlock.Uint64() + 1
 }
 
-func (a *WaypointFields) CmpRange(n uint64) int {
-	num := new(big.Int).SetUint64(n)
-	if num.Cmp(a.StartBlock) < 0 {
-		return -1
-	}
-	if num.Cmp(a.EndBlock) > 0 {
-		return 1
-	}
-	return 0
+func (wf *WaypointFields) CmpRange(n uint64) int {
+	return cmpBlockRange(wf.StartBlock.Uint64(), wf.EndBlock.Uint64(), n)
 }
 
 type Waypoints []Waypoint

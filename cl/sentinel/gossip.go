@@ -269,6 +269,7 @@ func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 		return s.defaultAggregateSubnetTopicParams()
 	case gossip.IsTopicSyncCommittee(topic):
 		return s.defaultSyncSubnetTopicParams(s.cfg.ActiveIndicies)
+
 	default:
 		return nil
 	}
@@ -497,6 +498,7 @@ func (g *GossipManager) Close() {
 func (g *GossipManager) Start(ctx context.Context) {
 	go func() {
 		checkingInterval := time.NewTicker(time.Second)
+		dbgLogInterval := time.NewTicker(5 * time.Second)
 		for {
 			select {
 			case <-ctx.Done():
@@ -507,6 +509,18 @@ func (g *GossipManager) Start(ctx context.Context) {
 					sub.checkIfTopicNeedsToEnabledOrDisabled()
 					return true
 				})
+			case <-dbgLogInterval.C:
+				logArgs := []interface{}{}
+				g.subscriptions.Range(func(key, value any) bool {
+					sub := value.(*GossipSubscription)
+					sub.lock.Lock()
+					if sub.topic != nil {
+						logArgs = append(logArgs, sub.topic.String(), sub.subscribed.Load())
+					}
+					sub.lock.Unlock()
+					return true
+				})
+				log.Trace("[Gossip] Subscriptions", "subscriptions", logArgs)
 			}
 		}
 	}()
@@ -531,9 +545,12 @@ type GossipSubscription struct {
 
 	stopCh    chan struct{}
 	closeOnce sync.Once
+	lock      sync.Mutex
 }
 
 func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
+	sub.lock.Lock()
+	defer sub.lock.Unlock()
 	var err error
 	expirationTime := sub.expiration.Load().(time.Time)
 	if sub.subscribed.Load() && time.Now().After(expirationTime) {
@@ -569,8 +586,12 @@ func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
 
 // calls the cancel func for the subscriber and closes the topic and sub
 func (s *GossipSubscription) Close() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	s.closeOnce.Do(func() {
-		close(s.stopCh)
+		if s.stopCh != nil {
+			close(s.stopCh)
+		}
 		if s.cf != nil {
 			s.cf()
 		}
@@ -621,6 +642,7 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			if msg.ReceivedFrom == s.host {
 				continue
 			}
+
 			s.ch <- &GossipMessage{
 				From:      msg.ReceivedFrom,
 				TopicName: topicName,
@@ -631,8 +653,22 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 }
 
 func (g *GossipSubscription) Publish(data []byte) error {
-	if len(g.topic.ListPeers()) == 0 {
-		log.Warn("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
+	if len(g.topic.ListPeers()) < 2 {
+		log.Trace("[Gossip] No peers to publish to for topic", "topic", g.topic.String())
+		go func() {
+			if err := g.topic.Publish(g.ctx, data, pubsub.WithReadiness(pubsub.MinTopicSize(1))); err != nil {
+				g.s.logger.Debug("[Gossip] Published to topic", "topic", g.topic.String(), "err", err)
+			}
+		}()
+		if len(g.topic.ListPeers()) == 0 {
+			return errors.New("not enough peers to publish the message")
+		}
+		return nil
 	}
-	return g.topic.Publish(g.ctx, data)
+
+	err := g.topic.Publish(g.ctx, data)
+	if err != nil {
+		return errors.New("failed to publish to topic due to lack of routing capacity (topic too small)")
+	}
+	return nil
 }

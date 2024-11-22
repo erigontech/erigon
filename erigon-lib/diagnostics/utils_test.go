@@ -15,8 +15,10 @@ func TestParseData(t *testing.T) {
 	require.Equal(t, diagnostics.RAMInfo{}, v)
 
 	newv := diagnostics.RAMInfo{
-		Total: 1,
-		Free:  2,
+		Total:       1,
+		Available:   2,
+		Used:        3,
+		UsedPercent: 4,
 	}
 
 	data, err := json.Marshal(newv)

@@ -31,27 +31,25 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/stages/mock"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -106,7 +104,7 @@ type btHeader struct {
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
 	ParentBeaconBlockRoot *libcommon.Hash
-	RequestsRoot          *libcommon.Hash
+	RequestsHash          *libcommon.Hash
 }
 
 type btHeaderMarshaling struct {
@@ -126,6 +124,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	if !ok {
 		return UnsupportedForkError{bt.json.Network}
 	}
+
 	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
 	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false, checkStateRoot)
 	defer m.Close()
@@ -179,6 +178,7 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		BlobGasUsed:           bt.json.Genesis.BlobGasUsed,
 		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
 		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
+		RequestsHash:          bt.json.Genesis.RequestsHash,
 	}
 }
 
@@ -223,7 +223,7 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, err
 			}
 			defer roTx.Rollback()
-			canonical, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
+			canonical, _, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
 			if cErr != nil {
 				return nil, cErr
 			}
@@ -310,8 +310,8 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
 		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
 	}
-	if !reflect.DeepEqual(h.RequestsRoot, h2.RequestsRoot) {
-		return fmt.Errorf("requestsRoot: want: %v have: %v", h.RequestsRoot, h2.RequestsRoot)
+	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
+		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
 	}
 	return nil
 }

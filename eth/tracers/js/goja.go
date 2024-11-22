@@ -30,12 +30,11 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/tracers"
 	jsassets "github.com/erigontech/erigon/eth/tracers/js/internal/tracers"
 )
@@ -249,6 +248,12 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommo
 	}
 	t.ctx["value"] = valueBig
 	t.ctx["block"] = t.vm.ToValue(env.Context.BlockNumber)
+	coinbase, err := t.toBuf(t.vm, env.Context.Coinbase.Bytes())
+	if err != nil {
+		t.err = err
+		return
+	}
+	t.ctx["coinbase"] = t.vm.ToValue(coinbase)
 	// Update list of precompiles based on current block
 	rules := env.ChainRules()
 	t.activePrecompiles = vm.ActivePrecompiles(rules)

@@ -32,13 +32,12 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/core/vm/stack"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -594,7 +593,7 @@ func TestOpTstore(t *testing.T) {
 		caller         = libcommon.Address{}
 		to             = libcommon.Address{1}
 		contractRef    = contractRef{caller}
-		contract       = NewContract(contractRef, to, u256.Num0, 0, false)
+		contract       = NewContract(contractRef, to, u256.Num0, 0, false, NewJumpDestCache())
 		scopeContext   = ScopeContext{mem, stack, contract}
 		value          = libcommon.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)

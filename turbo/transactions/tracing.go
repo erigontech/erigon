@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
@@ -51,42 +52,46 @@ type BlockGetter interface {
 	GetBlock(hash libcommon.Hash, number uint64) *types.Block
 }
 
-// ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex int) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, cfg.ChainName)
+// ComputeBlockContext returns the execution environment of a certain block.
+func ComputeBlockContext(ctx context.Context, engine consensus.EngineReader, header *types.Header, cfg *chain.Config,
+	headerReader services.HeaderReader, txNumsReader rawdbv3.TxNumsReader, dbtx kv.Tx,
+	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, header.Number.Uint64(), txIndex, cfg.ChainName)
 	if err != nil {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
+		return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 	}
 
 	// Create the parent state database
 	statedb := state.New(reader)
 
-	if txIndex == 0 && len(block.Transactions()) == 0 {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
-	}
 	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
 	}
-	header := block.HeaderNoCopy()
 
 	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, cfg)
+	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
 
 	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
-	rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
+	signer := types.MakeSigner(cfg, header.Number.Uint64(), header.Time)
+
+	return statedb, blockContext, reader, rules, signer, err
+}
+
+// ComputeTxContext returns the execution environment of a certain transaction.
+func ComputeTxContext(statedb *state.IntraBlockState, engine consensus.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (core.Message, evmtypes.TxContext, error) {
 	txn := block.Transactions()[txIndex]
-	statedb.SetTxContext(txn.Hash(), block.Hash(), txIndex)
+	statedb.SetTxContext(txIndex)
 	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 	if msg.FeeCap().IsZero() && engine != nil {
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, cfg, statedb, header, engine, true /* constCall */)
+			return core.SysCallContract(contract, data, cfg, statedb, block.HeaderNoCopy(), engine, true /* constCall */)
 		}
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
 
 	TxContext := core.NewEVMTxContext(msg)
-	return msg, blockContext, TxContext, statedb, reader, nil
+	return msg, TxContext, nil
 }
 
 // TraceTx configures a new tracer according to the provided configuration, and
@@ -102,21 +107,27 @@ func TraceTx(
 	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
-) error {
+) (usedGas uint64, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
-		return err
+		return 0, err
 	}
 
 	defer cancel()
 
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		gp := new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
-		return core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
+		res, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
+		if err != nil {
+			return res, err
+		}
+		usedGas = res.UsedGas
+		return res, nil
 	}
 
-	return ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
+	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
+	return usedGas, err
 }
 
 func AssembleTracer(

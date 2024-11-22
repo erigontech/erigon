@@ -37,8 +37,7 @@ func (s *Span) RawId() uint64 {
 	return uint64(s.Id)
 }
 
-func (s *Span) SetRawId(id uint64) {
-	panic("unimplemented")
+func (s *Span) SetRawId(_ uint64) {
 }
 
 func (s *Span) BlockNumRange() ClosedRange {
@@ -58,18 +57,39 @@ func (s *Span) Less(other btree.Item) bool {
 }
 
 func (s *Span) CmpRange(n uint64) int {
-	if n < s.StartBlock {
-		return -1
+	return cmpBlockRange(s.StartBlock, s.EndBlock, n)
+}
+
+func (s *Span) Producers() []*valset.Validator {
+	res := make([]*valset.Validator, len(s.SelectedProducers))
+	for i, p := range s.SelectedProducers {
+		pCopy := p
+		res[i] = &pCopy
 	}
 
-	if n > s.EndBlock {
-		return 1
-	}
-
-	return 0
+	return res
 }
 
 type SpanResponse struct {
 	Height string `json:"height"`
 	Result Span   `json:"result"`
+}
+
+type spans []*Span
+
+func (s spans) Len() int {
+	return len(s)
+}
+
+func (s spans) Less(i, j int) bool {
+	return s[i].Id < s[j].Id
+}
+
+func (s spans) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+type SpanListResponse struct {
+	Height string `json:"height"`
+	Result spans  `json:"result"`
 }

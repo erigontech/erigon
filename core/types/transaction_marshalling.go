@@ -25,14 +25,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -54,7 +52,7 @@ type txJSON struct {
 
 	// Access list transaction fields:
 	ChainID        *hexutil.Big         `json:"chainId,omitempty"`
-	AccessList     *types2.AccessList   `json:"accessList,omitempty"`
+	AccessList     *AccessList          `json:"accessList,omitempty"`
 	Authorizations *[]JsonAuthorization `json:"authorizationList,omitempty"`
 
 	// Blob transaction fields:
@@ -70,45 +68,47 @@ type txJSON struct {
 }
 
 type JsonAuthorization struct {
-	ChainID *hexutil.Big      `json:"chainId"`
+	ChainID hexutil.Uint64    `json:"chainId"`
 	Address libcommon.Address `json:"address"`
-	Nonce   []uint64          `json:"nonce,omitempty"`
-	V       hexutil.Big       `json:"v"`
+	Nonce   hexutil.Uint64    `json:"nonce"`
+	V       hexutil.Uint64    `json:"v"`
 	R       hexutil.Big       `json:"r"`
 	S       hexutil.Big       `json:"s"`
 }
 
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
-	chainId := hexutil.Big(*authorization.ChainID.ToBig())
-	a.ChainID = &chainId
+	a.ChainID = (hexutil.Uint64)(authorization.ChainID)
 	a.Address = authorization.Address
+	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
 
-	a.Nonce = make([]uint64, len(authorization.Nonce))
-	for i, nonce := range authorization.Nonce {
-		a.Nonce[i] = nonce
-	}
-
-	a.V = hexutil.Big(*authorization.V.ToBig())
+	a.V = (hexutil.Uint64)(authorization.YParity)
 	a.R = hexutil.Big(*authorization.R.ToBig())
 	a.S = hexutil.Big(*authorization.S.ToBig())
 	return a
 }
 
-func (a JsonAuthorization) ToAuthorization() Authorization {
-	nonce := make([]uint64, len(a.Nonce))
-	copy(nonce, a.Nonce)
-	v, _ := uint256.FromBig((*big.Int)(&a.V))
-	r, _ := uint256.FromBig((*big.Int)(&a.R))
-	s, _ := uint256.FromBig((*big.Int)(&a.S))
-	chainId, _ := uint256.FromBig((*big.Int)(a.ChainID))
-	return Authorization{
-		ChainID: chainId,
+func (a JsonAuthorization) ToAuthorization() (Authorization, error) {
+	auth := Authorization{
+		ChainID: a.ChainID.Uint64(),
 		Address: a.Address,
-		Nonce:   nonce,
-		V:       *v,
-		R:       *r,
-		S:       *s,
+		Nonce:   a.Nonce.Uint64(),
 	}
+	yParity := a.V.Uint64()
+	if yParity >= 1<<8 {
+		return auth, errors.New("y parity in authorization does not fit in 8 bits")
+	}
+	auth.YParity = uint8(yParity)
+	r, overflow := uint256.FromBig((*big.Int)(&a.R))
+	if overflow {
+		return auth, errors.New("r in authorization does not fit in 256 bits")
+	}
+	auth.R = *r
+	s, overflow := uint256.FromBig((*big.Int)(&a.S))
+	if overflow {
+		return auth, errors.New("s in authorization does not fit in 256 bits")
+	}
+	auth.S = *s
+	return auth, nil
 }
 
 func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
@@ -494,15 +494,16 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 		return err
 	}
 
-	dTx := DynamicFeeTransaction{}
-	if err := dTx.unmarshalJson(dec); err != nil {
+	if err := tx.DynamicFeeTransaction.unmarshalJson(dec); err != nil {
 		return err
 	}
-
-	tx.DynamicFeeTransaction = dTx
 	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
 	for i, auth := range *dec.Authorizations {
-		tx.Authorizations[i] = auth.ToAuthorization()
+		var err error
+		tx.Authorizations[i], err = auth.ToAuthorization()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -516,7 +517,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if dec.AccessList != nil {
 		tx.AccessList = *dec.AccessList
 	} else {
-		tx.AccessList = []types2.AccessTuple{}
+		tx.AccessList = []AccessTuple{}
 	}
 	if dec.ChainID == nil {
 		return nil, errors.New("missing required field 'chainId' in transaction")
@@ -533,9 +534,6 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 		return nil, errors.New("missing required field 'nonce' in transaction")
 	}
 	tx.Nonce = uint64(*dec.Nonce)
-	// if dec.GasPrice == nil { // do we need gasPrice here?
-	// 	return nil, errors.New("missing required field 'gasPrice' in transaction")
-	// }
 	tx.Tip, overflow = uint256.FromBig(dec.Tip.ToInt())
 	if overflow {
 		return nil, errors.New("'tip' in transaction does not fit in 256 bits")
@@ -611,7 +609,8 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 
 	btx := BlobTxWrapper{
-		Tx:          tx,
+		// it's ok to copy here - because it's constructor of object - no parallel access yet
+		Tx:          tx, //nolint
 		Commitments: dec.Commitments,
 		Blobs:       dec.Blobs,
 		Proofs:      dec.Proofs,

@@ -41,13 +41,13 @@ func (f *ForkChoiceStore) OnAttestation(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
-	data := attestation.AttestantionData()
+	data := attestation.Data
 	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err
 	}
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 
-	if f.Slot() < attestation.AttestantionData().Slot()+1 || data.Target().Epoch() > currentEpoch {
+	if f.Slot() < data.Slot+1 || data.Target.Epoch > currentEpoch {
 		return nil
 	}
 
@@ -56,19 +56,24 @@ func (f *ForkChoiceStore) OnAttestation(
 			return err
 		}
 	}
-	headState := f.syncedDataManager.HeadState()
+
 	var attestationIndicies []uint64
 	var err error
-	target := data.Target()
+	target := data.Target
 
-	if headState == nil {
+	if f.syncedDataManager.Syncing() {
 		attestationIndicies, err = f.verifyAttestationWithCheckpointState(
 			target,
 			attestation,
 			fromBlock,
 		)
 	} else {
-		attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
+		if err := f.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			attestationIndicies, err = f.verifyAttestationWithState(headState, attestation, fromBlock)
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 	if err != nil {
 		return err
@@ -94,7 +99,6 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	data := attestation.AttestantionData()
 	targetState, err := f.getCheckpointState(target)
 	if err != nil {
 		return nil, err
@@ -105,8 +109,8 @@ func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
 	}
 	// Now we need to find the attesting indicies.
 	attestationIndicies, err = targetState.getAttestingIndicies(
-		&data,
-		attestation.AggregationBits(),
+		attestation,
+		attestation.AggregationBits.Bytes(),
 	)
 	if err != nil {
 		return nil, err
@@ -133,12 +137,7 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 	attestation *solid.Attestation,
 	fromBlock bool,
 ) (attestationIndicies []uint64, err error) {
-	data := attestation.AttestantionData()
-	if err != nil {
-		return nil, err
-	}
-
-	attestationIndicies, err = s.GetAttestingIndicies(data, attestation.AggregationBits(), true)
+	attestationIndicies, err = s.GetAttestingIndicies(attestation, true)
 	if err != nil {
 		return nil, err
 	}
@@ -159,23 +158,11 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 }
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
-	if index >= uint64(len(f.latestMessages)) {
-		if index >= uint64(cap(f.latestMessages)) {
-			tmp := make([]LatestMessage, index+1, index*2)
-			copy(tmp, f.latestMessages)
-			f.latestMessages = tmp
-		}
-		f.latestMessages = f.latestMessages[:index+1]
-	}
-	f.latestMessages[index] = message
+	f.latestMessages.set(int(index), message)
 }
 
 func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage, bool) {
-	if validatorIndex >= uint64(len(f.latestMessages)) ||
-		f.latestMessages[validatorIndex] == (LatestMessage{}) {
-		return LatestMessage{}, false
-	}
-	return f.latestMessages[validatorIndex], true
+	return f.latestMessages.get(int(validatorIndex))
 }
 
 func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
@@ -206,17 +193,17 @@ func (f *ForkChoiceStore) processAttestingIndicies(
 	attestation *solid.Attestation,
 	indicies []uint64,
 ) {
-	beaconBlockRoot := attestation.AttestantionData().BeaconBlockRoot()
-	target := attestation.AttestantionData().Target()
+	beaconBlockRoot := attestation.Data.BeaconBlockRoot
+	target := attestation.Data.Target
 
 	for _, index := range indicies {
 		if f.isUnequivocating(index) {
 			continue
 		}
 		validatorMessage, has := f.getLatestMessage(index)
-		if !has || target.Epoch() > validatorMessage.Epoch {
+		if !has || target.Epoch > validatorMessage.Epoch {
 			f.setLatestMessage(index, LatestMessage{
-				Epoch: target.Epoch(),
+				Epoch: target.Epoch,
 				Root:  beaconBlockRoot,
 			})
 		}
@@ -224,25 +211,25 @@ func (f *ForkChoiceStore) processAttestingIndicies(
 }
 
 func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) error {
-	target := attestation.AttestantionData().Target()
+	target := attestation.Data.Target
 
-	if target.Epoch() != f.computeEpochAtSlot(attestation.AttestantionData().Slot()) {
+	if target.Epoch != f.computeEpochAtSlot(attestation.Data.Slot) {
 		return errors.New("mismatching target epoch with slot data")
 	}
-	if _, has := f.forkGraph.GetHeader(target.BlockRoot()); !has {
+	if _, has := f.forkGraph.GetHeader(target.Root); !has {
 		return errors.New("target root is missing")
 	}
-	if blockHeader, has := f.forkGraph.GetHeader(attestation.AttestantionData().BeaconBlockRoot()); !has ||
-		blockHeader.Slot > attestation.AttestantionData().Slot() {
+	if blockHeader, has := f.forkGraph.GetHeader(attestation.Data.BeaconBlockRoot); !has ||
+		blockHeader.Slot > attestation.Data.Slot {
 		return errors.New("bad attestation data")
 	}
 	// LMD vote must be consistent with FFG vote target
-	targetSlot := f.computeStartSlotAtEpoch(target.Epoch())
-	ancestorRoot := f.Ancestor(attestation.AttestantionData().BeaconBlockRoot(), targetSlot)
+	targetSlot := f.computeStartSlotAtEpoch(target.Epoch)
+	ancestorRoot := f.Ancestor(attestation.Data.BeaconBlockRoot, targetSlot)
 	if ancestorRoot == (libcommon.Hash{}) {
 		return errors.New("could not retrieve ancestor")
 	}
-	if ancestorRoot != target.BlockRoot() {
+	if ancestorRoot != target.Root {
 		return errors.New("ancestor root mismatches with target")
 	}
 
@@ -252,7 +239,7 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(
 	attestation *solid.Attestation,
 ) error {
-	target := attestation.AttestantionData().Target()
+	target := attestation.Data.Target
 	// Attestations must be from the current or previous epoch
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	// Use GENESIS_EPOCH for previous when genesis to avoid underflow
@@ -260,7 +247,7 @@ func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(
 	if currentEpoch <= f.beaconCfg.GenesisEpoch {
 		previousEpoch = f.beaconCfg.GenesisEpoch
 	}
-	if target.Epoch() == currentEpoch || target.Epoch() == previousEpoch {
+	if target.Epoch == currentEpoch || target.Epoch == previousEpoch {
 		return nil
 	}
 	return errors.New("verification of attestation against current time failed")

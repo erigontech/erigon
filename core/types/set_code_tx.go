@@ -1,6 +1,23 @@
+// Copyright 2021 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -11,10 +28,11 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	types2 "github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 )
+
+const DelegateDesignationCodeSize = 23
 
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
@@ -79,15 +97,6 @@ func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transact
 	return cpy, nil
 }
 
-func (tx *SetCodeTransaction) FakeSign(address libcommon.Address) Transaction {
-	cpy := tx.copy()
-	cpy.R.Set(u256.Num1)
-	cpy.S.Set(u256.Num1)
-	cpy.V.Set(u256.Num4)
-	cpy.from.Store(address)
-	return cpy
-}
-
 func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
 	var b [33]byte
@@ -103,21 +112,59 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg, err := tx.DynamicFeeTransaction.AsMessage(s, baseFee, rules)
-	if err != nil {
-		return msg, err
+	msg := Message{
+		nonce:      tx.Nonce,
+		gasLimit:   tx.Gas,
+		gasPrice:   *tx.FeeCap,
+		tip:        *tx.Tip,
+		feeCap:     *tx.FeeCap,
+		to:         tx.To,
+		amount:     *tx.Value,
+		data:       tx.Data,
+		accessList: tx.AccessList,
+		checkNonce: true,
 	}
-	msg.authorizations = tx.Authorizations
 	if !rules.IsPrague {
 		return msg, errors.New("SetCodeTransaction is only supported in Prague")
 	}
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, errors.New("gasPrice higher than 2^256-1")
+		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
+	if msg.gasPrice.Gt(tx.FeeCap) {
+		msg.gasPrice.Set(tx.FeeCap)
+	}
 
-	return msg, nil
+	if len(tx.Authorizations) == 0 {
+		return msg, errors.New("SetCodeTransaction without authorizations is invalid")
+	}
+	msg.authorizations = tx.Authorizations
+
+	var err error
+	msg.from, err = tx.Sender(s)
+	return msg, err
+}
+
+func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
+	if from := tx.from.Load(); from != nil {
+		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
+			return *from, nil
+		}
+	}
+	addr, err := signer.Sender(tx)
+	if err != nil {
+		return libcommon.Address{}, err
+	}
+	tx.from.Store(&addr)
+	return addr, nil
 }
 
 func (tx *SetCodeTransaction) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*libcommon.Hash)
+		return *hash
 	}
 	hash := prefixedRlpHash(SetCodeTxType, []interface{}{
 		tx.ChainID,
@@ -197,13 +244,11 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
-	if len(b) > 0 && len(b) != 20 {
+	if len(b) != 20 {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
-	if len(b) > 0 {
-		tx.To = &libcommon.Address{}
-		copy((*tx.To)[:], b)
-	}
+	tx.To = &libcommon.Address{}
+	copy((*tx.To)[:], b)
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
@@ -212,7 +257,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode AccessList
-	tx.AccessList = types2.AccessList{}
+	tx.AccessList = AccessList{}
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
@@ -306,4 +351,19 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	}
 	return nil
 
+}
+
+// ParseDelegation tries to parse the address from a delegation slice.
+func ParseDelegation(code []byte) (libcommon.Address, bool) {
+	if len(code) != DelegateDesignationCodeSize || !bytes.HasPrefix(code, params.DelegatedDesignationPrefix) {
+		return libcommon.Address{}, false
+	}
+	var addr libcommon.Address
+	copy(addr[:], code[len(params.DelegatedDesignationPrefix):])
+	return addr, true
+}
+
+// AddressToDelegation adds the delegation prefix to the specified address.
+func AddressToDelegation(addr libcommon.Address) []byte {
+	return append(params.DelegatedDesignationPrefix, addr.Bytes()...)
 }

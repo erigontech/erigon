@@ -30,10 +30,7 @@ import (
 	"path/filepath"
 	"runtime/pprof"
 	"slices"
-	"sort"
 	"strings"
-
-	"github.com/erigontech/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
@@ -52,14 +49,12 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
-	"github.com/erigontech/erigon/ethdb/cbor"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -141,7 +136,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, "", 0, log.New()), nil, nil, nil)
 	bw := blockio.NewBlockWriter()
 	return br, bw
 }
@@ -165,56 +160,6 @@ func printTxHashes(chaindata string, block uint64) error {
 		return err
 	}
 	return nil
-}
-
-func repairCurrent() {
-	historyDb := mdbx.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
-	defer historyDb.Close()
-	currentDb := mdbx.MustOpen("statedb")
-	defer currentDb.Close()
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.ClearBucket(kv.HashedStorage)
-	}))
-	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		newB, err := tx.RwCursor(kv.HashedStorage)
-		if err != nil {
-			return err
-		}
-		count := 0
-		if err := currentDb.View(context.Background(), func(ctx kv.Tx) error {
-			c, err := ctx.Cursor(kv.HashedStorage)
-			if err != nil {
-				return err
-			}
-			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				tool.Check(newB.Put(k, v))
-				count++
-				if count == 10000 {
-					fmt.Printf("Copied %d storage items\n", count)
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		return nil
-	}))
-}
-
-func dumpStorage() {
-	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
-	defer db.Close()
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.E2StorageHistory, nil, func(k, v []byte) error {
-			fmt.Printf("%x %x\n", k, v)
-			return nil
-		})
-	}); err != nil {
-		panic(err)
-	}
 }
 
 func printBucket(chaindata string) {
@@ -278,7 +223,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64,
 		blockTotal := getBlockTotal(tx, b, blockTotalOrOffset)
 		// Note: blockTotal used here as block number rather than block count
 		for b <= blockTotal {
-			hash, err := br.CanonicalHash(context.Background(), tx, b)
+			hash, _, err := br.CanonicalHash(context.Background(), tx, b)
 			if err != nil {
 				return err
 			}
@@ -333,11 +278,10 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 
 func extractBodies(datadir string) error {
 	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		Enabled:    true,
 		KeepBlocks: true,
 		ProduceE2:  false,
 	}, filepath.Join(datadir, "snapshots"), 0, log.New())
-	snaps.ReopenFolder()
+	snaps.OpenFolder()
 
 	/* method Iterate was removed, need re-implement
 	snaps.Bodies.View(func(sns []*snapshotsync.BodySegment) error {
@@ -396,7 +340,7 @@ func extractBodies(datadir string) error {
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := libcommon.BytesToHash(k[8:])
 		var hash libcommon.Hash
-		if hash, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
+		if hash, _, err = br.CanonicalHash(context.Background(), tx, blockNumber); err != nil {
 			return err
 		}
 		_, baseTxnID, txCount := rawdb.ReadBody(tx, blockHash, blockNumber)
@@ -755,87 +699,6 @@ func keybytesToHex(str []byte) []byte {
 	return nibbles
 }
 
-func rmSnKey(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsKey)
-		_ = tx.Delete(kv.DatabaseInfo, rawdb.SnapshotsHistoryKey)
-		return nil
-	})
-}
-
-func findLogs(chaindata string, block uint64, blockTotal uint64) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	tx, txErr := db.BeginRo(context.Background())
-	if txErr != nil {
-		return txErr
-	}
-	defer tx.Rollback()
-	logs, err := tx.Cursor(kv.Log)
-	if err != nil {
-		return err
-	}
-	defer logs.Close()
-
-	reader := bytes.NewReader(nil)
-	addrs := map[libcommon.Address]int{}
-	topics := map[string]int{}
-
-	for k, v, err := logs.Seek(dbutils.LogKey(block, 0)); k != nil; k, v, err = logs.Next() {
-		if err != nil {
-			return err
-		}
-
-		blockNum := binary.BigEndian.Uint64(k[:8])
-		if blockNum >= block+blockTotal {
-			break
-		}
-
-		var ll types.Logs
-		reader.Reset(v)
-		if err := cbor.Unmarshal(&ll, reader); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
-		}
-
-		for _, l := range ll {
-			addrs[l.Address]++
-			for _, topic := range l.Topics {
-				topics[fmt.Sprintf("%x | %x", l.Address, topic)]++
-			}
-		}
-	}
-	addrsInv := map[int][]libcommon.Address{}
-	topicsInv := map[int][]string{}
-	for a, c := range addrs {
-		addrsInv[c] = append(addrsInv[c], a)
-	}
-	counts := make([]int, 0, len(addrsInv))
-	for c := range addrsInv {
-		counts = append(counts, -c)
-	}
-	sort.Ints(counts)
-	for i := 0; i < 10 && i < len(counts); i++ {
-		as := addrsInv[-counts[i]]
-		fmt.Printf("%d=%x\n", -counts[i], as)
-	}
-	for t, c := range topics {
-		topicsInv[c] = append(topicsInv[c], t)
-	}
-	counts = make([]int, 0, len(topicsInv))
-	for c := range topicsInv {
-		counts = append(counts, -c)
-	}
-	sort.Ints(counts)
-	for i := 0; i < 10 && i < len(counts); i++ {
-		as := topicsInv[-counts[i]]
-		fmt.Printf("%d=%s\n", -counts[i], as)
-	}
-	return nil
-}
-
 func iterate(filename string, prefix string) error {
 	pBytes := common.FromHex(prefix)
 	efFilename := filename + ".ef"
@@ -930,9 +793,6 @@ func main() {
 	case "testBlockHashes":
 		testBlockHashes(*chaindata, *block, libcommon.HexToHash(*hash))
 
-	case "dumpStorage":
-		dumpStorage()
-
 	case "current":
 		printCurrentBlockNumber(*chaindata)
 
@@ -957,9 +817,6 @@ func main() {
 	case "extractBodies":
 		err = extractBodies(*chaindata)
 
-	case "repairCurrent":
-		repairCurrent()
-
 	case "printTxHashes":
 		printTxHashes(*chaindata, uint64(*block))
 
@@ -983,14 +840,10 @@ func main() {
 
 	case "devTx":
 		err = devTx(*chaindata)
-	case "chainConfig":
+	case "chainConsfig":
 		err = chainConfig(*name)
-	case "findLogs":
-		err = findLogs(*chaindata, uint64(*block), uint64(*blockTotal))
 	case "iterate":
 		err = iterate(*chaindata, *account)
-	case "rmSnKey":
-		err = rmSnKey(*chaindata)
 	}
 
 	if err != nil {

@@ -34,20 +34,20 @@ func TestHeimdallServer(t *testing.T) {
 
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	client := heimdall.NewMockHeimdallClient(ctrl)
+	client := heimdall.NewMockClient(ctrl)
 
 	events := []*heimdall.EventRecordWithTime{
 		{
 			EventRecord: heimdall.EventRecord{
 				ID:      1,
-				ChainID: "80001",
+				ChainID: "80002",
 			},
 			Time: time.Now(),
 		},
 		{
 			EventRecord: heimdall.EventRecord{
 				ID:      2,
-				ChainID: "80001",
+				ChainID: "80002",
 			},
 			Time: time.Now(),
 		},
@@ -58,7 +58,7 @@ func TestHeimdallServer(t *testing.T) {
 		Id:         1,
 		StartBlock: 1000,
 		EndBlock:   2000,
-		ChainID:    "80001",
+		ChainID:    "80002",
 	}
 	client.EXPECT().FetchSpan(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
 
@@ -66,7 +66,7 @@ func TestHeimdallServer(t *testing.T) {
 		Fields: heimdall.WaypointFields{
 			StartBlock: big.NewInt(1000),
 			EndBlock:   big.NewInt(1999),
-			ChainID:    "80001",
+			ChainID:    "80002",
 		},
 	}
 	client.EXPECT().FetchCheckpoint(gomock.Any(), gomock.Any()).AnyTimes().Return(checkpoint1, nil)

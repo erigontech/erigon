@@ -37,7 +37,6 @@ var (
 	bucket                                   string
 	datadirCli, toChaindata                  string
 	migration                                string
-	squeezeCommitmentFiles                   bool
 	integrityFast, integritySlow             bool
 	file                                     string
 	HeimdallURL                              string
@@ -51,15 +50,12 @@ var (
 	chain                                    string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                            string
 
-	commitmentMode string
-	commitmentTrie string
-	commitmentFreq int
-	startTxNum     uint64
-	traceFromTx    uint64
+	startTxNum uint64
 
-	_forceSetHistoryV3    bool
-	workers, reconWorkers uint64
-	dbWriteMap            bool
+	dbWriteMap bool
+
+	chainTipMode bool
+	syncCfg      = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -131,10 +127,6 @@ func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
 
-func withSqueezeCommitmentFiles(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&squeezeCommitmentFiles, "squeeze", false, "allow to squeeze commitment files on start")
-}
-
 func withDataDir2(cmd *cobra.Command) {
 	// --datadir is required, but no --chain flag: read chainConfig from db instead
 	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
@@ -185,24 +177,24 @@ func withHeimdall(cmd *cobra.Command) {
 }
 
 func withWorkers(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&workers, "exec.workers", uint64(ethconfig.Defaults.Sync.ExecWorkerCount), "")
-	cmd.Flags().Uint64Var(&reconWorkers, "recon.workers", uint64(ethconfig.Defaults.Sync.ReconWorkerCount), "")
+	cmd.Flags().IntVar(&syncCfg.ExecWorkerCount, "exec.workers", ethconfig.Defaults.Sync.ExecWorkerCount, "")
 }
 
 func withStartTx(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&startTxNum, "tx", 0, "start processing from tx")
 }
 
-func withTraceFromTx(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from txn number")
-}
-
 func withOutputCsvFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
 }
 
-func withCommitment(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&commitmentMode, "commitment.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment, 'off' actually disables commitment calculation")
-	cmd.Flags().StringVar(&commitmentTrie, "commitment.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
-	cmd.Flags().IntVar(&commitmentFreq, "commitment.freq", 1000000, "how many blocks to skip between calculating commitment")
+func withUnwindTypes(cmd *cobra.Command) {
+	cmd.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "types to unwind for polygon sync")
+}
+
+func withChaosMonkey(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
+}
+func withChainTipMode(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
 }

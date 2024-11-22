@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type ContractCreatorData struct {
@@ -43,6 +44,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, err
 	}
 	defer tx.Rollback()
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
 
 	latestState := rpchelper.NewLatestStateReader(tx)
 	plainStateAcc, err := latestState.ReadAccountData(addr)
@@ -93,7 +95,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 			continue
 		}
 
-		v, ok, err := ttx.HistorySeek(kv.AccountsHistory, addr[:], txnID)
+		v, ok, err := ttx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("Unexpected error, couldn't find changeset", "txNum", txnID, "addr", addr)
 			return nil, err
@@ -134,7 +136,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
 	idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 		txnID := uint64(i) + prevTxnID
-		v, ok, err := ttx.HistorySeek(kv.AccountsHistory, addr[:], txnID)
+		v, ok, err := ttx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 			panic(err)
@@ -164,14 +166,14 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
 	}
 
-	ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
+	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("block not found by txnID=%d", creationTxnID)
 	}
-	minTxNum, err := rawdbv3.TxNums.Min(tx, bn)
+	minTxNum, err := txNumsReader.Min(tx, bn)
 	if err != nil {
 		return nil, err
 	}

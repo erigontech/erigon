@@ -82,7 +82,10 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := turboNode.NewNodConfigUrfave(cliCtx, logger)
+	if err != nil {
+		return err
+	}
 	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
@@ -264,7 +267,7 @@ func insertPosChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Lo
 	}
 
 	for i := posBlockStart; i < chain.Length(); i++ {
-		if err := chain.Blocks[i].HashCheck(); err != nil {
+		if err := chain.Blocks[i].HashCheck(true); err != nil {
 			return err
 		}
 	}

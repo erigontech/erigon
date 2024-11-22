@@ -18,41 +18,71 @@ package state
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 // nolint
 type indexSeeker interface {
-	WarmUp(g ArchiveGetter) error
-	Get(g ArchiveGetter, key []byte) (k []byte, found bool, di uint64, err error)
-	//seekInFiles(g ArchiveGetter, key []byte) (indexSeekerIterator, error)
-	Seek(g ArchiveGetter, seek []byte) (k []byte, di uint64, found bool, err error)
+	WarmUp(g *seg.Reader) error
+	Get(g *seg.Reader, key []byte) (k []byte, found bool, di uint64, err error)
+	//seekInFiles(g *seg.Reader, key []byte) (indexSeekerIterator, error)
+	Seek(g *seg.Reader, seek []byte) (k []byte, di uint64, found bool, err error)
 }
 
 // nolint
 type indexSeekerIterator interface {
 	Next() bool
 	Di() uint64
-	KVFromGetter(g ArchiveGetter) ([]byte, []byte, error)
+	KVFromGetter(g *seg.Reader) ([]byte, []byte, error)
 }
 
-type dataLookupFunc func(di uint64, g ArchiveGetter) ([]byte, []byte, error)
-type keyCmpFunc func(k []byte, di uint64, g ArchiveGetter) (int, []byte, error)
+type dataLookupFunc func(di uint64, g *seg.Reader) ([]byte, []byte, uint64, error)
+type keyCmpFunc func(k []byte, di uint64, g *seg.Reader, copyBuf []byte) (int, []byte, error)
 
 // M limits amount of child for tree node.
-func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc) *BpsTree {
+func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc) *BpsTree {
 	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp}
 	if err := bt.WarmUp(kv); err != nil {
 		panic(err)
 	}
+	return bt
+}
+
+// "assert key behind offset == to stored key in bt"
+var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
+
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []Node) *BpsTree {
+	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp, mx: nodes}
+
+	nsz := uint64(unsafe.Sizeof(Node{}))
+	var cachedBytes uint64
+	for i := 0; i < len(nodes); i++ {
+		if envAssertBTKeys {
+			eq, r, err := keyCmp(nodes[i].key, nodes[i].di, kv, nil)
+			if err != nil {
+				panic(err)
+			}
+			if eq != 0 {
+				panic(fmt.Errorf("key mismatch %x %x %d %d", nodes[i].key, r, nodes[i].di, i))
+			}
+		}
+		cachedBytes += nsz + uint64(len(nodes[i].key))
+		nodes[i].off = offt.Get(nodes[i].di)
+	}
+
 	return bt
 }
 
@@ -76,12 +106,12 @@ func (it *BpsTreeIterator) Di() uint64 {
 	return it.i
 }
 
-func (it *BpsTreeIterator) KVFromGetter(g ArchiveGetter) ([]byte, []byte, error) {
+func (it *BpsTreeIterator) KVFromGetter(g *seg.Reader) ([]byte, []byte, error) {
 	if it == nil {
 		return nil, nil, errors.New("iterator is nil")
 	}
 	//fmt.Printf("kv from %p getter %p tree %p offt %d\n", it, g, it.t, it.i)
-	k, v, err := it.t.dataLookupFunc(it.i, g)
+	k, v, _, err := it.t.dataLookupFunc(it.i, g)
 	if err != nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil, nil
@@ -133,7 +163,59 @@ type Node struct {
 	di  uint64 // key ordinal number in kv
 }
 
-func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
+func encodeListNodes(nodes []Node, w io.Writer) error {
+	numBuf := make([]byte, 8)
+	binary.BigEndian.PutUint64(numBuf, uint64(len(nodes)))
+	if _, err := w.Write(numBuf); err != nil {
+		return err
+	}
+
+	for ni := 0; ni < len(nodes); ni++ {
+		if _, err := w.Write(nodes[ni].Encode()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func decodeListNodes(data []byte) ([]Node, error) {
+	count := binary.BigEndian.Uint64(data[:8])
+	nodes := make([]Node, count)
+	pos := 8
+	for ni := 0; ni < int(count); ni++ {
+		dp, err := (&nodes[ni]).Decode(data[pos:])
+		if err != nil {
+			return nil, fmt.Errorf("decode node %d: %w", ni, err)
+		}
+		pos += int(dp)
+	}
+	return nodes, nil
+}
+
+func (n Node) Encode() []byte {
+	buf := make([]byte, 8+2+len(n.key))
+	binary.BigEndian.PutUint64(buf[:8], n.di)
+	binary.BigEndian.PutUint16(buf[8:10], uint16(len(n.key)))
+	copy(buf[10:], n.key)
+	return buf
+}
+
+func (n *Node) Decode(buf []byte) (uint64, error) {
+	if len(buf) < 10 {
+		return 0, errors.New("short buffer (less than 10b)")
+	}
+	n.di = binary.BigEndian.Uint64(buf[:8])
+	l := int(binary.BigEndian.Uint16(buf[8:10]))
+	if len(buf) < 10+l {
+		return 0, errors.New("short buffer")
+	}
+	n.key = buf[10 : 10+l]
+	//madvise(k, len(k), MADV_WILL_NEED)
+	return uint64(10 + l), nil
+}
+
+func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
+	t := time.Now()
 	N := b.offt.Count()
 	if N == 0 {
 		return nil
@@ -151,9 +233,10 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	// extremely stupid picking of needed nodes:
 	cachedBytes := uint64(0)
 	nsz := uint64(unsafe.Sizeof(Node{}))
+	var key []byte
 	for i := step; i < N; i += step {
 		di := i - 1
-		_, key, err := b.keyCmpFunc(nil, di, kv)
+		_, key, err = b.keyCmpFunc(nil, di, kv, key[:0])
 		if err != nil {
 			return err
 		}
@@ -161,9 +244,10 @@ func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 		cachedBytes += nsz + uint64(len(key))
 	}
 
-	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", N,
-		"cached", fmt.Sprintf("%d %%%.5f", len(b.mx), float64(len(b.mx))/float64(N)*100),
-		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR())
+	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", common.PrettyCounter(N),
+		"cached", fmt.Sprintf("%d %.2f%%", len(b.mx), 100*(float64(len(b.mx))/float64(N))),
+		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
+		"took", time.Since(t))
 	return nil
 }
 
@@ -197,13 +281,13 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 // If key is nil, returns first key and found=true
 // If found item.key has a prefix of key, returns found=false and item.key
 // if key is greater than all keys, returns nil, found=false
-func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di uint64, found bool, err error) {
+func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (key, value []byte, di uint64, found bool, err error) {
 	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
 	}
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
-		key, value, err = b.dataLookupFunc(0, g)
+		key, value, _, err = b.dataLookupFunc(0, g)
 		if err != nil {
 			return nil, nil, 0, false, err
 		}
@@ -220,7 +304,7 @@ func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di u
 	var cmp int
 	for l < r {
 		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
-			cmp, key, err = b.keyCmpFunc(seekKey, l, g)
+			cmp, key, err = b.keyCmpFunc(seekKey, l, g, key[:0])
 			if err != nil {
 				return nil, nil, 0, false, err
 			}
@@ -242,7 +326,7 @@ func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di u
 		}
 
 		m = (l + r) >> 1
-		cmp, key, err = b.keyCmpFunc(seekKey, m, g)
+		cmp, key, err = b.keyCmpFunc(seekKey, m, g, key[:0])
 		if err != nil {
 			return nil, nil, 0, false, err
 		}
@@ -264,7 +348,7 @@ func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di u
 	if l == r {
 		m = l
 	}
-	key, value, err = b.dataLookupFunc(m, g)
+	key, value, _, err = b.dataLookupFunc(m, g)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
@@ -274,12 +358,12 @@ func (b *BpsTree) Seek(g ArchiveGetter, seekKey []byte) (key, value []byte, di u
 // returns first key which is >= key.
 // If key is nil, returns first key
 // if key is greater than all keys, returns nil
-func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error) {
+func (b *BpsTree) Get(g *seg.Reader, key []byte) (k []byte, ok bool, i uint64, err error) {
 	if b.trace {
 		fmt.Printf("get   %x\n", key)
 	}
 	if len(key) == 0 && b.offt.Count() > 0 {
-		k0, v0, err := b.dataLookupFunc(0, g)
+		k0, v0, _, err := b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
 			return nil, false, 0, err
 		}
@@ -291,10 +375,11 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
 	}
 
+	var cmp int
 	var m uint64
 	for l < r {
 		m = (l + r) >> 1
-		cmp, k, err := b.keyCmpFunc(key, m, g)
+		cmp, k, err = b.keyCmpFunc(key, m, g, k[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}
@@ -312,7 +397,7 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 		}
 	}
 
-	cmp, k, err := b.keyCmpFunc(key, l, g)
+	cmp, k, err = b.keyCmpFunc(key, l, g, k[:0])
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}

@@ -19,33 +19,35 @@ package service
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"strings"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/direct"
+	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-
-	"github.com/erigontech/erigon-lib/direct"
-	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/cltypes"
 )
+
+const AttestationSubnetSubscriptions = 2
 
 type ServerConfig struct {
 	Network       string
 	Addr          string
 	Creds         credentials.TransportCredentials
-	Validator     bool
 	InitialStatus *cltypes.Status
 }
 
@@ -57,10 +59,19 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 			CodecStr: sentinel.SSZSnappyCodec,
 		})
 	}
+
+	if template == gossip.TopicNamePrefixBeaconAttestation {
+		rand.Shuffle(len(topics), func(i, j int) {
+			topics[i], topics[j] = topics[j], topics[i]
+		})
+	}
 	return topics
 }
 
-func getExpirationForTopic(topic string) time.Time {
+func getExpirationForTopic(topic string, subscribeAll bool) time.Time {
+	if subscribeAll {
+		return time.Unix(0, math.MaxInt64)
+	}
 	if strings.Contains(topic, "beacon_attestation") ||
 		(strings.Contains(topic, "sync_committee_") && !strings.Contains(topic, gossip.TopicNameSyncCommitteeContributionAndProof)) {
 		return time.Unix(0, 0)
@@ -76,7 +87,6 @@ func createSentinel(
 	indiciesDB kv.RwDB,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	ethClock eth_clock.EthereumClock,
-	validatorTopics bool,
 	logger log.Logger) (*sentinel.Sentinel, error) {
 	sent, err := sentinel.New(
 		context.Background(),
@@ -111,12 +121,16 @@ func createSentinel(
 			gossip.TopicNamePrefixBlobSidecar,
 			int(cfg.BeaconConfig.MaxBlobsPerBlock),
 		)...)
+
+	attestationSubnetTopics := generateSubnetsTopics(
+		gossip.TopicNamePrefixBeaconAttestation,
+		int(cfg.NetworkConfig.AttestationSubnetCount),
+	)
+
 	gossipTopics = append(
 		gossipTopics,
-		generateSubnetsTopics(
-			gossip.TopicNamePrefixBeaconAttestation,
-			int(cfg.NetworkConfig.AttestationSubnetCount),
-		)...)
+		attestationSubnetTopics[AttestationSubnetSubscriptions:]...)
+
 	gossipTopics = append(
 		gossipTopics,
 		generateSubnetsTopics(
@@ -131,7 +145,18 @@ func createSentinel(
 		}
 
 		// now lets separately connect to the gossip topics. this joins the room
-		_, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name)) // Listen forever.
+		_, err := sent.SubscribeGossip(v, getExpirationForTopic(v.Name, cfg.SubscribeAllTopics)) // Listen forever.
+		if err != nil {
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
+		}
+	}
+
+	for k := 0; k < AttestationSubnetSubscriptions; k++ {
+		if err := sent.Unsubscribe(attestationSubnetTopics[k]); err != nil {
+			logger.Error("[Sentinel] failed to start sentinel", "err", err)
+			continue
+		}
+		_, err := sent.SubscribeGossip(attestationSubnetTopics[k], time.Unix(0, math.MaxInt64)) // Listen forever.
 		if err != nil {
 			logger.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
@@ -156,7 +181,6 @@ func StartSentinelService(
 		indiciesDB,
 		forkChoiceReader,
 		ethClock,
-		srvCfg.Validator,
 		logger,
 	)
 	if err != nil {

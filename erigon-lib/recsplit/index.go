@@ -66,7 +66,7 @@ const (
 
 // SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
 var SupportedFeatures = []Features{Enums, LessFalsePositives}
-var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon seg index'")
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
@@ -110,13 +110,26 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFilePath string) (*Index, error) {
+func OpenIndex(indexFilePath string) (idx *Index, err error) {
+	var validationPassed = false
 	_, fName := filepath.Split(indexFilePath)
-	idx := &Index{
+	idx = &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
-	var err error
+
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if rec := recover(); rec != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", indexFilePath, rec, dbg.Stack())
+		}
+		if err != nil || !validationPassed {
+			idx.Close()
+			idx = nil
+		}
+	}()
+
 	idx.f, err = os.Open(indexFilePath)
 	if err != nil {
 		return nil, err
@@ -217,6 +230,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 			return NewIndexReader(idx)
 		},
 	}
+	validationPassed = true
 	return idx, nil
 }
 
@@ -242,18 +256,16 @@ func (idx *Index) FileName() string   { return idx.fileName }
 func (idx *Index) IsOpen() bool       { return idx != nil && idx.f != nil }
 
 func (idx *Index) Close() {
-	if idx == nil {
+	if idx == nil || idx.f == nil {
 		return
 	}
-	if idx.f != nil {
-		if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
-		}
-		if err := idx.f.Close(); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
-		}
-		idx.f = nil
+	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
 	}
+	if err := idx.f.Close(); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
+	}
+	idx.f = nil
 }
 
 func (idx *Index) skipBits(m uint16) int {
@@ -423,7 +435,7 @@ func (idx *Index) DisableReadAhead() {
 	}
 	leftReaders := idx.readAheadRefcnt.Add(-1)
 	if leftReaders == 0 {
-		_ = mmap.MadviseNormal(idx.mmapHandle1)
+		_ = mmap.MadviseRandom(idx.mmapHandle1)
 	} else if leftReaders < 0 {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
 	}
@@ -435,6 +447,7 @@ func (idx *Index) EnableReadAhead() *Index {
 }
 func (idx *Index) EnableWillNeed() *Index {
 	idx.readAheadRefcnt.Add(1)
+	fmt.Printf("[dbg] madv_will_need: %s\n", idx.fileName)
 	_ = mmap.MadviseWillNeed(idx.mmapHandle1)
 	return idx
 }

@@ -22,6 +22,7 @@ package eth
 import (
 	"context"
 	"fmt"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -145,7 +146,7 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 			lookups >= 2*MaxBodiesServe {
 			break
 		}
-		number := rawdb.ReadHeaderNumber(db, hash)
+		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
 		if number == nil {
 			continue
 		}
@@ -160,27 +161,78 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 }
 
 type ReceiptsGetter interface {
-	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, senders []libcommon.Address) (types.Receipts, error)
+	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error)
+	GetCachedReceipts(ctx context.Context, blockHash libcommon.Hash) (types.Receipts, bool)
 }
 
-func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
-	// Gather state data until the fetch or network limits is reached
+type cachedReceipts struct {
+	EncodedReceipts []rlp.RawValue
+	Bytes           int // total size of the encoded receipts
+	PendingIndex    int // index of the first not-found receipt in the query
+}
+
+func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket) (*cachedReceipts, bool, error) {
 	var (
-		bytes    int
-		receipts []rlp.RawValue
+		bytes        int
+		receiptsList []rlp.RawValue
+		pendingIndex int
+		needMore     = true
 	)
 
 	for lookups, hash := range query {
+		if bytes >= softResponseLimit || len(receiptsList) >= maxReceiptsServe ||
+			lookups >= 2*maxReceiptsServe {
+			needMore = false
+			break
+		}
+		if receipts, ok := receiptsGetter.GetCachedReceipts(ctx, hash); ok {
+			if encoded, err := rlp.EncodeToBytes(receipts); err != nil {
+				return nil, needMore, fmt.Errorf("failed to encode receipt: %w", err)
+			} else {
+				receiptsList = append(receiptsList, encoded)
+				bytes += len(encoded)
+				pendingIndex = lookups + 1
+			}
+		} else {
+			break
+		}
+	}
+	if pendingIndex == len(query) {
+		needMore = false
+	}
+	return &cachedReceipts{
+		EncodedReceipts: receiptsList,
+		Bytes:           bytes,
+		PendingIndex:    pendingIndex,
+	}, needMore, nil
+}
+
+func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket, cachedReceipts *cachedReceipts) ([]rlp.RawValue, error) { //nolint:unparam
+	// Gather state data until the fetch or network limits is reached
+	var (
+		bytes        int
+		receipts     []rlp.RawValue
+		pendingIndex int
+	)
+
+	if cachedReceipts != nil {
+		bytes = cachedReceipts.Bytes
+		receipts = cachedReceipts.EncodedReceipts
+		pendingIndex = cachedReceipts.PendingIndex
+	}
+
+	for lookups := pendingIndex; lookups < len(query); lookups++ {
+		hash := query[lookups]
 		if bytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
 			lookups >= 2*maxReceiptsServe {
 			break
 		}
-		number := rawdb.ReadHeaderNumber(db, hash)
+		number, _ := br.HeaderNumber(context.Background(), db, hash)
 		if number == nil {
 			return nil, nil
 		}
 		// Retrieve the requested block's receipts
-		b, s, err := br.BlockWithSenders(context.Background(), db, hash, *number)
+		b, _, err := br.BlockWithSenders(context.Background(), db, hash, *number)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +240,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 			return nil, nil
 		}
 
-		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, s)
+		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b)
 		if err != nil {
 			return nil, err
 		}

@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 const PreAllocatedRewardsAndPenalties = 8192
@@ -97,7 +99,7 @@ func GetBlockRoot(b abstract.BeaconState, epoch uint64) (libcommon.Hash, error) 
 
 // FinalityDelay determines by how many epochs we are late on finality.
 func FinalityDelay(b abstract.BeaconState) uint64 {
-	return PreviousEpoch(b) - b.FinalizedCheckpoint().Epoch()
+	return PreviousEpoch(b) - b.FinalizedCheckpoint().Epoch
 }
 
 // InactivityLeaking returns whether epochs are in inactivity penalty.
@@ -107,22 +109,51 @@ func InactivityLeaking(b abstract.BeaconState) bool {
 }
 
 // IsUnslashedParticipatingIndex
-func IsUnslashedParticipatingIndex(validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.BitList, epoch, index uint64, flagIdx int) bool {
+func IsUnslashedParticipatingIndex(validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.ParticipationBitList, epoch, index uint64, flagIdx int) bool {
 	validator := validatorSet.Get(int(index))
 	return validator.Active(epoch) && cltypes.ParticipationFlags(previousEpochParticipation.Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
 }
 
 // EligibleValidatorsIndicies Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.
 func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []uint64) {
-	eligibleValidators = make([]uint64, 0, b.ValidatorLength())
-	previousEpoch := PreviousEpoch(b)
+	/* This is a parallel implementation of get_eligible_validator_indices*/
 
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-		if validator.Active(previousEpoch) || (validator.Slashed() && previousEpoch+1 < validator.WithdrawableEpoch()) {
-			eligibleValidators = append(eligibleValidators, uint64(i))
-		}
-		return true
-	})
+	// We divide computation into multiple threads to speed up the process.
+	numThreads := runtime.NumCPU()
+	wp := threading.NewParallelExecutor()
+	eligibleValidatorsShards := make([][]uint64, numThreads)
+	shardSize := b.ValidatorLength() / numThreads
+	for i := range eligibleValidatorsShards {
+		eligibleValidatorsShards[i] = make([]uint64, 0, shardSize)
+	}
+	previousEpoch := PreviousEpoch(b)
+	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
+	for i := 0; i < numThreads; i++ {
+		workerID := i
+		wp.AddWork(func() error {
+			from := workerID * shardSize
+			to := (workerID + 1) * shardSize
+			if workerID == numThreads-1 {
+				to = b.ValidatorLength()
+			}
+			for j := from; j < to; j++ {
+				validator, err := b.ValidatorForValidatorIndex(j)
+				if err != nil {
+					panic(err)
+				}
+				if validator.Active(previousEpoch) || (validator.Slashed() && previousEpoch+1 < validator.WithdrawableEpoch()) {
+					eligibleValidatorsShards[workerID] = append(eligibleValidatorsShards[workerID], uint64(j))
+				}
+			}
+			return nil
+		})
+	}
+	wp.Execute()
+	// Merge the results from all threads.
+	for i := range eligibleValidatorsShards {
+		eligibleValidators = append(eligibleValidators, eligibleValidatorsShards[i]...)
+	}
+
 	return
 }
 
@@ -145,7 +176,7 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 		return false, err
 	}
 
-	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target().Epoch())
+	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -167,7 +198,7 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 
 // GetUnslashedParticipatingIndices returns set of currently unslashed participating indexes.
 func GetUnslashedParticipatingIndices(b abstract.BeaconState, flagIndex int, epoch uint64) (validatorSet []uint64, err error) {
-	var participation *solid.BitList
+	var participation *solid.ParticipationBitList
 	// Must be either previous or current epoch
 	switch epoch {
 	case Epoch(b):
@@ -202,7 +233,7 @@ func IsValidatorEligibleForActivationQueue(b abstract.BeaconState, validator sol
 // Implementation of is_eligible_for_activation.
 // Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
 func IsValidatorEligibleForActivation(b abstract.BeaconState, validator solid.Validator) bool {
-	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch() &&
+	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch &&
 		validator.ActivationEpoch() == b.BeaconConfig().FarFutureEpoch
 }
 

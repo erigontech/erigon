@@ -87,8 +87,8 @@ func (l Locator) String() string {
 	return val
 }
 
-var locatorExp, _ = regexp.Compile(`^(?:(\w+)\:)?([^\:]*)(?:\:(v\d+))?`)
-var srcExp, _ = regexp.Compile(`^erigon-v\d+-snapshots-(.*)$`)
+var locatorExp = regexp.MustCompile(`^(?:(\w+)\:)?([^\:]*)(?:\:(v\d+))?`)
+var srcExp = regexp.MustCompile(`^erigon-v\d+-snapshots-(.*)$`)
 
 func ParseLocator(value string) (*Locator, error) {
 	if matches := locatorExp.FindStringSubmatch(value); len(matches) > 0 {
@@ -200,7 +200,7 @@ func NewDefaultTorrentClientConfig(chain string, torrentDir string, logger log.L
 	}
 }
 
-func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, error) {
+func NewTorrentClient(ctx context.Context, config CreateNewTorrentClientConfig) (*TorrentClient, error) {
 	logger := config.Logger
 	tempDir := config.TempDir
 
@@ -232,7 +232,7 @@ func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, erro
 
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
-	cfg, err := downloadercfg.New(dirs, version, logLevel, downloadRate, uploadRate,
+	cfg, err := downloadercfg.New(ctx, dirs, version, logLevel, downloadRate, uploadRate,
 		config.TorrentPort,
 		config.ConnsPerFile, 0, nil, webseedsList, config.Chain, true, true)
 

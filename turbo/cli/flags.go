@@ -22,8 +22,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
 
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -84,7 +85,7 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Avaiable values: "archive","full","minimal".
+		Usage: `Choose a pruning preset to run onto. Available values: "archive","full","minimal".
 				Archive: Keep the entire indexed database, aka. no pruning. (Pruning is flexible),
 				Full: Keep only blocks and latest state (Pruning is not flexible)
 				Minimal: Keep only latest state (Pruning is not flexible)`,
@@ -137,12 +138,6 @@ var (
 		Value: "",
 	}
 
-	SyncLoopPruneLimitFlag = cli.UintFlag{
-		Name:  "sync.loop.prune.limit",
-		Usage: "Sets the maximum number of block to prune per loop iteration",
-		Value: 100,
-	}
-
 	SyncLoopBreakAfterFlag = cli.StringFlag{
 		Name:  "sync.loop.break.after",
 		Usage: "Sets the last stage of the sync loop to run",
@@ -153,6 +148,12 @@ var (
 		Name:  "sync.loop.block.limit",
 		Usage: "Sets the maximum number of blocks to process per loop iteration",
 		Value: 5_000,
+	}
+
+	SyncParallelStateFlushing = cli.BoolFlag{
+		Name:  "sync.parallel-state-flushing",
+		Usage: "Enables parallel state flushing",
+		Value: true,
 	}
 
 	UploadLocationFlag = cli.StringFlag{
@@ -297,12 +298,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	// Full mode prunes all but the latest state
 	if ctx.String(PruneModeFlag.Name) == "full" {
 		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(0)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	}
 	// Minimal mode prunes all but the latest state including blocks
 	if ctx.String(PruneModeFlag.Name) == "minimal" {
-		mode.Blocks = prune.Distance(2048) // 2048 is just some blocks to allow reorgs
-		mode.History = prune.Distance(0)
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	}
 
 	if err != nil {
@@ -342,10 +343,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
 
-	if limit := ctx.Uint(SyncLoopPruneLimitFlag.Name); limit > 0 {
-		cfg.Sync.PruneLimit = int(limit)
-	}
-
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
 		cfg.Sync.BreakAfterStage = stage
 	}
@@ -353,6 +350,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
 		cfg.Sync.LoopBlockLimit = limit
 	}
+	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 
 	if location := ctx.String(UploadLocationFlag.Name); len(location) > 0 {
 		cfg.Sync.UploadLocation = location
@@ -389,6 +387,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	if ctx.Bool(utils.DisableIPV4.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv4 = true
+	}
+
+	if ctx.Bool(utils.ChaosMonkeyFlag.Name) {
+		cfg.ChaosMonkey = true
 	}
 }
 
@@ -427,10 +429,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	case "archive":
 	case "full":
 		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(0)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	case "minimal":
-		mode.Blocks = prune.Distance(2048) // 2048 is just some blocks to allow reorgs
-		mode.History = prune.Distance(0)
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	default:
 		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
 	}
@@ -455,6 +457,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	cfg.StateStream = true
 	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
 		cfg.StateStream = false
+	}
+
+	if v := f.Bool(utils.ChaosMonkeyFlag.Name, true, utils.ChaosMonkeyFlag.Usage); v != nil {
+		cfg.ChaosMonkey = true
 	}
 }
 

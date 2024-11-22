@@ -49,7 +49,7 @@ func MiningStages(
 			ID:          stages.MiningCreateBlock,
 			Description: "Mining: construct new block from txn pool",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnMiningCreateBlockStage(s, txc.Tx, createBlockCfg, ctx.Done(), logger)
+				return SpawnMiningCreateBlockStage(s, txc, createBlockCfg, ctx.Done(), logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return nil
@@ -69,14 +69,14 @@ func MiningStages(
 				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return BorHeimdallPrune(p, ctx, tx, borHeimdallCfg)
+				return nil
 			},
 		},
 		{
 			ID:          stages.MiningExecution,
 			Description: "Mining: execute new block from txn pool",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnMiningExecStage(s, txc, execCfg, sendersCfg, executeBlockCfg, ctx, logger)
+				return SpawnMiningExecStage(s, txc, execCfg, sendersCfg, executeBlockCfg, ctx, logger, nil)
 			},
 			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return nil

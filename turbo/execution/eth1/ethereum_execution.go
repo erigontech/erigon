@@ -26,22 +26,21 @@ import (
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
-
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/wrap"
+
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
@@ -85,6 +84,10 @@ type EthereumExecutionModule struct {
 
 	doingPostForkchoice atomic.Bool
 
+	// metrics for average mgas/sec
+	avgMgasSec      float64
+	recordedMgasSec uint64
+
 	execution.UnimplementedExecutionServer
 }
 
@@ -118,32 +121,19 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 }
 
 func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Header, error) {
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if td == nil {
-		return nil, nil
-	}
 	if e.blockReader == nil {
 		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
 	}
+
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *EthereumExecutionModule) getTD(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*big.Int, error) {
+func (e *EthereumExecutionModule) getTD(_ context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*big.Int, error) {
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 
 }
 
 func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Body, error) {
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if td == nil {
-		return nil, nil
-	}
 	if e.blockReader == nil {
 		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
 		return body, nil
@@ -156,20 +146,20 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	var err error
 	if e.blockReader == nil {
 		canonical, err = rawdb.ReadCanonicalHash(tx, blockNumber)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
 	} else {
-		canonical, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
-	}
-	if err != nil {
-		return libcommon.Hash{}, err
+		var ok bool
+		canonical, ok, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+		if !ok {
+			return libcommon.Hash{}, nil
+		}
 	}
 
-	td, err := rawdb.ReadTd(tx, canonical, blockNumber)
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-	if td == nil {
-		return libcommon.Hash{}, nil
-	}
 	return canonical, nil
 }
 
@@ -188,10 +178,8 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 			return err
 		}
 	}
-	if e.hook != nil {
-		if err := e.hook.BeforeRun(tx, true); err != nil {
-			return err
-		}
+	if err := e.hook.BeforeRun(tx, true); err != nil {
+		return err
 	}
 	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
@@ -212,13 +200,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	defer e.semaphore.Release(1)
 
-	// Update the last new block seen.
-	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
-	if err := e.db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteLastNewBlockSeen(tx, req.Number)
-	}); err != nil {
-		return nil, err
-	}
+	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 
@@ -307,7 +289,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {
-	tip := rawdb.ReadHeaderNumber(tx, headHash)
+	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
+	if err != nil {
+		return err
+	}
 
 	currentHash := headHash
 	currentNumber := *tip
@@ -324,17 +309,27 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 }
 
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
-	e.semaphore.Acquire(ctx, 1)
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		if !errors.Is(err, context.Canceled) {
+			e.logger.Error("Could not start execution service", "err", err)
+		}
+		return
+	}
 	defer e.semaphore.Release(1)
 
-	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline); err != nil {
+	if err := stages.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, nil); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
 	}
 }
 
-func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execution.ReadyResponse, error) {
+func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*execution.ReadyResponse, error) {
+
+	if err := <-e.blockReader.Ready(ctx); err != nil {
+		return &execution.ReadyResponse{Ready: false}, err
+	}
+
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return &execution.ReadyResponse{Ready: false}, nil
@@ -354,7 +349,7 @@ func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.Ge
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
 
-	num := rawdb.ReadHeaderNumber(tx, blockHash)
+	num, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 	if num == nil {
 		return &execution.HasBlockResponse{HasBlock: false}, nil
 	}

@@ -30,9 +30,9 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 
 	common2 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -68,7 +68,7 @@ type Genesis struct {
 	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
 	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
-	RequestsRoot          *common.Hash `json:"requestsRoot"`          // EIP-7685
+	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.

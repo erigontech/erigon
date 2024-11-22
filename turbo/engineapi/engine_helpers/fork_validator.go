@@ -23,15 +23,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
-	"github.com/erigontech/erigon/common/math"
+
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
@@ -202,7 +202,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		return
 	}
 	var foundCanonical bool
-	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, hash, number)
+	foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, hash, number)
 	if criticalError != nil {
 		return
 	}
@@ -214,7 +214,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
 	unwindPoint := number - 1
-	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
+	foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
 	}
@@ -251,7 +251,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 
 		currentHash = header.ParentHash
 		unwindPoint = header.Number.Uint64() - 1
-		foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
+		foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
 		}
@@ -272,10 +272,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	var txc wrap.TxContainer
 	txc.Tx = tx
 	txc.Doms = fv.sharedDom
-	fv.extendingForkNotifications = &shards.Notifications{
-		Events:      shards.NewEvents(),
-		Accumulator: shards.NewAccumulator(),
-	}
+
+	fv.extendingForkNotifications = shards.NewNotifications(nil)
 	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
 }
 
@@ -322,8 +320,13 @@ func (fv *ForkValidator) validateAndStorePayload(txc wrap.TxContainer, header *t
 		if criticalError != nil {
 			return
 		}
-		latestValidHash, criticalError = rawdb.ReadCanonicalHash(txc.Tx, latestValidNumber)
+		var ok bool
+		latestValidHash, ok, criticalError = fv.blockReader.CanonicalHash(fv.ctx, txc.Tx, latestValidNumber)
 		if criticalError != nil {
+			return
+		}
+		if !ok {
+			criticalError = fmt.Errorf("canonical hash not found: %d", latestValidNumber)
 			return
 		}
 		status = engine_types.InvalidStatus

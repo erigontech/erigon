@@ -25,11 +25,10 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
-
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM
@@ -104,11 +103,11 @@ func (al accessList) Equal(other accessList) bool {
 	return al.equal(other)
 }
 
-// accesslist converts the accesslist to a types2.AccessList.
-func (al accessList) accessList() types2.AccessList {
-	acl := make(types2.AccessList, 0, len(al))
+// accesslist converts the accesslist to a types.AccessList.
+func (al accessList) accessList() types.AccessList {
+	acl := make(types.AccessList, 0, len(al))
 	for addr, slots := range al {
-		tuple := types2.AccessTuple{Address: addr, StorageKeys: []libcommon.Hash{}}
+		tuple := types.AccessTuple{Address: addr, StorageKeys: []libcommon.Hash{}}
 		for slot := range slots {
 			tuple.StorageKeys = append(tuple.StorageKeys, slot)
 		}
@@ -117,18 +116,18 @@ func (al accessList) accessList() types2.AccessList {
 	return acl
 }
 
-// accesslist converts the accesslist to a types2.AccessList.
-func (al accessList) accessListSorted() types2.AccessList {
-	acl := make(types2.AccessList, 0, len(al))
+// accesslist converts the accesslist to a types.AccessList.
+func (al accessList) accessListSorted() types.AccessList {
+	acl := make(types.AccessList, 0, len(al))
 	for addr, slots := range al {
 		storageKeys := make([]libcommon.Hash, 0, len(slots))
 		for slot := range slots {
 			storageKeys = append(storageKeys, slot)
 		}
 		sort.Slice(storageKeys, func(i, j int) bool {
-			return storageKeys[i].String() < storageKeys[j].String()
+			return storageKeys[i].Cmp(storageKeys[j]) < 0
 		})
-		acl = append(acl, types2.AccessTuple{
+		acl = append(acl, types.AccessTuple{
 			Address:     addr,
 			StorageKeys: storageKeys,
 		})
@@ -151,7 +150,7 @@ type AccessListTracer struct {
 // the resulting accesslist.
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
-func NewAccessListTracer(acl types2.AccessList, exclude map[libcommon.Address]struct{}, state evmtypes.IntraBlockState) *AccessListTracer {
+func NewAccessListTracer(acl types.AccessList, exclude map[libcommon.Address]struct{}, state evmtypes.IntraBlockState) *AccessListTracer {
 	excl := make(map[libcommon.Address]struct{})
 	if exclude != nil {
 		excl = exclude
@@ -252,12 +251,12 @@ func (*AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 // AccessList returns the current accesslist maintained by the tracer.
-func (a *AccessListTracer) AccessList() types2.AccessList {
+func (a *AccessListTracer) AccessList() types.AccessList {
 	return a.list.accessList()
 }
 
 // AccessListSorted returns the current accesslist maintained by the tracer.
-func (a *AccessListTracer) AccessListSorted() types2.AccessList {
+func (a *AccessListTracer) AccessListSorted() types.AccessList {
 	return a.list.accessListSorted()
 }
 

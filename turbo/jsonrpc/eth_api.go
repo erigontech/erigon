@@ -21,38 +21,37 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
-
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
-	types2 "github.com/erigontech/erigon-lib/types"
-
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	ethFilters "github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/services"
 )
@@ -108,7 +107,7 @@ type EthAPI interface {
 
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutility.Bytes, error)
-	EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error)
+	EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutility.Bytes) (common.Hash, error)
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutility.Bytes) (hexutility.Bytes, error)
@@ -127,9 +126,8 @@ type EthAPI interface {
 
 type BaseAPI struct {
 	// all caches are thread-safe
-	stateCache    kvcache.Cache
-	blocksLRU     *lru.Cache[common.Hash, *types.Block]
-	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
+	stateCache kvcache.Cache
+	blocksLRU  *lru.Cache[common.Hash, *types.Block]
 
 	filters      *rpchelper.Filters
 	_chainConfig atomic.Pointer[chain.Config]
@@ -140,12 +138,16 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
-	evmCallTimeout    time.Duration
-	dirs              datadir.Dirs
-	receiptsGenerator *receipts.Generator
+	useBridgeReader bool
+	bridgeReader    bridgeReader
+
+	evmCallTimeout      time.Duration
+	dirs                datadir.Dirs
+	receiptsGenerator   *receipts.Generator
+	borReceiptGenerator *receipts.BorGenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
 	var (
 		blocksLRUSize      = 128 // ~32Mb
 		receiptsCacheLimit = 32
@@ -159,24 +161,20 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	if err != nil {
 		panic(err)
 	}
-	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
-	if err != nil {
-		panic(err)
-	}
-
-	receiptsGenerator := receipts.NewGenerator(receiptsCache, blockReader, engine)
 
 	return &BaseAPI{
-		filters:           f,
-		stateCache:        stateCache,
-		blocksLRU:         blocksLRU,
-		receiptsCache:     receiptsCache,
-		_blockReader:      blockReader,
-		_txnReader:        blockReader,
-		evmCallTimeout:    evmCallTimeout,
-		_engine:           engine,
-		receiptsGenerator: receiptsGenerator,
-		dirs:              dirs,
+		filters:             f,
+		stateCache:          stateCache,
+		blocksLRU:           blocksLRU,
+		_blockReader:        blockReader,
+		_txnReader:          blockReader,
+		evmCallTimeout:      evmCallTimeout,
+		_engine:             engine,
+		receiptsGenerator:   receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
+		borReceiptGenerator: receipts.NewBorGenerator(receiptsCacheLimit, blockReader, engine),
+		dirs:                dirs,
+		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
+		bridgeReader:        bridgeReader,
 	}
 }
 
@@ -200,9 +198,12 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	hash, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
+	hash, ok, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
 	if hashErr != nil {
 		return nil, hashErr
+	}
+	if !ok {
+		return nil, nil
 	}
 	return api.blockWithSenders(ctx, tx, hash, number)
 }
@@ -213,7 +214,10 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 			return it, nil
 		}
 	}
-	number := rawdb.ReadHeaderNumber(tx, hash)
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if number == nil {
 		return nil, nil
 	}
@@ -279,7 +283,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 }
 
 func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -290,18 +294,39 @@ func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber
 }
 
 func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
-	n, h, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
 	return api._blockReader.Header(ctx, tx, h, n)
 }
 
+func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {
+	var stateSyncEvents []*types.Message
+	if api.useBridgeReader {
+		events, err := api.bridgeReader.Events(ctx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		stateSyncEvents = events
+	} else {
+		events, err := api._blockReader.EventsByBlock(ctx, tx, blockHash, blockNum)
+		if err != nil {
+			return nil, err
+		}
+
+		stateReceiverContract := chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContractAddress()
+		stateSyncEvents = bridge.NewStateSyncEventMessages(events, &stateReceiverContract, core.SysCallGasLimit)
+	}
+
+	return stateSyncEvents, nil
+}
+
 // checks the pruning state to see if we would hold information about this
 // block in state history or not.  Some strange issues arise getting account
 // history for blocks that have been pruned away giving nonce too low errors
 // etc. as red herrings
-func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
+func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
 	p, err := api.pruneMode(tx)
 	if err != nil {
 		return err
@@ -311,7 +336,7 @@ func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
 		return nil
 	}
 	if p.History.Enabled() {
-		latest, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), tx, api.filters)
+		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), tx, api._blockReader, api.filters)
 		if err != nil {
 			return err
 		}
@@ -343,6 +368,11 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 	return p, nil
 }
 
+type bridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
+}
+
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
@@ -364,6 +394,10 @@ type APIImpl struct {
 func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
+	}
+
+	if base.useBridgeReader {
+		logger.Info("starting rpc with polygon bridge")
 	}
 
 	return &APIImpl{
@@ -399,7 +433,7 @@ type RPCTransaction struct {
 	TransactionIndex    *hexutil.Uint64            `json:"transactionIndex"`
 	Value               *hexutil.Big               `json:"value"`
 	Type                hexutil.Uint64             `json:"type"`
-	Accesses            *types2.AccessList         `json:"accessList,omitempty"`
+	Accesses            *types.AccessList          `json:"accessList,omitempty"`
 	ChainID             *hexutil.Big               `json:"chainId,omitempty"`
 	MaxFeePerBlobGas    *hexutil.Big               `json:"maxFeePerBlobGas,omitempty"`
 	BlobVersionedHashes []common.Hash              `json:"blobVersionedHashes,omitempty"`

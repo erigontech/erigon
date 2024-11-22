@@ -1,18 +1,21 @@
-// Copyright 2020 The Erigon Authors
-// This file is part of the Erigon library.
+// Copyright 2017 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
 //
-// The go-ethereum library is free software: you can redistribute it and/or modify
+// Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// The go-ethereum library is distributed in the hope that it will be useful,
+// Erigon is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package stages
 
@@ -29,26 +32,20 @@ import (
 type SyncStage string
 
 var (
-	Snapshots           SyncStage = "Snapshots"       // Snapshots
-	Headers             SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	BorHeimdall         SyncStage = "BorHeimdall"     // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
-	PolygonSync         SyncStage = "PolygonSync"     // Use polygon sync component to sync headers, bodies and heimdall data
-	CumulativeIndex     SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
-	BlockHashes         SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
-	Bodies              SyncStage = "Bodies"          // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders             SyncStage = "Senders"         // "From" recovered from signatures, bodies re-written
-	Execution           SyncStage = "Execution"       // Executing each block w/o buildinf a trie
-	CustomTrace         SyncStage = "CustomTrace"     // Executing each block w/o buildinf a trie
-	Translation         SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
-	VerkleTrie          SyncStage = "VerkleTrie"
-	IntermediateHashes  SyncStage = "IntermediateHashes"  // Generate intermediate hashes, calculate the state root hash
-	HashState           SyncStage = "HashState"           // Apply Keccak256 to all the keys in the state
-	AccountHistoryIndex SyncStage = "AccountHistoryIndex" // Generating history index for accounts
-	StorageHistoryIndex SyncStage = "StorageHistoryIndex" // Generating history index for storage
-	LogIndex            SyncStage = "LogIndex"            // Generating logs index (from receipts)
-	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
-	TxLookup            SyncStage = "TxLookup"            // Generating transactions lookup index
-	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
+	Snapshots       SyncStage = "OtterSync"       // Snapshots
+	Headers         SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BorHeimdall     SyncStage = "BorHeimdall"     // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
+	PolygonSync     SyncStage = "PolygonSync"     // Use polygon sync component to sync headers, bodies and heimdall data
+	CumulativeIndex SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
+	BlockHashes     SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
+	Bodies          SyncStage = "Bodies"          // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders         SyncStage = "Senders"         // "From" recovered from signatures, bodies re-written
+	Execution       SyncStage = "Execution"       // Executing each block w/o building a trie
+	CustomTrace     SyncStage = "CustomTrace"     // Executing each block w/o building a trie
+	Translation     SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
+	VerkleTrie      SyncStage = "VerkleTrie"
+	TxLookup        SyncStage = "TxLookup" // Generating transactions lookup index
+	Finish          SyncStage = "Finish"   // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningBorHeimdall SyncStage = "MiningBorHeimdall"
@@ -73,12 +70,6 @@ var AllStages = []SyncStage{
 	Execution,
 	CustomTrace,
 	Translation,
-	HashState,
-	IntermediateHashes,
-	AccountHistoryIndex,
-	StorageHistoryIndex,
-	LogIndex,
-	CallTraces,
 	TxLookup,
 	Finish,
 }

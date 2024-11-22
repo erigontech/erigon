@@ -17,7 +17,6 @@
 package bor
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -174,7 +173,6 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
-		sprintLen := s.config.CalculateSprintLength(number)
 
 		if err := ValidateHeaderTime(header, time.Now(), parent, snap.ValidatorSet, s.config, s.sigcache); err != nil {
 			return snap, err
@@ -185,13 +183,13 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 			return nil, err
 		}
 
-		difficulty := snap.Difficulty(signer)
+		difficulty := snap.ValidatorSet.SafeDifficulty(signer)
 		if header.Difficulty.Uint64() != difficulty {
 			return snap, &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
 		}
 
 		// change validator set and change proposer
-		if number > 0 && (number+1)%sprintLen == 0 {
+		if number > 0 && s.config.IsSprintEnd(number) {
 			if err := ValidateHeaderExtraLength(header.Extra); err != nil {
 				return snap, err
 			}
@@ -224,18 +222,4 @@ func (s *Snapshot) signers() []common.Address {
 	}
 
 	return sigs
-}
-
-// Difficulty returns the difficulty for a particular signer at the current snapshot number
-func (s *Snapshot) Difficulty(signer common.Address) uint64 {
-	// if signer is empty
-	if bytes.Equal(signer.Bytes(), common.Address{}.Bytes()) {
-		return 1
-	}
-
-	if d, err := s.ValidatorSet.Difficulty(signer); err == nil {
-		return d
-	} else {
-		return 0
-	}
 }

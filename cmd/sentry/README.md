@@ -33,9 +33,3 @@ computer, or a different port (or both), the option `--sentry.api.addr` can be u
 The command above will expect the p2p sentry running on the same computer, but on the port `9091`
 
 Options `--nat`, `--port`, `--staticpeers`, `--netrestrict`, `--discovery` are also available.
-
-We are currently testing against two implementations of the p2p sentry - one internal to `Erigon`, and another - written
-in Rust as a part of `rust-ethereum`: https://github.com/rust-ethereum/sentry
-In order to run the internal sentry, use the following command:
-
-
