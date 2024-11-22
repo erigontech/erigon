@@ -195,9 +195,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 
-		integrity: integrityCheck,
-		compress:  seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
-		largeVals: true,
+		integrity:   integrityCheck,
+		compress:    seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		largeValues: true,
 
 		hist: histCfg{
 			valuesTable: kv.TblCodeHistoryVals,
@@ -409,7 +409,7 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 		d.compressCfg.Workers = i
 	}
 	for _, ii := range a.iis {
-		ii.compressCfg.Workers = i
+		ii.compressorCfg.Workers = i
 	}
 }
 
@@ -733,7 +733,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 				return err
 			}
 
-			switch ii.indexKeysTable {
+			switch ii.keysTable {
 			case kv.TblLogTopicsKeys:
 				static.ivfs[kv.LogTopicIdxPos] = sf
 			case kv.TblLogAddressKeys:
@@ -743,7 +743,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 			case kv.TblTracesToKeys:
 				static.ivfs[kv.TracesToIdxPos] = sf
 			default:
-				panic("unknown index " + ii.indexKeysTable)
+				panic("unknown index " + ii.keysTable)
 			}
 			return nil
 		})
