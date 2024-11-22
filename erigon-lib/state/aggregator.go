@@ -167,7 +167,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 
 			withLocalityIndex: false, historyLargeValues: false,
 
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx},
 		},
 	}
@@ -187,7 +187,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 
 			withLocalityIndex: false, historyLargeValues: false,
 
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx},
 		},
 	}
@@ -208,7 +208,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 
 			withLocalityIndex: false, historyLargeValues: true,
 
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx},
 		},
 	}
@@ -230,7 +230,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			snapshotsDisabled: true,
 			withLocalityIndex: false, historyLargeValues: false,
 
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx},
 		},
 	}
@@ -248,7 +248,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 
 			withLocalityIndex: false, historyLargeValues: false,
 
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false,
+			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx},
 		},
 	}
