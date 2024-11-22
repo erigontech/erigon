@@ -282,7 +282,8 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		addrCopy := addr
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		codeHash, err := evm.intraBlockState.ResolveCodeHash(addrCopy)
+		var codeHash libcommon.Hash
+		codeHash, err = evm.intraBlockState.ResolveCodeHash(addrCopy)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
