@@ -1219,6 +1219,27 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, coll Inver
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
+	// Design decision: `why Enum=true and LessFalsePositives=true`?
+	//
+	// On compared it with `Enum=false and LessFalsePositives=false` on ethmainnet (on small machine with cloud drives and `sync && sudo sysctl vm.drop_caches=3`):
+	//  - `du -hsc *.efi` changed from `24Gb` to `17Gb` (better)
+	//  - `vmtouch of .ef` changed from `152M/426G` to `787M/426G` (worse)
+	//  - `vmtouch of .ef` changed from `1G/23G` to `633M/16G` (better)
+	//  - speed on hot data - not changed. speed on cold data changed from `7min` to `10min`  (worse)
+	//  - but most important i see `.ef` files became "randomly warm":
+	// From:
+	//```sh
+	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
+	//[ ooooooooo ooooooo oooooooooooooooooo oooooooo  oo o o  ooo ] 93/81397
+	//```
+	// To:
+	//```sh
+	//vmtouch -v /mnt/erigon/snapshots/idx/v1-storage.1680-1682.ef
+	//[oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo] 16279/81397
+	//```
+	// It happens because: EVM does read much non-existing keys, like "create storage key if it doesn't exists". And
+	// each such non-existing key read `MPH` transforms to random
+	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 	cfg := recsplit.RecSplitArgs{
 		Enums:              true,
 		LessFalsePositives: true,
