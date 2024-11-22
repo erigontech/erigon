@@ -62,12 +62,15 @@ func NewScraper[TEntity Entity](
 }
 
 func (s *Scraper[TEntity]) Run(ctx context.Context) error {
-	s.logger.Info(heimdallLogPrefix(fmt.Sprintf("running %s scrapper component", s.name)))
+	s.logger.Info(heimdallLogPrefix("running scraper component"), "name", s.name)
 
 	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {
 		return err
 	}
+
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
 
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := s.store.LastEntityId(ctx)
@@ -121,8 +124,24 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 			}
 
 			s.observers.NotifySync(entities) // NotifySync preserves order of events
+
+			select {
+			case <-progressLogTicker.C:
+				if len(entities) > 0 {
+					s.logger.Info(
+						heimdallLogPrefix("scraper periodic progress"),
+						"name", s.name,
+						"last", entities[len(entities)-1].RawId(),
+						"rangeStart", idRange.Start,
+						"rangeEnd", idRange.End,
+					)
+				}
+			default:
+				// carry on
+			}
 		}
 	}
+
 	return ctx.Err()
 }
 
