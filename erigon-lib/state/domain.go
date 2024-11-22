@@ -154,8 +154,10 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 		cfg.hist.filenameBase = cfg.name.String()
 		cfg.hist.iiCfg.filenameBase = cfg.hist.filenameBase
 	}
+	ch := cfg.hist
+	cfg.hist = histCfg{}
 	fmt.Printf("inti D %s: %+v\n", cfg.name, cfg)
-	if d.History, err = NewHistory(cfg.hist, logger); err != nil {
+	if d.History, err = NewHistory(ch, logger); err != nil {
 		return nil, err
 	}
 
