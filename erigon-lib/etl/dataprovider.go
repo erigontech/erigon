@@ -33,6 +33,7 @@ type dataProvider interface {
 	Next(keyBuf, valBuf []byte) ([]byte, []byte, error)
 	Dispose()    // Safe for repeated call, doesn't return error - means defer-friendly
 	Wait() error // join point for async providers
+	String() string
 }
 
 type fileDataProvider struct {
@@ -126,9 +127,14 @@ func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
 func (p *fileDataProvider) Dispose() {
 	if p.file != nil { //invariant: safe to call multiple time
 		p.Wait()
-		_ = p.file.Close()
-		go func(fPath string) { _ = os.Remove(fPath) }(p.file.Name())
+		file := p.file
 		p.file = nil
+
+		filePath := file.Name()
+		go func() {
+			file.Close()
+			_ = os.Remove(filePath)
+		}()
 	}
 }
 
