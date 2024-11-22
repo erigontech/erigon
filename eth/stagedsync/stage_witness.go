@@ -73,7 +73,6 @@ func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, cf
 	trieStateWriter := tds.TrieStateWriter()
 
 	statedb := state.New(tds)
-	statedb.SetDisableBalanceInc(true)
 
 	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 
