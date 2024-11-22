@@ -39,7 +39,7 @@ func getBeaconStateCacheFilename(blockRoot libcommon.Hash) string {
 	return fmt.Sprintf("%x.cache", blockRoot)
 }
 
-func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *state.CachingBeaconState, err error) {
+func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *state.CachingBeaconState) (bs *state.CachingBeaconState, err error) {
 	var file afero.File
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
@@ -77,7 +77,11 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	f.sszBuffer = f.sszBuffer[:n]
-	bs = state.New(f.beaconCfg)
+	if out == nil {
+		bs = state.New(f.beaconCfg)
+	} else {
+		bs = out
+	}
 
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
