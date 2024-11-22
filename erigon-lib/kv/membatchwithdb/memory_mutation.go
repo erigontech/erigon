@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+var _ kv.TemporalTx = new(MemoryMutation) // compile-time interface-check
+
 type MemoryMutation struct {
 	memTx            kv.RwTx
 	memDb            kv.RwDB
@@ -736,7 +738,7 @@ func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc ord
 	//return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
-func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
+func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	panic("not supported")
 	//return m.db.(kv.TemporalTx).RangeAsOf(name, fromKey, toKey, ts, asc, limit)
 }
