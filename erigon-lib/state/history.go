@@ -105,10 +105,8 @@ type histCfg struct {
 }
 
 func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
-	if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-		cfg.compressorCfg = seg.DefaultCfg
-	}
-
+	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
+	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
 		cfg.indexList = withHashMap
 	}

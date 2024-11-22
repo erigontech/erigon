@@ -103,9 +103,8 @@ func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` varialbe")
 	}
-	if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
-		cfg.compressorCfg = seg.DefaultCfg
-	}
+	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
+	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
 		cfg.indexList = withHashMap
 	}
