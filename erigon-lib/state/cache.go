@@ -30,7 +30,7 @@ type domainGetFromFileCacheItem struct {
 }
 
 var (
-	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 1_000))
+	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 10_000))
 	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
 )
@@ -59,18 +59,7 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 		files:  files,
 		caches: &sync.Pool{New: NewDomainGetFromFileCacheAny},
 	}
-	// Not on hot-path: better pre-alloc here
-	d.preAlloc()
 	return d
-}
-func (v *domainVisible) preAlloc() {
-	var preAlloc [10]any
-	for i := 0; i < len(preAlloc); i++ {
-		preAlloc[i] = v.caches.Get()
-	}
-	for i := 0; i < len(preAlloc); i++ {
-		v.caches.Put(preAlloc[i])
-	}
 }
 
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
