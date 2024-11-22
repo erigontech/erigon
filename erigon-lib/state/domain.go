@@ -112,7 +112,7 @@ type domainCfg struct {
 	hist     histCfg
 	compress seg.FileCompression
 
-	idxList                     idxList
+	indexList                   idxList
 	largeVals                   bool
 	replaceKeysInValues         bool
 	restrictSubsetFileDeletions bool
@@ -138,8 +138,8 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-	if cfg.idxList == 0 {
-		cfg.idxList = withBTree | withExistence
+	if cfg.indexList == 0 {
+		cfg.indexList = withBTree | withExistence
 	}
 
 	d := &Domain{
@@ -151,7 +151,7 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable,
 
 		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 
-		indexList:                   cfg.idxList,
+		indexList:                   cfg.indexList,
 		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
 		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
 		largeVals:                   cfg.largeVals,
