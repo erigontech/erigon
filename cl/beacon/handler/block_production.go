@@ -112,6 +112,26 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 		time.Sleep(30 * time.Millisecond)
 	}
 }
+
+func (a *ApiHandler) waitForHeadSlot(slot uint64) {
+	stopCh := time.After(time.Second)
+	for {
+		if a.syncedData.HeadSlot() >= slot {
+			return
+		}
+		time.Sleep(1 * time.Millisecond)
+		select {
+		case <-stopCh:
+			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
+			return
+		default:
+		}
+		if a.slotWaitedForAttestationProduction.Contains(slot) {
+			return
+		}
+	}
+}
+
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -141,6 +161,11 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			errors.New("slot is required"),
 		)
 	}
+	if *slot > a.ethClock.GetCurrentSlot() {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
+	}
+
+	a.waitForHeadSlot(*slot)
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
 		return nil, beaconhttp.NewEndpointError(
@@ -162,6 +187,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			*slot,
 			*committeeIndex,
 		)
+
 		if err == attestation_producer.ErrHeadStateBehind {
 			return beaconhttp.NewEndpointError(
 				http.StatusServiceUnavailable,

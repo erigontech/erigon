@@ -2797,8 +2797,7 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
 func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool, logger log.Logger) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
-	dbCfg := mdbx.NewMDBX(log.New()).
-		Label(kv.DownloaderDB).
+	dbCfg := mdbx.New(kv.DownloaderDB, log.New()).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).

@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -36,7 +37,7 @@ import (
 )
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	reader := tests.LoadChain(blocks, postState, db, t)
 
 	ctx := context.Background()

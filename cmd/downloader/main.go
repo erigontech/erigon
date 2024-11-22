@@ -679,8 +679,8 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	if !exists {
 		return nil
 	}
-	db, err := mdbx.NewMDBX(log.New()).
-		Path(dirs.Chaindata).Label(kv.ChainDB).
+	db, err := mdbx.New(kv.ChainDB, log.New()).
+		Path(dirs.Chaindata).
 		Accede().
 		Open(ctx)
 	if err != nil {

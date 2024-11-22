@@ -19,7 +19,6 @@ package kv
 import (
 	"context"
 	"errors"
-	"fmt"
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -143,71 +142,21 @@ var (
 )
 
 type DBVerbosityLvl int8
-type Label uint8
+type Label string
 
 const (
-	Unknown Label = iota
-	ChainDB
-	TxPoolDB
-	SentryDB
-	ConsensusDB
-	DownloaderDB
-	HeimdallDB
-	DiagnosticsDB
-	PolygonBridgeDB
-	CaplinDB
+	Unknown         = "unknown"
+	ChainDB         = "chaindata"
+	TxPoolDB        = "txpool"
+	SentryDB        = "sentry"
+	ConsensusDB     = "consensus"
+	DownloaderDB    = "downloader"
+	HeimdallDB      = "heimdall"
+	DiagnosticsDB   = "diagnostics"
+	PolygonBridgeDB = "polygon-bridge"
+	CaplinDB        = "caplin"
+	TemporaryDB     = "temporary"
 )
-
-func (l Label) String() string {
-	switch l {
-	case ChainDB:
-		return "chaindata"
-	case TxPoolDB:
-		return "txpool"
-	case SentryDB:
-		return "sentry"
-	case ConsensusDB:
-		return "consensus"
-	case DownloaderDB:
-		return "downloader"
-	case HeimdallDB:
-		return "heimdall"
-	case DiagnosticsDB:
-		return "diagnostics"
-	case PolygonBridgeDB:
-		return "polygon-bridge"
-	case CaplinDB:
-		return "caplin"
-	default:
-		return "unknown"
-	}
-}
-func UnmarshalLabel(s string) Label {
-	switch s {
-	case "chaindata":
-		return ChainDB
-	case "txpool":
-		return TxPoolDB
-	case "sentry":
-		return SentryDB
-	case "consensus":
-		return ConsensusDB
-	case "downloader":
-		return DownloaderDB
-	case "heimdall":
-		return HeimdallDB
-	case "diagnostics":
-		return DiagnosticsDB
-	case "polygon-bridge":
-		return PolygonBridgeDB
-	case "caplin":
-		return CaplinDB
-	case "unknown":
-		return Unknown
-	default:
-		panic(fmt.Sprintf("unexpected label: %s", s))
-	}
-}
 
 type GetPut interface {
 	Getter
