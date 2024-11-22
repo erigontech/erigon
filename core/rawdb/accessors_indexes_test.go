@@ -21,7 +21,6 @@ package rawdb_test
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"math/big"
 	"testing"
 
@@ -30,6 +29,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
