@@ -1103,11 +1103,11 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 		}
 
 		reader := recsplit.NewIndexReader(idxTxnHash)
-		txnId, ok := reader.Lookup(txnHash[:])
+		txNumInFile, ok := reader.Lookup(txnHash[:])
 		if !ok {
 			continue
 		}
-		offset := idxTxnHash.OrdinalLookup(txnId)
+		offset := idxTxnHash.OrdinalLookup(txNumInFile)
 		gg := sn.Src().MakeGetter()
 		gg.Reset(offset)
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
@@ -1133,33 +1133,11 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
-			return txn, blockNum, idxTxnHash.BaseDataID() + txnId + 1, true, nil
+			return txn, blockNum, idxTxnHash.BaseDataID() + txNumInFile + 1, true, nil
 		}
 	}
 
 	return nil, 0, 0, false, nil
-}
-
-func (r *BlockReader) txnIDByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment) (txnId uint64, found bool) {
-	for i := len(segments) - 1; i >= 0; i-- {
-		sn := segments[i]
-
-		idxTxnHash := sn.Src().Index(coresnaptype.Indexes.TxnHash)
-		idxTxnHash2BlockNum := sn.Src().Index(coresnaptype.Indexes.TxnHash2BlockNum)
-
-		if idxTxnHash == nil || idxTxnHash2BlockNum == nil {
-			continue
-		}
-
-		reader := recsplit.NewIndexReader(idxTxnHash)
-		var ok bool
-		txnId, ok = reader.Lookup(txnHash[:])
-		if ok {
-			found = true
-			break
-		}
-	}
-	return txnId, found
 }
 
 // TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
@@ -1209,7 +1187,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash
-func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
+func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
 	blockNumPointer, txNumPointer, err := rawdb.ReadTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, 0, false, err
@@ -1222,7 +1200,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 
 	txns := r.sn.ViewType(coresnaptype.Transactions)
 	defer txns.Close()
-	_, blockNum, txNum, ok, err := r.txnByHash(txnHash, txns.Segments, nil)
+	_, blockNum, txNum, ok, err = r.txnByHash(txnHash, txns.Segments, nil)
 	if err != nil {
 		return 0, 0, false, err
 	}

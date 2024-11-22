@@ -97,6 +97,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", block.NumberU64(), index, err)
 	}
+
 	receipt.BlockHash = block.Hash()
 	cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, txNum)
 	if err != nil {
@@ -106,6 +107,14 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	receipt.CumulativeGasUsed = cumGasUsed
 	receipt.TransactionIndex = uint(index)
+
+	for i := range 20 {
+		cumGasUsed1, _, firstLogIndex1, err := rawtemporaldb.ReceiptAsOf(tx, txNum+uint64(i)-10)
+		if err != nil {
+			return nil, err
+		}
+		println("cum gas used", cumGasUsed1, "first log index", firstLogIndex1, "txNum", txNum+uint64(i)-10)
+	}
 
 	for i := range receipt.Logs {
 		receipt.Logs[i].TxIndex = uint(index)

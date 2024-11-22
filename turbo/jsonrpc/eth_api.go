@@ -193,7 +193,7 @@ func (api *BaseAPI) genesis(ctx context.Context, tx kv.Tx) (*types.Block, error)
 	return genesis, err
 }
 
-func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, uint64, bool, error) {
+func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
 	return api._txnReader.TxnLookup(ctx, tx, txnHash)
 }
 

@@ -21,8 +21,6 @@ package rawdb
 
 import (
 	"encoding/binary"
-	"math/big"
-
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -48,11 +46,11 @@ func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, *uint64, 
 	if len(data) == 0 {
 		return nil, nil, nil
 	}
-	numberBlockNum := new(big.Int).SetBytes(data[:min(8, len(data))]).Uint64()
+	numberBlockNum := binary.BigEndian.Uint64(data[:min(8, len(data))])
 
 	var numberTxNum uint64
 	if len(data) >= 8 {
-		numberTxNum = new(big.Int).SetBytes(data[8:]).Uint64()
+		numberTxNum = binary.BigEndian.Uint64(data[8:])
 		numberTxNum += 2
 	} else {
 		return &numberBlockNum, nil, nil
@@ -64,14 +62,13 @@ func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, *uint64, 
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
 func WriteTxLookupEntries(db kv.Putter, block *types.Block, txNum uint64) {
-	for _, txn := range block.Transactions() {
-		data := make([]byte, 16)
+	data := make([]byte, 16)
+	for i, txn := range block.Transactions() {
 		binary.BigEndian.PutUint64(data[:8], block.NumberU64())
-		binary.BigEndian.PutUint64(data[8:], txNum)
+		binary.BigEndian.PutUint64(data[8:], txNum+uint64(i)+1)
 		if err := db.Put(kv.TxLookup, txn.Hash().Bytes(), data); err != nil {
 			log.Crit("Failed to store transaction lookup entry", "err", err)
 		}
-		txNum++
 	}
 }
 
