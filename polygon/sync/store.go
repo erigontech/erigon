@@ -236,13 +236,9 @@ func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 		}
 		if header == nil {
 			// this should never happen, check snapshot files and/or db data integrity
-			//return fmt.Errorf("unexpected block header missing when replying blocks for bridge: %d", blockNum)
-
-			//
-			// TODO switch back to error
-			//
-			s.logger.Error("unexpected block header missing when replying blocks for bridge", "blockNum", blockNum)
-			continue
+			return fmt.Errorf("unexpected block header missing when replying blocks for bridge, "+
+				"check snapshot files and/or db data integrity, "+
+				"rm -rf datadir/chaindata can fix this: %d", blockNum)
 		}
 
 		select {
