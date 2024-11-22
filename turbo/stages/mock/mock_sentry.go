@@ -346,11 +346,11 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		cancunTime := mock.ChainConfig.CancunTime
 		pragueTime := mock.ChainConfig.PragueTime
 		maxBlobsPerBlock := mock.ChainConfig.GetMaxBlobsPerBlock()
+		mock.txPoolDB = memdb.NewWithLabel(tmpdir, kv.TxPoolDB)
 		mock.TxPool, err = txpool.New(newTxs, mock.txPoolDB, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime, nil /* agraBlock */, cancunTime, pragueTime, maxBlobsPerBlock, nil, logger)
 		if err != nil {
 			tb.Fatal(err)
 		}
-		mock.txPoolDB = memdb.NewWithLabel(tmpdir, kv.TxPoolDB)
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
