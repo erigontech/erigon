@@ -38,11 +38,11 @@ import (
 )
 
 const (
-	LegacyTxType     byte = 0
-	AccessListTxType byte = 1 // EIP-2930
-	DynamicFeeTxType byte = 2 // EIP-1559
-	BlobTxType       byte = 3 // EIP-4844
-	SetCodeTxType    byte = 4 // EIP-7702
+	LegacyTxnType     byte = 0
+	AccessListTxnType byte = 1 // EIP-2930
+	DynamicFeeTxnType byte = 2 // EIP-1559
+	BlobTxnType       byte = 3 // EIP-4844
+	SetCodeTxnType    byte = 4 // EIP-7702
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -110,10 +110,10 @@ func (ctx *TxnParseContext) ChainIDRequired() *TxnParseContext {
 func PeekTransactionType(serialized []byte) (byte, error) {
 	dataPos, _, legacy, err := rlp.Prefix(serialized, 0)
 	if err != nil {
-		return LegacyTxType, fmt.Errorf("%w: size Prefix: %s", ErrParseTxn, err) //nolint
+		return LegacyTxnType, fmt.Errorf("%w: size Prefix: %s", ErrParseTxn, err) //nolint
 	}
 	if legacy {
-		return LegacyTxType, nil
+		return LegacyTxnType, nil
 	}
 	return serialized[dataPos], nil
 }
@@ -153,12 +153,12 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// If it is non-legacy transaction, the transaction type follows, and then the list
 	if !legacy {
 		slot.Type = payload[p]
-		if slot.Type > SetCodeTxType {
+		if slot.Type > SetCodeTxnType {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
 		if p >= len(payload) {
-			return 0, fmt.Errorf("%w: unexpected end of payload after txType", ErrParseTxn)
+			return 0, fmt.Errorf("%w: unexpected end of payload after txnType", ErrParseTxn)
 		}
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
@@ -168,7 +168,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		// whereas for non-legacy, only the content of the envelope (start with position p)
 		slot.Rlp = payload[p-1 : dataPos+dataLen]
 
-		if slot.Type == BlobTxType && wrappedWithBlobs {
+		if slot.Type == BlobTxnType && wrappedWithBlobs {
 			p = dataPos
 			wrapperDataPos = dataPos
 			wrapperDataLen = dataLen
@@ -178,7 +178,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			}
 		}
 	} else {
-		slot.Type = LegacyTxType
+		slot.Type = LegacyTxnType
 		slot.Rlp = payload[pos : dataPos+dataLen]
 	}
 
@@ -187,7 +187,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		return p, err
 	}
 
-	if slot.Type == BlobTxType && wrappedWithBlobs {
+	if slot.Type == BlobTxnType && wrappedWithBlobs {
 		if p != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: unexpected leftover after blob txn body", ErrParseTxn)
 		}
@@ -310,7 +310,7 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 
 func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, slot *TxnSlot, sender []byte, validateHash func([]byte) error) (p int, err error) {
 	p = p0
-	legacy := slot.Type == LegacyTxType
+	legacy := slot.Type == LegacyTxnType
 
 	// Compute transaction hash
 	ctx.Keccak1.Reset()
@@ -369,7 +369,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	}
 	// Next follows feeCap, but only for dynamic fee transactions, for legacy transaction, it is
 	// equal to tip
-	if slot.Type < DynamicFeeTxType {
+	if slot.Type < DynamicFeeTxnType {
 		slot.FeeCap = slot.Tip
 	} else {
 		p, err = rlp.U256(payload, p, &slot.FeeCap)
@@ -462,7 +462,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		}
 		p = dataPos + dataLen
 	}
-	if slot.Type == SetCodeTxType {
+	if slot.Type == SetCodeTxnType {
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
@@ -508,7 +508,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		}
 		p = dataPos + dataLen
 	}
-	if slot.Type == BlobTxType {
+	if slot.Type == BlobTxnType {
 		p, err = rlp.U256(payload, p, &slot.BlobFeeCap)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blob fee cap: %s", ErrParseTxn, err) //nolint
@@ -694,17 +694,17 @@ func (tx *TxnSlot) PrintDebug(prefix string) {
 }
 
 type TxnSlots struct {
-	Txs     []*TxnSlot
+	Txns    []*TxnSlot
 	Senders Addresses
 	IsLocal []bool
 }
 
 func (s *TxnSlots) Valid() error {
-	if len(s.Txs) != len(s.IsLocal) {
-		return fmt.Errorf("TxnSlots: expect equal len of isLocal=%d and txs=%d", len(s.IsLocal), len(s.Txs))
+	if len(s.Txns) != len(s.IsLocal) {
+		return fmt.Errorf("TxnSlots: expect equal len of isLocal=%d and txns=%d", len(s.IsLocal), len(s.Txns))
 	}
-	if len(s.Txs) != s.Senders.Len() {
-		return fmt.Errorf("TxnSlots: expect equal len of senders=%d and txs=%d", s.Senders.Len(), len(s.Txs))
+	if len(s.Txns) != s.Senders.Len() {
+		return fmt.Errorf("TxnSlots: expect equal len of senders=%d and txns=%d", s.Senders.Len(), len(s.Txns))
 	}
 	return nil
 }
@@ -713,8 +713,8 @@ var zeroAddr = make([]byte, 20)
 
 // Resize internal arrays to len=targetSize, shrinks if need. It rely on `append` algorithm to realloc
 func (s *TxnSlots) Resize(targetSize uint) {
-	for uint(len(s.Txs)) < targetSize {
-		s.Txs = append(s.Txs, nil)
+	for uint(len(s.Txns)) < targetSize {
+		s.Txns = append(s.Txns, nil)
 	}
 	for uint(s.Senders.Len()) < targetSize {
 		s.Senders = append(s.Senders, addressesGrowth...)
@@ -722,11 +722,11 @@ func (s *TxnSlots) Resize(targetSize uint) {
 	for uint(len(s.IsLocal)) < targetSize {
 		s.IsLocal = append(s.IsLocal, false)
 	}
-	//todo: set nil to overflow txs
-	oldLen := uint(len(s.Txs))
-	s.Txs = s.Txs[:targetSize]
+	//todo: set nil to overflow txns
+	oldLen := uint(len(s.Txns))
+	s.Txns = s.Txns[:targetSize]
 	for i := oldLen; i < targetSize; i++ {
-		s.Txs[i] = nil
+		s.Txns[i] = nil
 	}
 	s.Senders = s.Senders[:length.Addr*targetSize]
 	for i := oldLen; i < targetSize; i++ {
@@ -739,9 +739,9 @@ func (s *TxnSlots) Resize(targetSize uint) {
 }
 
 func (s *TxnSlots) Append(slot *TxnSlot, sender []byte, isLocal bool) {
-	n := len(s.Txs)
-	s.Resize(uint(len(s.Txs) + 1))
-	s.Txs[n] = slot
+	n := len(s.Txns)
+	s.Resize(uint(len(s.Txns) + 1))
+	s.Txns[n] = slot
 	s.IsLocal[n] = isLocal
 	copy(s.Senders.At(n), sender)
 }
@@ -779,7 +779,7 @@ func (r *TxnsRlp) Resize(targetSize uint) {
 	for uint(len(r.IsLocal)) < targetSize {
 		r.IsLocal = append(r.IsLocal, false)
 	}
-	//todo: set nil to overflow txs
+	//todo: set nil to overflow txns
 	r.Txns = r.Txns[:targetSize]
 	r.Senders = r.Senders[:length.Addr*targetSize]
 	r.IsLocal = r.IsLocal[:targetSize]

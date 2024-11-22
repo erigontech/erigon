@@ -497,7 +497,7 @@ func main() {
 func openDB(ctx context.Context, path string, logger log.Logger, accede bool) (kv.RwDB, error) {
 	var db kv.RwDB
 	var err error
-	opts := mdbx.NewMDBX(logger).Path(path)
+	opts := mdbx.New(kv.ChainDB, logger).Path(path)
 	if accede {
 		opts = opts.Accede()
 	}

@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
-// BorDefaultTxPoolPriceLimit defines the minimum gas price limit for bor to enforce txs acceptance into the pool.
+// BorDefaultTxPoolPriceLimit defines the minimum gas price limit for bor to enforce txns acceptance into the pool.
 const BorDefaultTxPoolPriceLimit = 25 * common.GWei
 
 type Config struct {
@@ -41,17 +41,17 @@ type Config struct {
 	QueuedSubPoolLimit  int
 	MinFeeCap           uint64
 	AccountSlots        uint64 // Number of executable transaction slots guaranteed per account
-	BlobSlots           uint64 // Total number of blobs (not txs) allowed per account
-	TotalBlobPoolLimit  uint64 // Total number of blobs (not txs) allowed within the txpool
+	BlobSlots           uint64 // Total number of blobs (not txns) allowed per account
+	TotalBlobPoolLimit  uint64 // Total number of blobs (not txns) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
 	BlobPriceBump       uint64 //Price bump percentage to replace an existing 4844 blob txn (type-3)
 	OverridePragueTime  *big.Int
 
 	// regular batch tasks processing
-	SyncToNewPeersEvery   time.Duration
-	ProcessRemoteTxsEvery time.Duration
-	CommitEvery           time.Duration
-	LogEvery              time.Duration
+	SyncToNewPeersEvery    time.Duration
+	ProcessRemoteTxnsEvery time.Duration
+	CommitEvery            time.Duration
+	LogEvery               time.Duration
 
 	//txpool db
 	MdbxPageSize    datasize.ByteSize
@@ -59,14 +59,14 @@ type Config struct {
 	MdbxGrowthStep  datasize.ByteSize
 	MdbxWriteMap    bool
 
-	NoGossip bool // this mode doesn't broadcast any txs, and if receive remote-txn - skip it
+	NoGossip bool // this mode doesn't broadcast any txns, and if receive remote-txn - skip it
 }
 
 var DefaultConfig = Config{
-	SyncToNewPeersEvery:   5 * time.Second,
-	ProcessRemoteTxsEvery: 100 * time.Millisecond,
-	CommitEvery:           15 * time.Second,
-	LogEvery:              30 * time.Second,
+	SyncToNewPeersEvery:    5 * time.Second,
+	ProcessRemoteTxnsEvery: 100 * time.Millisecond,
+	CommitEvery:            15 * time.Second,
+	LogEvery:               30 * time.Second,
 
 	PendingSubPoolLimit: 10_000,
 	BaseFeeSubPoolLimit: 10_000,
@@ -74,7 +74,7 @@ var DefaultConfig = Config{
 
 	MinFeeCap:          1,
 	AccountSlots:       16,  //TODO: to choose right value (16 to be compatible with Geth)
-	BlobSlots:          48,  // Default for a total of 8 txs for 6 blobs each - for hive tests
+	BlobSlots:          48,  // Default for a total of 8 txns for 6 blobs each - for hive tests
 	TotalBlobPoolLimit: 480, // Default for a total of 10 different accounts hitting the above limit
 	PriceBump:          10,  // Price bump percentage to replace an already existing transaction
 	BlobPriceBump:      100,
@@ -117,7 +117,7 @@ const (
 	BlobHashCheckFail   DiscardReason = 28 // KZGcommitment's versioned hash has to be equal to blob_versioned_hash at the same index
 	UnmatchedBlobTxExt  DiscardReason = 29 // KZGcommitments must match the corresponding blobs and proofs
 	BlobTxReplace       DiscardReason = 30 // Cannot replace type-3 blob txn with another type of txn
-	BlobPoolOverflow    DiscardReason = 31 // The total number of blobs (through blob txs) in the pool has reached its limit
+	BlobPoolOverflow    DiscardReason = 31 // The total number of blobs (through blob txns) in the pool has reached its limit
 	NoAuthorizations    DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
 )
 

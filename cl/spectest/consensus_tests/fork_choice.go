@@ -23,6 +23,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/spectest"
 
 	"github.com/spf13/afero"
@@ -204,13 +205,13 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	emitters := beaconevents.NewEventEmitter()
 	_, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp"), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp", kv.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 
 	validatorMonitor := monitor.NewValidatorMonitor(false, nil, nil, nil)
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
-		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0), blobStorage, validatorMonitor, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
+		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, validatorMonitor, public_keys_registry.NewInMemoryPublicKeysRegistry(), false)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 

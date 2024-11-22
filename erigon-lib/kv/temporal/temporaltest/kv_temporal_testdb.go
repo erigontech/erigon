@@ -36,9 +36,9 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (db kv.RwDB, agg *state.Aggrega
 	}
 
 	if tb != nil {
-		db = memdb.NewTestDB(tb)
+		db = memdb.NewTestDB(tb, kv.ChainDB)
 	} else {
-		db = memdb.New(dirs.DataDir)
+		db = memdb.New(dirs.DataDir, kv.ChainDB)
 	}
 
 	var err error
