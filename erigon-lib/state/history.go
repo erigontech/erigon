@@ -105,8 +105,9 @@ type histCfg struct {
 }
 
 func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
-	cfg.compressorCfg = seg.DefaultCfg
-	cfg.compressorCfg.Workers = 1
+	if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
+		cfg.compressorCfg = seg.DefaultCfg
+	}
 
 	if cfg.indexList == 0 {
 		cfg.indexList = withHashMap
@@ -114,10 +115,6 @@ func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	if cfg.iiCfg.filenameBase == "" {
 		cfg.iiCfg.filenameBase = cfg.filenameBase
 	}
-	if cfg.filenameBase == "" {
-		panic("empty fnb")
-	}
-	fmt.Printf("init history %s: %+v\n", cfg.filenameBase, cfg)
 
 	h := History{
 		histCfg:       cfg,
