@@ -40,7 +40,7 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	path := t.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := New(kv.ChainDB, logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
@@ -55,7 +55,7 @@ func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 	path := b.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := New(kv.ChainDB, logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
@@ -683,21 +683,21 @@ func TestDupDelete(t *testing.T) {
 }
 
 func TestBeginRoAfterClose(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRo(context.Background())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRwAfterClose(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRw(context.Background())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRoWithDoneContext(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -706,7 +706,7 @@ func TestBeginRoWithDoneContext(t *testing.T) {
 }
 
 func TestBeginRwWithDoneContext(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -721,7 +721,7 @@ func testCloseWaitsAfterTxBegin(
 	txEndFunc func(kv.Getter) error,
 ) {
 	t.Helper()
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	var txs []kv.Getter
 	for i := 0; i < count; i++ {
 		tx, err := txBeginFunc(db)

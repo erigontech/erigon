@@ -56,7 +56,7 @@ func (t *blsToExecutionChangeTestSuite) SetupTest() {
 		BLSToExecutionChangesPool: pool.NewOperationPool[common.Bytes96, *cltypes.SignedBLSToExecutionChange](10, "blsToExecutionChangesPool"),
 	}
 	_, st, _ := tests.GetCapellaRandom()
-	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0)
+	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	t.syncedData.OnHeadState(st)
 	t.emitters = beaconevents.NewEventEmitter()
 	t.beaconCfg = &clparams.BeaconChainConfig{}

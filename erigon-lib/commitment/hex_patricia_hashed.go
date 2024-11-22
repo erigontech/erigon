@@ -1930,36 +1930,38 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
+	if dbg.KVReadLevelledMetrics {
+		log.Debug("commitment finished, counters updated (no reset)",
+			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
+			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
+			"skip ratio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
+			"reset ratio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
+			"keys", common.PrettyCounter(ki), "spent", time.Since(start),
+		)
+		ends := make([]uint64, 0, len(hph.hadToLoadL))
+		for k := range hph.hadToLoadL {
+			ends = append(ends, k)
+		}
+		sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+		var Li int
+		for _, k := range ends {
+			v := hph.hadToLoadL[k]
+			accs := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.accLoaded), common.PrettyCounter(v.accSkipped), 100*(float64(v.accSkipped)/float64(v.accLoaded+v.accSkipped)), 100*(float64(v.accReset)/float64(v.accReset+v.accSkipped)))
+			stors := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.storLoaded), common.PrettyCounter(v.storSkipped), 100*(float64(v.storSkipped)/float64(v.storLoaded+v.storSkipped)), 100*(float64(v.storReset)/float64(v.storReset+v.storSkipped)))
+			if k == 0 {
+				log.Debug("branchData memoization, new branches", "endStep", k, "accounts", accs, "storages", stors)
+			} else {
+				log.Debug("branchData memoization", "L", Li, "endStep", k, "accounts", accs, "storages", stors)
+				Li++
 
-	log.Debug("commitment finished, counters updated (no reset)",
-		//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
-		//"hadToReset", common.PrettyCounter(hadToReset.Load()),
-		"skip ratio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
-		"reset ratio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
-		"keys", common.PrettyCounter(ki), "spent", time.Since(start),
-	)
-	ends := make([]uint64, 0, len(hph.hadToLoadL))
-	for k := range hph.hadToLoadL {
-		ends = append(ends, k)
-	}
-	sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
-	var Li int
-	for _, k := range ends {
-		v := hph.hadToLoadL[k]
-		accs := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.accLoaded), common.PrettyCounter(v.accSkipped), 100*(float64(v.accSkipped)/float64(v.accLoaded+v.accSkipped)), 100*(float64(v.accReset)/float64(v.accReset+v.accSkipped)))
-		stors := fmt.Sprintf("load=%s skip=%s (%.1f%%) reset %.1f%%", common.PrettyCounter(v.storLoaded), common.PrettyCounter(v.storSkipped), 100*(float64(v.storSkipped)/float64(v.storLoaded+v.storSkipped)), 100*(float64(v.storReset)/float64(v.storReset+v.storSkipped)))
-		if k == 0 {
-			log.Debug("branchData memoization, new branches", "endStep", k, "accounts", accs, "storages", stors)
-		} else {
-			log.Debug("branchData memoization", "L", Li, "endStep", k, "accounts", accs, "storages", stors)
-			Li++
-
-			mxTrieStateLevelledSkipRatesAccount[min(Li, 5)].Add(float64(v.accSkipped))
-			mxTrieStateLevelledSkipRatesStorage[min(Li, 5)].Add(float64(v.storSkipped))
-			mxTrieStateLevelledLoadRatesAccount[min(Li, 5)].Add(float64(v.accLoaded))
-			mxTrieStateLevelledLoadRatesStorage[min(Li, 5)].Add(float64(v.storLoaded))
+				mxTrieStateLevelledSkipRatesAccount[min(Li, 5)].Add(float64(v.accSkipped))
+				mxTrieStateLevelledSkipRatesStorage[min(Li, 5)].Add(float64(v.storSkipped))
+				mxTrieStateLevelledLoadRatesAccount[min(Li, 5)].Add(float64(v.accLoaded))
+				mxTrieStateLevelledLoadRatesStorage[min(Li, 5)].Add(float64(v.storLoaded))
+			}
 		}
 	}
+
 	return rootHash, nil
 }
 

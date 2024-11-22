@@ -101,8 +101,14 @@ func OpenCaplinDatabase(ctx context.Context,
 	os.MkdirAll(dbPath, 0700)
 	os.MkdirAll(dataDirIndexer, 0700)
 
-	db := mdbx.MustOpen(dataDirIndexer)
-	blobDB := mdbx.MustOpen(blobDbPath)
+	db := mdbx.New(kv.CaplinDB, log.New()).Path(dbPath).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
+			return kv.ChaindataTablesCfg
+		}).MustOpen()
+	blobDB := mdbx.New(kv.CaplinDB, log.New()).Path(blobDbPath).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			return kv.ChaindataTablesCfg
+		}).MustOpen()
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -255,7 +261,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
-	syncedDataManager := synced_data.NewSyncedDataManager(beaconConfig, true, synced_data.MinHeadStateDelay)
+	syncedDataManager := synced_data.NewSyncedDataManager(beaconConfig, true)
 
 	syncContributionPool := sync_contribution_pool.NewSyncContributionPool(beaconConfig)
 	emitters := beaconevents.NewEventEmitter()

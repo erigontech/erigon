@@ -51,8 +51,8 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 			return
 		}
 	}
-	resultsKV := mdbx.NewMDBX(logger).Path(tmpDataDir).MustOpen()
-	gethKV := mdbx.NewMDBX(logger).Path(gethDataDir).MustOpen()
+	resultsKV := mdbx.New(kv.ChainDB, logger).Path(tmpDataDir).MustOpen()
+	gethKV := mdbx.New(kv.ChainDB, logger).Path(gethDataDir).MustOpen()
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,

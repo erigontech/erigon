@@ -562,6 +562,7 @@ func init() {
 	withHeimdall(cmdStageExec)
 	withWorkers(cmdStageExec)
 	withChaosMonkey(cmdStageExec)
+	withChainTipMode(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withConfig(cmdStageCustomTrace)
@@ -787,9 +788,8 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, unwindTypes []string, log
 
 	heimdallClient := engine.(*bor.Bor).HeimdallClient
 
-	var tx kv.RwTx
 	if reset {
-		if err := reset2.ResetBorHeimdall(ctx, tx, db); err != nil {
+		if err := reset2.ResetBorHeimdall(ctx, nil, db); err != nil {
 			return err
 		}
 		return nil
@@ -800,7 +800,7 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, unwindTypes []string, log
 		defer borSn.Close()
 		defer agg.Close()
 
-		stageState := stage(sync, tx, nil, stages.BorHeimdall)
+		stageState := stage(sync, nil, db, stages.BorHeimdall)
 
 		snapshotsMaxBlock := borSn.BlocksAvailable()
 		if unwind <= snapshotsMaxBlock {
@@ -813,11 +813,11 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, unwindTypes []string, log
 
 		unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber, true, false)
 		cfg := stagedsync.StageBorHeimdallCfg(db, nil, miningState, *chainConfig, nil, heimdallStore, bridgeStore, nil, nil, nil, nil, nil, false, unwindTypes)
-		if err := stagedsync.BorHeimdallUnwind(unwindState, ctx, stageState, tx, cfg); err != nil {
+		if err := stagedsync.BorHeimdallUnwind(unwindState, ctx, stageState, nil, cfg); err != nil {
 			return err
 		}
 
-		stageProgress, err := stagedsync.BorHeimdallStageProgress(tx, cfg)
+		stageProgress, err := stagedsync.BorHeimdallStageProgress(nil, cfg)
 		if err != nil {
 			return fmt.Errorf("re-read bor heimdall progress: %w", err)
 		}
@@ -843,12 +843,12 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, unwindTypes []string, log
 	}
 	cfg := stagedsync.StageBorHeimdallCfg(db, snapDb, miningState, *chainConfig, heimdallClient, heimdallStore, bridgeStore, blockReader, nil, nil, recents, signatures, false, unwindTypes)
 
-	stageState := stage(sync, tx, nil, stages.BorHeimdall)
-	if err := stagedsync.BorHeimdallForward(stageState, sync, ctx, tx, cfg, logger); err != nil {
+	stageState := stage(sync, nil, db, stages.BorHeimdall)
+	if err := stagedsync.BorHeimdallForward(stageState, sync, ctx, nil, cfg, logger); err != nil {
 		return err
 	}
 
-	stageProgress, err := stagedsync.BorHeimdallStageProgress(tx, cfg)
+	stageProgress, err := stagedsync.BorHeimdallStageProgress(nil, cfg)
 	if err != nil {
 		return fmt.Errorf("re-read bor heimdall progress: %w", err)
 	}
@@ -1058,15 +1058,18 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	syncCfg := ethconfig.Defaults.Sync
-	syncCfg.ExecWorkerCount = int(workers)
-	syncCfg.ReconWorkerCount = int(reconWorkers)
+	if chainTipMode {
+		s.CurrentSyncCycle.IsFirstCycle = false
+		s.CurrentSyncCycle.IsInitialCycle = false
+	}
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, nil,
+
+	notifications := shards.NewNotifications(nil)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true /*alwaysGenerateChangesets=*/, false, chaosMonkey,
+		/*badBlockHalt=*/ true,
 		dirs, br, nil, genesis, syncCfg, nil)
 
 	if unwind > 0 {
@@ -1114,8 +1117,48 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger)
-	if err != nil {
+	if chainTipMode {
+		var sendersProgress, execProgress uint64
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+				return err
+			}
+			if execProgress == 0 {
+				doms, err := libstate.NewSharedDomains(tx, log.New())
+				if err != nil {
+					panic(err)
+				}
+				execProgress = doms.BlockNum()
+				doms.Close()
+			}
+
+			if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		if block == 0 {
+			block = sendersProgress
+		}
+
+		for bn := execProgress; bn < block; bn++ {
+			if err := db.Update(ctx, func(tx kv.RwTx) error {
+				txc.Tx = tx
+				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, logger); err != nil {
 		return err
 	}
 
@@ -1155,9 +1198,6 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
-	syncCfg := ethconfig.Defaults.Sync
-	syncCfg.ExecWorkerCount = int(workers)
-	syncCfg.ReconWorkerCount = int(reconWorkers)
 
 	genesis := core.GenesisBlockByChainName(chain)
 	br, _ := blocksIO(db, logger)
@@ -1395,6 +1435,13 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	cfg := ethconfig.Defaults
+	if chainTipMode {
+		syncCfg.LoopBlockLimit = 1
+		syncCfg.AlwaysGenerateChangesets = true
+		noCommit = false
+	}
+	cfg.Sync = syncCfg
+
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
 	cfg.DeprecatedTxPool.Disable = true
@@ -1457,9 +1504,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), borSn, chainConfig.Bor)
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), borSn)
 	}
-	stages := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, nil,
+	stageList := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, nil,
 		heimdallClient, heimdallStore, bridgeStore, recents, signatures, logger)
-	sync := stagedsync.New(cfg.Sync, stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
+	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)
 	miningCancel := make(chan struct{})
@@ -1483,8 +1530,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 				notifications,
 				cfg.StateStream,
 				/*stateStream=*/ false,
-				/*alwaysGenerateChangesets=*/ false,
-				chaosMonkey,
 				dirs,
 				blockReader,
 				sentryControlServer.Hd,
@@ -1499,6 +1544,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
 		logger,
+		stages.ModeBlockProduction,
 	)
 
 	return engine, vmConfig, sync, miningSync, miner
