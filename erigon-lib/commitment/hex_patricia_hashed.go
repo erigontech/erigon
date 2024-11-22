@@ -727,6 +727,9 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int) int {
 }
 
 func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte) ([]byte, bool, []byte, error) {
+	if bytes.Equal(cell.storageAddr[:], common.FromHex("0x000f3df6d732807ef1319fb7b8bb8522d0beac020000000000000000000000000000000000000000000000000000000000000049")) {
+		fmt.Printf("HERE\n")
+	}
 	var err error
 	var storageRootHash [length.Hash]byte
 	var storageRootHashIsSet bool
@@ -755,7 +758,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
-				return nil, storageRootHashIsSet, nil, err
+				return res, storageRootHashIsSet, nil, err
 			} else {
 				storageRootHashIsSet = true
 				storageRootHash = *(*[length.Hash]byte)(res[1:])
@@ -828,6 +831,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				hadToReset.Add(1)
 			} else if cell.hashLen > 0 {
 				storageRootHash = cell.hash
+				storageRootHashIsSet = true
 			} else {
 				storageRootHash = *(*[length.Hash]byte)(EmptyRootHash)
 			}
@@ -1101,6 +1105,8 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 					if !bytes.Equal(subTrieRoot, cellHash[1:]) {
 						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 					}
+					// // DEBUG
+					// nextNode = trie.NewHashNode(cellHash[1:])
 				}
 			}
 			// // for debugging only
@@ -1149,11 +1155,6 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 				fullNode.Children[col] = trie.NewHashNode(cellHash[1:]) // because cellHash has 33 bytes and we want 32
 			}
 			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
-			// if row == 1 {
-			// 	fullNodeSubTrie := trie.NewInMemoryTrie(fullNode)
-			// 	subTrieRoot := fullNodeSubTrie.Root()
-			// 	fmt.Printf("subTrieRoot = %x\n", subTrieRoot)
-			// }
 		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
 			if len(hashedKey) <= 64 { // no storage, stop here
 				nextNode = nil
@@ -1770,8 +1771,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			fmt.Printf("storage FOUND = %v\n", storage.Storage)
 		}
 
-		hph.SetTrace(true)
-
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
 			if err := hph.fold(); err != nil {
@@ -1795,7 +1794,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 		if !bytes.Equal(computedRootHash, expectedRootHash) {
 			err = fmt.Errorf("ROOT HASH MISMATCH computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
-			log.Error(err.Error())
+			return err
 		}
 
 		tries = append(tries, tr)

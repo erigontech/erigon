@@ -505,6 +505,13 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
+	latestBlockHeader, err := api._blockReader.HeaderByNumber(ctx, roTx, latestBlock)
+	if err != nil {
+		return nil, err
+	}
+	latestBlockRoot := latestBlockHeader.Root
+	fmt.Printf("latestBlockRoot = %x\n", latestBlockRoot)
+
 	if latestBlock < blockNr {
 		// shouldn't happen, but check anyway
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
@@ -624,13 +631,13 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	codeReads := store.Tds.BuildCodeTouches()
 
 	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
-	// for _, key := range touchedPlainKeys {
-	// 	updates.TouchPlainKey(key, nil, updates.TouchAccount)
-	// }
+	for _, key := range touchedPlainKeys {
+		updates.TouchPlainKey(key, nil, updates.TouchAccount)
+	}
 
-	_ = touchedPlainKeys
-	extraPlainKey := libcommon.FromHex("00a3ca265ebcb825b45f985a16cefb49958ce017")
-	updates.TouchPlainKey(extraPlainKey, nil, updates.TouchAccount)
+	// _ = touchedPlainKeys
+	// extraPlainKey := libcommon.FromHex("00a3ca265ebcb825b45f985a16cefb49958ce017")
+	// updates.TouchPlainKey(extraPlainKey, nil, updates.TouchAccount)
 
 	hph.SetTrace(false) // disable tracing
 	witnessTrie, rootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
