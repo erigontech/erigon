@@ -974,7 +974,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, st
 	return v, step, nil
 }
 
-// GetAsOfFile returns value from domain with respect to limit ofMaxTxnum
+// getAsOfFile returns value from domain with respect to limit ofMaxTxnum
 func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
@@ -983,7 +983,7 @@ func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum 
 		k = append(k, k2...)
 	}
 
-	v, ok, err := sd.aggTx.GetAsOfFile(domain, k, ofMaxTxnum)
+	v, ok, err := sd.aggTx.getAsOfFile(domain, k, ofMaxTxnum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
 	}

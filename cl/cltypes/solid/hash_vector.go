@@ -46,7 +46,7 @@ func (arr *hashVector) Bytes() []byte {
 }
 
 func (h *hashVector) Append(val libcommon.Hash) {
-	panic("not implmented")
+	panic("not implemented")
 }
 
 func (h hashVector) MarshalJSON() ([]byte, error) {

@@ -22,7 +22,7 @@ type testAggConfig struct {
 func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.RwDB, *Aggregator) {
 	tb.Helper()
 
-	db, agg := testDbAndAggregatorv3(tb.(*testing.T), cfg.stepSize)
+	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
 	agg.commitmentValuesTransform = !cfg.disableCommitmentBranchTransform
 	agg.d[kv.CommitmentDomain].replaceKeysInValues = agg.commitmentValuesTransform
 
@@ -114,7 +114,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
-	acit, err := ac.DomainRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
+	acit, err := ac.RangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	require.NoError(t, err)
 	defer acit.Close()
 

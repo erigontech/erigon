@@ -73,12 +73,14 @@ type MdbxOpts struct {
 	verbosity       kv.DBVerbosityLvl
 	label           kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 	inMem           bool
+
+	metrics bool
 }
 
 const DefaultMapSize = 2 * datasize.TB
 const DefaultGrowthStep = 1 * datasize.GB
 
-func NewMDBX(log log.Logger) MdbxOpts {
+func New(label kv.Label, log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
@@ -89,7 +91,8 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		growthStep:      DefaultGrowthStep,
 		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
-		label:           kv.InMem,
+		label:           label,
+		metrics:         label == kv.ChainDB,
 	}
 	return opts
 }
@@ -102,7 +105,6 @@ func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
 }
 func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
 
-func (opts MdbxOpts) Label(label kv.Label) MdbxOpts               { opts.label = label; return opts }
 func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts                { opts.dirtySpace = s; return opts }
 func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLimiter = l; return opts }
 func (opts MdbxOpts) PageSize(v uint64) MdbxOpts                  { opts.pageSize = v; return opts }
@@ -142,7 +144,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.mapSize = 512 * datasize.MB
 	opts.dirtySpace = uint64(64 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
-	opts.label = kv.InMem
+	opts.pageSize = 4096
 	return opts
 }
 
@@ -193,7 +195,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 				break
 			}
 			if retry >= 5 {
-				return nil, fmt.Errorf("%w, label: %s, path: %s", ErrDBDoesNotExists, opts.label.String(), opts.path)
+				return nil, fmt.Errorf("%w, label: %s, path: %s", ErrDBDoesNotExists, opts.label, opts.path)
 			}
 			select {
 			case <-time.After(500 * time.Millisecond):
@@ -296,13 +298,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
-		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label, stack2.Trace().String())
 	}
 
 	// mdbx will not change pageSize if db already exists. means need read real value after env.open()
 	in, err := env.Info(nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label, stack2.Trace().String())
 	}
 
 	opts.pageSize = uint64(in.PageSize)
@@ -346,13 +348,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		txsCountMutex:         txsCountMutex,
 		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
 
-		leakDetector: dbg.NewLeakDetector("db."+opts.label.String(), dbg.SlowTx()),
+		leakDetector: dbg.NewLeakDetector("db."+string(opts.label), dbg.SlowTx()),
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
-	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
+	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
 	}
@@ -579,7 +581,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
 	if err != nil {
-		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
 	return &MdbxTx{
@@ -614,7 +616,7 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
 		db.trackTxEnd()
-		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
+		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
 	return &MdbxTx{
@@ -670,7 +672,7 @@ func (tx *MdbxTx) Count(bucket string) (uint64, error) {
 }
 
 func (tx *MdbxTx) CollectMetrics() {
-	if tx.db.opts.label != kv.ChainDB {
+	if !tx.db.opts.metrics {
 		return
 	}
 
@@ -893,7 +895,7 @@ func (tx *MdbxTx) Commit() error {
 		return fmt.Errorf("label: %s, %w", tx.db.opts.label, err)
 	}
 
-	if tx.db.opts.label == kv.ChainDB {
+	if tx.db.opts.metrics {
 		kv.DbCommitPreparation.Observe(latency.Preparation.Seconds())
 		//kv.DbCommitAudit.Update(latency.Audit.Seconds())
 		kv.DbCommitWrite.Observe(latency.Write.Seconds())
@@ -983,6 +985,9 @@ func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
 	v, err := tx.tx.Get(mdbx.DBI(tx.db.buckets[bucket].DBI), k)
 	if mdbx.IsNotFound(err) {
 		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("label: %s, table: %s, %w", tx.db.opts.label, bucket, err)
 	}
 	return v, err
 }

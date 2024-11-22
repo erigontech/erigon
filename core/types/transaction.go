@@ -355,58 +355,6 @@ func (s TxByNonce) Len() int           { return len(s) }
 func (s TxByNonce) Less(i, j int) bool { return s[i].GetNonce() < s[j].GetNonce() }
 func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-type TransactionsStream interface {
-	Empty() bool
-	Peek() Transaction
-	Shift()
-	Pop()
-}
-
-// TransactionsFixedOrder represents a set of transactions that can return
-// transactions in a profit-maximizing sorted order, while supporting removing
-// entire batches of transactions for non-executable accounts.
-type TransactionsFixedOrder struct {
-	Transactions
-}
-
-// NewTransactionsFixedOrder creates a transaction set that can retrieve
-// price sorted transactions in a nonce-honouring way.
-//
-// Note, the input map is reowned so the caller should not interact any more with
-// if after providing it to the constructor.
-func NewTransactionsFixedOrder(txs Transactions) *TransactionsFixedOrder {
-	return &TransactionsFixedOrder{txs}
-}
-
-func (t *TransactionsFixedOrder) Empty() bool {
-	if t == nil {
-		return true
-	}
-	return len(t.Transactions) == 0
-}
-
-// Peek returns the next transaction by price.
-func (t *TransactionsFixedOrder) Peek() Transaction {
-	if len(t.Transactions) == 0 {
-		return nil
-	}
-	return t.Transactions[0]
-}
-
-// Shift replaces the current best head with the next one from the same account.
-func (t *TransactionsFixedOrder) Shift() {
-	t.Transactions[0] = nil // avoid memory leak
-	t.Transactions = t.Transactions[1:]
-}
-
-// Pop removes the best transaction, *not* replacing it with the next one from
-// the same account. This should be used when a transaction cannot be executed
-// and hence all subsequent ones should be discarded from the same account.
-func (t *TransactionsFixedOrder) Pop() {
-	t.Transactions[0] = nil // avoid memory leak
-	t.Transactions = t.Transactions[1:]
-}
-
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
 	to               *libcommon.Address

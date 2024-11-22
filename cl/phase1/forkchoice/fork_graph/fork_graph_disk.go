@@ -187,7 +187,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, BelowAnchor, nil
 	}
 
-	newState, err := f.GetState(block.ParentRoot, false)
+	newState, err := f.getState(block.ParentRoot, false, true)
 	if err != nil {
 		return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
 	}
@@ -249,7 +249,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		// Add block to list of invalid blocks
 		log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", blockRoot, "reason", invalidBlockErr)
 		f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
-		f.currentState = nil
+		//f.currentState = nil
 
 		return nil, InvalidBlock, invalidBlockErr
 	}
@@ -296,8 +296,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint())
 	if newState.Slot() > f.highestSeen {
 		f.highestSeen = newState.Slot()
-		f.currentState = newState
 	}
+	f.currentState = newState
 	return newState, Success, nil
 }
 
@@ -317,8 +317,11 @@ func (f *forkGraphDisk) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaco
 
 	return obj.(*cltypes.SignedBeaconBlock), true
 }
-
 func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	return f.getState(blockRoot, alwaysCopy, false)
+}
+
+func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addChainSegment bool) (*state.CachingBeaconState, error) {
 	if f.currentState != nil && !alwaysCopy {
 		currentStateBlockRoot, err := f.currentState.BlockRoot()
 		if err != nil {
@@ -329,12 +332,16 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 		}
 	}
 
-	// collect all blocks beetwen greatest extending node path and block.
+	// collect all blocks between greatest extending node path and block.
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
 	currentIteratorRoot := blockRoot
-	var copyReferencedState *state.CachingBeaconState
+	var copyReferencedState, outState *state.CachingBeaconState
 	var err error
+	if addChainSegment {
+		outState = f.currentState
+	}
+
 	// try and find the point of recconection
 	for copyReferencedState == nil {
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
@@ -342,7 +349,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
 			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
-				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
+				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot, outState)
 				if err != nil {
 					log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
 					copyReferencedState = nil
@@ -353,7 +360,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 			return nil, nil
 		}
 		if block.Block.Slot%dumpSlotFrequency == 0 {
-			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
+			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot, outState)
 			if err != nil {
 				log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
 			}

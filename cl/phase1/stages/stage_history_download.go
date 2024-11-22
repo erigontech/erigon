@@ -26,7 +26,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -267,14 +266,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	}
 	cfg.downloader.SetThrottle(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
 	cfg.downloader.SetNeverSkip(false)
-	// If i do not give it a database, erigon lib starts to cry uncontrollably
-	db2 := memdb.New(cfg.tmpdir)
-	defer db2.Close()
-	tx2, err := db2.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx2.Rollback()
 	isBackfilling.Store(true)
 
 	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
@@ -377,7 +368,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 					continue
 				}
 				if block.Signature != header.Signature {
-					return errors.New("signature mismatch beetwen blob and stored block")
+					return errors.New("signature mismatch between blob and stored block")
 				}
 				return nil
 			}

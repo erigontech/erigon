@@ -122,8 +122,8 @@ func TestDump(t *testing.T) {
 		chainID, _ := uint256.FromBig(m.ChainConfig.ChainID)
 		t.Run("txs", func(t *testing.T) {
 			require := require.New(t)
-			slot := txpool.TxSlot{}
-			parseCtx := txpool.NewTxParseContext(*chainID)
+			slot := txpool.TxnSlot{}
+			parseCtx := txpool.NewTxnParseContext(*chainID)
 			parseCtx.WithSender(false)
 			var sender [20]byte
 
@@ -147,8 +147,8 @@ func TestDump(t *testing.T) {
 		})
 		t.Run("txs_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
-			slot := txpool.TxSlot{}
-			parseCtx := txpool.NewTxParseContext(*chainID)
+			slot := txpool.TxnSlot{}
+			parseCtx := txpool.NewTxnParseContext(*chainID)
 			parseCtx.WithSender(false)
 			var sender [20]byte
 

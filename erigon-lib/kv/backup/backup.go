@@ -41,8 +41,7 @@ import (
 
 func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.Logger) (kv.RoDB, kv.RwDB) {
 	const ThreadsHardLimit = 9_000
-	src := mdbx2.NewMDBX(logger).Path(from).
-		Label(label).
+	src := mdbx2.New(label, logger).Path(from).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
 		Flags(func(flags uint) uint { return flags | mdbx.Accede }).
@@ -54,8 +53,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 	if err != nil {
 		panic(err)
 	}
-	dst := mdbx2.NewMDBX(logger).Path(to).
-		Label(label).
+	dst := mdbx2.New(label, logger).Path(to).
 		PageSize(targetPageSize.Bytes()).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
 		GrowthStep(4 * datasize.GB).

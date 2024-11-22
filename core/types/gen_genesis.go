@@ -28,8 +28,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		Mixhash               common.Hash                                  `json:"mixHash"`
 		Coinbase              common.Address                               `json:"coinbase"`
 		Alloc                 map[common0.UnprefixedAddress]GenesisAccount `json:"alloc"      gencodec:"required"`
-		AuRaStep              uint64                                       `json:"auRaStep"`
-		AuRaSeal              []byte                                       `json:"auRaSeal"`
+		AuRaSeal              *AuRaSeal                                    `json:"seal"`
 		Number                math.HexOrDecimal64                          `json:"number"`
 		GasUsed               math.HexOrDecimal64                          `json:"gasUsed"`
 		ParentHash            common.Hash                                  `json:"parentHash"`
@@ -54,7 +53,6 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 			enc.Alloc[common0.UnprefixedAddress(k)] = v
 		}
 	}
-	enc.AuRaStep = g.AuRaStep
 	enc.AuRaSeal = g.AuRaSeal
 	enc.Number = math.HexOrDecimal64(g.Number)
 	enc.GasUsed = math.HexOrDecimal64(g.GasUsed)
@@ -79,8 +77,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		Mixhash               *common.Hash                                 `json:"mixHash"`
 		Coinbase              *common.Address                              `json:"coinbase"`
 		Alloc                 map[common0.UnprefixedAddress]GenesisAccount `json:"alloc"      gencodec:"required"`
-		AuRaStep              *uint64                                      `json:"auRaStep"`
-		AuRaSeal              []byte                                       `json:"auRaSeal"`
+		AuRaSeal              *AuRaSeal                                    `json:"seal"`
 		Number                *math.HexOrDecimal64                         `json:"number"`
 		GasUsed               *math.HexOrDecimal64                         `json:"gasUsed"`
 		ParentHash            *common.Hash                                 `json:"parentHash"`
@@ -126,9 +123,6 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 	g.Alloc = make(GenesisAlloc, len(dec.Alloc))
 	for k, v := range dec.Alloc {
 		g.Alloc[common.Address(k)] = v
-	}
-	if dec.AuRaStep != nil {
-		g.AuRaStep = *dec.AuRaStep
 	}
 	if dec.AuRaSeal != nil {
 		g.AuRaSeal = dec.AuRaSeal

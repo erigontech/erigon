@@ -555,7 +555,6 @@ func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
 	expirationTime := sub.expiration.Load().(time.Time)
 	if sub.subscribed.Load() && time.Now().After(expirationTime) {
 		sub.stopCh <- struct{}{}
-		sub.topic.Close()
 		sub.subscribed.Store(false)
 		log.Info("[Gossip] Unsubscribed from topic", "topic", sub.sub.Topic())
 		sub.s.updateENROnSubscription(sub.sub.Topic(), false)
@@ -563,6 +562,7 @@ func (sub *GossipSubscription) checkIfTopicNeedsToEnabledOrDisabled() {
 	}
 	if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
 		sub.stopCh = make(chan struct{}, 3)
+
 		sub.sub, err = sub.topic.Subscribe()
 		if err != nil {
 			log.Warn("[Gossip] failed to begin topic subscription", "err", err)
@@ -628,6 +628,7 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 		case <-ctx.Done():
 			return
 		case <-s.stopCh:
+			sub.Cancel()
 			return
 		default:
 			msg, err := sub.Next(ctx)

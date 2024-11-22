@@ -105,20 +105,20 @@ func TestEncodeGPT66(t *testing.T) {
 }
 
 var ptp66EncodeTests = []struct {
-	txs         [][]byte
+	txns        [][]byte
 	encoded     string
 	requestID   uint64
 	chainID     uint64
 	expectedErr bool
 }{
 	{
-		txs: [][]byte{
+		txns: [][]byte{
 			hexutility.MustDecodeHex("02f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab"),
 		},
 		encoded: "f88088a4e61e8ad32f4845f875b87302f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab", requestID: 11882218248461043781, expectedErr: false, chainID: 5,
 	},
 	{
-		txs: [][]byte{
+		txns: [][]byte{
 			hexutility.MustDecodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
 			hexutility.MustDecodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
 		},
@@ -140,17 +140,17 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
-			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestID, encodeBuf)
+			encodeBuf = EncodePooledTransactions66(tt.txns, tt.requestID, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxParseContext(*uint256.NewInt(tt.chainID))
-			slots := &TxSlots{}
+			ctx := NewTxnParseContext(*uint256.NewInt(tt.chainID))
+			slots := &TxnSlots{}
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
-			require.Equal(len(tt.txs), len(slots.Txs))
-			for i, txn := range tt.txs {
-				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txs[i].Rlp))
+			require.Equal(len(tt.txns), len(slots.Txns))
+			for i, txn := range tt.txns {
+				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txns[i].Rlp))
 			}
 		})
 	}
@@ -158,16 +158,16 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 		t.Run("reject_all_"+strconv.Itoa(i), func(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
-			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestID, encodeBuf)
+			encodeBuf = EncodePooledTransactions66(tt.txns, tt.requestID, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			chainID := uint256.NewInt(tt.chainID)
-			ctx := NewTxParseContext(*chainID)
-			slots := &TxSlots{}
+			ctx := NewTxnParseContext(*chainID)
+			slots := &TxnSlots{}
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
-			require.Equal(0, len(slots.Txs))
+			require.Equal(0, len(slots.Txns))
 			require.Equal(0, slots.Senders.Len())
 			require.Equal(0, len(slots.IsLocal))
 		})
@@ -175,19 +175,19 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 }
 
 var tpEncodeTests = []struct {
-	txs         [][]byte
+	txns        [][]byte
 	encoded     string
 	chainID     uint64
 	expectedErr bool
 }{
 	{
-		txs: [][]byte{
+		txns: [][]byte{
 			hexutility.MustDecodeHex("02f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab"),
 		},
 		encoded: "f875b87302f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab", expectedErr: false, chainID: 5,
 	},
 	{
-		txs: [][]byte{
+		txns: [][]byte{
 			hexutility.MustDecodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
 			hexutility.MustDecodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
 		},
@@ -200,16 +200,16 @@ func TestTransactionsPacket(t *testing.T) {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
-			encodeBuf = EncodeTransactions(tt.txs, encodeBuf)
+			encodeBuf = EncodeTransactions(tt.txns, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxParseContext(*uint256.NewInt(tt.chainID))
-			slots := &TxSlots{}
+			ctx := NewTxnParseContext(*uint256.NewInt(tt.chainID))
+			slots := &TxnSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
-			require.Equal(len(tt.txs), len(slots.Txs))
-			for i, txn := range tt.txs {
-				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txs[i].Rlp))
+			require.Equal(len(tt.txns), len(slots.Txns))
+			for i, txn := range tt.txns {
+				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txns[i].Rlp))
 			}
 		})
 	}
@@ -217,15 +217,15 @@ func TestTransactionsPacket(t *testing.T) {
 		t.Run("reject_all_"+strconv.Itoa(i), func(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
-			encodeBuf = EncodeTransactions(tt.txs, encodeBuf)
+			encodeBuf = EncodeTransactions(tt.txns, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			chainID := uint256.NewInt(tt.chainID)
-			ctx := NewTxParseContext(*chainID)
-			slots := &TxSlots{}
+			ctx := NewTxnParseContext(*chainID)
+			slots := &TxnSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
-			require.Equal(0, len(slots.Txs))
+			require.Equal(0, len(slots.Txns))
 			require.Equal(0, slots.Senders.Len())
 			require.Equal(0, len(slots.IsLocal))
 		})

@@ -118,7 +118,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	return nil
 }
 
-// ProcessOperations is called by ProcessBlock and prcesses the block body operations
+// ProcessOperations is called by ProcessBlock and processes the block body operations
 func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (signatures [][]byte, messages [][]byte, publicKeys [][]byte, err error) {
 	if blockBody.GetDeposits().Len() != int(maximumDeposits(s)) {
 		return nil, nil, nil, errors.New("outstanding deposits do not match maximum deposits")

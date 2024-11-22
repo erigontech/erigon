@@ -109,32 +109,32 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 // == Pooled transactions ==
 
 // TODO(eip-4844) wrappedWithBlobs = true?
-func EncodePooledTransactions66(txsRlp [][]byte, requestID uint64, encodeBuf []byte) []byte {
+func EncodePooledTransactions66(txnsRlp [][]byte, requestID uint64, encodeBuf []byte) []byte {
 	pos := 0
-	txsRlpLen := 0
-	for i := range txsRlp {
-		_, _, isLegacy, _ := rlp.Prefix(txsRlp[i], 0)
+	txnsRlpLen := 0
+	for i := range txnsRlp {
+		_, _, isLegacy, _ := rlp.Prefix(txnsRlp[i], 0)
 		if isLegacy {
-			txsRlpLen += len(txsRlp[i])
+			txnsRlpLen += len(txnsRlp[i])
 		} else {
-			txsRlpLen += rlp.StringLen(txsRlp[i])
+			txnsRlpLen += rlp.StringLen(txnsRlp[i])
 		}
 	}
-	dataLen := rlp.U64Len(requestID) + rlp.ListPrefixLen(txsRlpLen) + txsRlpLen
+	dataLen := rlp.U64Len(requestID) + rlp.ListPrefixLen(txnsRlpLen) + txnsRlpLen
 
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 
 	// Length Prefix for the entire structure
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
 	pos += rlp.EncodeU64(requestID, encodeBuf[pos:])
-	pos += rlp.EncodeListPrefix(txsRlpLen, encodeBuf[pos:])
-	for i := range txsRlp {
-		_, _, isLegacy, _ := rlp.Prefix(txsRlp[i], 0)
+	pos += rlp.EncodeListPrefix(txnsRlpLen, encodeBuf[pos:])
+	for i := range txnsRlp {
+		_, _, isLegacy, _ := rlp.Prefix(txnsRlp[i], 0)
 		if isLegacy {
-			copy(encodeBuf[pos:], txsRlp[i])
-			pos += len(txsRlp[i])
+			copy(encodeBuf[pos:], txnsRlp[i])
+			pos += len(txnsRlp[i])
 		} else {
-			pos += rlp.EncodeString(txsRlp[i], encodeBuf[pos:])
+			pos += rlp.EncodeString(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
 	_ = pos
@@ -142,47 +142,47 @@ func EncodePooledTransactions66(txsRlp [][]byte, requestID uint64, encodeBuf []b
 }
 
 // TODO(eip-4844) wrappedWithBlobs = false?
-func EncodeTransactions(txsRlp [][]byte, encodeBuf []byte) []byte {
+func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 	pos := 0
 	dataLen := 0
-	for i := range txsRlp {
-		_, _, isLegacy, _ := rlp.Prefix(txsRlp[i], 0)
+	for i := range txnsRlp {
+		_, _, isLegacy, _ := rlp.Prefix(txnsRlp[i], 0)
 		if isLegacy {
-			dataLen += len(txsRlp[i])
+			dataLen += len(txnsRlp[i])
 		} else {
-			dataLen += rlp.StringLen(txsRlp[i])
+			dataLen += rlp.StringLen(txnsRlp[i])
 		}
 	}
 
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 	// Length Prefix for the entire structure
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
-	for i := range txsRlp {
-		_, _, isLegacy, _ := rlp.Prefix(txsRlp[i], 0)
+	for i := range txnsRlp {
+		_, _, isLegacy, _ := rlp.Prefix(txnsRlp[i], 0)
 		if isLegacy {
-			copy(encodeBuf[pos:], txsRlp[i])
-			pos += len(txsRlp[i])
+			copy(encodeBuf[pos:], txnsRlp[i])
+			pos += len(txnsRlp[i])
 		} else {
-			pos += rlp.EncodeString(txsRlp[i], encodeBuf[pos:])
+			pos += rlp.EncodeString(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
 	_ = pos
 	return encodeBuf
 }
 
-func ParseTransactions(payload []byte, pos int, ctx *TxParseContext, txSlots *TxSlots, validateHash func([]byte) error) (newPos int, err error) {
+func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (newPos int, err error) {
 	pos, _, err = rlp.List(payload, pos)
 	if err != nil {
 		return 0, err
 	}
 
 	for i := 0; pos < len(payload); i++ {
-		txSlots.Resize(uint(i + 1))
-		txSlots.Txs[i] = &TxSlot{}
-		pos, err = ctx.ParseTransaction(payload, pos, txSlots.Txs[i], txSlots.Senders.At(i), true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
+		txnSlots.Resize(uint(i + 1))
+		txnSlots.Txns[i] = &TxnSlot{}
+		pos, err = ctx.ParseTransaction(payload, pos, txnSlots.Txns[i], txnSlots.Senders.At(i), true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
 		if err != nil {
 			if errors.Is(err, ErrRejected) {
-				txSlots.Resize(uint(i))
+				txnSlots.Resize(uint(i))
 				i--
 				continue
 			}
@@ -192,7 +192,7 @@ func ParseTransactions(payload []byte, pos int, ctx *TxParseContext, txSlots *Tx
 	return pos, nil
 }
 
-func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txSlots *TxSlots, validateHash func([]byte) error) (requestID uint64, newPos int, err error) {
+func ParsePooledTransactions66(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (requestID uint64, newPos int, err error) {
 	p, _, err := rlp.List(payload, pos)
 	if err != nil {
 		return requestID, 0, err
@@ -207,12 +207,12 @@ func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txS
 	}
 
 	for i := 0; p < len(payload); i++ {
-		txSlots.Resize(uint(i + 1))
-		txSlots.Txs[i] = &TxSlot{}
-		p, err = ctx.ParseTransaction(payload, p, txSlots.Txs[i], txSlots.Senders.At(i), true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
+		txnSlots.Resize(uint(i + 1))
+		txnSlots.Txns[i] = &TxnSlot{}
+		p, err = ctx.ParseTransaction(payload, p, txnSlots.Txns[i], txnSlots.Senders.At(i), true /* hasEnvelope */, true /* wrappedWithBlobs */, validateHash)
 		if err != nil {
 			if errors.Is(err, ErrRejected) {
-				txSlots.Resize(uint(i))
+				txnSlots.Resize(uint(i))
 				i--
 				continue
 			}
