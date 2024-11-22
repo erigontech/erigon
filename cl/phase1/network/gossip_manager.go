@@ -67,7 +67,6 @@ type GossipManager struct {
 	blsToExecutionChangeService  services.BLSToExecutionChangeService
 	proposerSlashingService      services.ProposerSlashingService
 	attestationsLimiter          *timeBasedRateLimiter
-	aggregateAndProofLimiter     *timeBasedRateLimiter
 }
 
 func NewGossipReceiver(
