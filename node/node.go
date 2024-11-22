@@ -333,14 +333,9 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			Path(dbPath).
 			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
-			WriteMap(config.MdbxWriteMap)
-
-		if readonly {
-			opts = opts.Readonly()
-		}
-		if exclusive {
-			opts = opts.Exclusive()
-		}
+			WriteMap(config.MdbxWriteMap).
+			Readonly(readonly).
+			Exclusive(exclusive)
 
 		switch label {
 		case kv.ChainDB:

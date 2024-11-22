@@ -44,7 +44,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 	src := mdbx2.New(label, logger).Path(from).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
-		Flags(func(flags uint) uint { return flags | mdbx.Accede }).
+		AddFlags(mdbx.Accede).
 		MustOpen()
 	if targetPageSize <= 0 {
 		targetPageSize = datasize.ByteSize(src.PageSize())
@@ -57,7 +57,7 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 		PageSize(targetPageSize.Bytes()).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
 		GrowthStep(4 * datasize.GB).
-		Flags(func(flags uint) uint { return flags | mdbx.WriteMap }).
+		AddFlags(mdbx.WriteMap).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
 		MustOpen()
 	return src, dst

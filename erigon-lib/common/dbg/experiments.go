@@ -34,7 +34,6 @@ var (
 	doMemstat           = EnvBool("NO_MEMSTAT", true)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	mdbxReadahead       = EnvBool("MDBX_READAHEAD", false)
 	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
 
@@ -76,7 +75,6 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 }
 
-func MdbxReadAhead() bool { return mdbxReadahead }
 func MdbxLockInRam() bool { return mdbxLockInRam }
 
 func DiscardCommitment() bool    { return discardCommitment }

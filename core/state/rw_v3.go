@@ -209,9 +209,6 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 }
 
 func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedDomains) error {
-	if dbg.DiscardHistory() {
-		return nil
-	}
 	shouldPruneNonEssentials := txTask.PruneNonEssentials && txTask.Config != nil
 
 	for addr := range txTask.TraceFroms {
