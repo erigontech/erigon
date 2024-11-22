@@ -1061,6 +1061,7 @@ func (hph *HexPatriciaHashed) nCellsInRow(row int) int {
 	return count
 }
 
+// Traverse the grid following `hashedKey` and produce the witness `trie.Trie` for that key
 func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash) (*trie.Trie, error) {
 	rootNode := &trie.FullNode{}
 	var currentNode trie.Node = rootNode
@@ -1105,7 +1106,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 					if !bytes.Equal(subTrieRoot, cellHash[1:]) {
 						return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 					}
-					// // DEBUG
+					// // DEBUG patch with cell hash which we know to be correct
 					// nextNode = trie.NewHashNode(cellHash[1:])
 				}
 			}
@@ -1729,6 +1730,10 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rootHash[1:], nil // first byte is 128+hash_len=160
 }
 
+// Generate the block witness. This works by loading each key from the list of updates (they are not really updates since we won't modify the trie,
+// but currently need to be defined like that for the fold/unfold algorithm) into the grid and traversing the grid to convert it into `trie.Trie`.
+// All the individual tries are combined to create the final witness trie.
+// Because the grid is lacking information about the code in smart contract accounts which is also part of the witness, we need to provide that as an input parameter to this function (`codeReads`)
 func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Updates, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash, expectedRootHash []byte, logPrefix string) (witnessTrie *trie.Trie, rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
@@ -1768,7 +1773,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			if err != nil {
 				return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
 			}
-			fmt.Printf("storage FOUND = %v\n", storage.Storage)
+			fmt.Printf("storage found = %v\n", storage.Storage)
 		}
 
 		// Keep folding until the currentKey is the prefix of the key we modify
@@ -1785,6 +1790,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		}
 		hph.PrintGrid()
 
+		// convert grid to trie.Trie
 		tr, err = hph.ToTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
@@ -1793,7 +1799,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		fmt.Printf("computedRootHash = %x\n", computedRootHash)
 
 		if !bytes.Equal(computedRootHash, expectedRootHash) {
-			err = fmt.Errorf("ROOT HASH MISMATCH computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
+			err = fmt.Errorf("root hash mismatch computedRootHash(%x)!=expectedRootHash(%x)", computedRootHash, expectedRootHash)
 			return err
 		}
 
@@ -1820,11 +1826,8 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
-	// err = hph.branchEncoder.Load(hph.Ctx, etl.TransformArgs{Quit: ctx.Done()})
-	// if err != nil {
-	// 	return nil, nil, fmt.Errorf("branch update failed: %w", err)
-	// }
 
+	// merge all individual tries
 	witnessTrie, err = trie.MergeTries(tries)
 	if err != nil {
 		return nil, nil, err
@@ -1835,7 +1838,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	fmt.Printf("mergedTrieRootHash = %x\n", witnessTrieRootHash)
 
 	if !bytes.Equal(witnessTrieRootHash, expectedRootHash) {
-		return nil, nil, fmt.Errorf("ROOT HASH MISMATCH witnessTrieRootHash(%x)!=expectedRootHash(%x)", witnessTrieRootHash, expectedRootHash)
+		return nil, nil, fmt.Errorf("root hash mismatch witnessTrieRootHash(%x)!=expectedRootHash(%x)", witnessTrieRootHash, expectedRootHash)
 	}
 
 	return witnessTrie, rootHash, nil

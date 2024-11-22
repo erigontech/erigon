@@ -505,13 +505,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
-	latestBlockHeader, err := api._blockReader.HeaderByNumber(ctx, roTx, latestBlock)
-	if err != nil {
-		return nil, err
-	}
-	latestBlockRoot := latestBlockHeader.Root
-	fmt.Printf("latestBlockRoot = %x\n", latestBlockRoot)
-
 	if latestBlock < blockNr {
 		// shouldn't happen, but check anyway
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
@@ -533,7 +526,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, fmt.Errorf("engine is not consensus.Engine")
 	}
 
-	// // DEBUGGING
 	roTx2, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -547,6 +539,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, fmt.Errorf("error loading chain config: %v", err)
 	}
 
+	// Unwind to blockNr
 	cfg := stagedsync.StageWitnessCfg(true, 0, chainConfig, engine, api._blockReader, api.dirs)
 	err = stagedsync.RewindStagesForWitness(txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
@@ -557,59 +550,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	if err != nil {
 		return nil, err
 	}
-	// // The code below is for using ExecV3 instead of ExecuteBlockEphemerally
-	// txNumsReader := rawdbv3.TxNums
-	// cr := rawdb.NewCanonicalReader(txNumsReader)
-	// agg, err := libstate.NewAggregator(ctx, api.dirs, config3.HistoryV3AggregationStep, txBatch.MemDB(), cr, logger)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// temporalDB, err := temporal.New(txBatch.MemDB(), agg)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// txc := wrap.TxContainer{Tx: txBatch}
-	// batchSizeStr := "512M"
-	// var batchSize datasize.ByteSize
-	// err = batchSize.UnmarshalText([]byte(batchSizeStr))
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// pruneMode := prune.Mode{
-	// 	Initialised: false,
-	// 	History:     prune.Distance(math.MaxUint64),
-	// }
-	// vmConfig := &vm.Config{}
-	// syncCfg := ethconfig.Defaults.Sync
-
-	// execCfg := stagedsync.StageExecuteBlocksCfg(temporalDB, pruneMode, batchSize, chainConfig, engine, vmConfig, nil,
-	// 	/*stateStream=*/ false,
-	// 	/*badBlockHalt=*/ true, api.dirs, api._blockReader, nil, nil, syncCfg, nil)
-
-	// stateSyncStages := stagedsync.DefaultStages(ctx, stagedsync.SnapshotsCfg{}, stagedsync.HeadersCfg{}, stagedsync.BorHeimdallCfg{}, stagedsync.BlockHashesCfg{}, stagedsync.BodiesCfg{}, stagedsync.SendersCfg{}, stagedsync.ExecuteBlockCfg{}, stagedsync.TxLookupCfg{}, stagedsync.FinishCfg{}, true)
-	// stateSync := stagedsync.New(
-	// 	ethconfig.Defaults.Sync,
-	// 	stateSyncStages,
-	// 	stagedsync.DefaultUnwindOrder,
-	// 	stagedsync.DefaultPruneOrder,
-	// 	logger,
-	// )
-	// stageState := &stagedsync.StageState{ID: stages.Execution, BlockNumber: blockNr}
-	// // Re-execute block
-	// err = stagedsync.ExecBlockV3(stageState, stateSync, txc, stageState.BlockNumber, ctx, execCfg, false, logger, false)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// execute block ephemerally
-
-	// var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
-	// stateReader := rpchelper.NewLatestStateReader(txBatch)
-	// stateReader, err := rpchelper.CreateHistoryStateReader(roTx, txNumsReader, blockNr, 0, "")  <-----
-	// stateReader := state.NewHistoryReaderV3()
 
 	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
 	if err != nil {
@@ -622,35 +562,36 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
 	}
 
+	// execute block #blockNr ephemerally. This will use TrieStateWriter to record touches of accounts and storage keys.
 	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
 	if err != nil {
 		return nil, err
 	}
 
+	// gather touched keys from ephemeral block execution
 	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
 	codeReads := store.Tds.BuildCodeTouches()
 
+	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
+	// so this is just to satisfy the current hex patricia trie api.
 	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
 	for _, key := range touchedPlainKeys {
 		updates.TouchPlainKey(key, nil, updates.TouchAccount)
 	}
 
-	// _ = touchedPlainKeys
-	// extraPlainKey := libcommon.FromHex("00a3ca265ebcb825b45f985a16cefb49958ce017")
-	// updates.TouchPlainKey(extraPlainKey, nil, updates.TouchAccount)
-
-	hph.SetTrace(false) // disable tracing
-	witnessTrie, rootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
+	hph.SetTrace(false) // disable tracing to avoid mixing with trace from witness computation
+	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
+	witnessTrie, witnessRootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
 	if err != nil {
 		return nil, err
 	}
 
-	_ = witnessTrie
-
-	if !bytes.Equal(rootHash, prevHeader.Root[:]) {
-		return nil, errors.New("root hash mismatch")
+	//
+	if !bytes.Equal(witnessRootHash, prevHeader.Root[:]) {
+		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRootHash, prevHeader.Root[:])
 	}
 
+	// retain list is need for the serialization of the trie.Trie into a witness
 	retainListBuilder := trie.NewRetainListBuilder()
 	for _, key := range touchedHashedKeys {
 		if len(key) == 32 {
@@ -668,6 +609,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	retainList := retainListBuilder.Build(false)
 
+	// serialize witness trie
 	witness, err := witnessTrie.ExtractWitness(true, retainList)
 	if err != nil {
 		return nil, err
@@ -679,6 +621,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
+	// this is a verification step: we execute block #blockNr statelessly using the witness, and we expect to get the same state root as in the header
+	// otherwise something went wrong
 	store.Tds.SetTrie(witnessTrie)
 	newStateRoot, err := stagedsync.ExecuteBlockStatelessly(block, prevHeader, store.ChainReader, store.Tds, &cfg, &witnessBuffer, store.GetHashFn, logger)
 	if err != nil {

@@ -76,9 +76,6 @@ func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, cf
 	statedb.SetDisableBalanceInc(true)
 
 	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
-	// if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, statedb, trieStateWriter, logger, nil); err != nil {
-	// 	return nil, err
-	// }
 
 	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, e := cfg.blockReader.Header(ctx, tx, hash, number)
@@ -121,7 +118,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	syncCfg := ethconfig.Defaults.Sync
 	execCfg := StageExecuteBlocksCfg(batch.MemDB(), pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig, nil,
 		/*stateStream=*/ false,
-		/*badBlockHalt=*/ true, true, false, dirs, blockReader, nil, nil, syncCfg, nil)
+		/*badBlockHalt=*/ true, dirs, blockReader, nil, nil, syncCfg, nil)
 
 	if err := UnwindExecutionStage(unwindState, stageState, txc, ctx, execCfg, logger); err != nil {
 		return err
