@@ -132,6 +132,8 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 // {} or nil          matches any topics list
 // {{A}}              matches topic A in any positions. Logs with {{B}, {A}} will be matched
 func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.ErigonLogs, error) {
+	return nil, errors.New("not supported yet")
+
 	if logOptions.LogCount != 0 && logOptions.BlockCount != 0 {
 		return nil, errors.New("logs count & block count are ambigious")
 	}
