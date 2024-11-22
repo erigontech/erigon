@@ -177,9 +177,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tds.tMu.Unlock()
 
 	n := tds.getBlockNr()
-	tp := trie.NewEviction()
-	tp.SetBlockNumber(n)
-
 	cpy := TrieDbState{
 		t:              &tcopy,
 		tMu:            new(sync.Mutex),

@@ -55,7 +55,6 @@ type Trie struct {
 	valueNodesRLPEncoded bool
 
 	newHasherFunc func() *hasher
-	observers     *ObserverMux
 	strictHash    bool // if true, the trie will panic on a hash access
 }
 
@@ -288,14 +287,6 @@ func NewTestRLPTrie(root libcommon.Hash) *Trie {
 		trie.RootNode = &HashNode{hash: root[:]}
 	}
 	return trie
-}
-
-func (t *Trie) AddObserver(observer Observer) {
-	if t.observers == nil {
-		t.observers = NewTrieObserverMux()
-	}
-
-	t.observers.AddChild(observer)
 }
 
 func (t *Trie) SetStrictHash(strict bool) {
