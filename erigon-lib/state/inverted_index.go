@@ -105,6 +105,7 @@ func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
+	cfg.compressorCfg.Workers = 1
 	//}
 	cfg.indexList = withHashMap
 
