@@ -46,14 +46,14 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 		Accede(true).
 		MustOpen()
 	if targetPageSize <= 0 {
-		targetPageSize = datasize.ByteSize(src.PageSize())
+		targetPageSize = src.PageSize()
 	}
 	info, err := src.(*mdbx2.MdbxKV).Env().Info(nil)
 	if err != nil {
 		panic(err)
 	}
 	dst := mdbx2.New(label, logger).Path(to).
-		PageSize(targetPageSize.Bytes()).
+		PageSize(targetPageSize).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
 		GrowthStep(4 * datasize.GB).
 		WriteMap(true).
