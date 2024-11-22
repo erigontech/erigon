@@ -103,23 +103,12 @@ func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` varialbe")
 	}
-	//if cfg.filenameBase == "" {
-	//	panic("empty fnb")
-	//}
-	//if cfg.valuesTable == "" {
-	//	panic("empty fnb")
-	//}
-	//if cfg.keysTable == "" {
-	//	panic("empty fnb")
-	//}
-	//if cfg.aggregationStep == 0 {
-	//	panic("empty aggregationStep")
-	//}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	//}
 	cfg.indexList = withHashMap
 
+	fmt.Printf("inti II %s: %+v\n", cfg.filenameBase, cfg)
 	ii := InvertedIndex{
 		iiCfg:      cfg,
 		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),

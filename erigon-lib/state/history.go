@@ -106,6 +106,8 @@ type histCfg struct {
 
 func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	cfg.compressorCfg = seg.DefaultCfg
+	cfg.compressorCfg.Workers = 1
+
 	if cfg.indexList == 0 {
 		cfg.indexList = withHashMap
 	}
@@ -115,6 +117,7 @@ func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	if cfg.filenameBase == "" {
 		panic("empty fnb")
 	}
+	fmt.Printf("init history %s: %+v\n", cfg.filenameBase, cfg)
 
 	h := History{
 		histCfg:       cfg,

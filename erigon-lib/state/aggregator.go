@@ -324,6 +324,7 @@ func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadi
 		filenameBase:    filenameBase,
 		keysTable:       indexKeysTable,
 		valuesTable:     indexTable,
+		compression:     seg.CompressNone,
 	}
 	var err error
 	a.iis[idx], err = NewInvertedIndex(idxCfg, logger)

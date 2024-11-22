@@ -35,7 +35,7 @@ import (
 
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: datadir.New(os.TempDir()), db: nil, aggregationStep: aggStep, filenameBase: "test", indexList: 0}
+	cfg := iiCfg{salt: &salt, dirs: datadir.New(os.TempDir()), db: nil, aggregationStep: aggStep, filenameBase: "test"}
 
 	ii, err := NewInvertedIndex(cfg, log.New())
 	ii.indexList = 0
