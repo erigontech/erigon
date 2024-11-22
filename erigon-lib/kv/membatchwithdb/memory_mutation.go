@@ -723,7 +723,7 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []b
 	panic("not supported")
 	//return m.db.(kv.TemporalTx).GetAsOf(name, k, k2, ts)
 }
-func (m *MemoryMutation) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
+func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	panic("not supported")
 	//return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
 }
