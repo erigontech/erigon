@@ -76,6 +76,9 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
+	if i.AttestingIndices == nil {
+		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, nil)
+	}
 	for _, index := range tmp.AttestingIndices {
 		v, err := strconv.ParseUint(index, 10, 64)
 		if err != nil {
@@ -83,7 +86,7 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 		}
 		i.AttestingIndices.Append(v)
 	}
-
+	//slot := tmp.Data.Slot
 	i.Data = tmp.Data
 	i.Signature = tmp.Signature
 	return nil

@@ -79,7 +79,7 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		haveRoot, err := object.HashSSZ()
 		require.NoError(t, err)
 		require.EqualValues(t, expectedRoot, haveRoot)
-		// Cannot test it without a config.
+		// Cannot test it without a config. ?????
 		if isBeaconState {
 			return nil
 		}
@@ -130,4 +130,68 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 
 		return nil
 	})
+}
+
+func sszStaticTestNewObjectByVersion[T unmarshalerMarshalerHashable](
+	newObjFunc func(v clparams.StateVersion) T, opts ...func(*sszStaticTestOption),
+) spectest.Handler {
+	return spectest.HandlerFunc(func(t *testing.T, fsroot fs.FS, c spectest.TestCase) (err error) {
+		testOptions := sszStaticTestOption{}
+		for _, opt := range opts {
+			opt(&testOptions)
+		}
+
+		// expected root
+		rootBytes, err := fs.ReadFile(fsroot, rootsFile)
+		require.NoError(t, err)
+		root := Root{}
+		require.NoError(t, yaml.Unmarshal(rootBytes, &root))
+		expectedRoot := libcommon.HexToHash(root.Root)
+
+		// new container
+		object := newObjFunc(c.Version())
+
+		// read ssz bytes and decode
+		snappyEncoded, err := fs.ReadFile(fsroot, serializedFile)
+		require.NoError(t, err)
+		encoded, err := utils.DecompressSnappy(snappyEncoded)
+		require.NoError(t, err)
+		if err := object.DecodeSSZ(encoded, int(c.Version())); err != nil {
+			return err
+		}
+
+		// 1. check hash root
+		hashRoot, err := object.HashSSZ()
+		require.NoError(t, err)
+		require.EqualValues(t, expectedRoot, hashRoot, "hash root not equal")
+
+		// 2. check ssz bytes
+		sszBytes, err := object.EncodeSSZ(nil)
+		require.NoError(t, err)
+		require.EqualValues(t, encoded, sszBytes, "ssz bytes not equal")
+
+		if testOptions.testJson {
+			jsonObject := newObjFunc(c.Version())
+			// make sure object data stay the same after marshal and unmarshal
+			jsonBytes, err := json.Marshal(object)
+			require.NoError(t, err, "json.Marshal failed")
+			require.NoError(t, json.Unmarshal(jsonBytes, jsonObject), "json.Unmarshal failed")
+
+			// check hash root again
+			hashRoot, err := jsonObject.HashSSZ()
+			require.NoError(t, err, "failed in HashSSZ")
+			require.Equal(t, expectedRoot, libcommon.Hash(hashRoot), "json not equal")
+		}
+		return nil
+	})
+}
+
+type sszStaticTestOption struct {
+	testJson bool
+}
+
+func withTestJson() func(*sszStaticTestOption) {
+	return func(opt *sszStaticTestOption) {
+		opt.testJson = true
+	}
 }

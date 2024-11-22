@@ -150,6 +150,7 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 		a.Data = temp.Data
 		a.Signature = temp.Signature
 		a.CommitteeBits = temp.CommitteeBits
+		return nil
 	}
 
 	// Deneb case

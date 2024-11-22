@@ -28,14 +28,17 @@ func (s *SignedBeaconBlock) Clone() clonable.Clonable {
 }
 
 func (i *IndexedAttestation) Clone() clonable.Clonable {
-	var attestingIndices *solid.RawUint64List
-	if i.AttestingIndices != nil {
-		attestingIndices = solid.NewRawUint64List(i.AttestingIndices.Cap(), []uint64{})
-	}
+	/*
+	   var attestingIndices *solid.RawUint64List
 
+	   	if i.AttestingIndices != nil {
+	   		attestingIndices = solid.NewRawUint64List(i.AttestingIndices.Cap(), []uint64{})
+	   	}
+
+	*/
 	return &IndexedAttestation{
-		AttestingIndices: attestingIndices,
-		Data:             &solid.AttestationData{},
+		//AttestingIndices: attestingIndices,
+		Data: &solid.AttestationData{},
 	}
 }
 
