@@ -300,7 +300,7 @@ func (s *Service) Ready(ctx context.Context) <-chan error {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	s.logger.Info(heimdallLogPrefix("running %s heimdall service component"))
+	s.logger.Info(heimdallLogPrefix("running heimdall service component"))
 
 	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {
