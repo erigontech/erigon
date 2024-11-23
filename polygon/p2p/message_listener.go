@@ -73,7 +73,7 @@ type MessageListener struct {
 }
 
 func (ml *MessageListener) Run(ctx context.Context) error {
-	ml.logger.Debug(messageListenerLogPrefix("running p2p message listener component"))
+	ml.logger.Info(messageListenerLogPrefix("running p2p message listener component"))
 
 	backgroundLoops := []func(ctx context.Context){
 		ml.listenInboundMessages,
