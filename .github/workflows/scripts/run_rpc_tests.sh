@@ -27,10 +27,8 @@ disabled_tests=(
     erigon_nodeInfo/test_1.json
     eth_coinbase/test_01.json
     eth_createAccessList/test_16.json
-    eth_getTransactionByHash/test_02.json
     eth_getWork/test_01.json
     eth_mining/test_01.json
-    eth_protocolVersion/test_1.json
     eth_submitHashrate/test_1.json
     eth_submitWork/test_1.json
     net_peerCount/test_1.json
