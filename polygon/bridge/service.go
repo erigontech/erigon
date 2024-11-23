@@ -265,12 +265,12 @@ func (s *Service) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, e
 		return 0, false, err
 	}
 	if ok && blockInfo.BlockNum > lastFrozen {
-		// we have all info, no need to replay
-		return 0, false, nil
+		// we have all info, no need to replay initial block
+		return blockInfo.BlockNum, false, nil
 	}
 
 	// replay the last block we have in event snapshots
-	return s.store.LastFrozenEventBlockNum(), true, nil
+	return lastFrozen, true, nil
 }
 
 func (s *Service) ReplayInitialBlock(ctx context.Context, block *types.Block) error {
