@@ -255,7 +255,7 @@ func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 		}
 
 		blocks = append(blocks, types.NewBlockWithHeader(header))
-		if len(blocks) < blocksBatchSize && blockNum != s.lastQueuedBlock {
+		if len(blocks) < blocksBatchSize && blockNum != end {
 			continue
 		}
 
