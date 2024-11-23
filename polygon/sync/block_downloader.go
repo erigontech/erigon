@@ -283,10 +283,14 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 			continue
 		}
 
-		d.logger.Debug(syncLogPrefix("fetched blocks"), "start", blocks[0].NumberU64(), "end", blocks[len(blocks)-1].NumberU64(),
+		d.logger.Debug(
+			syncLogPrefix("fetched blocks"),
+			"start", blocks[0].NumberU64(),
+			"end", blocks[len(blocks)-1].NumberU64(),
 			"blocks", len(blocks),
 			"duration", time.Since(batchFetchStartTime),
-			"blks/sec", float64(len(blocks))/math.Max(time.Since(batchFetchStartTime).Seconds(), 0.0001))
+			"blks/sec", float64(len(blocks))/math.Max(time.Since(batchFetchStartTime).Seconds(), 0.0001),
+		)
 
 		batchFetchStartTime = time.Now() // reset for next time
 
