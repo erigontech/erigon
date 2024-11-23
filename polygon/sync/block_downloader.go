@@ -138,7 +138,7 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 
 	waypoints = d.limitWaypoints(waypoints)
 
-	d.logger.Debug(
+	d.logger.Info(
 		syncLogPrefix("downloading blocks using waypoints"),
 		"waypointsLen", len(waypoints),
 		"start", waypoints[0].StartBlock().Uint64(),
@@ -295,9 +295,10 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 		batchFetchStartTime = time.Now() // reset for next time
 
 		d.logger.Info(
-			syncLogPrefix(fmt.Sprintf("inserting %d fetched blocks", len(blocks))),
+			syncLogPrefix("inserting fetched blocks"),
 			"start", blocks[0].NumberU64(),
 			"end", blocks[len(blocks)-1].NumberU64(),
+			"blocks", len(blocks),
 		)
 		if err := d.store.InsertBlocks(ctx, blocks); err != nil {
 			return nil, err
