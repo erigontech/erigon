@@ -315,34 +315,34 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, er
 	}
 	var m uint64
 	var cmp int
-	var offset uint64
+	// var offset uint64
 	for l < r {
 		m = (l + r) >> 1
-		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
-			m = l
-			_ = offset
+		// if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
+		// 	m = l
+		// 	_ = offset
 
-			err = b.dataLookupFuncCursor(m, g, cur)
-			if cmp = bytes.Compare(cur.key, seekKey); cmp < 0 {
-				l++
-				continue
-			}
-			return cur, cmp == 0, err
+		// 	err = b.dataLookupFuncCursor(m, g, cur)
+		// 	if cmp = bytes.Compare(cur.key, seekKey); cmp < 0 {
+		// 		l++
+		// 		continue
+		// 	}
+		// 	return cur, cmp == 0, err
 
-			// if offset == 0 {
-			// 	offset = b.offt.Get(m)
-			// 	g.Reset(offset)
-			// }
-			// key, _ = g.Next(key[:0])
-			// if cmp = bytes.Compare(key, seekKey); cmp < 0 {
-			// 	g.Skip()
-			// 	l++
-			// 	continue
-			// }
-			// v, _ := g.Next(nil)
-			// cur := b.cursorGetter(key, v, m, g)
-			// return cur, cmp == 0, err
-		}
+		// if offset == 0 {
+		// 	offset = b.offt.Get(m)
+		// 	g.Reset(offset)
+		// }
+		// key, _ = g.Next(key[:0])
+		// if cmp = bytes.Compare(key, seekKey); cmp < 0 {
+		// 	g.Skip()
+		// 	l++
+		// 	continue
+		// }
+		// v, _ := g.Next(nil)
+		// cur := b.cursorGetter(key, v, m, g)
+		// return cur, cmp == 0, err
+		// }
 
 		cmp, cur.key, err = b.keyCmpFunc(seekKey, m, g, cur.key[:0])
 		if err != nil {
