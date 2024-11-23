@@ -1224,7 +1224,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	// On compared it with `Enum=false and LessFalsePositives=false` on ethmainnet (on small machine with cloud drives and `sync && sudo sysctl vm.drop_caches=3`):
 	//  - `du -hsc *.efi` changed from `24Gb` to `17Gb` (better)
 	//  - `vmtouch of .ef` changed from `152M/426G` to `787M/426G` (worse)
-	//  - `vmtouch of .ef` changed from `1G/23G` to `633M/16G` (better)
+	//  - `vmtouch of .efi` changed from `1G/23G` to `633M/16G` (better)
 	//  - speed on hot data - not changed. speed on cold data changed from `7min` to `10min`  (worse)
 	//  - but most important i see `.ef` files became "randomly warm":
 	// From:
