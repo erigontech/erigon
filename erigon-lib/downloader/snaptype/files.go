@@ -133,8 +133,23 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
-	parts := strings.Split(onlyName, "-")
+	parts := strings.SplitN(onlyName, "-", 4)
 	res = FileInfo{Path: filepath.Join(dir, fileName), name: fileName, Ext: ext}
+
+	if len(parts) < 2 {
+		return res, ok
+	}
+
+	res.Type, ok = ParseFileType(parts[len(parts)-1])
+
+	if !ok {
+		res.Type, ok = ParseFileType(parts[0])
+	}
+
+	if ok {
+		res.TypeString = res.Type.Name()
+	}
+
 	if len(parts) < 4 {
 		return res, ok
 	}
@@ -155,12 +170,7 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		return
 	}
 	res.To = to * 1_000
-	res.TypeString = parts[3]
 
-	res.Type, ok = ParseFileType(parts[3])
-	if !ok {
-		return res, ok
-	}
 	return res, ok
 }
 

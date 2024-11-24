@@ -224,6 +224,12 @@ func RegisterType(enum Enum, name string, versions Versions, rangeExtractor Rang
 	registeredTypes[enum] = t
 	namedTypes[strings.ToLower(name)] = t
 
+	for _, index := range indexes {
+		if _, ok := namedTypes[strings.ToLower(index.Name)]; !ok {
+			namedTypes[strings.ToLower(index.Name)] = t
+		}
+	}
+
 	return t
 }
 
@@ -349,10 +355,10 @@ type Enums struct {
 }
 
 const MinCoreEnum = 1
-const MinBorEnum = 4
-const MinCaplinEnum = 8
+const MinBorEnum = 5
+const MinCaplinEnum = 9
 
-const MaxEnum = 11
+const MaxEnum = 12
 
 var CaplinEnums = struct {
 	Enums

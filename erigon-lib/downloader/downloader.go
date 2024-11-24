@@ -841,7 +841,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 					if t.Info() == nil {
 						ts, ok, err := d.webseeds.DownloadAndSaveTorrentFile(d.ctx, t.Name())
 						if ok && err == nil {
-							fmt.Println("ML")
 							_, _, err = addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 							if err != nil {
 								d.logger.Warn("[snapshots] addTorrentFile from webseed", "err", err)
@@ -849,7 +848,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 					}
-					fmt.Println("AWS 2", urls)
 					t.AddWebSeeds(urls)
 				}
 			}
@@ -2531,7 +2529,6 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	fmt.Println("NSF")
 	_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
@@ -2578,7 +2575,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if err != nil {
 		return err
 	}
-	fmt.Println("AML0")
 	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
 		return err
@@ -2600,7 +2596,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 
 			ts, ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
 			if ok && err == nil {
-				fmt.Println("AML1")
 				_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
 				if err != nil {
 					return
@@ -2624,7 +2619,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 
 		urls, ok := d.webseeds.ByFileName(t.Name())
 		if ok {
-			fmt.Println("AWS 3", urls)
 			t.AddWebSeeds(urls)
 		}
 	}(t)
