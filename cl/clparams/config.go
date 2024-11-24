@@ -885,6 +885,7 @@ func holeskyConfig() BeaconChainConfig {
 
 func gnosisConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
+	cfg.PresetBase = "gnosis"
 	cfg.MinGenesisTime = 1638968400
 	cfg.MinGenesisActiveValidatorCount = 4096
 	cfg.GenesisDelay = 6000
@@ -913,6 +914,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
+	cfg.MaxBlobsPerBlock = 2
+	cfg.MinEpochsForBlobsSidecarsRequest = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
@@ -920,6 +923,7 @@ func gnosisConfig() BeaconChainConfig {
 
 func chiadoConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
+	cfg.PresetBase = "gnosis"
 	cfg.MinGenesisTime = 1665396000
 	cfg.MinGenesisActiveValidatorCount = 6000
 	cfg.GenesisDelay = 300
@@ -944,6 +948,10 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.MaxWithdrawalsPerPayload = 8
+	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
+	cfg.MaxBlobsPerBlock = 2
+	cfg.MinEpochsForBlobsSidecarsRequest = 16384
 	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
@@ -1056,19 +1064,19 @@ func GetConfigsByNetwork(net NetworkType) (*NetworkConfig, *BeaconChainConfig) {
 
 func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, NetworkType, error) {
 	switch net {
-	case networkname.MainnetChainName:
+	case networkname.Mainnet:
 		networkCfg, beaconCfg := GetConfigsByNetwork(MainnetNetwork)
 		return networkCfg, beaconCfg, MainnetNetwork, nil
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
 		return networkCfg, beaconCfg, SepoliaNetwork, nil
-	case networkname.GnosisChainName:
+	case networkname.Gnosis:
 		networkCfg, beaconCfg := GetConfigsByNetwork(GnosisNetwork)
 		return networkCfg, beaconCfg, GnosisNetwork, nil
-	case networkname.ChiadoChainName:
+	case networkname.Chiado:
 		networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
 		return networkCfg, beaconCfg, ChiadoNetwork, nil
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
 		return networkCfg, beaconCfg, HoleskyNetwork, nil
 	default:
@@ -1134,8 +1142,8 @@ func EmbeddedSupported(id uint64) bool {
 	return id == 1 ||
 		id == 17000 ||
 		id == 11155111 ||
-		id == 100 // ||
-	//id == 10200
+		id == 100 ||
+		id == 10200
 }
 
 // Subset of supported networks where embedded CL is stable enough
@@ -1148,6 +1156,7 @@ func SupportBackfilling(networkId uint64) bool {
 	return networkId == uint64(MainnetNetwork) ||
 		networkId == uint64(SepoliaNetwork) ||
 		networkId == uint64(GnosisNetwork) ||
+		networkId == uint64(ChiadoNetwork) ||
 		networkId == uint64(HoleskyNetwork)
 }
 

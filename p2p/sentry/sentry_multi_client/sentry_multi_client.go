@@ -78,8 +78,8 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[direct.ETH66][eth.GetBlockBodiesMsg],
-		eth.ToProto[direct.ETH66][eth.GetReceiptsMsg],
+		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
+		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -94,7 +94,7 @@ func (cs *MultiClient) RecvUploadHeadersMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[direct.ETH66][eth.GetBlockHeadersMsg],
+		eth.ToProto[direct.ETH67][eth.GetBlockHeadersMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -109,10 +109,10 @@ func (cs *MultiClient) RecvMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[direct.ETH66][eth.BlockHeadersMsg],
-		eth.ToProto[direct.ETH66][eth.BlockBodiesMsg],
-		eth.ToProto[direct.ETH66][eth.NewBlockHashesMsg],
-		eth.ToProto[direct.ETH66][eth.NewBlockMsg],
+		eth.ToProto[direct.ETH67][eth.BlockHeadersMsg],
+		eth.ToProto[direct.ETH67][eth.BlockBodiesMsg],
+		eth.ToProto[direct.ETH67][eth.NewBlockHashesMsg],
+		eth.ToProto[direct.ETH67][eth.NewBlockMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -470,12 +470,12 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
-	txs, uncles, withdrawals, requests := request.BlockRawBodiesPacket.Unpack()
-	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 && len(requests) == 0 {
+	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
+	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
 		// No point processing empty response
 		return nil
 	}
-	cs.Bd.DeliverBodies(txs, uncles, withdrawals, requests, uint64(len(inreq.Data)), sentry.ConvertH512ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(txs, uncles, withdrawals, uint64(len(inreq.Data)), sentry.ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 

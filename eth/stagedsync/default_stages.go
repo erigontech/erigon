@@ -137,7 +137,7 @@ func DefaultStages(ctx context.Context,
 				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx)
+				return PruneExecutionStage(p, tx, exec, ctx, logger)
 			},
 		},
 		//{
@@ -241,7 +241,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx)
+				return PruneExecutionStage(p, tx, exec, ctx, logger)
 			},
 		},
 
@@ -358,7 +358,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx)
+				return PruneExecutionStage(p, tx, exec, ctx, logger)
 			},
 		},
 		{
@@ -509,7 +509,7 @@ func PolygonSyncStages(
 				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx)
+				return PruneExecutionStage(p, tx, exec, ctx, logger)
 			},
 		},
 		{
@@ -537,6 +537,30 @@ func PolygonSyncStages(
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneFinish(p, tx, finish, ctx)
+			},
+		},
+	}
+}
+
+func DownloadSyncStages(
+	ctx context.Context,
+	snapshots SnapshotsCfg,
+) []*Stage {
+	return []*Stage{
+		{
+			ID:          stages.Snapshots,
+			Description: "Download snapshots",
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				if badBlockUnwind {
+					return nil
+				}
+				return SpawnStageSnapshots(s, ctx, txc.Tx, snapshots, logger)
+			},
+			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+				return nil
+			},
+			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return nil
 			},
 		},
 	}

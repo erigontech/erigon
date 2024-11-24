@@ -25,28 +25,18 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
-//go:generate mockgen -typed=true -source=./entity_fetcher.go -destination=./entity_fetcher_mock.go -package=heimdall
-type entityFetcher[TEntity Entity] interface {
-	FetchEntityIdRange(ctx context.Context) (ClosedRange, error)
-	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error)
-	FetchAllEntities(ctx context.Context) ([]TEntity, error)
-}
-
-type entityFetcherImpl[TEntity Entity] struct {
-	name string
-
-	fetchFirstEntityId func(ctx context.Context) (int64, error)
-	fetchLastEntityId  func(ctx context.Context) (int64, error)
-	fetchEntity        func(ctx context.Context, id int64) (TEntity, error)
-
+type EntityFetcher[TEntity Entity] struct {
+	name                      string
+	fetchFirstEntityId        func(ctx context.Context) (int64, error)
+	fetchLastEntityId         func(ctx context.Context) (int64, error)
+	fetchEntity               func(ctx context.Context, id int64) (TEntity, error)
 	fetchEntitiesPage         func(ctx context.Context, page uint64, limit uint64) ([]TEntity, error)
 	fetchEntitiesPageLimit    uint64
 	fetchAllEntitiesIdxOffset uint64
-
-	logger log.Logger
+	logger                    log.Logger
 }
 
-func newEntityFetcher[TEntity Entity](
+func NewEntityFetcher[TEntity Entity](
 	name string,
 	fetchFirstEntityId func(ctx context.Context) (int64, error),
 	fetchLastEntityId func(ctx context.Context) (int64, error),
@@ -55,23 +45,20 @@ func newEntityFetcher[TEntity Entity](
 	fetchEntitiesPageLimit uint64,
 	fetchAllEntitiesIdxOffset uint64,
 	logger log.Logger,
-) entityFetcher[TEntity] {
-	return &entityFetcherImpl[TEntity]{
-		name: name,
-
-		fetchFirstEntityId: fetchFirstEntityId,
-		fetchLastEntityId:  fetchLastEntityId,
-		fetchEntity:        fetchEntity,
-
+) *EntityFetcher[TEntity] {
+	return &EntityFetcher[TEntity]{
+		name:                      name,
+		fetchFirstEntityId:        fetchFirstEntityId,
+		fetchLastEntityId:         fetchLastEntityId,
+		fetchEntity:               fetchEntity,
 		fetchEntitiesPage:         fetchEntitiesPage,
 		fetchEntitiesPageLimit:    fetchEntitiesPageLimit,
 		fetchAllEntitiesIdxOffset: fetchAllEntitiesIdxOffset,
-
-		logger: logger,
+		logger:                    logger,
 	}
 }
 
-func (f *entityFetcherImpl[TEntity]) FetchEntityIdRange(ctx context.Context) (ClosedRange, error) {
+func (f *EntityFetcher[TEntity]) FetchEntityIdRange(ctx context.Context) (ClosedRange, error) {
 	first, err := f.fetchFirstEntityId(ctx)
 	if err != nil {
 		return ClosedRange{}, err
@@ -91,7 +78,7 @@ func (f *entityFetcherImpl[TEntity]) FetchEntityIdRange(ctx context.Context) (Cl
 
 const entityFetcherBatchFetchThreshold = 100
 
-func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
+func (f *EntityFetcher[TEntity]) FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
 	count := idRange.Len()
 
 	if (count > entityFetcherBatchFetchThreshold) && (f.fetchEntitiesPage != nil) {
@@ -106,9 +93,24 @@ func (f *entityFetcherImpl[TEntity]) FetchEntitiesRange(ctx context.Context, idR
 	return f.FetchEntitiesRangeSequentially(ctx, idRange)
 }
 
-func (f *entityFetcherImpl[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
+func (f *EntityFetcher[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
+
 	entities := make([]TEntity, 0, idRange.Len())
 	for id := idRange.Start; id <= idRange.End; id++ {
+		select {
+		case <-progressLogTicker.C:
+			f.logger.Info(
+				heimdallLogPrefix(f.name+" fetch entities sequentially periodic progress"),
+				"current", id,
+				"start", idRange.Start,
+				"end", idRange.End,
+			)
+		default:
+			// carry-on
+		}
+
 		entity, err := f.fetchEntity(ctx, int64(id))
 		if err != nil {
 			// return fetched entities up to this point in case of transient errors
@@ -121,7 +123,7 @@ func (f *entityFetcherImpl[TEntity]) FetchEntitiesRangeSequentially(ctx context.
 	return entities, nil
 }
 
-func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntity, error) {
+func (f *EntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntity, error) {
 	// TODO: once heimdall API is fixed to return sorted items in pages we can only fetch
 	//
 	//	the new pages after lastStoredCheckpointId using the checkpoints/list paging API
@@ -143,14 +145,12 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 			break
 		}
 
-		for _, entity := range entitiesPage {
-			entities = append(entities, entity)
-		}
+		entities = append(entities, entitiesPage...)
 
 		select {
 		case <-progressLogTicker.C:
-			f.logger.Debug(
-				heimdallLogPrefix(f.name+" progress"),
+			f.logger.Info(
+				heimdallLogPrefix(f.name+" fetch all entities periodic progress"),
 				"page", page,
 				"len", len(entities),
 			)
@@ -170,10 +170,17 @@ func (f *entityFetcherImpl[TEntity]) FetchAllEntities(ctx context.Context) ([]TE
 	}
 
 	f.logger.Debug(
-		heimdallLogPrefix(f.name+" done"),
+		heimdallLogPrefix(f.name+" fetch all entities done"),
 		"len", len(entities),
 		"duration", time.Since(fetchStartTime),
 	)
 
 	return entities, nil
+}
+
+//go:generate mockgen -typed=true -source=./entity_fetcher.go -destination=./entity_fetcher_mock.go -package=heimdall
+type entityFetcher[TEntity Entity] interface {
+	FetchEntityIdRange(ctx context.Context) (ClosedRange, error)
+	FetchEntitiesRange(ctx context.Context, idRange ClosedRange) ([]TEntity, error)
+	FetchAllEntities(ctx context.Context) ([]TEntity, error)
 }

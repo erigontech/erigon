@@ -16,6 +16,7 @@ on:
       docker_build_tag:
         required: true
         type: string
+  workflow_dispatch:
 
 jobs:
   assertoor_test:
@@ -67,7 +68,7 @@ jobs:
           BUILD_VERSION: ${{ inputs.docker_build_tag }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
         run: |
-          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/main/.github/workflows/kurtosis/config.yaml
+          wget -O kurtosis_config_with_p.yaml https://raw.githubusercontent.com/erigontech/erigon/main/.github/workflows/kurtosis/config.properties
           sed 's#<<ERIGON_IMAGE_PLACEHOLDER>>#${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}#g' kurtosis_config_with_p.yaml > kurtosis_config.yaml
 
       - name: Run Kurtosis + assertoor tests

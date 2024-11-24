@@ -30,7 +30,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon-lib/common"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -39,9 +39,9 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 
 	peerId1 := PeerIdFromUint64(1)
 	requestId1 := uint64(1234)
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId1.H512(),
 			Data:   newMockBlockHeadersPacket66Bytes(t, requestId1, 2),
 		},
@@ -54,9 +54,9 @@ func TestTrackingFetcherFetchHeadersUpdatesPeerTracker(t *testing.T) {
 		wantRequestAmount:           2,
 	}
 	requestId2 := uint64(1235)
-	mockInboundMessages2 := []*sentry.InboundMessage{
+	mockInboundMessages2 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId1.H512(),
 			// peer returns 0 headers for requestId2 - peer does not have this header range
 			Data: newMockBlockHeadersPacket66Bytes(t, requestId2, 0),
@@ -115,9 +115,9 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 	requestId3 := uint64(1236)
 	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
-	mockInboundMessages1 := []*sentry.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId1.H512(),
 			Data:   newMockBlockBodiesPacketBytes(t, requestId1),
 		},
@@ -128,9 +128,9 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 		wantRequestPeerId:           peerId1,
 		wantRequestHashes:           mockHashes,
 	}
-	mockInboundMessages2 := []*sentry.InboundMessage{
+	mockInboundMessages2 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId2.H512(),
 			Data:   nil, // response timeout
 		},
@@ -142,9 +142,9 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 		wantRequestHashes:           mockHashes,
 		responseDelay:               600 * time.Millisecond,
 	}
-	mockInboundMessages3 := []*sentry.InboundMessage{
+	mockInboundMessages3 := []*sentryproto.InboundMessage{
 		{
-			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId2.H512(),
 			Data:   nil, // response timeout
 		},
@@ -189,7 +189,7 @@ func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator)
 	sentryClient := fetcherTest.sentryClient
 	messageListener := fetcherTest.messageListener
 	peerTracker := NewPeerTracker(logger, sentryClient, messageListener, WithPreservingPeerShuffle)
-	trackingFetcher := newTrackingFetcher(fetcherTest.fetcher, peerTracker)
+	trackingFetcher := NewTrackingFetcher(fetcherTest.fetcher, peerTracker)
 	return &trackingFetcherTest{
 		fetcherTest:     fetcherTest,
 		trackingFetcher: trackingFetcher,
@@ -199,8 +199,8 @@ func newTrackingFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator)
 
 type trackingFetcherTest struct {
 	*fetcherTest
-	trackingFetcher        *trackingFetcher
-	peerTracker            PeerTracker
+	trackingFetcher        *TrackingFetcher
+	peerTracker            *PeerTracker
 	peerTrackerInitialised atomic.Bool
 }
 
@@ -244,29 +244,29 @@ func (tft *trackingFetcherTest) mockSentryStreams(mocks ...requestResponseMock) 
 
 	tft.sentryClient.EXPECT().
 		Peers(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentry.PeersReply, error) {
+		DoAndReturn(func(context.Context, *emptypb.Empty, ...grpc.CallOption) (*sentryproto.PeersReply, error) {
 			tft.peerTrackerInitialised.Store(true)
-			return &sentry.PeersReply{}, nil
+			return &sentryproto.PeersReply{}, nil
 		}).
 		Times(1)
 }
 
 func (tft *trackingFetcherTest) simulateDefaultPeerEvents() {
-	tft.simulatePeerEvents([]*sentry.PeerEvent{
+	tft.simulatePeerEvents([]*sentryproto.PeerEvent{
 		{
-			EventId: sentry.PeerEvent_Connect,
+			EventId: sentryproto.PeerEvent_Connect,
 			PeerId:  PeerIdFromUint64(1).H512(),
 		},
 		{
-			EventId: sentry.PeerEvent_Connect,
+			EventId: sentryproto.PeerEvent_Connect,
 			PeerId:  PeerIdFromUint64(2).H512(),
 		},
 	})
 }
 
-func (tft *trackingFetcherTest) simulatePeerEvents(peerEvents []*sentry.PeerEvent) {
+func (tft *trackingFetcherTest) simulatePeerEvents(peerEvents []*sentryproto.PeerEvent) {
 	for _, peerEvent := range peerEvents {
-		tft.peerEvents <- &delayedMessage[*sentry.PeerEvent]{
+		tft.peerEvents <- &delayedMessage[*sentryproto.PeerEvent]{
 			message: peerEvent,
 		}
 	}

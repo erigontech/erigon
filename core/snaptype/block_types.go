@@ -31,25 +31,25 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/crypto/cryptopool"
 	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 func init() {
 	ethereumTypes := append(BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
 
-	snapcfg.RegisterKnownTypes(networkname.MainnetChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.SepoliaChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.GnosisChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.ChiadoChainName, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.HoleskyChainName, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Mainnet, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Sepolia, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Gnosis, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Chiado, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Holesky, ethereumTypes)
 }
 
 var Enums = struct {
@@ -245,9 +245,9 @@ var (
 
 				chainId, _ := uint256.FromBig(chainConfig.ChainID)
 
-				parseCtx := types2.NewTxParseContext(*chainId)
+				parseCtx := txpool.NewTxnParseContext(*chainId)
 				parseCtx.WithSender(false)
-				slot := types2.TxSlot{}
+				slot := txpool.TxnSlot{}
 				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
 				defer d.EnableReadAhead().DisableReadAhead()

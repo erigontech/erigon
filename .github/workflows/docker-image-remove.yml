@@ -1,9 +1,9 @@
 name: Remove docker image
-run-name: Request to remove ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.docker_image_tag }} by @${{ github.actor }}
+run-name: Request to remove erigontech/erigon:${{ inputs.docker_image_tag }} by @${{ github.actor }}
 
 env:
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
-  API_URL: "https://hub.docker.com/v2/repositories/erigontech/erigon/tags/"
+  API_URL: "https://hub.docker.com/v2/repositories/erigontech/erigon/tags"
 
 on:
   push:

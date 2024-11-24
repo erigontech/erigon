@@ -41,7 +41,7 @@ type ForkChoiceStorageReader interface {
 	FinalizedSlot() uint64
 	LowestAvailableSlot() uint64
 	GetEth1Hash(eth2Root common.Hash) common.Hash
-	GetHead() (common.Hash, uint64, error)
+	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	HighestSeen() uint64
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
@@ -54,7 +54,6 @@ type ForkChoiceStorageReader interface {
 		blockRoot libcommon.Hash,
 	) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
-	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	Slot() uint64
 	Time() uint64
 	Participation(epoch uint64) (*solid.ParticipationBitList, bool)

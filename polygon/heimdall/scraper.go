@@ -19,6 +19,7 @@ package heimdall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	commonerrors "github.com/erigontech/erigon-lib/common/errors"
@@ -29,7 +30,8 @@ import (
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
-type scraper[TEntity Entity] struct {
+type Scraper[TEntity Entity] struct {
+	name            string
 	store           EntityStore[TEntity]
 	fetcher         entityFetcher[TEntity]
 	pollDelay       time.Duration
@@ -39,14 +41,16 @@ type scraper[TEntity Entity] struct {
 	logger          log.Logger
 }
 
-func newScraper[TEntity Entity](
+func NewScraper[TEntity Entity](
+	name string,
 	store EntityStore[TEntity],
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,
 	transientErrors []error,
 	logger log.Logger,
-) *scraper[TEntity] {
-	return &scraper[TEntity]{
+) *Scraper[TEntity] {
+	return &Scraper[TEntity]{
+		name:            name,
 		store:           store,
 		fetcher:         fetcher,
 		pollDelay:       pollDelay,
@@ -57,16 +61,21 @@ func newScraper[TEntity Entity](
 	}
 }
 
-func (s *scraper[TEntity]) Run(ctx context.Context) error {
+func (s *Scraper[TEntity]) Run(ctx context.Context) error {
+	s.logger.Info(heimdallLogPrefix("running scraper component"), "name", s.name)
+
 	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {
 		return err
 	}
 
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
+
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := s.store.LastEntityId(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("can't get last id: %w", err)
 		}
 
 		idRange, err := s.fetcher.FetchEntityIdRange(ctx)
@@ -76,7 +85,7 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 				continue
 			}
 
-			return err
+			return fmt.Errorf("can't fetch id range: %w", err)
 		}
 
 		if hasLastKnownId {
@@ -104,27 +113,44 @@ func (s *scraper[TEntity]) Run(ctx context.Context) error {
 						"err", err,
 					)
 				} else {
-					return err
+					return fmt.Errorf("can't fetch entity range: %d-%d: %w", idRange.Start, idRange.End, err)
 				}
 			}
 
 			for i, entity := range entities {
 				if err = s.store.PutEntity(ctx, idRange.Start+uint64(i), entity); err != nil {
-					return err
+					return fmt.Errorf("can't put entity: %d: %w", idRange.Start+uint64(i), err)
 				}
 			}
 
 			s.observers.NotifySync(entities) // NotifySync preserves order of events
+
+			select {
+			case <-progressLogTicker.C:
+				if len(entities) > 0 {
+					s.logger.Info(
+						heimdallLogPrefix("scraper periodic progress"),
+						"name", s.name,
+						"rangeStart", idRange.Start,
+						"rangeEnd", idRange.End,
+						"priorLastKnownId", lastKnownId,
+						"newLast", entities[len(entities)-1].RawId(),
+					)
+				}
+			default:
+				// carry on
+			}
 		}
 	}
+
 	return ctx.Err()
 }
 
-func (s *scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncommon.UnregisterFunc {
+func (s *Scraper[TEntity]) RegisterObserver(observer func([]TEntity)) polygoncommon.UnregisterFunc {
 	return s.observers.Register(observer)
 }
 
-func (s *scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, error) {
+func (s *Scraper[TEntity]) Synchronize(ctx context.Context) (TEntity, error) {
 	if err := s.syncEvent.Wait(ctx); err != nil {
 		return generics.Zero[TEntity](), err
 	}

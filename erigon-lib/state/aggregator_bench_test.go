@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
@@ -44,9 +43,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 	b.Helper()
 	logger := log.New()
 	dirs := datadir.New(b.TempDir())
-	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	b.Cleanup(db.Close)
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(b, err)
@@ -109,7 +106,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 }
 
 func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
-	rnd := rand.New(rand.NewSource(int64(seed)))
+	rnd := newRnd(seed)
 	keys := make(chan []byte, 1)
 	go func() {
 		for {
@@ -127,10 +124,10 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 }
 
 func Benchmark_BtreeIndex_Allocation(b *testing.B) {
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	for i := 0; i < b.N; i++ {
 		now := time.Now()
-		count := rnd.Intn(1000000000)
+		count := rnd.IntN(1000000000)
 		bt := newBtAlloc(uint64(count), uint64(1<<12), true, nil, nil)
 		bt.traverseDfs()
 		fmt.Printf("alloc %v\n", time.Since(now))
@@ -139,7 +136,7 @@ func Benchmark_BtreeIndex_Allocation(b *testing.B) {
 
 func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 	defer os.RemoveAll(tmp)
 	dataPath := "../../data/storage.256-288.kv"
@@ -159,7 +156,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	getter := seg.NewReader(kv.MakeGetter(), comp)
 
 	for i := 0; i < b.N; i++ {
-		p := rnd.Intn(len(keys))
+		p := rnd.IntN(len(keys))
 		cur, err := bt.Seek(getter, keys[p])
 		require.NoErrorf(b, err, "i=%d", i)
 		require.EqualValues(b, keys[p], cur.Key())
@@ -193,12 +190,12 @@ func Benchmark_BTree_Seek(b *testing.B) {
 	M := uint64(1024)
 	compress := seg.CompressNone
 	kv, bt, keys, _ := benchInitBtreeIndex(b, M, compress)
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			p := rnd.Intn(len(keys))
+			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
@@ -209,7 +206,7 @@ func Benchmark_BTree_Seek(b *testing.B) {
 
 	b.Run("seek_then_next", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			p := rnd.Intn(len(keys))
+			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
 			require.NoError(b, err)
@@ -249,7 +246,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 		b.Skip("requires existing KV index file at ../../data/storage.kv")
 	}
 
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 
 	defer os.RemoveAll(tmp)
@@ -269,7 +266,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	require.NoError(b, err)
 
 	for i := 0; i < b.N; i++ {
-		p := rnd.Intn(len(keys))
+		p := rnd.IntN(len(keys))
 
 		offset, _ := idxr.Lookup(keys[p])
 		getter.Reset(offset)

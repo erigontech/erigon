@@ -105,7 +105,7 @@ func (s *suite) runStep(ctx context.Context, scenario *Scenario, step *Step, pre
 		earlyReturn := prevStepErr != nil || sr.Err == ErrUndefined
 
 		// Run after step handlers.
-		rctx, sr.Err = s.runAfterStepHooks(ctx, step, sr.Status, sr.Err)
+		rctx, sr.Err = s.runAfterStepHooks(ctx, step, sr.Status, sr.Err) //nolint
 
 		// Trigger after scenario on failing or last step to attach possible hook error to step.
 		if isLast || (sr.Status != Skipped && sr.Status != Undefined && sr.Err != nil) {
@@ -303,7 +303,7 @@ func (s *suite) runScenario(scenario *Scenario) (sr *ScenarioResult, err error) 
 	if s.testingT != nil {
 		// Running scenario as a subtest.
 		s.testingT.Run(scenario.Name, func(t *testing.T) {
-			ctx, sr.StepResults, err = s.runSteps(ctx, scenario, scenario.Steps)
+			ctx, sr.StepResults, err = s.runSteps(ctx, scenario, scenario.Steps) //nolint
 			if s.shouldFail(err) {
 				t.Error(err)
 			}
@@ -346,7 +346,7 @@ func (s *suite) runBeforeStepHooks(ctx context.Context, step *Step, err error) (
 		}
 
 		if hctx != nil {
-			ctx = hctx
+			ctx = hctx //nolint
 		}
 	}
 
@@ -371,7 +371,7 @@ func (s *suite) runAfterStepHooks(ctx context.Context, step *Step, status StepSt
 		}
 
 		if hctx != nil {
-			ctx = hctx
+			ctx = hctx //nolint
 		}
 	}
 
@@ -393,7 +393,7 @@ func (s *suite) runBeforeScenarioHooks(ctx context.Context, scenario *Scenario) 
 		}
 
 		if hctx != nil {
-			ctx = hctx
+			ctx = hctx //nolint
 		}
 	}
 
@@ -431,7 +431,7 @@ func (s *suite) runAfterScenarioHooks(ctx context.Context, scenario *Scenario, l
 		}
 
 		if hctx != nil {
-			ctx = hctx
+			ctx = hctx //nolint
 		}
 	}
 

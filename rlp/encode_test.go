@@ -28,9 +28,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/erigontech/erigon/common/math"
-
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon-lib/common/math"
 )
 
 type testEncoder struct {

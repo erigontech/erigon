@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"sync"
 
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -63,18 +65,19 @@ type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
 
-	blockReader     freezeblocks.BeaconSnapshotReader
-	indiciesDB      kv.RwDB
-	netConfig       *clparams.NetworkConfig
-	ethClock        eth_clock.EthereumClock
-	beaconChainCfg  *clparams.BeaconChainConfig
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	operationsPool  pool.OperationsPool
-	syncedData      synced_data.SyncedData
-	stateReader     *historical_states_reader.HistoricalStatesReader
-	sentinel        sentinel.SentinelClient
-	blobStoage      blob_storage.BlobStorage
-	caplinSnapshots *freezeblocks.CaplinSnapshots
+	blockReader          freezeblocks.BeaconSnapshotReader
+	indiciesDB           kv.RwDB
+	netConfig            *clparams.NetworkConfig
+	ethClock             eth_clock.EthereumClock
+	beaconChainCfg       *clparams.BeaconChainConfig
+	forkchoiceStore      forkchoice.ForkChoiceStorage
+	operationsPool       pool.OperationsPool
+	syncedData           synced_data.SyncedData
+	stateReader          *historical_states_reader.HistoricalStatesReader
+	sentinel             sentinel.SentinelClient
+	blobStoage           blob_storage.BlobStorage
+	caplinSnapshots      *freezeblocks.CaplinSnapshots
+	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
 	version string // Node's version
 
@@ -89,13 +92,14 @@ type ApiHandler struct {
 	logger    log.Logger
 
 	// Validator data structures
-	validatorParams     *validator_params.ValidatorParams
-	blobBundles         *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
-	engine              execution_client.ExecutionEngine
-	syncMessagePool     sync_contribution_pool.SyncContributionPool
-	committeeSub        *committee_subscription.CommitteeSubscribeMgmt
-	attestationProducer attestation_producer.AttestationDataProducer
-	aggregatePool       aggregation.AggregationPool
+	validatorParams                    *validator_params.ValidatorParams
+	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
+	engine                             execution_client.ExecutionEngine
+	syncMessagePool                    sync_contribution_pool.SyncContributionPool
+	committeeSub                       *committee_subscription.CommitteeSubscribeMgmt
+	attestationProducer                attestation_producer.AttestationDataProducer
+	slotWaitedForAttestationProduction *lru.Cache[uint64, struct{}]
+	aggregatePool                      aggregation.AggregationPool
 
 	// services
 	syncCommitteeMessagesService     services.SyncCommitteeMessagesService
@@ -107,6 +111,7 @@ type ApiHandler struct {
 	proposerSlashingService          services.ProposerSlashingService
 	builderClient                    builder.BuilderClient
 	validatorsMonitor                monitor.ValidatorMonitor
+	enableMemoizedHeadState          bool
 }
 
 func NewApiHandler(
@@ -141,24 +146,32 @@ func NewApiHandler(
 	proposerSlashingService services.ProposerSlashingService,
 	builderClient builder.BuilderClient,
 	validatorMonitor monitor.ValidatorMonitor,
+	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
+	enableMemoizedHeadState bool,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
 		panic(err)
 	}
+	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
+	if err != nil {
+		panic(err)
+	}
 	return &ApiHandler{
-		logger:          logger,
-		validatorParams: validatorParams,
-		o:               sync.Once{},
-		netConfig:       netConfig,
-		ethClock:        ethClock,
-		beaconChainCfg:  beaconChainConfig,
-		indiciesDB:      indiciesDB,
-		forkchoiceStore: forkchoiceStore,
-		operationsPool:  operationsPool,
-		blockReader:     rcsn,
-		syncedData:      syncedData,
-		stateReader:     stateReader,
+		logger:                             logger,
+		validatorParams:                    validatorParams,
+		o:                                  sync.Once{},
+		netConfig:                          netConfig,
+		ethClock:                           ethClock,
+		beaconChainCfg:                     beaconChainConfig,
+		indiciesDB:                         indiciesDB,
+		forkchoiceStore:                    forkchoiceStore,
+		operationsPool:                     operationsPool,
+		blockReader:                        rcsn,
+		syncedData:                         syncedData,
+		stateReader:                        stateReader,
+		caplinStateSnapshots:               caplinStateSnapshots,
+		slotWaitedForAttestationProduction: slotWaitedForAttestationProduction,
 		randaoMixesPool: sync.Pool{New: func() interface{} {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
@@ -183,6 +196,7 @@ func NewApiHandler(
 		proposerSlashingService:          proposerSlashingService,
 		builderClient:                    builderClient,
 		validatorsMonitor:                validatorMonitor,
+		enableMemoizedHeadState:          enableMemoizedHeadState,
 	}
 }
 
@@ -351,4 +365,18 @@ func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.init()
 	})
 	a.mux.ServeHTTP(w, r)
+}
+
+func (a *ApiHandler) getHead() (common.Hash, uint64, int, error) {
+	if a.enableMemoizedHeadState {
+		if a.syncedData.Syncing() {
+			return common.Hash{}, 0, http.StatusServiceUnavailable, errors.New("beacon node is syncing")
+		}
+		return a.syncedData.HeadRoot(), a.syncedData.HeadSlot(), 0, nil
+	}
+	blockRoot, blockSlot, err := a.forkchoiceStore.GetHead(nil)
+	if err != nil {
+		return common.Hash{}, 0, http.StatusInternalServerError, err
+	}
+	return blockRoot, blockSlot, 0, nil
 }

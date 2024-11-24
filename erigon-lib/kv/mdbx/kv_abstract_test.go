@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -163,7 +164,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	}
 	ctx := context.Background()
 	logger := log.New()
-	writeDB := mdbx.NewMDBX(logger).InMem("").MustOpen()
+	writeDB := mdbx.New(kv.ChainDB, logger).InMem("").MustOpen()
 	defer writeDB.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -206,7 +207,7 @@ func TestRemoteKvRange(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	logger := log.New()
-	ctx, writeDB := context.Background(), memdb.NewTestDB(t)
+	ctx, writeDB := context.Background(), memdb.NewTestDB(t, kv.ChainDB)
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
 		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
@@ -271,7 +272,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Range(kv.AccountChangeSet, from, to)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Asc, kv.Unlim)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err = it.Next()
@@ -292,7 +293,7 @@ func TestRemoteKvRange(t *testing.T) {
 	// Limit
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeAscend(kv.AccountChangeSet, from, to, 2)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Asc, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
@@ -312,7 +313,7 @@ func TestRemoteKvRange(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeDescend(kv.AccountChangeSet, from, to, 2)
+			it, err := tx.Range(kv.AccountChangeSet, from, to, order.Desc, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
@@ -335,8 +336,8 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	t.Helper()
 	ctx := context.Background()
 	writeDBs = []kv.RwDB{
-		mdbx.NewMDBX(logger).InMem("").WithTableCfg(f).MustOpen(),
-		mdbx.NewMDBX(logger).InMem("").WithTableCfg(f).MustOpen(), // for remote db
+		mdbx.New(kv.ChainDB, logger).InMem("").WithTableCfg(f).MustOpen(),
+		mdbx.New(kv.ChainDB, logger).InMem("").WithTableCfg(f).MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)

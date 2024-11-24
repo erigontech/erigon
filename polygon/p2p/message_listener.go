@@ -40,31 +40,13 @@ type DecodedInboundMessage[TPacket any] struct {
 
 type UnregisterFunc = polygoncommon.UnregisterFunc
 
-type MessageListener interface {
-	Run(ctx context.Context) error
-	RegisterNewBlockObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc
-	RegisterNewBlockHashesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc
-	RegisterBlockHeadersObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc
-	RegisterBlockBodiesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc
-	RegisterPeerEventObserver(observer polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc
-}
-
 func NewMessageListener(
 	logger log.Logger,
 	sentryClient sentryproto.SentryClient,
 	statusDataFactory sentry.StatusDataFactory,
-	peerPenalizer PeerPenalizer,
-) MessageListener {
-	return newMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
-}
-
-func newMessageListener(
-	logger log.Logger,
-	sentryClient sentryproto.SentryClient,
-	statusDataFactory sentry.StatusDataFactory,
-	peerPenalizer PeerPenalizer,
-) *messageListener {
-	return &messageListener{
+	peerPenalizer *PeerPenalizer,
+) *MessageListener {
+	return &MessageListener{
 		logger:                  logger,
 		sentryClient:            sentryClient,
 		statusDataFactory:       statusDataFactory,
@@ -77,11 +59,11 @@ func newMessageListener(
 	}
 }
 
-type messageListener struct {
+type MessageListener struct {
 	logger                  log.Logger
 	sentryClient            sentryproto.SentryClient
 	statusDataFactory       sentry.StatusDataFactory
-	peerPenalizer           PeerPenalizer
+	peerPenalizer           *PeerPenalizer
 	newBlockObservers       *polygoncommon.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
 	newBlockHashesObservers *polygoncommon.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
 	blockHeadersObservers   *polygoncommon.Observers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
@@ -90,8 +72,8 @@ type messageListener struct {
 	stopWg                  sync.WaitGroup
 }
 
-func (ml *messageListener) Run(ctx context.Context) error {
-	ml.logger.Debug(messageListenerLogPrefix("running p2p message listener component"))
+func (ml *MessageListener) Run(ctx context.Context) error {
+	ml.logger.Info(messageListenerLogPrefix("running p2p message listener component"))
 
 	backgroundLoops := []func(ctx context.Context){
 		ml.listenInboundMessages,
@@ -116,27 +98,27 @@ func (ml *messageListener) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (ml *messageListener) RegisterNewBlockObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
+func (ml *MessageListener) RegisterNewBlockObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
 	return ml.newBlockObservers.Register(observer)
 }
 
-func (ml *messageListener) RegisterNewBlockHashesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
+func (ml *MessageListener) RegisterNewBlockHashesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
 	return ml.newBlockHashesObservers.Register(observer)
 }
 
-func (ml *messageListener) RegisterBlockHeadersObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc {
+func (ml *MessageListener) RegisterBlockHeadersObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc {
 	return ml.blockHeadersObservers.Register(observer)
 }
 
-func (ml *messageListener) RegisterBlockBodiesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
+func (ml *MessageListener) RegisterBlockBodiesObserver(observer polygoncommon.Observer[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
 	return ml.blockBodiesObservers.Register(observer)
 }
 
-func (ml *messageListener) RegisterPeerEventObserver(observer polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
+func (ml *MessageListener) RegisterPeerEventObserver(observer polygoncommon.Observer[*sentryproto.PeerEvent]) UnregisterFunc {
 	return ml.peerEventObservers.Register(observer)
 }
 
-func (ml *messageListener) listenInboundMessages(ctx context.Context) {
+func (ml *MessageListener) listenInboundMessages(ctx context.Context) {
 	streamFactory := func(ctx context.Context, sentryClient sentryproto.SentryClient) (grpc.ClientStream, error) {
 		messagesRequest := sentryproto.MessagesRequest{
 			Ids: []sentryproto.MessageId{
@@ -166,7 +148,7 @@ func (ml *messageListener) listenInboundMessages(ctx context.Context) {
 	})
 }
 
-func (ml *messageListener) listenPeerEvents(ctx context.Context) {
+func (ml *MessageListener) listenPeerEvents(ctx context.Context) {
 	streamFactory := func(ctx context.Context, sentryClient sentryproto.SentryClient) (grpc.ClientStream, error) {
 		return sentryClient.PeerEvents(ctx, &sentryproto.PeerEventsRequest{}, grpc.WaitForReady(true))
 	}
@@ -174,7 +156,7 @@ func (ml *messageListener) listenPeerEvents(ctx context.Context) {
 	streamMessages(ctx, ml, "PeerEvents", streamFactory, ml.notifyPeerEventObservers)
 }
 
-func (ml *messageListener) notifyPeerEventObservers(peerEvent *sentryproto.PeerEvent) error {
+func (ml *MessageListener) notifyPeerEventObservers(peerEvent *sentryproto.PeerEvent) error {
 	// wait on all observers to finish processing the peer event before notifying them
 	// with subsequent events in order to preserve the ordering of the sentry messages
 	ml.peerEventObservers.NotifySync(peerEvent)
@@ -183,7 +165,7 @@ func (ml *messageListener) notifyPeerEventObservers(peerEvent *sentryproto.PeerE
 
 func streamMessages[TMessage any](
 	ctx context.Context,
-	ml *messageListener,
+	ml *MessageListener,
 	name string,
 	streamFactory sentry.MessageStreamFactory,
 	handler func(event *TMessage) error,
@@ -210,7 +192,7 @@ func streamMessages[TMessage any](
 func notifyInboundMessageObservers[TPacket any](
 	ctx context.Context,
 	logger log.Logger,
-	peerPenalizer PeerPenalizer,
+	peerPenalizer *PeerPenalizer,
 	observers *polygoncommon.Observers[*DecodedInboundMessage[TPacket]],
 	message *sentryproto.InboundMessage,
 ) error {

@@ -69,7 +69,6 @@ func NewCommitteeSubscribeManagement(
 	netConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
 	sentinel sentinel.SentinelClient,
-	state *state.CachingBeaconState,
 	aggregationPool aggregation.AggregationPool,
 	syncedData *synced_data.SyncedDataManager,
 ) *CommitteeSubscribeMgmt {
@@ -79,7 +78,6 @@ func NewCommitteeSubscribeManagement(
 		netConfig:       netConfig,
 		ethClock:        ethClock,
 		sentinel:        sentinel,
-		state:           state,
 		aggregationPool: aggregationPool,
 		syncedData:      syncedData,
 		validatorSubs:   make(map[uint64]*validatorSub),
@@ -99,13 +97,12 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		cIndex = p.CommitteeIndex
 	)
 
-	headState := c.syncedData.HeadState()
-	if headState == nil {
+	if c.syncedData.Syncing() {
 		return errors.New("head state not available")
 	}
 
-	log.Debug("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
-	commiteePerSlot := headState.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
+	log.Trace("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
+	commiteePerSlot := c.syncedData.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
 	c.validatorSubsMutex.Lock()

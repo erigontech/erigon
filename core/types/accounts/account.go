@@ -25,9 +25,8 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
-
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -61,16 +60,6 @@ func NewAccount() Account {
 		Root:     emptyRoot,
 		CodeHash: emptyCodeHash,
 	}
-}
-
-func bytesToUint64(buf []byte) (x uint64) {
-	for i, b := range buf {
-		x = x<<8 + uint64(b)
-		if i == 7 {
-			return
-		}
-	}
-	return
 }
 
 func (a *Account) EncodingLengthForStorage() uint {
@@ -476,7 +465,7 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 				enc[pos+1:], decodeLength)
 		}
 
-		a.Nonce = bytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		a.Nonce = libcommon.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
 		pos += decodeLength + 1
 	}
 
@@ -502,7 +491,7 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 				enc[pos+1:], decodeLength)
 		}
 
-		a.Incarnation = bytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		a.Incarnation = libcommon.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
 		pos += decodeLength + 1
 	}
 
@@ -569,7 +558,7 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 				enc[pos+1:], decodeLength)
 		}
 
-		incarnation := bytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		incarnation := libcommon.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
 		return incarnation, nil
 	}
 
@@ -629,13 +618,6 @@ func ConvertV3toV2(v []byte) ([]byte, error) {
 	a.EncodeForStorage(v)
 	return v, nil
 }
-func ConvertV2toV3(v []byte) ([]byte, error) {
-	var a Account
-	if err := a.DecodeForStorage(v); err != nil {
-		return nil, fmt.Errorf("ConvertV3toV2(%x): %w", v, err)
-	}
-	return SerialiseV3(&a), nil
-}
 
 // DeserialiseV3 - method to deserialize accounts in Erigon22 history
 func DeserialiseV3(a *Account, enc []byte) error {
@@ -647,7 +629,7 @@ func DeserialiseV3(a *Account, enc []byte) error {
 	nonceBytes := int(enc[pos])
 	pos++
 	if nonceBytes > 0 {
-		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
+		a.Nonce = libcommon.BytesToUint64(enc[pos : pos+nonceBytes])
 		pos += nonceBytes
 	}
 	balanceBytes := int(enc[pos])
@@ -668,7 +650,7 @@ func DeserialiseV3(a *Account, enc []byte) error {
 	incBytes := int(enc[pos])
 	pos++
 	if incBytes > 0 {
-		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
+		a.Incarnation = libcommon.BytesToUint64(enc[pos : pos+incBytes])
 	}
 	return nil
 }

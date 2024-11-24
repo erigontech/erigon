@@ -75,7 +75,10 @@ type Config struct {
 	TargetBlobGasPerBlock      *uint64 `json:"targetBlobGasPerBlock,omitempty"`
 	BlobGasPriceUpdateFraction *uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
 
-	// (Optional) governance contract where EIP-1559 fees will be sent to that otherwise would be burnt since the London fork
+	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
+	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
+	// Starting from Prague, EIP-4844 fees might be collected as well:
+	// see https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra.
 	BurntContract map[string]common.Address `json:"burntContract,omitempty"`
 
 	// (Optional) deposit contract of PoS chains
@@ -100,6 +103,7 @@ type BorConfig interface {
 	IsAhmedabad(number uint64) bool
 	StateReceiverContractAddress() common.Address
 	CalculateSprintNumber(number uint64) uint64
+	CalculateSprintLength(number uint64) uint64
 }
 
 func (c *Config) String() string {

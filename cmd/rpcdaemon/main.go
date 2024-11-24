@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 
-	_ "github.com/erigontech/erigon/core/snaptype"        //hack
-	_ "github.com/erigontech/erigon/polygon/bor/snaptype" //hack
+	_ "github.com/erigontech/erigon/core/snaptype"    //hack
+	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
 func main() {
@@ -39,7 +39,7 @@ func main() {
 	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		logger := debug.SetupCobra(cmd, "sentry")
+		logger := debug.SetupCobra(cmd, "rpcdaemon")
 		db, backend, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err := cli.RemoteServices(ctx, cfg, logger, rootCancel)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {

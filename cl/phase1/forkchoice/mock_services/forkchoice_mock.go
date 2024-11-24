@@ -168,7 +168,7 @@ func (f *ForkChoiceStorageMock) GetEth1Hash(eth2Root common.Hash) common.Hash {
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetHead() (common.Hash, uint64, error) {
+func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
@@ -210,13 +210,6 @@ func (f *ForkChoiceStorageMock) GetSyncCommittees(
 ) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
 	return f.GetSyncCommitteesVal[period][0], f.GetSyncCommitteesVal[period][1], f.GetSyncCommitteesVal[period][0] != nil &&
 		f.GetSyncCommitteesVal[period][1] != nil
-}
-
-func (f *ForkChoiceStorageMock) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	if f.GetBeaconCommitteeMock != nil {
-		return f.GetBeaconCommitteeMock(slot, committeeIndex)
-	}
-	return []uint64{1, 2, 3, 4, 5, 6, 7, 8}, nil
 }
 
 func (f *ForkChoiceStorageMock) Slot() uint64 {

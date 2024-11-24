@@ -18,6 +18,7 @@ package shards
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -161,6 +162,11 @@ type Notifications struct {
 	Accumulator          *Accumulator // StateAccumulator
 	StateChangesConsumer StateChangeConsumer
 	RecentLogs           *RecentLogs
+	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+}
+
+func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
+	n.LastNewBlockSeen.Store(blockNum)
 }
 
 func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
@@ -205,6 +211,10 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 		var blockNum uint64
 		reply := make([]*remote.SubscribeLogsReply, 0, len(receipts))
 		for _, receipt := range receipts {
+			if receipt == nil {
+				continue
+			}
+
 			blockNum = receipt.BlockNumber.Uint64()
 			//txIndex++
 			//// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
@@ -243,11 +253,28 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var blockNum uint64
+	var ok bool
 	// find non-nil receipt
 	for _, receipt := range receipts {
 		if receipt != nil {
-			r.receipts[receipts[0].BlockNumber.Uint64()] = receipts
-			return
+			ok = true
+			blockNum = receipt.BlockNumber.Uint64()
+			break
+		}
+	}
+	if !ok {
+		return
+	}
+	r.receipts[blockNum] = receipts
+
+	//enforce `limit`: drop all items older than `limit` blocks
+	if len(r.receipts) <= int(r.limit) {
+		return
+	}
+	for bn := range r.receipts {
+		if bn+r.limit < blockNum {
+			delete(r.receipts, bn)
 		}
 	}
 }

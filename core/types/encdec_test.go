@@ -28,8 +28,6 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -45,8 +43,8 @@ func NewTRand() *TRand {
 	return &TRand{rnd: rand.New(src)}
 }
 
-func (tr *TRand) RandIntInRange(min, max int) int {
-	return (tr.rnd.Intn(max-min) + min)
+func (tr *TRand) RandIntInRange(_min, _max int) int {
+	return (tr.rnd.Intn(_max-_min) + _min)
 }
 
 func (tr *TRand) RandUint64() *uint64 {
@@ -87,41 +85,6 @@ func (tr *TRand) RandWithdrawal() *Withdrawal {
 	}
 }
 
-func (tr *TRand) RandWithdrawalRequest() *WithdrawalRequest {
-	return &WithdrawalRequest{
-		RequestData: [WithdrawalRequestDataLen]byte(tr.RandBytes(WithdrawalRequestDataLen)),
-	}
-}
-
-func (tr *TRand) RandDepositRequest() *DepositRequest {
-	return &DepositRequest{
-		Pubkey:                [48]byte(tr.RandBytes(48)),
-		WithdrawalCredentials: tr.RandHash(),
-		Amount:                *tr.RandUint64(),
-		Signature:             [96]byte(tr.RandBytes(96)),
-		Index:                 *tr.RandUint64(),
-	}
-}
-
-func (tr *TRand) RandConsolidationRequest() *ConsolidationRequest {
-	return &ConsolidationRequest{
-		RequestData: [ConsolidationRequestDataLen]byte(tr.RandBytes(ConsolidationRequestDataLen)),
-	}
-}
-
-func (tr *TRand) RandRequest() Request {
-	switch tr.rnd.Intn(3) {
-	case 0:
-		return tr.RandDepositRequest()
-	case 1:
-		return tr.RandWithdrawalRequest()
-	case 2:
-		return tr.RandConsolidationRequest()
-	default:
-		return nil // unreachable code
-	}
-}
-
 func (tr *TRand) RandHeader() *Header {
 	wHash := tr.RandHash()
 	pHash := tr.RandHash()
@@ -149,20 +112,20 @@ func (tr *TRand) RandHeader() *Header {
 	}
 }
 
-func (tr *TRand) RandAccessTuple() types2.AccessTuple {
+func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
 	sk := make([]libcommon.Hash, n)
 	for i := 0; i < n; i++ {
 		sk[i] = tr.RandHash()
 	}
-	return types2.AccessTuple{
+	return AccessTuple{
 		Address:     tr.RandAddress(),
 		StorageKeys: sk,
 	}
 }
 
-func (tr *TRand) RandAccessList(size int) types2.AccessList {
-	al := make([]types2.AccessTuple, size)
+func (tr *TRand) RandAccessList(size int) AccessList {
+	al := make([]AccessTuple, size)
 	for i := 0; i < size; i++ {
 		al[i] = tr.RandAccessTuple()
 	}
@@ -173,10 +136,10 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	auths := make([]Authorization, size)
 	for i := 0; i < size; i++ {
 		auths[i] = Authorization{
-			ChainID: uint256.NewInt(*tr.RandUint64()),
+			ChainID: *tr.RandUint64(),
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
-			V:       *uint256.NewInt(*tr.RandUint64()),
+			YParity: uint8(*tr.RandUint64()),
 			R:       *uint256.NewInt(*tr.RandUint64()),
 			S:       *uint256.NewInt(*tr.RandUint64()),
 		}
@@ -290,20 +253,11 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 	return withdrawals
 }
 
-func (tr *TRand) RandRequests(size int) []Request {
-	requests := make([]Request, size)
-	for i := 0; i < size; i++ {
-		requests[i] = tr.RandRequest()
-	}
-	return requests
-}
-
 func (tr *TRand) RandRawBody() *RawBody {
 	return &RawBody{
 		Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-		Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -330,7 +284,6 @@ func (tr *TRand) RandBody() *Body {
 		Transactions: tr.RandTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
-		Requests:     tr.RandRequests(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -401,57 +354,6 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.S", s1, s2)
 }
 
-func compareDeposits(t *testing.T, a, b *DepositRequest) {
-	check(t, "Deposit.Pubkey", a.Pubkey, b.Pubkey)
-	check(t, "Deposit.WithdrawalCredentials", a.WithdrawalCredentials, b.WithdrawalCredentials)
-	check(t, "Deposit.Amount", a.Amount, b.Amount)
-	check(t, "Deposit.Signature", a.Signature, b.Signature)
-	check(t, "Deposit.Index", a.Index, b.Index)
-}
-
-func compareWithdrawalRequests(t *testing.T, a, b *WithdrawalRequest) {
-	check(t, "WithdrawalRequest.Amount", a.RequestData, b.RequestData)
-}
-
-func compareConsolidationRequests(t *testing.T, a, b *ConsolidationRequest) {
-	check(t, "ConsolidationRequest.RequestData", a.RequestData, b.RequestData)
-}
-
-func checkRequests(t *testing.T, a, b Request) {
-	if a.RequestType() != b.RequestType() {
-		t.Errorf("request type mismatch: request-a: %v, request-b: %v", a.RequestType(), b.RequestType())
-	}
-
-	switch a.RequestType() {
-	case DepositRequestType:
-		a, aok := a.(*DepositRequest)
-		b, bok := b.(*DepositRequest)
-		if aok && bok {
-			compareDeposits(t, a, b)
-		} else {
-			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
-		}
-	case WithdrawalRequestType:
-		a, aok := a.(*WithdrawalRequest)
-		b, bok := b.(*WithdrawalRequest)
-		if aok && bok {
-			compareWithdrawalRequests(t, a, b)
-		} else {
-			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
-		}
-	case ConsolidationRequestType:
-		a, aok := a.(*ConsolidationRequest)
-		b, bok := b.(*ConsolidationRequest)
-		if aok && bok {
-			compareConsolidationRequests(t, a, b)
-		} else {
-			t.Errorf("type assertion failed: %v %v %v %v", a.RequestType(), aok, b.RequestType(), bok)
-		}
-	default:
-		t.Errorf("unknown request type: %v", a.RequestType())
-	}
-}
-
 func compareHeaders(t *testing.T, a, b []*Header) error {
 	auLen, buLen := len(a), len(b)
 	if auLen != buLen {
@@ -476,18 +378,6 @@ func compareWithdrawals(t *testing.T, a, b []*Withdrawal) error {
 	return nil
 }
 
-func compareRequests(t *testing.T, a, b Requests) error {
-	arLen, brLen := len(a), len(b)
-	if arLen != brLen {
-		return fmt.Errorf("requests len mismatch: expected: %v, got: %v", arLen, brLen)
-	}
-
-	for i := 0; i < arLen; i++ {
-		checkRequests(t, a[i], b[i])
-	}
-	return nil
-}
-
 func compareRawBodies(t *testing.T, a, b *RawBody) error {
 
 	atLen, btLen := len(a.Transactions), len(b.Transactions)
@@ -503,8 +393,6 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 
 	compareHeaders(t, a.Uncles, b.Uncles)
 	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-	compareRequests(t, a.Requests, b.Requests)
-
 	return nil
 }
 
@@ -521,7 +409,6 @@ func compareBodies(t *testing.T, a, b *Body) error {
 
 	compareHeaders(t, a.Uncles, b.Uncles)
 	compareWithdrawals(t, a.Withdrawals, b.Withdrawals)
-	compareRequests(t, a.Requests, b.Requests)
 
 	return nil
 }
@@ -570,60 +457,5 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		if err := compareBodies(t, enc, dec); err != nil {
 			t.Errorf("error: compareBodies: %v", err)
 		}
-	}
-}
-
-func TestDepositEncodeDecode(t *testing.T) {
-	tr := NewTRand()
-	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
-		a := tr.RandDepositRequest()
-		buf.Reset()
-		if err := a.EncodeRLP(&buf); err != nil {
-			t.Errorf("error: deposit.EncodeRLP(): %v", err)
-		}
-		b := new(DepositRequest)
-		if err := b.DecodeRLP(buf.Bytes()); err != nil {
-			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
-		}
-		compareDeposits(t, a, b)
-	}
-}
-
-func TestConsolidationReqsEncodeDecode(t *testing.T) {
-	tr := NewTRand()
-	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
-		a := tr.RandConsolidationRequest()
-		buf.Reset()
-		if err := a.EncodeRLP(&buf); err != nil {
-			t.Errorf("error: deposit.EncodeRLP(): %v", err)
-		}
-		b := new(ConsolidationRequest)
-		if err := b.DecodeRLP(buf.Bytes()); err != nil {
-			t.Errorf("error: Deposit.DecodeRLP(): %v", err)
-		}
-		compareConsolidationRequests(t, a, b)
-	}
-}
-
-func TestWithdrawalReqsEncodeDecode(t *testing.T) {
-	wx1 := WithdrawalRequest{
-		RequestData: [WithdrawalRequestDataLen]byte(hexutility.MustDecodeHex("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001fefefefefefefefe")),
-	}
-	wx2 := WithdrawalRequest{
-		RequestData: [WithdrawalRequestDataLen]byte(hexutility.MustDecodeHex("0x8a0a19589531694250d570040a0c4b74576919b8000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001fefefefefefefefe")),
-	}
-
-	var wx3, wx4 WithdrawalRequest
-	var buf1, buf2 bytes.Buffer
-	wx1.EncodeRLP(&buf1)
-	wx2.EncodeRLP(&buf2)
-
-	wx3.DecodeRLP(buf1.Bytes())
-	wx4.DecodeRLP(buf2.Bytes())
-
-	if wx1.RequestData != wx3.RequestData || wx2.RequestData != wx4.RequestData {
-		t.Errorf("error: incorrect encode/decode for WithdrawalRequest")
 	}
 }

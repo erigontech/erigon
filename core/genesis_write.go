@@ -33,26 +33,24 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -248,7 +246,7 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdbv3.TxNums.ForcedWrite(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
+	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
 		return nil, nil, err
 	}
 
@@ -372,7 +370,7 @@ func GnosisGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.GnosisChainConfig,
 		Timestamp:  0,
-		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/gnosis.json"),
@@ -383,7 +381,7 @@ func ChiadoGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.ChiadoChainConfig,
 		Timestamp:  0,
-		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/chiado.json"),
@@ -445,9 +443,11 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		BaseFee:       g.BaseFee,
 		BlobGasUsed:   g.BlobGasUsed,
 		ExcessBlobGas: g.ExcessBlobGas,
-		AuRaStep:      g.AuRaStep,
-		AuRaSeal:      g.AuRaSeal,
-		RequestsRoot:  g.RequestsRoot,
+		RequestsHash:  g.RequestsHash,
+	}
+	if g.AuRaSeal != nil && len(g.AuRaSeal.AuthorityRound.Signature) > 0 {
+		head.AuRaSeal = g.AuRaSeal.AuthorityRound.Signature
+		head.AuRaStep = uint64(g.AuRaSeal.AuthorityRound.Step)
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -486,15 +486,12 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 	}
 
-	var requests types.Requests
 	if g.Config != nil && g.Config.IsPrague(g.Timestamp) {
-		requests = types.Requests{}
-
 		// TODO @somnathb1 - if later iterations and/or tests don't need this from genesis.json, remove the following
-		if g.RequestsRoot != nil {
-			head.RequestsRoot = g.RequestsRoot
+		if g.RequestsHash != nil {
+			head.RequestsHash = g.RequestsHash
 		} else {
-			head.RequestsRoot = &types.EmptyRootHash
+			head.RequestsHash = &types.EmptyRootHash
 		}
 	}
 
@@ -506,7 +503,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	// we may run inside write tx, can't open 2nd write tx in same goroutine
 	wg.Go(func() error {
 		// some users creaing > 1Gb custome genesis by `erigon init`
-		genesisTmpDB := mdbx.NewMDBX(logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
 		agg, err := state2.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, genesisTmpDB, logger)
@@ -596,7 +593,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 
 	head.Root = root
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals, requests), statedb, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
 }
 
 func sortedAllocKeys(m types.GenesisAlloc) []string {
@@ -627,21 +624,21 @@ func readPrealloc(filename string) types.GenesisAlloc {
 
 func GenesisBlockByChainName(chain string) *types.Genesis {
 	switch chain {
-	case networkname.MainnetChainName:
+	case networkname.Mainnet:
 		return MainnetGenesisBlock()
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		return HoleskyGenesisBlock()
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		return SepoliaGenesisBlock()
-	case networkname.AmoyChainName:
+	case networkname.Amoy:
 		return AmoyGenesisBlock()
-	case networkname.BorMainnetChainName:
+	case networkname.BorMainnet:
 		return BorMainnetGenesisBlock()
-	case networkname.BorDevnetChainName:
+	case networkname.BorDevnet:
 		return BorDevnetGenesisBlock()
-	case networkname.GnosisChainName:
+	case networkname.Gnosis:
 		return GnosisGenesisBlock()
-	case networkname.ChiadoChainName:
+	case networkname.Chiado:
 		return ChiadoGenesisBlock()
 	case networkname.Test:
 		return TestGenesisBlock()

@@ -25,11 +25,11 @@ import (
 	"encoding/binary"
 	"time"
 
-	"github.com/erigontech/erigon/common/mclock"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/p2p/enode"
-
 	"github.com/hashicorp/golang-lru/v2/simplelru"
+
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 const handshakeTimeout = time.Second

@@ -126,7 +126,7 @@ AccountsHistory and StorageHistory - indices designed to serve next 2 type of re
 1. what is smallest block number >= X where account A changed
 2. get last shard of A - to append there new block numbers
 
-Task 1. is part of "get historical state" operation (see `core/state:GetAsOf`):
+Task 1. is part of "get historical state" operation (see `core/state:DomainGetAsOf`):
 If `db.seekInFiles(A+bigEndian(X))` returns non-last shard -
 
 	then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
@@ -484,7 +484,6 @@ var (
 	PlainStateVersion = []byte("PlainStateVersion")
 
 	HighestFinalizedKey = []byte("HighestFinalized")
-	LastNewBlockSeen    = []byte("LastNewBlockSeen") // last seen block hash
 
 	StatesProcessingKey          = []byte("StatesProcessing")
 	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
@@ -506,8 +505,6 @@ var ChaindataTables = []string{
 	ConfigTable,
 	DatabaseInfo,
 	IncarnationMap,
-	CliqueSeparate,
-	CliqueLastSnapshot,
 	SyncStageProgress,
 	PlainState,
 	PlainContractCode,
@@ -643,7 +640,16 @@ var TxPoolTables = []string{
 	PoolTransaction,
 	PoolInfo,
 }
-var SentryTables = []string{}
+var SentryTables = []string{
+	Inodes,
+	NodeRecords,
+}
+var ConsensusTables = []string{
+	CliqueSeparate,
+	CliqueLastSnapshot,
+}
+var HeimdallTables = []string{}
+var PolygonBridgeTables = []string{}
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
@@ -762,8 +768,11 @@ var BorTablesCfg = TableCfg{
 
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
+var ConsensusTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
+var HeimdallTablesCfg = TableCfg{}
+var PolygonBridgeTablesCfg = TableCfg{}
 var ReconTablesCfg = TableCfg{
 	PlainStateD:    {Flags: DupSort},
 	CodeD:          {Flags: DupSort},
@@ -772,7 +781,7 @@ var ReconTablesCfg = TableCfg{
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case ChainDB:
+	case ChainDB, TemporaryDB, CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case TxPoolDB:
 		return TxpoolTablesCfg
@@ -782,6 +791,12 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return DownloaderTablesCfg
 	case DiagnosticsDB:
 		return DiagnosticsTablesCfg
+	case HeimdallDB:
+		return HeimdallTablesCfg
+	case PolygonBridgeDB:
+		return PolygonBridgeTablesCfg
+	case ConsensusDB:
+		return ConsensusTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
@@ -830,6 +845,13 @@ func reinit() {
 		}
 	}
 
+	for _, name := range ConsensusTables {
+		_, ok := ConsensusTablesCfg[name]
+		if !ok {
+			ConsensusTablesCfg[name] = TableCfgItem{}
+		}
+	}
+
 	for _, name := range DownloaderTables {
 		_, ok := DownloaderTablesCfg[name]
 		if !ok {
@@ -850,6 +872,19 @@ func reinit() {
 			DiagnosticsTablesCfg[name] = TableCfgItem{}
 		}
 	}
+
+	for _, name := range HeimdallTables {
+		_, ok := HeimdallTablesCfg[name]
+		if !ok {
+			HeimdallTablesCfg[name] = TableCfgItem{}
+		}
+	}
+	for _, name := range PolygonBridgeTables {
+		_, ok := PolygonBridgeTablesCfg[name]
+		if !ok {
+			PolygonBridgeTablesCfg[name] = TableCfgItem{}
+		}
+	}
 }
 
 // Temporal
@@ -861,14 +896,6 @@ const (
 	CommitmentDomain Domain = 3
 	ReceiptDomain    Domain = 4
 	DomainLen        Domain = 5
-)
-
-const (
-	AccountsHistory   History = "AccountsHistory"
-	StorageHistory    History = "StorageHistory"
-	CodeHistory       History = "CodeHistory"
-	CommitmentHistory History = "CommitmentHistory"
-	ReceiptHistory    History = "ReceiptHistory"
 )
 
 const (

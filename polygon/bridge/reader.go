@@ -1,3 +1,19 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package bridge
 
 import (
@@ -11,13 +27,11 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -28,23 +42,21 @@ type Reader struct {
 }
 
 type ReaderConfig struct {
-	Ctx                          context.Context
-	DataDir                      string
+	Store                        Store
 	Logger                       log.Logger
 	StateReceiverContractAddress libcommon.Address
 	RoTxLimit                    int64
 }
 
-func AssembleReader(config ReaderConfig) (*Reader, error) {
-	bridgeDB := polygoncommon.NewDatabase(config.DataDir, kv.PolygonBridgeDB, databaseTablesCfg, config.Logger, true /* accede */, config.RoTxLimit)
-	bridgeStore := NewStore(bridgeDB)
+func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
+	reader := NewReader(config.Store, config.Logger, config.StateReceiverContractAddress)
 
-	err := bridgeStore.Prepare(config.Ctx)
+	err := reader.Prepare(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewReader(bridgeStore, config.Logger, config.StateReceiverContractAddress), nil
+	return reader, nil
 }
 
 func NewReader(store Store, logger log.Logger, stateReceiverContractAddress libcommon.Address) *Reader {
@@ -55,11 +67,15 @@ func NewReader(store Store, logger log.Logger, stateReceiverContractAddress libc
 	}
 }
 
+func (r *Reader) Prepare(ctx context.Context) error {
+	return r.store.Prepare(ctx)
+}
+
 // Events returns all sync events at blockNum
 func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message, error) {
-	start, end, err := r.store.BlockEventIDsRange(ctx, blockNum)
+	start, end, err := r.store.BlockEventIdsRange(ctx, blockNum)
 	if err != nil {
-		if errors.Is(err, ErrEventIDRangeNotFound) {
+		if errors.Is(err, ErrEventIdRangeNotFound) {
 			return nil, nil
 		}
 
@@ -68,13 +84,14 @@ func (r *Reader) Events(ctx context.Context, blockNum uint64) ([]*types.Message,
 
 	eventsRaw := make([]*types.Message, 0, end-start+1)
 
-	// get events from DB
 	events, err := r.store.Events(ctx, start, end+1)
 	if err != nil {
 		return nil, err
 	}
 
-	r.logger.Debug(bridgeLogPrefix(fmt.Sprintf("got %v events for block %v", len(events), blockNum)))
+	if len(events) > 0 {
+		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "start", start, "end", end)
+	}
 
 	// convert to message
 	for _, event := range events {
@@ -148,9 +165,8 @@ func (r *RemoteReader) EventTxnLookup(ctx context.Context, borTxHash libcommon.H
 	return reply.BlockNumber, reply.Present, nil
 }
 
-// Close implements bridge.ReaderService. It's a noop as there is no attached store.
 func (r *RemoteReader) Close() {
-	return
+	// no-op as there is no attached store
 }
 
 func (r *RemoteReader) EnsureVersionCompatibility() bool {

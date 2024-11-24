@@ -84,13 +84,6 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: parseSegmentRequest error %w", err)
 	}
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: ReadTd error %w", err)
-	}
-	if td == nil {
-		return &execution.GetBodyResponse{Body: nil}, nil
-	}
 	body, err := e.getBody(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: getBody error %w", err)
@@ -118,13 +111,7 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	if errors.Is(err, errNotFound) {
 		return &execution.GetHeaderResponse{Header: nil}, nil
 	}
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: ReadTd error %w", err)
-	}
-	if td == nil {
-		return &execution.GetHeaderResponse{Header: nil}, nil
-	}
+
 	header, err := e.getHeader(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: getHeader error %w", err)
@@ -168,14 +155,12 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalTransactionsBinary error %w", err)
 		}
 
-		reqs, err := types.MarshalRequestsBinary(body.Requests)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalRequestsBinary error %w", err)
 		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
-			Requests:     reqs,
 		})
 	}
 
@@ -216,14 +201,12 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: MarshalTransactionsBinary error %w", err)
 		}
 
-		reqs, err := types.MarshalRequestsBinary(body.Requests)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalRequestsBinary error %w", err)
 		}
 		bodies = append(bodies, &execution.BlockBody{
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
-			Requests:     reqs,
 		})
 	}
 	// Remove trailing nil values as per spec

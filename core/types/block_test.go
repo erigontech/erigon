@@ -34,13 +34,11 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 )
@@ -193,7 +191,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	tx1, _ = tx1.WithSignature(*LatestSignerForChainID(nil), libcommon.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 
 	addr := libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
-	accesses := types2.AccessList{types2.AccessTuple{
+	accesses := AccessList{AccessTuple{
 		Address: addr,
 		StorageKeys: []libcommon.Hash{
 			{0},
@@ -282,7 +280,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 			},
 			GasPrice: ten,
 		},
-		AccessList: types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}},
+		AccessList: AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}},
 	}
 	sig2 := libcommon.Hex2Bytes("3dbacc8d0259f2508625e97fdfc57cd85fdd16e5821bc2c10bdd1a52649e8335476e10695b183a87b0aa292a7f4b78ef0c3fbe62aa2c42c84e1d9c3da159ef1401")
 	tx2, _ = tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), sig2)
@@ -363,7 +361,7 @@ func makeBenchBlock() *Block {
 			Extra:      []byte("benchmark uncle"),
 		}
 	}
-	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */, nil /*requests*/)
+	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */)
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {
@@ -512,7 +510,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		Amount:    5_000_000_000,
 	}
 
-	block := NewBlock(&header, nil, nil, nil, withdrawals, nil /*requests*/)
+	block := NewBlock(&header, nil, nil, nil, withdrawals)
 	_ = block.Size()
 
 	encoded, err := rlp.EncodeToBytes(block)
@@ -524,7 +522,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	assert.Equal(t, block, &decoded)
 
 	// Now test with empty withdrawals
-	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{}, nil /*requests*/)
+	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
 	_ = block2.Size()
 
 	encoded2, err := rlp.EncodeToBytes(block2)

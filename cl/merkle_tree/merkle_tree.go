@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"sync"
+	"sync/atomic"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
 )
 
 func ceil(num, divisor int) int {
@@ -28,6 +30,9 @@ type MerkleTree struct {
 
 	hashBuf [64]byte // buffer to store the input for hash(hash1, hash2)
 	limit   *uint64  // Optional limit for the number of leaves (this will enable limit-oriented hashing)
+
+	dirtyLeaves []atomic.Bool
+	mu          sync.RWMutex
 }
 
 var _ HashTreeEncodable = (*MerkleTree)(nil)
@@ -50,10 +55,17 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 		m.limit = new(uint64)
 		*m.limit = *limitOptional
 	}
+	m.dirtyLeaves = make([]atomic.Bool, leavesCount)
+}
+
+func (m *MerkleTree) MarkLeafAsDirty(idx int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	m.dirtyLeaves[idx].Store(true)
 }
 
 // MarkLeafAsDirty resets the leaf at the given index, so that it will be recomputed on the next call to ComputeRoot.
-func (m *MerkleTree) MarkLeafAsDirty(idx int) {
+func (m *MerkleTree) markLeafAsDirty(idx int) {
 	for i := 0; i < len(m.layers); i++ {
 		currDivisor := 1 << (i + 1) // i+1 because the first layer is not the leaf layer
 		layerSize := (m.leavesCount + (currDivisor - 1)) / currDivisor
@@ -75,6 +87,8 @@ func (m *MerkleTree) MarkLeafAsDirty(idx int) {
 }
 
 func (m *MerkleTree) AppendLeaf() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	/*
 		Step 1: Append a new dirty leaf
 		Step 2: Extend each layer with the new leaf when needed (1.5x extension)
@@ -83,6 +97,7 @@ func (m *MerkleTree) AppendLeaf() {
 		m.extendLayer(i)
 	}
 	m.leavesCount++
+	m.dirtyLeaves = append(m.dirtyLeaves, atomic.Bool{})
 }
 
 // extendLayer extends the layer with the given index by 1.5x, by marking the new leaf as dirty.
@@ -122,9 +137,17 @@ func (m *MerkleTree) extendLayer(layerIdx int) {
 
 // ComputeRoot computes the root of the Merkle tree.
 func (m *MerkleTree) ComputeRoot() libcommon.Hash {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var root libcommon.Hash
 	if len(m.layers) == 0 {
 		return ZeroHashes[0]
+	}
+	for idx := range m.dirtyLeaves {
+		if m.dirtyLeaves[idx].Load() {
+			m.markLeafAsDirty(idx)
+			m.dirtyLeaves[idx].Store(false)
+		}
 	}
 
 	if m.leavesCount == 0 {
@@ -180,14 +203,48 @@ func (m *MerkleTree) ComputeRoot() libcommon.Hash {
 }
 
 func (m *MerkleTree) CopyInto(other *MerkleTree) {
+	other.mu.Lock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	defer other.mu.Unlock()
 	other.computeLeaf = m.computeLeaf
-	other.layers = make([][]byte, len(m.layers))
+	if len(other.layers) > len(m.layers) {
+		// reset the internal layers
+		for i := len(m.layers); i < len(other.layers); i++ {
+			other.layers[i] = other.layers[i][:0]
+		}
+		other.layers = other.layers[:len(m.layers)]
+	}
+
+	if len(m.layers) > len(other.layers) {
+		for len(other.layers) != len(m.layers) {
+			idx := len(other.layers)
+			other.layers = append(other.layers, make([]byte, len(m.layers[idx]), (len(m.layers[idx])*3)/2))
+		}
+	}
+
 	for i := 0; i < len(m.layers); i++ {
-		other.layers[i] = make([]byte, len(m.layers[i]))
+		// If the destination buffer is too short, extend it
+		if len(m.layers[i]) > cap(other.layers[i]) {
+			other.layers[i] = make([]byte, len(m.layers[i]), (len(m.layers[i])*3)/2)
+		}
+		// Normalizr the destination length
+		other.layers[i] = other.layers[i][:len(m.layers[i])]
+
+		// Now that the 2 slices are of equal length we can do a simple memcopy
 		copy(other.layers[i], m.layers[i])
 	}
+
 	other.leavesCount = m.leavesCount
 	other.limit = m.limit
+	//other.dirtyLeaves = make([]atomic.Bool, len(m.dirtyLeaves))
+
+	for i := 0; i < len(m.dirtyLeaves); i++ {
+		if i >= len(other.dirtyLeaves) {
+			other.dirtyLeaves = append(other.dirtyLeaves, atomic.Bool{})
+		}
+		other.dirtyLeaves[i].Store(m.dirtyLeaves[i].Load())
+	}
 }
 
 func (m *MerkleTree) finishHashing(lastLayerIdx int, root []byte) {

@@ -174,7 +174,7 @@ func insertCloudflareHeaders(req *http.Request) {
 // It also tries to parse Retry-After response header when a http.StatusTooManyRequests
 // (HTTP Code 429) is found in the resp parameter. Hence it will return the number of
 // seconds the server states it may be ready to process more requests from this client.
-func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
+func calcBackoff(_min, _max time.Duration, attemptNum int, resp *http.Response) time.Duration {
 	if resp != nil {
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 			if s, ok := resp.Header["Retry-After"]; ok {
@@ -185,10 +185,10 @@ func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) ti
 		}
 	}
 
-	mult := math.Pow(2, float64(attemptNum)) * float64(min)
+	mult := math.Pow(2, float64(attemptNum)) * float64(_min)
 	sleep := time.Duration(mult)
-	if float64(sleep) != mult || sleep > max {
-		sleep = max
+	if float64(sleep) != mult || sleep > _max {
+		sleep = _max
 	}
 
 	return sleep
@@ -2657,14 +2657,21 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	var l4 []string
+	var l4, l5 []string
 	if all {
 		l4, err = seedableStateFilesBySubDir(dirs.Snap, "accessor", all)
 		if err != nil {
 			return nil, err
 		}
 	}
-	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
+	// check if dirs.SnapCaplin exists
+	if _, err := os.Stat(dirs.SnapCaplin); !os.IsNotExist(err) {
+		l5, err = seedableSegmentFiles(dirs.SnapCaplin, chainName, all)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
 	return files, nil
 }
 
@@ -2802,8 +2809,7 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
 func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool, logger log.Logger) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
-	dbCfg := mdbx.NewMDBX(log.New()).
-		Label(kv.DownloaderDB).
+	dbCfg := mdbx.New(kv.DownloaderDB, log.New()).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
