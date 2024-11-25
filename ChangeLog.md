@@ -18,6 +18,10 @@ ChangeLog
 - Erigon3 book: https://development.erigon-documentation-preview.pages.dev/
 
 ### Fixes:
+ 
+- `eth_syncing` works on Bor chains
+- support upper-bounds at: `eth_accRange` https://github.com/erigontech/erigon/pull/12609 , `erigon_getBalanceChangesInBlock` https://github.com/erigontech/erigon/pull/12642, `debug_getModifiedAccountsByNumber` https://github.com/erigontech/erigon/pull/12634
+- `eth_getLogs` fix `fee cap less than block` https://github.com/erigontech/erigon/pull/12640
 
 ### TODO
 
