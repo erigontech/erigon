@@ -481,7 +481,35 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
-	println("txnum", txNum, "txInd", txnIndex)
+
+	txNumMin, err := rawdbv3.TxNums.Min(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	println("txnum", txNum, "txInd", txnIndex, txNumMin+txnIndex)
+
+	//well, let's find amogus
+	println("truly blocknum is:", blockNum)
+	ok, blockNumFromTxNums, err := rawdbv3.TxNums.FindBlockNum(tx, txNumMin+txnIndex)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		println("not found in txnums")
+	} else {
+		println("found in txnums blocknum:", blockNumFromTxNums)
+	}
+	ok, blockNumFromFiles, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		println("not found in files")
+	} else {
+		println("found in files blocknum:", blockNumFromFiles)
+	}
+	//txNum = txNumMin + txnIndex
 	receipt, err := api.getReceipt(ctx, chainConfig, tx.(kv.TemporalTx), block, int(txnIndex), txNum, true)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %w", err)

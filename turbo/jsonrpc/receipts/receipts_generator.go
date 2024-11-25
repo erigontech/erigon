@@ -109,12 +109,12 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	receipt.CumulativeGasUsed = cumGasUsed
 	receipt.TransactionIndex = uint(index)
 
-	for i := range 20 {
-		cumGasUsed1, _, firstLogIndex1, err := rawtemporaldb.ReceiptAsOf(tx, txNum+uint64(i)-10)
+	for i := range 40 {
+		cumGasUsed1, _, firstLogIndex1, err := rawtemporaldb.ReceiptAsOf(tx, txNum+uint64(i)-20)
 		if err != nil {
 			return nil, err
 		}
-		println("cum gas used", cumGasUsed1, "first log index", firstLogIndex1, "txNum", txNum+uint64(i)-10)
+		println("cum gas used", cumGasUsed1, "first log index", firstLogIndex1, "txNum", txNum+uint64(i)-20)
 	}
 
 	for i := range receipt.Logs {
