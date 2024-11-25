@@ -60,6 +60,13 @@ func (a *ContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
 }
 
+// SignedContributionAndProofWithGossipData type represents SignedContributionAndProof with the gossip data where it's coming from.
+type SignedContributionAndProofWithGossipData struct {
+	SignedContributionAndProof *SignedContributionAndProof
+	GossipData                 *sentinel.GossipData
+	ImmediateVerification      bool
+}
+
 type SignedContributionAndProof struct {
 	Message   *ContributionAndProof `json:"message"`
 	Signature libcommon.Bytes96     `json:"signature"`

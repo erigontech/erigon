@@ -163,6 +163,12 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.OpenFolder(); err != nil {
 		return err
 	}
+	if a.stateSn != nil {
+		if err := a.stateSn.OpenFolder(); err != nil {
+			return err
+		}
+	}
+
 	defer logInterval.Stop()
 	if from != a.sn.BlocksAvailable() && a.sn.BlocksAvailable() != 0 {
 		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())

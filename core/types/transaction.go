@@ -36,8 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
-
+	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -76,7 +75,7 @@ type Transaction interface {
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
 	GetData() []byte
-	GetAccessList() types2.AccessList
+	GetAccessList() AccessList
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
 	EncodingSize() int
@@ -214,18 +213,30 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	return t, nil
 }
 
-// Remove everything but the payload body from the wrapper - this is not used, for reference only
-func UnwrapTxPlayloadRlp(blobTxRlp []byte) (retRlp []byte, err error) {
+// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
+// Doesn't change non-blob tx
+func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if blobTxRlp[0] != BlobTxType {
 		return blobTxRlp, nil
 	}
-	it, err := rlp.NewListIterator(blobTxRlp[1:])
+	dataposPrev, _, isList, err := rlp2.Prefix(blobTxRlp[1:], 0)
+	if err != nil || dataposPrev < 1 {
+		return nil, err
+	}
+	if !isList { // This is clearly not wrapped txn then
+		return blobTxRlp, nil
+	}
+
+	blobTxRlp = blobTxRlp[1:]
+	// Get to the wrapper list
+	datapos, datalen, err := rlp2.List(blobTxRlp, dataposPrev)
 	if err != nil {
 		return nil, err
 	}
-	it.Next()
-	retRlp = it.Value()
-	return
+	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // seekInFiles left an extra-bit
+	blobTxRlp[0] = 0x3
+	// Include the prefix part of the rlp
+	return blobTxRlp, nil
 }
 
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
@@ -344,58 +355,6 @@ func (s TxByNonce) Len() int           { return len(s) }
 func (s TxByNonce) Less(i, j int) bool { return s[i].GetNonce() < s[j].GetNonce() }
 func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-type TransactionsStream interface {
-	Empty() bool
-	Peek() Transaction
-	Shift()
-	Pop()
-}
-
-// TransactionsFixedOrder represents a set of transactions that can return
-// transactions in a profit-maximizing sorted order, while supporting removing
-// entire batches of transactions for non-executable accounts.
-type TransactionsFixedOrder struct {
-	Transactions
-}
-
-// NewTransactionsFixedOrder creates a transaction set that can retrieve
-// price sorted transactions in a nonce-honouring way.
-//
-// Note, the input map is reowned so the caller should not interact any more with
-// if after providing it to the constructor.
-func NewTransactionsFixedOrder(txs Transactions) *TransactionsFixedOrder {
-	return &TransactionsFixedOrder{txs}
-}
-
-func (t *TransactionsFixedOrder) Empty() bool {
-	if t == nil {
-		return true
-	}
-	return len(t.Transactions) == 0
-}
-
-// Peek returns the next transaction by price.
-func (t *TransactionsFixedOrder) Peek() Transaction {
-	if len(t.Transactions) == 0 {
-		return nil
-	}
-	return t.Transactions[0]
-}
-
-// Shift replaces the current best head with the next one from the same account.
-func (t *TransactionsFixedOrder) Shift() {
-	t.Transactions[0] = nil // avoid memory leak
-	t.Transactions = t.Transactions[1:]
-}
-
-// Pop removes the best transaction, *not* replacing it with the next one from
-// the same account. This should be used when a transaction cannot be executed
-// and hence all subsequent ones should be discarded from the same account.
-func (t *TransactionsFixedOrder) Pop() {
-	t.Transactions[0] = nil // avoid memory leak
-	t.Transactions = t.Transactions[1:]
-}
-
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
 	to               *libcommon.Address
@@ -408,7 +367,7 @@ type Message struct {
 	tip              uint256.Int
 	maxFeePerBlobGas uint256.Int
 	data             []byte
-	accessList       types2.AccessList
+	accessList       AccessList
 	checkNonce       bool
 	isFree           bool
 	blobHashes       []libcommon.Hash
@@ -416,7 +375,7 @@ type Message struct {
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
-	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool,
+	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	isFree bool, maxFeePerBlobGas *uint256.Int,
 ) Message {
 	m := Message{
@@ -454,7 +413,7 @@ func (m Message) Value() *uint256.Int             { return &m.amount }
 func (m Message) Gas() uint64                     { return m.gasLimit }
 func (m Message) Nonce() uint64                   { return m.nonce }
 func (m Message) Data() []byte                    { return m.data }
-func (m Message) AccessList() types2.AccessList   { return m.accessList }
+func (m Message) AccessList() AccessList          { return m.accessList }
 func (m Message) Authorizations() []Authorization { return m.authorizations }
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations

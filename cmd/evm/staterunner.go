@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv"
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
 
@@ -133,11 +134,9 @@ func aggregateResultsFromStateTests(
 	//this DB is shared. means:
 	// - faster sequential tests: don't need create/delete db
 	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
-	_db := mdbx.NewMDBX(log.New()).
+	_db := mdbx.New(kv.ChainDB, log.New()).
 		Path(dirs.Chaindata).
-		Flags(func(u uint) uint {
-			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap
-		}).
+		AddFlags(mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap).
 		GrowthStep(1 * datasize.MB).
 		MustOpen()
 	defer _db.Close()

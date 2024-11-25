@@ -67,8 +67,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		blocks, preState, postState = tests.GetCapellaRandom()
 	}
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
-	db = memdb.NewTestDB(t)
-	blobDb := memdb.NewTestDB(t)
+	db = memdb.NewTestDB(t, kv.ChainDB)
+	blobDb := memdb.NewTestDB(t, kv.ChainDB)
 	var reader *tests.MockBlockReader
 	reader = tests.LoadChain(blocks, postState, db, t)
 	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
@@ -86,7 +86,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	fcu.Pool = opPool
 
 	if useRealSyncDataMgr {
-		syncedData = synced_data.NewSyncedDataManager(&bcfg, true, 0)
+		syncedData = synced_data.NewSyncedDataManager(&bcfg, true)
 	} else {
 		syncedData = sync_mock_services.NewMockSyncedData(ctrl)
 	}
@@ -123,8 +123,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		return h.syncMessagePool.AddSyncCommitteeMessage(postState, *subnetID, msg.SyncCommitteeMessage)
 	}).AnyTimes()
 
-	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedContributionAndProof) error {
-		return h.syncMessagePool.AddSyncContribution(postState, msg.Message.Contribution)
+	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedContributionAndProofWithGossipData) error {
+		return h.syncMessagePool.AddSyncContribution(postState, msg.SignedContributionAndProof.Message.Contribution)
 	}).AnyTimes()
 	aggregateAndProofsService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedAggregateAndProofData) error {
 		opPool.AttestationsPool.Insert(msg.SignedAggregateAndProof.Message.Aggregate.Signature, msg.SignedAggregateAndProof.Message.Aggregate)

@@ -67,6 +67,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/stages"
@@ -100,8 +101,14 @@ func OpenCaplinDatabase(ctx context.Context,
 	os.MkdirAll(dbPath, 0700)
 	os.MkdirAll(dataDirIndexer, 0700)
 
-	db := mdbx.MustOpen(dataDirIndexer)
-	blobDB := mdbx.MustOpen(blobDbPath)
+	db := mdbx.New(kv.CaplinDB, log.New()).Path(dbPath).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
+			return kv.ChaindataTablesCfg
+		}).MustOpen()
+	blobDB := mdbx.New(kv.CaplinDB, log.New()).Path(blobDbPath).
+		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			return kv.ChaindataTablesCfg
+		}).MustOpen()
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -254,16 +261,20 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
-	syncedDataManager := synced_data.NewSyncedDataManager(beaconConfig, true, synced_data.MinHeadStateDelay)
+	syncedDataManager := synced_data.NewSyncedDataManager(beaconConfig, true)
 
 	syncContributionPool := sync_contribution_pool.NewSyncContributionPool(beaconConfig)
 	emitters := beaconevents.NewEventEmitter()
 	aggregationPool := aggregation.NewAggregationPool(ctx, beaconConfig, networkConfig, ethClock)
 	validatorMonitor := monitor.NewValidatorMonitor(config.EnableValidatorMonitor, ethClock, beaconConfig, syncedDataManager)
 	doLMDSampling := len(state.GetActiveValidatorsIndices(state.Slot()/beaconConfig.SlotsPerEpoch)) >= 20_000
+
+	// create the public keys registry
+	pksRegistry := public_keys_registry.NewDBPublicKeysRegistry(indexDB)
+
 	forkChoice, err := forkchoice.NewForkChoiceStore(
 		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconAPIRouter, emitters),
-		emitters, syncedDataManager, blobStorage, validatorMonitor, doLMDSampling)
+		emitters, syncedDataManager, blobStorage, validatorMonitor, pksRegistry, doLMDSampling)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -303,14 +314,14 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock)
-	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, state, aggregationPool, syncedDataManager)
+	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, indexDB, beaconConfig, networkConfig, ethClock, sentinel, aggregationPool, syncedDataManager)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
-	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, false)
+	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, false)
 	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, beaconConfig, pool, false, batchSignatureVerifier)
 	voluntaryExitService := services.NewVoluntaryExitService(pool, emitters, syncedDataManager, beaconConfig, ethClock, batchSignatureVerifier)
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)

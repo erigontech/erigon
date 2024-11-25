@@ -98,7 +98,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *cltypes.SignedAggregateAndProofData,
 ) error {
-
 	selectionProof := aggregateAndProof.SignedAggregateAndProof.Message.SelectionProof
 	aggregateData := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data
 	aggregate := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate
@@ -107,7 +106,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex
 
 	if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
-		a.scheduleAggregateForLaterProcessing(aggregateAndProof)
+		//a.scheduleAggregateForLaterProcessing(aggregateAndProof)
 		return ErrIgnore
 	}
 
@@ -398,7 +397,6 @@ func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 				return true
 			}
 			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
-				log.Trace("blob sidecar verification failed", "err", err)
 				return true
 			}
 

@@ -484,7 +484,6 @@ var (
 	PlainStateVersion = []byte("PlainStateVersion")
 
 	HighestFinalizedKey = []byte("HighestFinalized")
-	LastNewBlockSeen    = []byte("LastNewBlockSeen") // last seen block hash
 
 	StatesProcessingKey          = []byte("StatesProcessing")
 	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
@@ -506,8 +505,6 @@ var ChaindataTables = []string{
 	ConfigTable,
 	DatabaseInfo,
 	IncarnationMap,
-	CliqueSeparate,
-	CliqueLastSnapshot,
 	SyncStageProgress,
 	PlainState,
 	PlainContractCode,
@@ -643,7 +640,18 @@ var TxPoolTables = []string{
 	PoolTransaction,
 	PoolInfo,
 }
-var SentryTables = []string{}
+var SentryTables = []string{
+	Inodes,
+	NodeRecords,
+}
+var ConsensusTables = append([]string{
+	CliqueSeparate,
+	CliqueLastSnapshot,
+},
+	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
+)
+var HeimdallTables = []string{}
+var PolygonBridgeTables = []string{}
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
@@ -762,8 +770,11 @@ var BorTablesCfg = TableCfg{
 
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
+var ConsensusTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
+var HeimdallTablesCfg = TableCfg{}
+var PolygonBridgeTablesCfg = TableCfg{}
 var ReconTablesCfg = TableCfg{
 	PlainStateD:    {Flags: DupSort},
 	CodeD:          {Flags: DupSort},
@@ -772,7 +783,7 @@ var ReconTablesCfg = TableCfg{
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case ChainDB:
+	case ChainDB, TemporaryDB, CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case TxPoolDB:
 		return TxpoolTablesCfg
@@ -782,6 +793,12 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return DownloaderTablesCfg
 	case DiagnosticsDB:
 		return DiagnosticsTablesCfg
+	case HeimdallDB:
+		return HeimdallTablesCfg
+	case PolygonBridgeDB:
+		return PolygonBridgeTablesCfg
+	case ConsensusDB:
+		return ConsensusTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
@@ -830,6 +847,13 @@ func reinit() {
 		}
 	}
 
+	for _, name := range ConsensusTables {
+		_, ok := ConsensusTablesCfg[name]
+		if !ok {
+			ConsensusTablesCfg[name] = TableCfgItem{}
+		}
+	}
+
 	for _, name := range DownloaderTables {
 		_, ok := DownloaderTablesCfg[name]
 		if !ok {
@@ -848,6 +872,19 @@ func reinit() {
 		_, ok := DiagnosticsTablesCfg[name]
 		if !ok {
 			DiagnosticsTablesCfg[name] = TableCfgItem{}
+		}
+	}
+
+	for _, name := range HeimdallTables {
+		_, ok := HeimdallTablesCfg[name]
+		if !ok {
+			HeimdallTablesCfg[name] = TableCfgItem{}
+		}
+	}
+	for _, name := range PolygonBridgeTables {
+		_, ok := PolygonBridgeTablesCfg[name]
+		if !ok {
+			PolygonBridgeTablesCfg[name] = TableCfgItem{}
 		}
 	}
 }

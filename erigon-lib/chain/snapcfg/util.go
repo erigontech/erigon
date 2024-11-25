@@ -94,6 +94,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
+		if strings.HasPrefix(p.Name, "caplin") {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
+
 		var preferredVersion, minVersion snaptype.Version
 
 		countSep := 0
@@ -391,6 +396,9 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	for _, p := range c.Preverified {
 		info, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
+			continue
+		}
+		if strings.Contains(p.Name, "caplin") {
 			continue
 		}
 

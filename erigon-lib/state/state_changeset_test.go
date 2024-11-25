@@ -17,11 +17,33 @@
 package state
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOverflowPages(t *testing.T) {
+	db, _ := testDbAndAggregatorv3(t, 10)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	k, v := make([]byte, diffChunkKeyLen), make([]byte, diffChunkLen)
+	k[0] = 0
+	_ = tx.Put(kv.ChangeSets3, k, v)
+	k[0] = 1
+	_ = tx.Put(kv.ChangeSets3, k, v)
+	st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
+	require.NoError(t, err)
+	require.Equal(t, 2, int(st.OverflowPages))
+	require.Equal(t, 1, int(st.LeafPages))
+	require.Equal(t, 2, int(st.Entries))
+	require.Equal(t, 2, int(st.Entries))
+}
 
 func TestSerializeDeserializeDiff(t *testing.T) {
 	t.Parallel()

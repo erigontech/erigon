@@ -168,8 +168,8 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	// start syncing
-	s.logger.Debug(
-		bridgeLogPrefix("running bridge component"),
+	s.logger.Info(
+		bridgeLogPrefix("running bridge service component"),
 		"lastFetchedEventId", lastFetchedEventId,
 		"lastProcessedEventId", lastProcessedEventId,
 		"lastProcessedBlockNum", lastProcessedBlockInfo.BlockNum,
@@ -238,7 +238,7 @@ func (s *Service) Run(ctx context.Context) error {
 
 		select {
 		case <-logTicker.C:
-			s.logger.Debug(
+			s.logger.Info(
 				bridgeLogPrefix("fetched new events periodic progress"),
 				"count", len(events),
 				"lastFetchedEventId", lastFetchedEventId,
@@ -257,7 +257,7 @@ func (s *Service) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, e
 	lastFrozen := s.store.LastFrozenEventBlockNum()
 
 	if blockInfo := s.lastProcessedBlockInfo.Load(); blockInfo != nil && blockInfo.BlockNum > lastFrozen {
-		return 0, false, nil
+		return blockInfo.BlockNum, false, nil
 	}
 
 	blockInfo, ok, err := s.store.LastProcessedBlockInfo(ctx)
@@ -265,12 +265,12 @@ func (s *Service) InitialBlockReplayNeeded(ctx context.Context) (uint64, bool, e
 		return 0, false, err
 	}
 	if ok && blockInfo.BlockNum > lastFrozen {
-		// we have all info, no need to replay
-		return 0, false, nil
+		// we have all info, no need to replay initial block
+		return blockInfo.BlockNum, false, nil
 	}
 
 	// replay the last block we have in event snapshots
-	return s.store.LastFrozenEventBlockNum(), true, nil
+	return lastFrozen, true, nil
 }
 
 func (s *Service) ReplayInitialBlock(ctx context.Context, block *types.Block) error {

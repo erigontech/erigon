@@ -142,6 +142,16 @@ func IncrementHistoricalSummariesTable(tx kv.RwTx, state *state.CachingBeaconSta
 	return nil
 }
 
+func ReadPublicKeyByIndexNoCopy(tx kv.Tx, index uint64) ([]byte, error) {
+	var pks []byte
+	var err error
+	key := base_encoding.Encode64ToBytes4(index)
+	if pks, err = tx.GetOne(kv.ValidatorPublicKeys, key); err != nil {
+		return nil, err
+	}
+	return pks, err
+}
+
 func ReadPublicKeyByIndex(tx kv.Tx, index uint64) (libcommon.Bytes48, error) {
 	var pks []byte
 	var err error
@@ -329,4 +339,22 @@ func ReadActiveIndicies(getFn GetValFn, slot uint64) ([]uint64, error) {
 	}
 	buf := bytes.NewBuffer(v)
 	return base_encoding.ReadRabbits(nil, buf)
+}
+
+func ReadProposersInEpoch(getFn GetValFn, epoch uint64) ([]uint64, error) {
+	key := base_encoding.Encode64ToBytes4(epoch)
+
+	indiciesBytes, err := getFn(kv.Proposers, key)
+	if err != nil {
+		return nil, err
+	}
+	if len(indiciesBytes) == 0 {
+		return nil, nil
+	}
+	var ret []uint64
+	for i := 0; i < len(indiciesBytes); i += 4 {
+		validatorIndex := binary.BigEndian.Uint32(indiciesBytes[i : i+4])
+		ret = append(ret, uint64(validatorIndex))
+	}
+	return ret, nil
 }

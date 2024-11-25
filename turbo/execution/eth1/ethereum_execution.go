@@ -121,14 +121,6 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 }
 
 func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Header, error) {
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if td == nil {
-		return nil, nil
-	}
-
 	if e.blockReader == nil {
 		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
 	}
@@ -142,13 +134,6 @@ func (e *EthereumExecutionModule) getTD(_ context.Context, tx kv.Tx, blockHash l
 }
 
 func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Body, error) {
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if td == nil {
-		return nil, nil
-	}
 	if e.blockReader == nil {
 		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
 		return body, nil
@@ -175,13 +160,6 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 		}
 	}
 
-	td, err := rawdb.ReadTd(tx, canonical, blockNumber)
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-	if td == nil {
-		return libcommon.Hash{}, nil
-	}
 	return canonical, nil
 }
 

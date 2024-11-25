@@ -33,8 +33,6 @@ import (
 	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -73,7 +71,7 @@ type TraceCallParam struct {
 	MaxFeePerBlobGas     *hexutil.Big       `json:"maxFeePerBlobGas"`
 	Value                *hexutil.Big       `json:"value"`
 	Data                 hexutility.Bytes   `json:"data"`
-	AccessList           *types2.AccessList `json:"accessList"`
+	AccessList           *types.AccessList  `json:"accessList"`
 	txHash               *libcommon.Hash
 	traceTypes           []string
 	isBorStateSyncTxn    bool
@@ -236,7 +234,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.Data != nil {
 		data = args.Data
 	}
-	var accessList types2.AccessList
+	var accessList types.AccessList
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}

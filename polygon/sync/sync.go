@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/turbo/shards"
 )
 
 type heimdallSynchronizer interface {
@@ -46,6 +47,7 @@ type bridgeSynchronizer interface {
 }
 
 func NewSync(
+	logger log.Logger,
 	store Store,
 	execution ExecutionClient,
 	milestoneVerifier WaypointHeadersVerifier,
@@ -56,7 +58,7 @@ func NewSync(
 	heimdallSync heimdallSynchronizer,
 	bridgeSync bridgeSynchronizer,
 	events <-chan Event,
-	logger log.Logger,
+	notifications *shards.Notifications,
 ) *Sync {
 	badBlocksLru, err := simplelru.NewLRU[common.Hash, struct{}](1024, nil)
 	if err != nil {
@@ -64,6 +66,7 @@ func NewSync(
 	}
 
 	return &Sync{
+		logger:            logger,
 		store:             store,
 		execution:         execution,
 		milestoneVerifier: milestoneVerifier,
@@ -75,11 +78,12 @@ func NewSync(
 		bridgeSync:        bridgeSync,
 		events:            events,
 		badBlocks:         badBlocksLru,
-		logger:            logger,
+		notifications:     notifications,
 	}
 }
 
 type Sync struct {
+	logger            log.Logger
 	store             Store
 	execution         ExecutionClient
 	milestoneVerifier WaypointHeadersVerifier
@@ -91,7 +95,7 @@ type Sync struct {
 	bridgeSync        bridgeSynchronizer
 	events            <-chan Event
 	badBlocks         *simplelru.LRU[common.Hash, struct{}]
-	logger            log.Logger
+	notifications     *shards.Notifications
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
@@ -606,6 +610,10 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
+	if err := s.store.Prepare(ctx); err != nil {
+		return err
+	}
+
 	s.logger.Info(syncLogPrefix("running sync component"))
 
 	result, err := s.syncToTip(ctx)
@@ -739,61 +747,50 @@ func (s *Sync) syncToTip(ctx context.Context) (syncToTipResult, error) {
 }
 
 func (s *Sync) syncToTipUsingCheckpoints(ctx context.Context, tip *types.Header) (syncToTipResult, error) {
-	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (syncToTipResult, error) {
-		latestCheckpoint, err := s.heimdallSync.SynchronizeCheckpoints(ctx)
-		if err != nil {
-			return syncToTipResult{}, err
-		}
-
-		tip, err := s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, startBlockNum)
-		if err != nil {
-			return syncToTipResult{}, err
-		}
-
-		return syncToTipResult{latestTip: tip, latestWaypoint: latestCheckpoint}, nil
-	})
+	syncCheckpoints := func(ctx context.Context) (heimdall.Waypoint, error) {
+		return s.heimdallSync.SynchronizeCheckpoints(ctx)
+	}
+	return s.sync(ctx, tip, syncCheckpoints, s.blockDownloader.DownloadBlocksUsingCheckpoints)
 }
 
 func (s *Sync) syncToTipUsingMilestones(ctx context.Context, tip *types.Header) (syncToTipResult, error) {
-	return s.sync(ctx, tip, func(ctx context.Context, startBlockNum uint64) (syncToTipResult, error) {
-		latestMilestone, err := s.heimdallSync.SynchronizeMilestones(ctx)
-		if err != nil {
-			return syncToTipResult{}, err
-		}
-
-		tip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, startBlockNum)
-		if err != nil {
-			return syncToTipResult{}, err
-		}
-
-		return syncToTipResult{latestTip: tip, latestWaypoint: latestMilestone}, nil
-	})
+	syncMilestones := func(ctx context.Context) (heimdall.Waypoint, error) {
+		return s.heimdallSync.SynchronizeMilestones(ctx)
+	}
+	return s.sync(ctx, tip, syncMilestones, s.blockDownloader.DownloadBlocksUsingMilestones)
 }
 
-type tipDownloaderFunc func(ctx context.Context, startBlockNum uint64) (syncToTipResult, error)
+type waypointSyncFunc func(ctx context.Context) (heimdall.Waypoint, error)
+type blockDownloadFunc func(ctx context.Context, startBlockNum uint64) (*types.Header, error)
 
-func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDownloaderFunc) (syncToTipResult, error) {
-	var latestWaypoint heimdall.Waypoint
-	var startBlockNum uint64 = 1
+func (s *Sync) sync(
+	ctx context.Context,
+	tip *types.Header,
+	waypointSync waypointSyncFunc,
+	blockDownload blockDownloadFunc,
+) (syncToTipResult, error) {
+	var waypoint heimdall.Waypoint
+	var err error
 
 	for {
-		if tip != nil {
-			startBlockNum = tip.Number.Uint64() + 1
-		}
-
-		newResult, err := tipDownloader(ctx, startBlockNum)
+		waypoint, err = waypointSync(ctx)
 		if err != nil {
 			return syncToTipResult{}, err
 		}
 
-		latestWaypoint = newResult.latestWaypoint
+		// notify about latest waypoint end block so that eth_syncing API doesn't flicker on initial sync
+		s.notifications.NewLastBlockSeen(waypoint.EndBlock().Uint64())
 
-		if newResult.latestTip == nil {
+		newTip, err := blockDownload(ctx, tip.Number.Uint64()+1)
+		if err != nil {
+			return syncToTipResult{}, err
+		}
+
+		if newTip == nil {
 			// we've reached the tip
 			break
 		}
 
-		newTip := newResult.latestTip
 		if err := s.commitExecution(ctx, newTip, newTip); err != nil {
 			// note: if we face a failure during execution of finalized waypoints blocks, it means that
 			// we're wrong and the blocks are not considered as bad blocks, so we should terminate
@@ -804,7 +801,7 @@ func (s *Sync) sync(ctx context.Context, tip *types.Header, tipDownloader tipDow
 		tip = newTip
 	}
 
-	return syncToTipResult{latestTip: tip, latestWaypoint: latestWaypoint}, nil
+	return syncToTipResult{latestTip: tip, latestWaypoint: waypoint}, nil
 }
 
 func (s *Sync) handleWaypointExecutionErr(ctx context.Context, lastCorrectTip *types.Header, execErr error) error {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -81,7 +82,6 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		headRoot, headSlot); err2 != nil {
 		logger.Warn("Could not set status", "err", err2)
 	}
-
 	return
 }
 
@@ -167,7 +167,7 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to read parent block root: %w", err)
 	}
 	if parentRoot != oldCanonical {
-		log.Info("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_canonical", oldCanonical, "new_canonical", headRoot)
+		log.Debug("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_canonical", oldCanonical, "new_canonical", headRoot)
 		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldCanonical)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", oldCanonical)
@@ -313,6 +313,7 @@ func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
+
 	// Retrieve the head state
 	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
 	if err != nil {
@@ -323,12 +324,16 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	if err := cfg.syncedData.OnHeadState(headState); err != nil {
 		return fmt.Errorf("failed to set head state: %w", err)
 	}
+	start := time.Now()
+	defer func() {
+		logger.Debug("Post forkchoice operations", "duration", time.Since(start))
+	}()
 
 	return cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// Produce and cache attestation data for validator node (this is not an expensive operation so we can do it for all nodes)
-		if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
-			logger.Warn("failed to produce and cache attestation data", "err", err)
-		}
+		// if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
+		// 	logger.Warn("failed to produce and cache attestation data", "err", err)
+		// }
 
 		// Run indexing routines for the database
 		if err := runIndexingRoutines(ctx, tx, cfg, headState); err != nil {
@@ -344,6 +349,7 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 		if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
 			return fmt.Errorf("failed to save head state on disk: %w", err)
 		}
+
 		// Lastly, emit the head event
 		emitHeadEvent(cfg, headSlot, headRoot, headState)
 		emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
@@ -371,7 +377,6 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
-
 	if err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg); err != nil {
 		return fmt.Errorf("failed to update canonical chain in the database: %w", err)
 	}
@@ -390,36 +395,46 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	return tx.Commit()
 }
 
+// we need to generate only one goroutine for pre-caching shuffled set
+var workingPreCacheNextShuffledValidatorSet atomic.Bool
+
 func preCacheNextShuffledValidatorSet(ctx context.Context, logger log.Logger, cfg *Cfg, b *state.CachingBeaconState) {
-	nextEpoch := state.Epoch(b) + 1
-	beaconConfig := cfg.beaconCfg
-
-	// Check if any action is needed
-	refSlot := ((nextEpoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1
-	if refSlot >= b.Slot() {
+	if workingPreCacheNextShuffledValidatorSet.Load() {
 		return
 	}
-	// Get the block root at the beginning of the previous epoch
-	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(refSlot)
-	if err != nil {
-		logger.Warn("failed to get block root at slot for pre-caching shuffled set", "err", err)
-		return
-	}
-	// Skip if the shuffled set is already pre-cached
-	if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(nextEpoch, blockRootAtBegginingPrevEpoch); ok {
-		return
-	}
+	workingPreCacheNextShuffledValidatorSet.Store(true)
+	go func() {
+		defer workingPreCacheNextShuffledValidatorSet.Store(false)
+		nextEpoch := state.Epoch(b) + 1
+		beaconConfig := cfg.beaconCfg
 
-	indicies := b.GetActiveValidatorsIndices(nextEpoch)
-	shuffledIndicies := make([]uint64, len(indicies))
-	mixPosition := (nextEpoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
-		beaconConfig.EpochsPerHistoricalVector
-	// Input for the seed hash.
-	mix := b.GetRandaoMix(int(mixPosition))
-	start := time.Now()
-	shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, nextEpoch*beaconConfig.SlotsPerEpoch)
-	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
+		// Check if any action is needed
+		refSlot := ((nextEpoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1
+		if refSlot >= b.Slot() {
+			return
+		}
+		// Get the block root at the beginning of the previous epoch
+		blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(refSlot)
+		if err != nil {
+			logger.Warn("failed to get block root at slot for pre-caching shuffled set", "err", err)
+			return
+		}
+		// Skip if the shuffled set is already pre-cached
+		if _, ok := caches.ShuffledIndiciesCacheGlobal.Get(nextEpoch, blockRootAtBegginingPrevEpoch); ok {
+			return
+		}
 
-	caches.ShuffledIndiciesCacheGlobal.Put(nextEpoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
-	log.Info("Pre-cached shuffled set", "epoch", nextEpoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+		indicies := b.GetActiveValidatorsIndices(nextEpoch)
+		shuffledIndicies := make([]uint64, len(indicies))
+		mixPosition := (nextEpoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+			beaconConfig.EpochsPerHistoricalVector
+		// Input for the seed hash.
+		mix := b.GetRandaoMix(int(mixPosition))
+		start := time.Now()
+		shuffledIndicies = shuffling.ComputeShuffledIndicies(b.BeaconConfig(), mix, shuffledIndicies, indicies, nextEpoch*beaconConfig.SlotsPerEpoch)
+		shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
+
+		caches.ShuffledIndiciesCacheGlobal.Put(nextEpoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
+		log.Info("Pre-cached shuffled set", "epoch", nextEpoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+	}()
 }

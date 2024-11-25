@@ -208,16 +208,41 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	defer m.mu.RUnlock()
 	defer other.mu.Unlock()
 	other.computeLeaf = m.computeLeaf
-	other.layers = make([][]byte, len(m.layers))
+	if len(other.layers) > len(m.layers) {
+		// reset the internal layers
+		for i := len(m.layers); i < len(other.layers); i++ {
+			other.layers[i] = other.layers[i][:0]
+		}
+		other.layers = other.layers[:len(m.layers)]
+	}
+
+	if len(m.layers) > len(other.layers) {
+		for len(other.layers) != len(m.layers) {
+			idx := len(other.layers)
+			other.layers = append(other.layers, make([]byte, len(m.layers[idx]), (len(m.layers[idx])*3)/2))
+		}
+	}
+
 	for i := 0; i < len(m.layers); i++ {
-		other.layers[i] = make([]byte, len(m.layers[i]))
+		// If the destination buffer is too short, extend it
+		if len(m.layers[i]) > cap(other.layers[i]) {
+			other.layers[i] = make([]byte, len(m.layers[i]), (len(m.layers[i])*3)/2)
+		}
+		// Normalizr the destination length
+		other.layers[i] = other.layers[i][:len(m.layers[i])]
+
+		// Now that the 2 slices are of equal length we can do a simple memcopy
 		copy(other.layers[i], m.layers[i])
 	}
+
 	other.leavesCount = m.leavesCount
 	other.limit = m.limit
-	other.dirtyLeaves = make([]atomic.Bool, len(m.dirtyLeaves))
+	//other.dirtyLeaves = make([]atomic.Bool, len(m.dirtyLeaves))
 
 	for i := 0; i < len(m.dirtyLeaves); i++ {
+		if i >= len(other.dirtyLeaves) {
+			other.dirtyLeaves = append(other.dirtyLeaves, atomic.Bool{})
+		}
 		other.dirtyLeaves[i].Store(m.dirtyLeaves[i].Load())
 	}
 }

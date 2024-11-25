@@ -63,9 +63,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	dirs := datadir.New(path)
 
 	logger := log.New()
-	db := mdbx.NewMDBX(logger).Path(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
 	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, logger)
