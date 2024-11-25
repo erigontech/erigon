@@ -195,6 +195,11 @@ test-hive:
 	fi
 
 
+## lint:                              run all linters
+lint:
+	golangci-lint run ./...
+
+
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
 	go clean -cache
