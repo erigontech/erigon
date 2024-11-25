@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
-	"strconv"
 	"sync"
 	"time"
 
@@ -96,10 +95,7 @@ func DirtySpace() uint64 {
 	dirtySaceOnce.Do(func() {
 		v, _ := os.LookupEnv("MDBX_DIRTY_SPACE_MB")
 		if v != "" {
-			i, err := strconv.Atoi(v)
-			if err != nil {
-				panic(err)
-			}
+			i := MustParseInt(v)
 			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
 			dirtySace = uint64(i * 1024 * 1024)
 		}
