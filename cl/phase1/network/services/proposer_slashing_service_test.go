@@ -51,7 +51,7 @@ func (t *proposerSlashingTestSuite) SetupTest() {
 		ProposerSlashingsPool: pool.NewOperationPool[common.Bytes96, *cltypes.ProposerSlashing](10, "proposerSlashingsPool"),
 	}
 	_, st, _ := tests.GetBellatrixRandom()
-	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0)
+	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	t.syncedData.OnHeadState(st)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconCfg = &clparams.BeaconChainConfig{

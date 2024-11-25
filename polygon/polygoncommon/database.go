@@ -57,8 +57,8 @@ func AsDatabase(db kv.RoDB) *Database {
 }
 
 func (db *Database) open(ctx context.Context) error {
-	dbPath := filepath.Join(db.dataDir, db.label.String())
-	db.logger.Info("Opening Database", "label", db.label.String(), "path", dbPath)
+	dbPath := filepath.Join(db.dataDir, string(db.label))
+	db.logger.Info("Opening Database", "label", db.label, "path", dbPath)
 
 	var txLimiter *semaphore.Weighted
 
@@ -67,19 +67,14 @@ func (db *Database) open(ctx context.Context) error {
 	}
 
 	var err error
-	opts := mdbx.NewMDBX(db.logger).
-		Label(db.label).
+	db.db, err = mdbx.New(db.label, db.logger).
 		Path(dbPath).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
-		RoTxsLimiter(txLimiter)
-
-	if db.accede {
-		opts = opts.Accede()
-	}
-
-	db.db, err = opts.Open(ctx)
+		RoTxsLimiter(txLimiter).
+		Accede(db.accede).
+		Open(ctx)
 	return err
 }
 

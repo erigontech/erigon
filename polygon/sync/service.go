@@ -80,6 +80,7 @@ func NewService(
 		notifications,
 	)
 	return &Service{
+		logger:          logger,
 		sync:            sync,
 		p2pService:      p2pService,
 		store:           store,
@@ -90,6 +91,7 @@ func NewService(
 }
 
 type Service struct {
+	logger          log.Logger
 	sync            *Sync
 	p2pService      *p2p.Service
 	store           Store
@@ -99,8 +101,9 @@ type Service struct {
 }
 
 func (s *Service) Run(parentCtx context.Context) error {
-	group, ctx := errgroup.WithContext(parentCtx)
+	s.logger.Info(syncLogPrefix("running sync service component"))
 
+	group, ctx := errgroup.WithContext(parentCtx)
 	group.Go(func() error {
 		if err := s.p2pService.Run(ctx); err != nil {
 			return fmt.Errorf("pos sync p2p failed: %w", err)
