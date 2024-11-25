@@ -67,7 +67,7 @@ type MdbxOpts struct {
 	growthStep      datasize.ByteSize
 	shrinkThreshold int
 	flags           uint
-	pageSize        uint64
+	pageSize        datasize.ByteSize
 	dirtySpace      uint64 // if exceed this space, modified pages will `spill` to disk
 	mergeThreshold  uint64
 	verbosity       kv.DBVerbosityLvl
@@ -94,38 +94,41 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		label:           label,
 		metrics:         label == kv.ChainDB,
 	}
-	return opts
-}
-
-func (opts MdbxOpts) GetLabel() kv.Label  { return opts.label }
-func (opts MdbxOpts) GetInMem() bool      { return opts.inMem }
-func (opts MdbxOpts) GetPageSize() uint64 { return opts.pageSize }
-func (opts MdbxOpts) Set(opt MdbxOpts) MdbxOpts {
-	return opt
-}
-func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
-
-func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts                { opts.dirtySpace = s; return opts }
-func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLimiter = l; return opts }
-func (opts MdbxOpts) PageSize(v uint64) MdbxOpts                  { opts.pageSize = v; return opts }
-func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
-func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
-func (opts MdbxOpts) Exclusive() MdbxOpts                         { opts.flags = opts.flags | mdbx.Exclusive; return opts }
-func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts            { opts.flags = f(opts.flags); return opts }
-func (opts MdbxOpts) Readonly() MdbxOpts                          { opts.flags = opts.flags | mdbx.Readonly; return opts }
-func (opts MdbxOpts) Accede() MdbxOpts                            { opts.flags = opts.flags | mdbx.Accede; return opts }
-func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
-func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts    { opts.verbosity = v; return opts }
-func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts       { opts.mapSize = sz; return opts }
-func (opts MdbxOpts) LifoReclaim() MdbxOpts                       { opts.flags |= mdbx.LifoReclaim; return opts }
-func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeThreshold = v; return opts }
-func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
-func (opts MdbxOpts) WriteMap(flag bool) MdbxOpts {
-	if flag {
-		opts.flags |= mdbx.WriteMap
+	if label == kv.ChainDB {
+		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
 	}
 	return opts
 }
+
+func (opts MdbxOpts) GetLabel() kv.Label             { return opts.label }
+func (opts MdbxOpts) GetPageSize() datasize.ByteSize { return opts.pageSize }
+
+// Setters
+func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts                { opts.dirtySpace = s; return opts }
+func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLimiter = l; return opts }
+func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSize = v; return opts }
+func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
+func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
+func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
+func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts    { opts.verbosity = v; return opts }
+func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts       { opts.mapSize = sz; return opts }
+func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts       { opts.mergeThreshold = v; return opts }
+func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts        { opts.bucketsCfg = f; return opts }
+
+// Flags
+func (opts MdbxOpts) HasFlag(flag uint) bool          { return opts.flags&flag != 0 }
+func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts    { opts.flags = opts.flags | flags; return opts }
+func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts { opts.flags = opts.flags &^ flags; return opts }
+func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
+	if enabled {
+		return opts.AddFlags(flag)
+	}
+	return opts.RemoveFlags(flag)
+}
+func (opts MdbxOpts) WriteMap(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.WriteMap) }
+func (opts MdbxOpts) Exclusive(v bool) MdbxOpts { return opts.boolToFlag(v, mdbx.Exclusive) }
+func (opts MdbxOpts) Readonly(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.Readonly) }
+func (opts MdbxOpts) Accede(v bool) MdbxOpts    { return opts.boolToFlag(v, mdbx.Accede) }
 
 func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	if tmpDir != "" {
@@ -142,7 +145,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 512 * datasize.MB
-	opts.dirtySpace = uint64(64 * datasize.MB)
+	opts.dirtySpace = uint64(32 * datasize.MB)
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
 	return opts
@@ -178,14 +181,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if dbg.MergeTr() > 0 {
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
 	}
-	if dbg.MdbxReadAhead() {
-		opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
-	} else {
-		if opts.label == kv.ChainDB {
-			opts = opts.Flags(func(u uint) uint { return u &^ mdbx.NoReadahead }) //nolint
-		}
-	}
-	if opts.flags&mdbx.Accede != 0 || opts.flags&mdbx.Readonly != 0 {
+	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) {
 		for retry := 0; ; retry++ {
 			exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
 			if err != nil {
@@ -285,7 +281,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			}
 		}
 		//can't use real pagesize here - it will be known only after env.Open()
-		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize.Bytes()); err != nil {
 			return nil, err
 		}
 
@@ -307,7 +303,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label, stack2.Trace().String())
 	}
 
-	opts.pageSize = uint64(in.PageSize)
+	opts.pageSize = datasize.ByteSize(in.PageSize)
 	opts.mapSize = datasize.ByteSize(in.MapSize)
 	if opts.label == kv.ChainDB {
 		opts.log.Info("[db] open", "label", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
@@ -342,7 +338,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		env:          env,
 		log:          opts.log,
 		buckets:      kv.TableCfg{},
-		txSize:       dirtyPagesLimit * opts.pageSize,
+		txSize:       dirtyPagesLimit * opts.pageSize.Bytes(),
 		roTxsLimiter: opts.roTxsLimiter,
 
 		txsCountMutex:         txsCountMutex,
@@ -453,10 +449,10 @@ type MdbxKV struct {
 	batch   *batch
 }
 
-func (db *MdbxKV) Path() string     { return db.opts.path }
-func (db *MdbxKV) PageSize() uint64 { return db.opts.pageSize }
-func (db *MdbxKV) ReadOnly() bool   { return db.opts.HasFlag(mdbx.Readonly) }
-func (db *MdbxKV) Accede() bool     { return db.opts.HasFlag(mdbx.Accede) }
+func (db *MdbxKV) Path() string                { return db.opts.path }
+func (db *MdbxKV) PageSize() datasize.ByteSize { return db.opts.pageSize }
+func (db *MdbxKV) ReadOnly() bool              { return db.opts.HasFlag(mdbx.Readonly) }
+func (db *MdbxKV) Accede() bool                { return db.opts.HasFlag(mdbx.Accede) }
 
 func (db *MdbxKV) CHandle() unsafe.Pointer {
 	return db.env.CHandle()
@@ -714,7 +710,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	}
 	kv.GcLeafMetric.SetUint64(gc.LeafPages)
 	kv.GcOverflowMetric.SetUint64(gc.OverflowPages)
-	kv.GcPagesMetric.SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8)
+	kv.GcPagesMetric.SetUint64((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize.Bytes() / 8)
 }
 
 func (tx *MdbxTx) WarmupDB(force bool) error {
@@ -1066,7 +1062,7 @@ func (tx *MdbxTx) BucketSize(name string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return (st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize, nil
+	return (st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize.Bytes(), nil
 }
 
 func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {

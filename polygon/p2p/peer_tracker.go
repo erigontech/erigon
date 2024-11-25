@@ -63,7 +63,7 @@ type PeerTracker struct {
 }
 
 func (pt *PeerTracker) Run(ctx context.Context) error {
-	pt.logger.Debug(peerTrackerLogPrefix("running peer tracker component"))
+	pt.logger.Info(peerTrackerLogPrefix("running peer tracker component"))
 
 	var peerEventUnreg polygoncommon.UnregisterFunc
 	defer func() { peerEventUnreg() }()

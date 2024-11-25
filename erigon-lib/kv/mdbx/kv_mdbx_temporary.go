@@ -21,6 +21,7 @@ import (
 	"os"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -75,7 +76,7 @@ func (t *TemporaryMdbx) AllTables() kv.TableCfg {
 	return t.db.AllTables()
 }
 
-func (t *TemporaryMdbx) PageSize() uint64 {
+func (t *TemporaryMdbx) PageSize() datasize.ByteSize {
 	return t.db.PageSize()
 }
 
