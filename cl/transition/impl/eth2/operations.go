@@ -207,17 +207,11 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 			return nil
 		}
 		// Append validator
-		statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, amount)
 		if s.Version() >= clparams.ElectraVersion {
-			s.AppendPendingDeposit(&solid.PendingDeposit{
-				PubKey:                publicKey,
-				WithdrawalCredentials: deposit.Data.WithdrawalCredentials,
-				Amount:                amount,
-				Signature:             deposit.Data.Signature,
-				Slot:                  s.BeaconConfig().GenesisSlot, // Use GENESIS_SLOT to distinguish from a pending deposit request
-			})
+			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, 0)
+		} else {
+			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, amount)
 		}
-		return nil
 	}
 	if s.Version() >= clparams.ElectraVersion {
 		s.AppendPendingDeposit(&solid.PendingDeposit{
@@ -228,10 +222,10 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 			Slot:                  s.BeaconConfig().GenesisSlot, // Use GENESIS_SLOT to distinguish from a pending deposit request
 		})
 		return nil
+	} else {
+		// Deneb and before: Increase the balance if exists already
+		return state.IncreaseBalance(s, validatorIndex, amount)
 	}
-	// Deneb and before: Increase the balance if exists already
-	return state.IncreaseBalance(s, validatorIndex, amount)
-
 }
 
 func getPendingBalanceToWithdraw(s abstract.BeaconState, validatorIndex uint64) uint64 {
