@@ -554,6 +554,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", dt.d.filenameBase, r.values.from, r.values.to, err)
 			}
 		}
+	} else {
+		panic(fmt.Sprintf("not implemented: %s idxlist=%b", dt.d.filenameBase, dt.d.indexList))
 	}
 
 	closeFiles = false
