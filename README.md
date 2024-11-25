@@ -195,11 +195,11 @@ du -hsc /erigon/*
 3.8T	total
 
 du -hsc /erigon/snapshots/* 
-260G	/erigon-data/snapshots/accessor
-850G	/erigon-data/snapshots/domain
-650G	/erigon-data/snapshots/history
-1.4T	/erigon-data/snapshots/idx
-4.1T	/erigon/snapshots
+360G	/erigon-data/snapshots/accessor
+1.1T	/erigon-data/snapshots/domain
+750G	/erigon-data/snapshots/history
+1.5T	/erigon-data/snapshots/idx
+4.9T	/erigon/snapshots
 ```
 
 ### Erigon3 changes from Erigon2
