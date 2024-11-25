@@ -87,9 +87,9 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 }
 
 var snapshotCommand = cli.Command{
-	Name:    "snapshots",
-	Aliases: []string{"seg"},
-	Usage:   `Managing snapshots (historical data partitions)`,
+	Name:    "seg",
+	Aliases: []string{"snapshots"},
+	Usage:   `Managing historical data segments (partitions)`,
 	Before: func(cliCtx *cli.Context) error {
 		go mem.LogMemStats(cliCtx.Context, log.New())
 		go disk.UpdateDiskStats(cliCtx.Context, log.New())
@@ -112,7 +112,8 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name: "index",
+			Name:    "accessor",
+			Aliases: []string{"index"},
 			Action: func(c *cli.Context) error {
 				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {

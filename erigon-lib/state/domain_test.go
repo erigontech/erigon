@@ -95,11 +95,15 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 	cfg := domainCfg{
+		name: kv.AccountsDomain, valuesTable: valsTable,
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
-			withLocalityIndex: false, withExistenceIndex: false, compression: seg.CompressNone, historyLargeValues: true,
+			valuesTable:       historyValsTable,
+			withLocalityIndex: false, compression: seg.CompressNone, historyLargeValues: true,
+
+			iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
+				aggregationStep: aggStep, keysTable: historyKeysTable, valuesTable: indexTable},
 		}}
-	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain, valsTable, historyKeysTable, historyValsTable, indexTable, nil, logger)
+	d, err := NewDomain(cfg, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	t.Cleanup(d.Close)
@@ -987,7 +991,12 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 func TestScanStaticFilesD(t *testing.T) {
 	t.Parallel()
 
-	ii := &Domain{History: &History{InvertedIndex: emptyTestInvertedIndex(1)},
+	ii := &Domain{
+		History: &History{
+			histCfg: histCfg{
+				filenameBase: "test",
+			},
+			InvertedIndex: emptyTestInvertedIndex(1)},
 		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	files := []string{
@@ -1866,11 +1875,11 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	cancel()
 
-	key, err := GetExecV3PruneProgress(rwTx, dc.d.valsTable)
+	key, err := GetExecV3PruneProgress(rwTx, dc.d.valuesTable)
 	require.NoError(t, err)
 	require.NotNil(t, key)
 
-	keysCursor, err := rwTx.RwCursorDupSort(dc.d.valsTable)
+	keysCursor, err := rwTx.RwCursorDupSort(dc.d.valuesTable)
 	require.NoError(t, err)
 
 	k, istep, err := keysCursor.Seek(key)
@@ -1892,13 +1901,13 @@ func TestDomain_PruneProgress(t *testing.T) {
 		}
 		cancel()
 
-		key, err := GetExecV3PruneProgress(rwTx, dc.d.valsTable)
+		key, err := GetExecV3PruneProgress(rwTx, dc.d.valuesTable)
 		require.NoError(t, err)
 		if step == 0 && key == nil {
 
 			fmt.Printf("pruned in %d iterations\n", i)
 
-			keysCursor, err := rwTx.RwCursorDupSort(dc.d.valsTable)
+			keysCursor, err := rwTx.RwCursorDupSort(dc.d.valuesTable)
 			require.NoError(t, err)
 
 			// check there are no keys with 0 step left

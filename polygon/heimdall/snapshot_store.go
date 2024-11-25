@@ -102,12 +102,15 @@ func (s *SpanSnapshotStore) LastFrozenEntityId() uint64 {
 	if len(segments) == 0 {
 		return 0
 	}
-	// find the last segment which has a built index
+	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Src().Index() != nil {
-			lastSegment = segments[i]
-			break
+			gg := segments[i].Src().MakeGetter()
+			if gg.HasNext() {
+				lastSegment = segments[i]
+				break
+			}
 		}
 	}
 	if lastSegment == nil {
@@ -221,12 +224,15 @@ func (r *milestoneSnapshotStore) LastFrozenEntityId() uint64 {
 	if len(segments) == 0 {
 		return 0
 	}
-	// find the last segment which has a built index
+	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Src().Index() != nil {
-			lastSegment = segments[i]
-			break
+			gg := segments[i].Src().MakeGetter()
+			if gg.HasNext() {
+				lastSegment = segments[i]
+				break
+			}
 		}
 	}
 	if lastSegment == nil {
@@ -380,12 +386,15 @@ func (r *checkpointSnapshotStore) LastFrozenEntityId() uint64 {
 	if len(segments) == 0 {
 		return 0
 	}
-	// find the last segment which has a built index
+	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Src().Index() != nil {
-			lastSegment = segments[i]
-			break
+			gg := segments[i].Src().MakeGetter()
+			if gg.HasNext() {
+				lastSegment = segments[i]
+				break
+			}
 		}
 	}
 

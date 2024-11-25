@@ -60,6 +60,7 @@ func NewService(config ServiceConfig) *Service {
 	spanFetcher := NewSpanFetcher(client, logger)
 
 	checkpointScraper := NewScraper(
+		"checkpoints",
 		store.Checkpoints(),
 		checkpointFetcher,
 		1*time.Second,
@@ -74,6 +75,7 @@ func NewService(config ServiceConfig) *Service {
 	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
 	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, TransientErrors...)
 	milestoneScraper := NewScraper(
+		"milestones",
 		store.Milestones(),
 		milestoneFetcher,
 		1*time.Second,
@@ -82,6 +84,7 @@ func NewService(config ServiceConfig) *Service {
 	)
 
 	spanScraper := NewScraper(
+		"spans",
 		store.Spans(),
 		spanFetcher,
 		1*time.Second,
@@ -297,8 +300,9 @@ func (s *Service) Ready(ctx context.Context) <-chan error {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	defer s.store.Close()
+	s.logger.Info(heimdallLogPrefix("running heimdall service component"))
 
+	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {
 		return nil
 	}
