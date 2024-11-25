@@ -219,7 +219,8 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	var b [33]byte
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
 		return err
 	}
@@ -243,7 +244,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 			return err
 		}
 	}
-	if err := tx.GasPrice.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
@@ -258,23 +259,23 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 		return err
 	}
 	if tx.To != nil {
-		if _, err := w.Write(tx.To.Bytes()); err != nil {
+		if _, err := w.Write(tx.To[:]); err != nil {
 			return err
 		}
 	}
-	if err := tx.Value.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
-	if err := tx.V.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(&tx.V, w, b); err != nil {
 		return err
 	}
-	if err := tx.R.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(&tx.R, w, b); err != nil {
 		return err
 	}
-	if err := tx.S.EncodeRLP(w); err != nil {
+	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
 		return err
 	}
 	return nil
@@ -283,7 +284,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	var b [33]byte
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
 		return err
 	}
