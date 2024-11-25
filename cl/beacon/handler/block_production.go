@@ -116,9 +116,19 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
 	stopCh := time.After(time.Second)
 	for {
-		if a.syncedData.HeadSlot() >= slot {
+		headSlot := a.syncedData.HeadSlot()
+		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
 			return
 		}
+		_, ok, err := a.attestationProducer.CachedAttestationData(slot, 0)
+		if err != nil {
+			log.Warn("Failed to get attestation data", "err", err)
+		}
+		if ok {
+			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
+			return
+		}
+
 		time.Sleep(1 * time.Millisecond)
 		select {
 		case <-stopCh:
@@ -126,9 +136,7 @@ func (a *ApiHandler) waitForHeadSlot(slot uint64) {
 			return
 		default:
 		}
-		if a.slotWaitedForAttestationProduction.Contains(slot) {
-			return
-		}
+
 	}
 }
 
@@ -166,6 +174,16 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	a.waitForHeadSlot(*slot)
+
+	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot, *committeeIndex)
+	if err != nil {
+		log.Warn("Failed to get attestation data", "err", err)
+	}
+	if ok {
+		fmt.Println("cache-hit")
+		return newBeaconResponse(attestationData), nil
+	}
+
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
 		return nil, beaconhttp.NewEndpointError(
@@ -178,7 +196,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeeIndex = &zero
 	}
 
-	var attestationData solid.AttestationData
 	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
 			tx,
