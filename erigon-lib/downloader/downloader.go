@@ -2141,8 +2141,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if transfer.Percentage != 0 {
 					//logger.Log(verbosity, "[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
 					//logger.Log(verbosity, "[snapshots] web peers", webseedRates...)
-					d.logger.Info("[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
-					d.logger.Info("[snapshots] web peers", webseedRates...)
+					log.Info("[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
+					log.Info("[snapshots] web peers", webseedRates...)
 				}
 
 				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
