@@ -171,7 +171,7 @@ datadir
 # eth-mainnet - archive - Nov 2024
 
 du -hsc /erigon/chaindata
-10G 	/erigon/chaindata
+15G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
 120G 	/erigon/snapshots/accessor
