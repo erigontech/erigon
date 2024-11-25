@@ -1139,8 +1139,6 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
 		}
-	} else {
-		panic(fmt.Sprintf("not set withExistence %s %b", d.filenameBase, d.indexList))
 	}
 	closeComp = false
 	return StaticFiles{
@@ -1239,8 +1237,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 			}
 		}
-	} else {
-		panic(fmt.Sprintf("not set withExistence %s %b", d.filenameBase, d.indexList))
 	}
 	closeComp = false
 	return StaticFiles{

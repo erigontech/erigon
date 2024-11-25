@@ -874,6 +874,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 
 	idx.useBplus = true
 
+	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
 	switch idx.useBplus {
 	case true:
 		if len(idx.data[pos:]) == 0 {
