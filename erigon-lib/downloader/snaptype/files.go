@@ -150,24 +150,24 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		res.TypeString = res.Type.Name()
 	}
 
-	if len(parts) < 4 {
+	if len(parts) < 3 {
 		return res, ok
 	}
 
 	var err error
 	res.Version, err = ParseVersion(parts[0])
 	if err != nil {
-		return
+		return res, false
 	}
 
 	from, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
-		return
+		return res, false
 	}
 	res.From = from * 1_000
 	to, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
-		return
+		return res, false
 	}
 	res.To = to * 1_000
 
