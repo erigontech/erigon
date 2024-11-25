@@ -226,7 +226,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receipts.NewGenerator(32, blockReader, engine),
+		ethApiWrapper:                     receipts.NewGenerator(128, blockReader, engine),
 	}
 
 	return cs, nil

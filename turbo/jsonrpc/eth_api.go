@@ -150,7 +150,7 @@ type BaseAPI struct {
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
 	var (
 		blocksLRUSize      = 128 // ~32Mb
-		receiptsCacheLimit = 32
+		receiptsCacheLimit = 128
 	)
 	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !singleNodeMode {
