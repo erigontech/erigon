@@ -608,6 +608,10 @@ func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, e
 	return &acc, nil
 }
 
+func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(address)
+}
+
 func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
 	enc, _, err := r.tx.GetLatest(kv.StorageDomain, r.composite, nil)
@@ -688,6 +692,30 @@ func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Ac
 	if !r.discardReadList {
 		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
 		r.readLists[kv.AccountsDomain.String()].Push(string(address[:]), enc)
+	}
+	if len(enc) == 0 {
+		if r.trace {
+			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
+		}
+		return nil, nil
+	}
+
+	var acc accounts.Account
+	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+	}
+	return &acc, nil
+}
+
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, address[:], nil)
+	if err != nil {
+		return nil, err
 	}
 	if len(enc) == 0 {
 		if r.trace {

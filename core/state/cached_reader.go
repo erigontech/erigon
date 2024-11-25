@@ -53,6 +53,11 @@ func (cr *CachedReader) ReadAccountData(address common.Address) (*accounts.Accou
 	return a, nil
 }
 
+// ReadAccountDataForDebug is called when an account needs to be fetched from the state
+func (cr *CachedReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return cr.ReadAccountData(address)
+}
+
 // ReadAccountStorage is called when a storage item needs to be fetched from the state
 func (cr *CachedReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	addrBytes := address.Bytes()
