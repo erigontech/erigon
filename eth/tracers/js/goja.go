@@ -236,7 +236,18 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
 	t.ctx["gas"] = t.vm.ToValue(tx.GetGas())
-	t.ctx["gasPrice"] = t.vm.ToValue(t.env.GasPrice.ToBig())
+	gasPriceBig, err := t.toBig(t.vm, env.GasPrice.String())
+	if err != nil {
+		t.err = err
+		return
+	}
+	t.ctx["gasPrice"] = gasPriceBig
+	coinbase, err := t.toBuf(t.vm, env.Coinbase.Bytes())
+	if err != nil {
+		t.err = err
+		return
+	}
+	t.ctx["coinbase"] = t.vm.ToValue(coinbase)
 }
 
 // OnTxEnd implements the Tracer interface and is invoked at the end of
@@ -251,33 +262,6 @@ func (t *jsTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	}
 	t.ctx["gasUsed"] = t.vm.ToValue(receipt.GasUsed)
 }
-
-// // CaptureStart implements the Tracer interface to initialize the tracing operation.
-// func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-// 	t.env = env
-// 	db := &dbObj{ibs: env.IntraBlockState(), vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
-// 	t.dbValue = db.setupObject()
-// 	if create {
-// 		t.ctx["type"] = t.vm.ToValue("CREATE")
-// 	} else {
-// 		t.ctx["type"] = t.vm.ToValue("CALL")
-// 	}
-// 	t.ctx["from"] = t.vm.ToValue(from.Bytes())
-// 	t.ctx["to"] = t.vm.ToValue(to.Bytes())
-// 	t.ctx["input"] = t.vm.ToValue(input)
-// 	t.ctx["gas"] = t.vm.ToValue(t.gasLimit)
-// 	t.ctx["gasPrice"] = t.vm.ToValue(env.GasPrice.ToBig())
-// 	valueBig, err := t.toBig(t.vm, value.ToBig().String())
-// 	if err != nil {
-// 		t.err = err
-// 		return
-// 	}
-// 	t.ctx["value"] = valueBig
-// 	t.ctx["block"] = t.vm.ToValue(env.Context.BlockNumber)
-// 	// Update list of precompiles based on current block
-// 	rules := env.ChainRules()
-// 	t.activePrecompiles = vm.ActivePrecompiles(rules)
-// }
 
 // onStart implements the Tracer interface to initialize the tracing operation.
 func (t *jsTracer) onStart(from libcommon.Address, to libcommon.Address, create bool, input []byte, gas uint64, value *uint256.Int) {

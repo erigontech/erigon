@@ -132,6 +132,7 @@ func TraceTx(
 				tracer.OnTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
 			}
 		}
+		usedGas = result.UsedGas
 		return result, err
 	}
 

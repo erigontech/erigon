@@ -164,10 +164,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				// FIXME (tracing): The `nil` tracer (at the very end) should be replaced with a real tracer, so those you be reflected
-				// when used by the RPC tracing APIs. The tracer will need to be changed to be at the root of `traceBlock`, this will
-				// requires changes to the overall calls here as `ComputeTxEnv` will need to receive the tracer as well as some changes
-				// to the `transactions.TraceTx` call to pass the tracer through and also on Polygon side to pass the tracer there also.
 				return core.SysCallContract(contract, data, chainConfig, ibs, block.Header(), engine, true /* constCall */, nil)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
