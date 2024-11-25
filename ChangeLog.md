@@ -8,7 +8,7 @@ ChangeLog
 - `--prune.mode` default is `full`. For compatibility with `geth` and other clients. Plz set explicit
   `--prune.mode` flag to your Erigon3 setups - to simplify future upgrade/downgrade.
 - Bor chains: enable our internal Consensus Layer by default (name: Astrid)
-- Released artifacts for Linux are now dynamically linked (
+- Released binaries for Linux are now dynamically linked (
   Issues: https://github.com/erigontech/erigon/issues/12570, https://github.com/erigontech/erigon/issues/12556 )
 
 ### New features:
