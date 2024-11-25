@@ -161,7 +161,7 @@ func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) 
 		exitBalanceToConsume += addtionalEpochs * perEpochChurn
 	}
 	// Consume the balance and update state variables.
-	b.SetExitBalanceToConsume(exitBalanceToConsume)
+	b.SetExitBalanceToConsume(exitBalanceToConsume - exitBalance)
 	b.SetEarliestExitEpoch(earliestExitEpoch)
 	return earliestExitEpoch
 }

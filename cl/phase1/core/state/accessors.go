@@ -227,7 +227,7 @@ func GetUnslashedParticipatingIndices(b abstract.BeaconState, flagIndex int, epo
 // Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
 // updated for Electra: https://github.com/ethereum/consensus-specs/blob/dev/specs/electra/beacon-chain.md#modified-is_eligible_for_activation_queue
 func IsValidatorEligibleForActivationQueue(b abstract.BeaconState, validator solid.Validator) bool {
-	if b.Version().BeforeOrEqual(clparams.DenebVersion) {
+	if b.Version() <= clparams.DenebVersion {
 		return validator.ActivationEligibilityEpoch() == b.BeaconConfig().FarFutureEpoch &&
 			validator.EffectiveBalance() == b.BeaconConfig().MaxEffectiveBalance
 	}

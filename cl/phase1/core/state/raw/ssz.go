@@ -19,6 +19,7 @@ package raw
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 
 	"github.com/erigontech/erigon-lib/types/clonable"
@@ -98,6 +99,11 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	}
 	if version >= int(clparams.BellatrixVersion) {
 		b.latestExecutionPayloadHeader = &cltypes.Eth1Header{}
+	}
+	if version >= int(clparams.ElectraVersion) {
+		b.pendingDeposits = solid.NewPendingDepositList(b.beaconConfig)
+		b.pendingPartialWithdrawals = solid.NewPendingWithdrawalList(b.beaconConfig)
+		b.pendingConsolidations = solid.NewPendingConsolidationList(b.beaconConfig)
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
