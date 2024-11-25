@@ -1006,6 +1006,13 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 	}
 }
 
+func (b *BeaconChainConfig) GetWhistleBlowerRewardQuotient(version StateVersion) uint64 {
+	if version == ElectraVersion {
+		return b.WhistleBlowerRewardQuotientElectra
+	}
+	return b.WhistleBlowerRewardQuotient
+}
+
 func (b *BeaconChainConfig) GetProportionalSlashingMultiplier(version StateVersion) uint64 {
 	switch version {
 	case Phase0Version:
