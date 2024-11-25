@@ -2215,13 +2215,16 @@ func (p *TxPool) logStats() {
 }
 
 // Deprecated need switch to streaming-like
+// data are valid until passed `tx` is alive
 func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.all.ascendAll(func(mt *metaTxn) bool {
 		slot := mt.TxnSlot
-		slotRlp := slot.Rlp
-		if slot.Rlp == nil {
+		var slotRlp []byte
+		if slot.Rlp != nil {
+			slotRlp = common.Copy(slot.Rlp) // alive outside of `lock.Lock`
+		} else {
 			v, err := tx.GetOne(kv.PoolTransaction, slot.IDHash[:])
 			if err != nil {
 				p.logger.Warn("[txpool] foreach: get txn from db", "err", err)

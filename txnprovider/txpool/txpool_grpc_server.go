@@ -140,9 +140,14 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpool_proto.AllRequest) (*txpo
 		reply.Txs = append(reply.Txs, &txpool_proto.AllReply_Tx{
 			Sender:  gointerfaces.ConvertAddressToH160(sender),
 			TxnType: convertSubPoolType(t),
-			RlpTx:   common.Copy(rlp),
+			RlpTx:   rlp,
 		})
 	}, tx)
+
+	for i := range reply.Txs { // copy before return to grpc, because data are valid only until `tx.Rollback()`
+		reply.Txs[i].RlpTx = common.Copy(reply.Txs[i].RlpTx)
+	}
+
 	return reply, nil
 }
 
