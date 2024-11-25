@@ -94,11 +94,9 @@ type BpsTree struct {
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
 
-	dataLookupFunc       dataLookupFunc
-	dataLookupFuncCursor dataLookupFuncCursor
-
-	keyCmpFunc   keyCmpFunc
-	cursorGetter cursorGetter
+	dataLookupFunc dataLookupFunc
+	keyCmpFunc     keyCmpFunc
+	cursorGetter   cursorGetter
 }
 
 type cursorGetter func(k, v []byte, di uint64, g *seg.Reader) *Cursor
@@ -294,55 +292,60 @@ func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
 // If key is nil, returns first key and found=true
 // If found item.key has a prefix of key, returns found=false and item.key
 // if key is greater than all keys, returns nil, found=false
-func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, err error) {
+func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, found bool, err error) {
 	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
 	}
-	var key []byte
-	cur := b.cursorGetter(nil, nil, 0, g)
+	cur = b.cursorGetter(nil, nil, 0, g)
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
-		if err = b.dataLookupFuncCursor(0, g, cur); err != nil {
-			return nil, false, err
-		}
+		cur.Reset(0)
+		// if err = b.dataLookupFuncCursor(0, g, cur); err != nil {
+		// 	return nil, false, err
+		// }
 		return cur, true, nil
 	}
 
-	n, l, r := b.bs(seekKey) // l===r when key is found
-	if b.trace {
-		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-		defer func() { fmt.Printf("found=%t %x [%d %d]\n", bytes.Equal(key, seekKey), seekKey, l, r) }()
+	_, l, r := b.bs(seekKey) // l===r when key is found
+	if l == r {
+		cur.Reset(l)
+		// if err = b.dataLookupFuncCursor(l, g, cur); err != nil {
+		// 	return nil, false, err
+		// }
+		return cur, bytes.Equal(cur.key, seekKey), nil
 	}
+
+	// if b.trace {
+	// 	fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
+	// 	defer func() { fmt.Printf("found=%t %x [%d %d]\n", bytes.Equal(key, seekKey), seekKey, l, r) }()
+	// }
 	var m uint64
 	var cmp int
 	// var offset uint64
 	for l < r {
 		m = (l + r) >> 1
-		// if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
-		// 	m = l
-		// 	_ = offset
+		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
+			// m = l
+			if cur.d == 0 {
+				cur.Reset(l)
+			} else {
+				cur.Next()
+			}
 
-		// 	err = b.dataLookupFuncCursor(m, g, cur)
-		// 	if cmp = bytes.Compare(cur.key, seekKey); cmp < 0 {
-		// 		l++
-		// 		continue
-		// 	}
-		// 	return cur, cmp == 0, err
-
-		// if offset == 0 {
-		// 	offset = b.offt.Get(m)
-		// 	g.Reset(offset)
-		// }
-		// key, _ = g.Next(key[:0])
-		// if cmp = bytes.Compare(key, seekKey); cmp < 0 {
-		// 	g.Skip()
-		// 	l++
-		// 	continue
-		// }
-		// v, _ := g.Next(nil)
-		// cur := b.cursorGetter(key, v, m, g)
-		// return cur, cmp == 0, err
-		// }
+			// if offset == 0 {
+			// 	offset = b.offt.Get(m)
+			// 	g.Reset(offset)
+			// }
+			// cur.key, _ = g.Next(cur.key[:0])
+			if cmp = bytes.Compare(cur.key, seekKey); cmp < 0 {
+				// g.Skip()
+				l++
+				continue
+			}
+			// cur.value, _ = g.Next(cur.value[:0])
+			// cur.d, cur.getter = m, g
+			return cur, cmp == 0, err
+		}
 
 		cmp, cur.key, err = b.keyCmpFunc(seekKey, m, g, cur.key[:0])
 		if err != nil {
@@ -365,17 +368,20 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (c *Cursor, found bool, er
 		m = l
 	}
 
-	err = b.dataLookupFuncCursor(m, g, cur)
+	err = cur.Reset(m)
+	if err != nil {
+		return nil, false, err
+	}
 	cmp = bytes.Compare(cur.Key(), seekKey)
-	if err != nil || cmp < 0 {
+	if cmp < 0 {
 		return nil, false, err
 	}
 	return cur, cmp == 0, nil
 }
 
-// returns first key which is >= key.
-// If key is nil, returns first key
-// if key is greater than all keys, returns nil
+// Get: returns for exact given key, value and offset in file where key starts
+// If given key is nil, returns first key
+// If no exact match found, returns nil values
 func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint64, err error) {
 	if b.trace {
 		fmt.Printf("get   %x\n", key)
@@ -398,24 +404,24 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	var m uint64
 	for l < r {
 		m = (l + r) >> 1
-		// if r-l <= DefaultBtreeStartSkip {
-		// 	m = l
-		// 	if offset == 0 {
-		// 		offset = b.offt.Get(m)
-		// 		g.Reset(offset)
-		// 	}
-		// 	v, _ = g.Next(v[:0])
-		// 	if cmp = bytes.Compare(v, key); cmp > 0 {
-		// 		return nil, false, 0, err
-		// 	} else if cmp < 0 {
-		// 		g.Skip()
-		// 		l++
-		// 		continue
-		// 	}
-		// 	v, _ = g.Next(nil)
-		// 	offset = b.offt.Get(m)
-		// 	return v, true, offset, nil
-		// }//
+		if r-l <= DefaultBtreeStartSkip {
+			m = l
+			if offset == 0 {
+				offset = b.offt.Get(m)
+				g.Reset(offset)
+			}
+			v, _ = g.Next(v[:0])
+			if cmp = bytes.Compare(v, key); cmp > 0 {
+				return nil, false, 0, err
+			} else if cmp < 0 {
+				g.Skip()
+				l++
+				continue
+			}
+			v, _ = g.Next(nil)
+			offset = b.offt.Get(m)
+			return v, true, offset, nil
+		}
 
 		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
 		if err != nil {
@@ -426,7 +432,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			if !g.HasNext() {
 				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
 			}
-			v, _ = g.Next(v[:0])
+			v, _ = g.Next(nil)
 			return v, true, offset, nil
 		} else if cmp > 0 {
 			r = m
@@ -445,7 +451,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	if !g.HasNext() {
 		return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
 	}
-	v, _ = g.Next(v[:0])
+	v, _ = g.Next(nil)
 	return v, true, b.offt.Get(l), nil
 }
 
