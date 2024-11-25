@@ -23,12 +23,10 @@ ChangeLog
 
 - milestone: https://github.com/erigontech/erigon/milestone/5
 - Known problem:
-  - external CL support
-  - `erigon_getLatestLogs` not emplimented
-
+    - external CL support
+    - `erigon_getLatestLogs` not emplimented
 
 ### Acknowledgements:
-
 
 ## v3.0.0-alpha5
 
