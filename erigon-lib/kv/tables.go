@@ -647,7 +647,8 @@ var SentryTables = []string{
 var ConsensusTables = append([]string{
 	CliqueSeparate,
 	CliqueLastSnapshot,
-}, ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
+},
+	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
 )
 var HeimdallTables = []string{}
 var PolygonBridgeTables = []string{}
