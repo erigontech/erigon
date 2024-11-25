@@ -1385,14 +1385,23 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		value := make([]byte, 10)
 		r.Read(value)
 
-		if r.Intn(100) > 85 {
-			value = value[:0]
+		if r.Rand.IntN(100) > 85 {
+			// value = value[:0]
+			value = nil
 		}
 
 		updates = append(updates, upd{txNum: txNum, value: value})
 		usedTxNums[txNum] = true
 	}
 	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+
+	for i := 1; i < len(updates); i++ {
+		if updates[i].value == nil && updates[i-1].value == nil {
+			value := make([]byte, 10)
+			r.Read(value)
+			updates[i].value = append(updates[i].value, value...)
+		}
+	}
 
 	return updates
 }
@@ -1433,7 +1442,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	// put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
-		p := []byte{}
+		var p []byte
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
 			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
