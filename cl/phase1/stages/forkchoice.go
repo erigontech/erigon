@@ -321,12 +321,12 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)
 	}
+	start := time.Now()
 	cfg.forkChoice.SetSynced(true) // Now we are synced
 	// Update the head state with the new head state
 	if err := cfg.syncedData.OnHeadState(headState); err != nil {
 		return fmt.Errorf("failed to set head state: %w", err)
 	}
-	start := time.Now()
 	defer func() {
 		logger.Debug("Post forkchoice operations", "duration", time.Since(start))
 	}()
