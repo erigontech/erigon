@@ -51,7 +51,7 @@ type attestationProducer struct {
 }
 
 func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
-	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
+	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second / 2
 	attestationsCache := lru.NewWithTTL[uint64, solid.AttestationData]("attestations", attestationsCacheSize, ttl)
 	blockRootsUsedForSlotCache, err := lru.New[uint64, libcommon.Hash]("blockRootsUsedForSlot", attestationsCacheSize)
 	if err != nil {
@@ -200,6 +200,7 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		Source:          baseState.CurrentJustifiedCheckpoint(),
 		Target:          targetCheckpoint,
 	}
+	fmt.Println("baseAttestationData", baseAttestationData, "epoch", epoch, "baseStateBlockRoot", baseStateBlockRoot)
 	ap.attestationsCache.Add(epoch, baseAttestationData)
 	ap.blockRootsUsedForSlotCache.Add(slot, baseStateBlockRoot)
 
