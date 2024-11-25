@@ -131,7 +131,6 @@ func addSszTests() {
 		//		With("PowBlock", getSSZStaticConsensusTest(&cltypes.PowBlock{})). Unimplemented
 		With("ProposerSlashing", getSSZStaticConsensusTest(&cltypes.ProposerSlashing{})).
 		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
-		With("SignedBeaconBlock", getSSZStaticConsensusTest(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion))).
 		With("SignedBeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlockHeader{})).
 		//With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSideCar{})).
 		With("SignedBLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.SignedBLSToExecutionChange{})).
@@ -146,6 +145,10 @@ func addSszTests() {
 		With("Validator", getSSZStaticConsensusTest(solid.NewValidator())).
 		With("PendingPartialWithdrawal", getSSZStaticConsensusTest(&solid.PendingPartialWithdrawal{})).
 		With("WithdrawalRequest", getSSZStaticConsensusTest(&solid.WithdrawalRequest{})).
+		With("SignedBeaconBlock", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.SignedBeaconBlock {
+				return cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, v)
+			})).
 		With("ExecutionPayload", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.Eth1Block {
 				return cltypes.NewEth1Block(v, &clparams.MainnetBeaconConfig)
