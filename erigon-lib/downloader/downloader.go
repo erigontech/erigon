@@ -2306,6 +2306,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
 			"flushed", common.ByteCount(stats.BytesFlushed),
 			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+			"downloaded", common.ByteCount(stats.BytesDownload),
+			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)),
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
