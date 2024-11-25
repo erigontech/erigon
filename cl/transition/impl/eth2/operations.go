@@ -545,6 +545,35 @@ func (I *impl) processAttestationPostAltair(
 		if data.CommitteeIndex != 0 {
 			return nil, errors.New("processAttestationPostAltair: committee index must be 0")
 		}
+		// check committee
+		committeeIndices := attestation.CommitteeBits.GetOnIndices()
+		committeeOffset := 0
+		for _, committeeIndex := range committeeIndices {
+			// assert committee_index < get_committee_count_per_slot(state, data.target.epoch)
+			if uint64(committeeIndex) >= s.CommitteeCount(currentEpoch) {
+				return nil, errors.New("processAttestationPostAltair: committee index out of bounds")
+			}
+			committee, err := s.GetBeaconCommitee(data.Slot, uint64(committeeIndex))
+			if err != nil {
+				return nil, err
+			}
+			attesters := []uint64{}
+			for i, attester := range committee {
+				if attestation.AggregationBits.GetBitAt(committeeOffset + i) {
+					attesters = append(attesters, attester)
+				}
+			}
+			// assert len(committee_attesters) > 0
+			if len(attesters) == 0 {
+				return nil, errors.New("processAttestationPostAltair: no attesters in committee")
+			}
+			committeeOffset += len(committee)
+		}
+		// Bitfield length matches total number of participants
+		// assert len(attestation.aggregation_bits) == committee_offset
+		if attestation.AggregationBits.Bits() != committeeOffset {
+			return nil, errors.New("processAttestationPostAltair: aggregation bits length mismatch")
+		}
 	}
 
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
