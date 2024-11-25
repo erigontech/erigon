@@ -2139,8 +2139,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 				// more detailed statistic: download rate of each peer (for each file)
 				if transfer.Percentage != 0 {
-					//logger.Log(verbosity, "[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
-					//logger.Log(verbosity, "[snapshots] web peers", webseedRates...)
 					log.Info("[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
 					log.Info("[snapshots] web peers", webseedRates...)
 				}
