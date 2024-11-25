@@ -319,6 +319,9 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	if err != nil {
 		return fmt.Errorf("failed to get state at block root: %w", err)
 	}
+	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
+		logger.Warn("failed to produce and cache attestation data", "err", err)
+	}
 	cfg.forkChoice.SetSynced(true) // Now we are synced
 	// Update the head state with the new head state
 	if err := cfg.syncedData.OnHeadState(headState); err != nil {
@@ -331,9 +334,6 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 
 	return cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// Produce and cache attestation data for validator node (this is not an expensive operation so we can do it for all nodes)
-		// if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
-		// 	logger.Warn("failed to produce and cache attestation data", "err", err)
-		// }
 
 		// Run indexing routines for the database
 		if err := runIndexingRoutines(ctx, tx, cfg, headState); err != nil {
