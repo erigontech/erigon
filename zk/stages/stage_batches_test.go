@@ -178,20 +178,27 @@ func TestFindCommonAncestor(t *testing.T) {
 			hermezDb := hermez_db.NewHermezDb(tx)
 			erigonDb := erigon_db.NewErigonDb(tx)
 
-			dsBlocks := l2Blocks[:tc.dsBlocksCount]
 			dbBlocks := l2Blocks[:tc.dbBlocksCount]
 			if tc.divergentBlockHistory {
 				dbBlocks = l2Blocks[tc.dsBlocksCount : tc.dbBlocksCount+tc.dsBlocksCount]
 			}
 
-			dsClient := NewTestDatastreamClient(dsBlocks, nil)
+			reader := newMockL2BlockReaderRpc()
+
 			for _, l2Block := range dbBlocks {
 				require.NoError(t, hermezDb.WriteBlockBatch(l2Block.L2BlockNumber, l2Block.BatchNumber))
 				require.NoError(t, rawdb.WriteCanonicalHash(tx, l2Block.L2Blockhash, l2Block.L2BlockNumber))
+				reader.addBlockDetail(l2Block.L2BlockNumber, l2Block.BatchNumber, l2Block.L2Blockhash)
+			}
+
+			cfg := BatchesCfg{
+				zkCfg: &ethconfig.Zk{
+					L2RpcUrl: "test",
+				},
 			}
 
 			// ACT
-			ancestorNum, ancestorHash, err := findCommonAncestor(erigonDb, hermezDb, dsClient, tc.latestBlockNum)
+			ancestorNum, ancestorHash, err := findCommonAncestor(cfg, erigonDb, hermezDb, reader, tc.latestBlockNum)
 
 			// ASSERT
 			if tc.expectedError != nil {
@@ -240,4 +247,29 @@ func createTestL2Blocks(t *testing.T, blocksCount int) []types.FullL2Block {
 	}
 
 	return l2Blocks
+}
+
+type mockL2BlockReaderRpc struct {
+	blockHashes  map[uint64]common.Hash
+	blockBatches map[uint64]uint64
+}
+
+func newMockL2BlockReaderRpc() mockL2BlockReaderRpc {
+	return mockL2BlockReaderRpc{
+		blockHashes:  make(map[uint64]common.Hash),
+		blockBatches: make(map[uint64]uint64),
+	}
+}
+
+func (m mockL2BlockReaderRpc) addBlockDetail(number, batch uint64, hash common.Hash) {
+	m.blockHashes[number] = hash
+	m.blockBatches[number] = batch
+}
+
+func (m mockL2BlockReaderRpc) GetZKBlockByNumberHash(url string, blockNum uint64) (common.Hash, error) {
+	return m.blockHashes[blockNum], nil
+}
+
+func (m mockL2BlockReaderRpc) GetBatchNumberByBlockNumber(url string, blockNum uint64) (uint64, error) {
+	return m.blockBatches[blockNum], nil
 }

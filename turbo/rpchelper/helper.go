@@ -58,9 +58,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		number := *blockNrOrHash.BlockNumber
 		switch number {
 		case rpc.LatestBlockNumber:
-			if blockNumber, err = GetLatestFinishedBlockNumber(tx); err != nil {
-				return 0, libcommon.Hash{}, false, err
-			}
+			blockNumber = finishedBlockNumber
 		case rpc.EarliestBlockNumber:
 			blockNumber = 0
 		case rpc.FinalizedBlockNumber:

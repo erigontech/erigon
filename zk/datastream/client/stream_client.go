@@ -65,6 +65,9 @@ type StreamClient struct {
 	// which makes sense for an active server listening for these things but in unit tests
 	// this makes behaviour very unpredictable and hard to test
 	allowStops bool
+
+	lastError error
+	started   bool
 }
 
 const (
@@ -116,46 +119,23 @@ var (
 // and streams the changes for that block (including the transactions).
 // Note that this function is intended for on demand querying and it disposes the connection after it ends.
 func (c *StreamClient) GetL2BlockByNumber(blockNum uint64) (fullBLock *types.FullL2Block, err error) {
-	var (
-		connected bool = c.conn != nil
-	)
-	count := 0
-	for {
-		select {
-		case <-c.ctx.Done():
-			return nil, fmt.Errorf("context done - stopping")
+	select {
+	case <-c.ctx.Done():
+		return nil, fmt.Errorf("context done - stopping")
 
-		default:
-		}
-		if count > 5 {
-			return nil, ErrFailedAttempts
-		}
-		if connected {
-			if err := c.stopStreamingIfStarted(); err != nil {
-				return nil, fmt.Errorf("stopStreamingIfStarted: %w", err)
-			}
-
-			if fullBLock, err = c.getL2BlockByNumber(blockNum); err == nil {
-				break
-			}
-
-			if errors.Is(err, types.ErrAlreadyStarted) {
-				// if the client is already started, we can stop the client and try again
-				if errStop := c.Stop(); errStop != nil {
-					log.Warn("failed to send stop command", "error", errStop)
-				}
-			} else if !errors.Is(err, ErrSocket) {
-				return nil, fmt.Errorf("getL2BlockByNumber: %w", err)
-			}
-
-		}
-		time.Sleep(1 * time.Second)
-		connected = c.handleSocketError(err)
-		count++
-		err = nil
+	default:
+	}
+	if err := c.stopStreamingIfStarted(); err != nil {
+		return nil, fmt.Errorf("stopStreamingIfStarted: %w", err)
 	}
 
-	return fullBLock, nil
+	fullBlock, err := c.getL2BlockByNumber(blockNum)
+	if err != nil {
+		c.lastError = err
+		return nil, err
+	}
+
+	return fullBlock, nil
 }
 
 func (c *StreamClient) getL2BlockByNumber(blockNum uint64) (l2Block *types.FullL2Block, err error) {
@@ -204,46 +184,22 @@ func (c *StreamClient) getL2BlockByNumber(blockNum uint64) (l2Block *types.FullL
 // it retrieves the latest File entry that is of EntryTypeL2Block type.
 // Note that this function is intended for on demand querying and it disposes the connection after it ends.
 func (c *StreamClient) GetLatestL2Block() (l2Block *types.FullL2Block, err error) {
-	var (
-		connected bool = c.conn != nil
-	)
-	count := 0
-	for {
-		select {
-		case <-c.ctx.Done():
-			return nil, errors.New("context done - stopping")
-		default:
-		}
-		if count > 5 {
-			return nil, ErrFailedAttempts
-		}
-		if connected {
-			if err = c.stopStreamingIfStarted(); err != nil {
-				err = fmt.Errorf("stopStreamingIfStarted: %w", err)
-			}
-			if err == nil {
-				if l2Block, err = c.getLatestL2Block(); err == nil {
-					break
-				}
-				err = fmt.Errorf("getLatestL2Block: %w", err)
-			}
-
-			if err != nil && !errors.Is(err, ErrSocket) {
-				return nil, err
-			} else if errors.Is(err, types.ErrAlreadyStarted) {
-				// if the client is already started, we can stop the client and try again
-				if errStop := c.Stop(); errStop != nil {
-					log.Warn("failed to send stop command", "error", errStop)
-				}
-			}
-			err = nil
-		}
-
-		time.Sleep(1 * time.Second)
-		connected = c.handleSocketError(err)
-		count++
+	select {
+	case <-c.ctx.Done():
+		return nil, errors.New("context done - stopping")
+	default:
 	}
-	return l2Block, nil
+	if err = c.stopStreamingIfStarted(); err != nil {
+		err = fmt.Errorf("stopStreamingIfStarted: %w", err)
+	}
+
+	fullBlock, err := c.getLatestL2Block()
+	if err != nil {
+		c.lastError = err
+		return nil, err
+	}
+
+	return fullBlock, nil
 }
 
 func (c *StreamClient) getStreaming() bool {
@@ -461,32 +417,28 @@ func (c *StreamClient) RenewEntryChannel() {
 }
 
 func (c *StreamClient) ReadAllEntriesToChannel() (err error) {
-	var (
-		connected bool = c.conn != nil
-	)
-	count := 0
-	for {
-		select {
-		case <-c.ctx.Done():
-			return fmt.Errorf("context done - stopping")
-		default:
+	defer func() {
+		if err != nil {
+			c.lastError = err
 		}
-		if connected {
-			if err := c.stopStreamingIfStarted(); err != nil {
-				return fmt.Errorf("stopStreamingIfStarted: %w", err)
-			}
+	}()
+	select {
+	case <-c.ctx.Done():
+		return fmt.Errorf("context done - stopping")
+	default:
+	}
+	if err := c.stopStreamingIfStarted(); err != nil {
+		return fmt.Errorf("stopStreamingIfStarted: %w", err)
+	}
 
-			if err = c.readAllEntriesToChannel(); err == nil {
-				break
-			}
-			if !errors.Is(err, ErrSocket) {
-				return fmt.Errorf("readAllEntriesToChannel: %w", err)
-			}
-		}
+	// first load up the header of the stream
+	if _, err := c.GetHeader(); err != nil {
+		return fmt.Errorf("GetHeader: %w", err)
+	}
 
-		time.Sleep(1 * time.Second)
-		connected = c.handleSocketError(err)
-		count++
+	if err = c.readAllEntriesToChannel(); err != nil {
+		c.lastError = err
+		return err
 	}
 
 	return nil
@@ -510,7 +462,10 @@ func (c *StreamClient) handleSocketError(socketErr error) bool {
 // at end will wait for new entries to arrive
 func (c *StreamClient) readAllEntriesToChannel() (err error) {
 	defer func() {
-		c.setStreaming(false)
+		if err != nil {
+			c.setStreaming(false)
+			c.lastError = err
+		}
 	}()
 
 	c.setStreaming(true)
@@ -640,6 +595,28 @@ LOOP:
 			}
 			break LOOP
 		}
+	}
+
+	return nil
+}
+
+func (c *StreamClient) HandleStart() error {
+	if !c.started {
+		log.Info("[Datastream client] Starting datastream client from cold")
+		// never been started - so kick things off
+		if err := c.Start(); err != nil {
+			return err
+		}
+		c.started = true
+	}
+
+	if c.lastError != nil {
+		log.Info("[Datastream client] Last error detected, trying to reconnect")
+		// we had an error last time, so try to reconnect
+		if err := c.tryReConnect(); err != nil {
+			return err
+		}
+		c.lastError = nil
 	}
 
 	return nil

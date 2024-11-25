@@ -105,12 +105,10 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 	///// DEBUG BISECT /////
 	defer func() {
 		if cfg.zk.DebugLimit > 0 {
+			log.Info(fmt.Sprintf("[%s] Debug limits", logPrefix), "Limit", cfg.zk.DebugLimit, "TO", to, "Err is nil ?", err == nil)
 			if err != nil {
 				log.Error("Hashing Failed", "block", to, "err", err)
 				os.Exit(1)
-			} else if to >= cfg.zk.DebugLimit {
-				tx.Commit()
-				os.Exit(0)
 			}
 		}
 	}()

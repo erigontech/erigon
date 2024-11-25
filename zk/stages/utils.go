@@ -15,6 +15,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
+	jsonClient "github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
+	jsonTypes "github.com/ledgerwatch/erigon/zkevm/jsonrpc/types"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+)
+
+const (
+	SEQUENCER_DATASTREAM_RPC_CALL = "zkevm_getLatestDataStreamBlock"
+	BATCH_NUMBER_BY_BLOCK_NUMBER  = "zkevm_batchNumberByBlockNumber"
+	ZK_BLOCK_BY_NUMBER            = "zkevm_getFullBlockByNumber"
 )
 
 func TrimHexString(s string) string {
@@ -150,4 +159,59 @@ func DeriveEffectiveGasPrice(cfg SequenceBlockCfg, tx types.Transaction) uint8 {
 	}
 
 	return cfg.zk.EffectiveGasPriceForEthTransfer
+}
+
+func GetSequencerHighestDataStreamBlock(endpoint string) (uint64, error) {
+	res, err := jsonClient.JSONRPCCall(endpoint, SEQUENCER_DATASTREAM_RPC_CALL)
+	if err != nil {
+		return 0, err
+	}
+
+	return trimHexAndHandleUint64Result(res)
+}
+
+type l2BlockReaderRpc struct {
+}
+
+func (l2BlockReaderRpc) GetZKBlockByNumberHash(endpoint string, blockNo uint64) (common.Hash, error) {
+	asHex := fmt.Sprintf("0x%x", blockNo)
+	res, err := jsonClient.JSONRPCCall(endpoint, ZK_BLOCK_BY_NUMBER, asHex, false)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	type ZkBlock struct {
+		Hash common.Hash `json:"hash"`
+	}
+
+	var zkBlock ZkBlock
+	if err := json.Unmarshal(res.Result, &zkBlock); err != nil {
+		return common.Hash{}, err
+	}
+
+	return zkBlock.Hash, nil
+}
+
+func (l2BlockReaderRpc) GetBatchNumberByBlockNumber(endpoint string, blockNo uint64) (uint64, error) {
+	asHex := fmt.Sprintf("0x%x", blockNo)
+	res, err := jsonClient.JSONRPCCall(endpoint, BATCH_NUMBER_BY_BLOCK_NUMBER, asHex)
+	if err != nil {
+		return 0, err
+	}
+
+	return trimHexAndHandleUint64Result(res)
+}
+
+func trimHexAndHandleUint64Result(res jsonTypes.Response) (uint64, error) {
+	// hash comes in escaped quotes, so we trim them here
+	// \"0x1234\" -> 0x1234
+	hashHex := strings.Trim(string(res.Result), "\"")
+
+	// now convert to a uint
+	decoded, err := hexutil.DecodeUint64(hashHex)
+	if err != nil {
+		return 0, err
+	}
+
+	return decoded, nil
 }
