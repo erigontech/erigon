@@ -2207,7 +2207,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 		sort.Strings(files)
 
-		logger.Log(verbosity, "[snapshots] files progress", "files", amount, "list", strings.Join(files, ", "))
+		log.Info("[snapshots] files progress", "files", amount, "list", strings.Join(files, ", "))
 	}
 
 	if d.stuckFileDetailedLogs && time.Since(stats.lastTorrentStatus) > 5*time.Minute {
@@ -2216,7 +2216,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		if len(noDownloadProgress) > 0 {
 			progressStatus := getProgressStatus(torrentClient, noDownloadProgress)
 			for file, status := range progressStatus {
-				logger.Debug(fmt.Sprintf("[snapshots] torrent status: %s\n    %s", file,
+				log.Info(fmt.Sprintf("[snapshots] torrent status: %s\n    %s", file,
 					string(bytes.TrimRight(bytes.ReplaceAll(status, []byte("\n"), []byte("\n    ")), "\n "))))
 			}
 		}
@@ -2460,8 +2460,8 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		toVerify = append(toVerify, t)
 		total += t.NumPieces()
 	}
-	d.logger.Info("[snapshots] Verify start")
-	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
+	log.Info("[snapshots] Verify start")
+	defer log.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
 	completedPieces, completedFiles := &atomic.Uint64{}, &atomic.Uint64{}
 
@@ -2476,7 +2476,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 				case <-ctx.Done():
 					return
 				case <-logEvery.C:
-					d.logger.Info("[snapshots] Verify",
+					log.Info("[snapshots] Verify",
 						"progress", fmt.Sprintf("%.2f%%", 100*float64(completedPieces.Load())/float64(total)),
 						"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
 						"sz_gb", downloadercfg.DefaultPieceSize*completedPieces.Load()/1024/1024/1024,
