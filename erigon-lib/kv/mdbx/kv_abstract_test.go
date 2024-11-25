@@ -23,20 +23,20 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon/erigon-lib/kv/order"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/remotedb"
-	"github.com/erigontech/erigon-lib/kv/remotedbserver"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/erigon-lib/kv/remotedb"
+	"github.com/erigontech/erigon/erigon-lib/kv/remotedbserver"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 func TestSequence(t *testing.T) {

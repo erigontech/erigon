@@ -26,8 +26,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 )
 
 func TestBloom(t *testing.T) {

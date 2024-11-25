@@ -29,9 +29,9 @@ import (
 
 	"github.com/erigontech/secp256k1"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common/u256"
 )
 

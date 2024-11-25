@@ -30,10 +30,10 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"

@@ -32,14 +32,14 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"
 
-	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	datadir2 "github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	chain2 "github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	chain2 "github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"

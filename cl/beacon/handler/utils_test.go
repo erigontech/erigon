@@ -25,11 +25,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"

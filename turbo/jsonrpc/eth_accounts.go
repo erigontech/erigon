@@ -21,16 +21,16 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/gointerfaces"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/turbo/rpchelper"
 
-	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	txpool_proto "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc"

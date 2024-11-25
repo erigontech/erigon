@@ -22,14 +22,14 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borabi"
 
-	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/aura"
 	"github.com/erigontech/erigon/consensus/clique"

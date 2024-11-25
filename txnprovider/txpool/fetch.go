@@ -27,13 +27,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	sentry "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/rlp"
 )
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction

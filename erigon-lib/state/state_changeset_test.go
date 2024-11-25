@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
 	"github.com/stretchr/testify/require"
 )
 

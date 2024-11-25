@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/eth/stagedsync/stagedsynctest"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"

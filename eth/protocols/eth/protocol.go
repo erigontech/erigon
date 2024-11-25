@@ -24,10 +24,10 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/direct"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/direct"
+	proto_sentry "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
+	rlp2 "github.com/erigontech/erigon/erigon-lib/rlp"
 
 	"github.com/erigontech/erigon/core/forkid"
 	"github.com/erigontech/erigon/core/types"

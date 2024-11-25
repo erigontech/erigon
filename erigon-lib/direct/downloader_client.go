@@ -20,7 +20,7 @@ import (
 	"context"
 	"io"
 
-	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
+	proto_downloader "github.com/erigontech/erigon/erigon-lib/gointerfaces/downloaderproto"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

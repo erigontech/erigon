@@ -19,7 +19,7 @@ package verkletrie
 import (
 	"context"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/core/types/accounts"

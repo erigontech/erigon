@@ -28,7 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 	"github.com/stretchr/testify/require"
 )
 

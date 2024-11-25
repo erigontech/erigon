@@ -11,11 +11,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/direct"
+	"github.com/erigontech/erigon/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"

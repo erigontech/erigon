@@ -27,11 +27,11 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	kv2 "github.com/erigontech/erigon/erigon-lib/kv/mdbx"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/turbo/debug"

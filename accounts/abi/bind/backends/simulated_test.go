@@ -34,9 +34,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/common"

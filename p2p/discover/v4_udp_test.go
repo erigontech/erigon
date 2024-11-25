@@ -37,7 +37,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/testlog"
 
 	"github.com/erigontech/erigon/p2p/discover/v4wire"

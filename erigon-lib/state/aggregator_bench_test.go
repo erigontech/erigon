@@ -26,17 +26,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/recsplit"
+	"github.com/erigontech/erigon/erigon-lib/seg"
 )
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregator) {

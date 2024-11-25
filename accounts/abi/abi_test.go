@@ -30,9 +30,9 @@ import (
 	"strings"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/crypto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 )
 

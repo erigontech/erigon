@@ -26,7 +26,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/args"

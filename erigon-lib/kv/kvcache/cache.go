@@ -31,11 +31,11 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/metrics"
 )
 
 type CacheValidationResult struct {

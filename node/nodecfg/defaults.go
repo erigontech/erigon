@@ -20,7 +20,7 @@
 package nodecfg
 
 import (
-	"github.com/erigontech/erigon-lib/direct"
+	"github.com/erigontech/erigon/erigon-lib/direct"
 
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/nat"

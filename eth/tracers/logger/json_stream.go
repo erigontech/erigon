@@ -24,7 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/vm"

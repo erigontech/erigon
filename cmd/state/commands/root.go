@@ -22,8 +22,8 @@ import (
 	"os"
 	"path/filepath"
 
-	chain2 "github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
+	chain2 "github.com/erigontech/erigon/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/spf13/cobra"
 

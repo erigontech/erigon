@@ -37,8 +37,8 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"

@@ -22,11 +22,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/dataflow"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"

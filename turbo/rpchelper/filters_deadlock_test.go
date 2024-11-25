@@ -20,12 +20,12 @@ import (
 	"context"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	types2 "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/turbo/rpchelper"

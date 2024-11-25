@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/threading"
 
 	"github.com/Giulio2002/bls"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"

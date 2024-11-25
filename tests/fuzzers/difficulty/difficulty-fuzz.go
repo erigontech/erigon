@@ -26,7 +26,7 @@ import (
 	"io"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/types"

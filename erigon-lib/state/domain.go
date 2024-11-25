@@ -28,23 +28,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/erigon-lib/metrics"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano32"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/background"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/etl"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/order"
+	"github.com/erigontech/erigon/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/erigon-lib/recsplit"
+	"github.com/erigontech/erigon/erigon-lib/seg"
 )
 
 var sortableBuffersPoolForPruning = sync.Pool{

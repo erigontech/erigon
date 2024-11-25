@@ -22,9 +22,9 @@ import (
 	"math/big"
 	"reflect"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/metrics"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/metrics"
+	execution "github.com/erigontech/erigon/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"

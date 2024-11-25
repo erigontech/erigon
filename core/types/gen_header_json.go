@@ -9,9 +9,9 @@ import (
 
 	"github.com/gballet/go-verkle"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
 )
 
 var _ = (*headerMarshaling)(nil)

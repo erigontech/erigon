@@ -25,7 +25,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
 	"github.com/erigontech/erigon/turbo/logging"
 )

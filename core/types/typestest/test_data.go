@@ -21,8 +21,8 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/crypto/kzg"
 )
 
 func MakeBlobTxnRlp() ([]byte, []gokzg4844.KZGCommitment) {

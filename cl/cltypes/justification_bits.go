@@ -19,8 +19,8 @@ package cltypes
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/utils"
 )
 

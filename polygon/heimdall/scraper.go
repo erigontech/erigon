@@ -22,11 +22,11 @@ import (
 	"fmt"
 	"time"
 
-	commonerrors "github.com/erigontech/erigon-lib/common/errors"
-	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon-lib/log/v3"
+	commonerrors "github.com/erigontech/erigon/erigon-lib/common/errors"
+	"github.com/erigontech/erigon/erigon-lib/common/generics"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 

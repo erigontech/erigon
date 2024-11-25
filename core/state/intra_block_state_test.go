@@ -36,13 +36,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/log/v3"
-	stateLib "github.com/erigontech/erigon-lib/state"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	stateLib "github.com/erigontech/erigon/erigon-lib/state"
 
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"

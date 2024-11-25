@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"

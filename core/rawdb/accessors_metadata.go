@@ -28,9 +28,9 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.

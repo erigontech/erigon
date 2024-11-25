@@ -26,9 +26,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 )
 
 // prepare converts an ethash cache or dataset from a byte stream into the internal

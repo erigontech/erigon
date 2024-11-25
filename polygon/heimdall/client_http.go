@@ -30,9 +30,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/erigon-lib/metrics"
 )
 
 var (

@@ -22,9 +22,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	proto_sentry "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"

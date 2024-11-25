@@ -20,9 +20,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon/erigon-lib/state"
 	"golang.org/x/sync/errgroup"
 )
 

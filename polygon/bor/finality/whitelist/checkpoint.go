@@ -17,8 +17,8 @@
 package whitelist
 
 import (
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/metrics"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor/finality/rawdb"
 )

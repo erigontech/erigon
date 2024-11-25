@@ -24,7 +24,7 @@ import (
 	"math/bits"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon/erigon-lib/common/bitutil"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html

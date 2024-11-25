@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 type proposerDuties struct {

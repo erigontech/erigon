@@ -37,7 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/stretchr/testify/require"
 

@@ -23,10 +23,10 @@ import (
 	"path/filepath"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync"

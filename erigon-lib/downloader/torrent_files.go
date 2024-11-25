@@ -28,7 +28,7 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
 )
 
 // AtomicTorrentFS - does provide thread-safe CRUD operations on .torrent files

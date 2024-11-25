@@ -22,9 +22,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 var PoolChainConfigKey = []byte("chain_config")

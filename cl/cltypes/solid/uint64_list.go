@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/erigon-lib/types/clonable"
 )
 
 type uint64ListSSZ struct {

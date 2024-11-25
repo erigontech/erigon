@@ -23,15 +23,15 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/erigon-lib/wrap"
 
 	mapset "github.com/deckarep/golang-set/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"

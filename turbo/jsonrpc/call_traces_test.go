@@ -27,8 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fastjson"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"

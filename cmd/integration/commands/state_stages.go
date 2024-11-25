@@ -25,19 +25,19 @@ import (
 	"os"
 	"time"
 
-	stateLib "github.com/erigontech/erigon-lib/state"
+	stateLib "github.com/erigontech/erigon/erigon-lib/state"
 
-	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/erigon-lib/wrap"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	chain2 "github.com/erigontech/erigon-lib/chain"
-	common2 "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
+	chain2 "github.com/erigontech/erigon/erigon-lib/chain"
+	common2 "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/debugprint"

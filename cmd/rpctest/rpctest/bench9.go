@@ -21,7 +21,7 @@ import (
 	"net/http"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/erigontech/erigon/core/state"
 )

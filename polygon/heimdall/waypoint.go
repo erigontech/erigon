@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func AsWaypoints[T Waypoint](wp []T) Waypoints {

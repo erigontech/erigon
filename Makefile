@@ -170,18 +170,16 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-test-erigon-lib:
-	@cd erigon-lib && $(MAKE) test
 
 test-erigon-ext:
 	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
 
 ## test:                              run unit tests with a 100s timeout
-test: test-erigon-lib
+test:
 	$(GOTEST) --timeout 10m -coverprofile=coverage.out
 
 ## test-integration:                  run integration tests with a 30m timeout
-test-integration: test-erigon-lib
+test-integration:
 	$(GOTEST) --timeout 240m -tags $(BUILD_TAGS),integration
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
@@ -196,20 +194,6 @@ test-hive:
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
 
-## lint-deps:                         install lint dependencies
-lint-deps:
-	@cd erigon-lib && $(MAKE) lint-deps
-
-## lintci:                            run golangci-lint linters
-lintci:
-	@cd erigon-lib && $(MAKE) lintci
-	@./erigon-lib/tools/golangci_lint.sh
-
-## lint:                              run all linters
-lint:
-	@cd erigon-lib && $(MAKE) lint
-	@./erigon-lib/tools/golangci_lint.sh
-	@./erigon-lib/tools/mod_tidy_check.sh
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:

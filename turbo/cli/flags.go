@@ -21,12 +21,12 @@ import (
 	"math"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/config3"
 
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -35,11 +35,11 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon/erigon-lib/etl"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/kvcache"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"

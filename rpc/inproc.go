@@ -23,7 +23,7 @@ import (
 	"context"
 	"net"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // DialInProc attaches an in-process connection to the given RPC server.

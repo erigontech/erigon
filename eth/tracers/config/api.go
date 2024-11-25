@@ -22,7 +22,7 @@ package config
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )

@@ -22,8 +22,8 @@ import (
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"

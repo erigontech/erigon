@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
 
 	"github.com/anacrolix/dht/v2"
 	lg "github.com/anacrolix/log"
@@ -35,11 +35,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/time/rate"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce

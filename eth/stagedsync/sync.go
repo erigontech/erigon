@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/state"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/wrap"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/wrap"
 
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"

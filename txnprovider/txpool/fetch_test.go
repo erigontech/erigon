@@ -24,21 +24,21 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common/u256"
+	"github.com/erigontech/erigon/erigon-lib/direct"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 func TestFetch(t *testing.T) {

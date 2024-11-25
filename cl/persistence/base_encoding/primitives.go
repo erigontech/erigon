@@ -19,7 +19,7 @@ package base_encoding
 import (
 	"encoding/binary"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func Encode64ToBytes4(x uint64) (out []byte) {

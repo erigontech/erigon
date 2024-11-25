@@ -13,8 +13,8 @@ import (
 	context "context"
 	reflect "reflect"
 
-	sentryproto "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	sentryproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
+	typesproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 	gomock "go.uber.org/mock/gomock"
 	grpc "google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"

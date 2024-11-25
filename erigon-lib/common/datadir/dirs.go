@@ -25,7 +25,7 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
 )
 
 // Dirs is the file system folder the node should use for any data storage

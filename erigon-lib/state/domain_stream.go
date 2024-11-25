@@ -21,12 +21,12 @@ import (
 	"container/heap"
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/order"
+	"github.com/erigontech/erigon/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/seg"
 	btree2 "github.com/tidwall/btree"
 )
 

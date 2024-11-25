@@ -25,8 +25,8 @@ import (
 	"math/big"
 	"reflect"
 
-	common2 "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/math"
+	common2 "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
 	"github.com/erigontech/erigon/common"
 )
 

@@ -20,8 +20,8 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/rawdb"
 )
 

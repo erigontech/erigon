@@ -30,12 +30,12 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/direct"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/erigon-lib/direct"
+	execution "github.com/erigontech/erigon/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/erigontech/erigon/turbo/services"

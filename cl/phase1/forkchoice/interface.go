@@ -19,8 +19,8 @@ package forkchoice
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"

@@ -19,8 +19,8 @@ package cltypes_test
 import (
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/ssz"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"

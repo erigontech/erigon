@@ -23,7 +23,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 	mockaggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/cltypes/solid"

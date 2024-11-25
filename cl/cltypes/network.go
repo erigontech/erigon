@@ -20,10 +20,10 @@ import (
 	"encoding/json"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )

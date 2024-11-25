@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
 
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/common/debug"

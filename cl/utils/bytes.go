@@ -22,7 +22,7 @@ import (
 	"math/bits"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 
 	"github.com/golang/snappy"
 )

@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
 	"github.com/erigontech/erigon/core/systemcontracts"

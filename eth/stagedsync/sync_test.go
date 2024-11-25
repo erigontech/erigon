@@ -23,9 +23,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/wrap"
+	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/wrap"
 
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"

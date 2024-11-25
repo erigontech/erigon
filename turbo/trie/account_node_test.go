@@ -24,9 +24,9 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon/core/types/accounts"
 )
 

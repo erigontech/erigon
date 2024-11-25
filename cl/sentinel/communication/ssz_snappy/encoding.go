@@ -28,7 +28,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )

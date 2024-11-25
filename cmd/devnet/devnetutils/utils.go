@@ -27,10 +27,10 @@ import (
 	"strconv"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 var ErrInvalidEnodeString = errors.New("invalid enode string")

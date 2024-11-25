@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
 	ethereum "github.com/erigontech/erigon"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"

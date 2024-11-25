@@ -22,7 +22,7 @@ package abi
 import (
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 type packUnpackTest struct {

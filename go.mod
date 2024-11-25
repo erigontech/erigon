@@ -3,13 +3,16 @@ module github.com/erigontech/erigon
 go 1.22.5
 
 require (
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
+	github.com/erigontech/interfaces v0.0.0-20241116035842-5d396f10468e
 	github.com/erigontech/mdbx-go v0.38.4
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/erigontech/silkworm-go v0.18.0
+	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 )
 
-replace github.com/erigontech/erigon-lib => ./erigon-lib
+// replace github.com/erigontech/erigon-lib => ./erigon-lib
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
@@ -32,7 +35,7 @@ require (
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.6.2
-	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
+	// github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-chi/chi/v5 v5.1.0
@@ -107,15 +110,15 @@ require (
 
 require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
-	github.com/elastic/go-freelru v0.13.0 // indirect
-	github.com/erigontech/speedtest v0.0.2 // indirect
+	github.com/elastic/go-freelru v0.13.0
+	github.com/erigontech/speedtest v0.0.2
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
-	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
+	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
@@ -129,11 +132,11 @@ require (
 	github.com/agnivade/levenshtein v1.1.1 // indirect
 	github.com/ajwerner/btree v0.0.0-20211221152037-f427b3e689c0 // indirect
 	github.com/anacrolix/chansync v0.3.0 // indirect
-	github.com/anacrolix/dht/v2 v2.21.1 // indirect
+	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/envpprof v1.3.0 // indirect
 	github.com/anacrolix/generics v0.0.2-0.20240227122613-f95486179cab // indirect
-	github.com/anacrolix/go-libutp v1.3.1 // indirect
-	github.com/anacrolix/log v0.15.2 // indirect
+	github.com/anacrolix/go-libutp v1.3.1
+	github.com/anacrolix/log v0.15.2
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
 	github.com/anacrolix/missinggo/v2 v2.7.3 // indirect
@@ -154,7 +157,7 @@ require (
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/consensys/bavard v0.1.13 // indirect
 	github.com/containerd/cgroups v1.1.0 // indirect
-	github.com/containerd/cgroups/v3 v3.0.3 // indirect
+	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
@@ -163,7 +166,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elastic/gosigar v0.14.2 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
@@ -179,7 +181,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20240409012703-83162a5b38cd // indirect
-	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
+	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20240503222823-736c933a666d // indirect
 	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -201,8 +203,8 @@ require (
 	github.com/libp2p/go-yamux/v4 v4.0.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-colorable v0.1.13
+	github.com/mattn/go-isatty v0.0.20
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/miekg/dns v1.1.58 // indirect
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
@@ -227,7 +229,7 @@ require (
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/onsi/ginkgo/v2 v2.15.0 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
-	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
+	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pion/datachannel v1.5.6 // indirect
 	github.com/pion/dtls/v2 v2.2.11 // indirect
 	github.com/pion/ice/v2 v2.3.24 // indirect
@@ -245,7 +247,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_golang v1.20.5
-	github.com/prometheus/client_model v0.6.1 // indirect
+	github.com/prometheus/client_model v0.6.1
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/quic-go/qpack v0.4.0 // indirect
@@ -255,14 +257,13 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
-	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/shirou/gopsutil/v4 v4.24.8 // indirect
+	github.com/shirou/gopsutil/v4 v4.24.8
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/shopspring/decimal v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/sosodev/duration v1.3.1 // indirect
-	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
 	github.com/supranational/blst v0.3.13 // indirect
@@ -288,7 +289,24 @@ require (
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
 
+replace github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
+
+// module github.com/erigontech/erigon-lib
+
+// go 1.22.0
+
+// require (
+// 	google.golang.org/protobuf v1.34.2
+// )
+
+require github.com/alecthomas/repr v0.4.0 // indirect
+
+require (
+	github.com/alecthomas/assert/v2 v2.8.1 // indirect
+// golang.org/x/net v0.30.0
+)
+
 replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
 	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
+	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

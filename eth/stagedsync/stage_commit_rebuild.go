@@ -22,12 +22,12 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/turbo/services"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/trie"
 )
 

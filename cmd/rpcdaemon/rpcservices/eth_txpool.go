@@ -26,10 +26,10 @@ import (
 
 	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
 
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	txpooproto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/grpcutil"
+	txpooproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 type TxPoolService struct {

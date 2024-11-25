@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 type ValidatorPreparationPayload struct {

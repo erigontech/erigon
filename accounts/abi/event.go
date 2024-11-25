@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 )
 
 // Event is an event potentially triggered by the EVM's LOG mechanism. The Event

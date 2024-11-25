@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
 )
 
 // Strings of length 56 are a boundary case.

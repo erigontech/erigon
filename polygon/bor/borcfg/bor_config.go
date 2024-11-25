@@ -21,7 +21,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // BorConfig is the consensus engine configs for Matic bor based sealing.

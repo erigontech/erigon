@@ -19,10 +19,10 @@ package rpchelper
 import (
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/concurrent"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/concurrent"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
 
 	types2 "github.com/erigontech/erigon/core/types"
 )

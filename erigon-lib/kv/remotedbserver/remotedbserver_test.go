@@ -25,9 +25,9 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 func TestKvServer_renew(t *testing.T) {

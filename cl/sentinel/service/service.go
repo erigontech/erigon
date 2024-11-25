@@ -35,10 +35,10 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/peer"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	sentinelrpc "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
 )

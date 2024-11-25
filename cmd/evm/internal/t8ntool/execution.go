@@ -25,11 +25,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/kv"
-	state3 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	state3 "github.com/erigontech/erigon/erigon-lib/state"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus/ethash"

@@ -26,8 +26,8 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/metrics"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/metrics"
 
 	"github.com/erigontech/erigon/core/types/accounts"
 )

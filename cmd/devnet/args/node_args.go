@@ -25,8 +25,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/cmd/devnet/accounts"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core"

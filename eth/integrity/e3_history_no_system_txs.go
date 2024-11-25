@@ -25,12 +25,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/order"
+	"github.com/erigontech/erigon/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )

@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestValue(t *testing.T) {

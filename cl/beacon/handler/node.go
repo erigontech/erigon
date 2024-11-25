@@ -23,7 +23,7 @@ import (
 	"runtime"
 	"strconv"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
+	sentinel "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 

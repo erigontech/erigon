@@ -25,10 +25,10 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	downloadercfg2 "github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	downloadercfg2 "github.com/erigontech/erigon/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {

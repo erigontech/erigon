@@ -26,7 +26,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	_debug "github.com/erigontech/erigon/common/debug"
 )
 

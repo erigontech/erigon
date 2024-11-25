@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon/erigon-lib/common"
 	builder "github.com/erigontech/erigon/cl/beacon/builder"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	engine_types "github.com/erigontech/erigon/turbo/engineapi/engine_types"

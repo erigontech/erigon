@@ -25,7 +25,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 )

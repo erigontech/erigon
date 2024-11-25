@@ -30,7 +30,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
 )
 
 type testEncoder struct {

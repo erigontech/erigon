@@ -17,7 +17,7 @@
 package building
 
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 

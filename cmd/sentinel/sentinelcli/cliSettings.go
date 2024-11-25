@@ -21,13 +21,13 @@ import (
 
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/turbo/logging"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 type SentinelCliCfg struct {

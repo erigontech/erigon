@@ -20,7 +20,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"

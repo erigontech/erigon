@@ -21,8 +21,8 @@ import (
 	"errors"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 

@@ -32,12 +32,12 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano16"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/assert"
+	"github.com/erigontech/erigon/erigon-lib/etl"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano16"
+	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano32"
 )
 
 var ErrCollision = errors.New("duplicate key")

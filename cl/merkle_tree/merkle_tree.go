@@ -7,9 +7,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/math"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
 )
 
 func ceil(num, divisor int) int {

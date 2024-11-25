@@ -14,7 +14,7 @@ import (
 	big "math/big"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon/erigon-lib/common"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	types "github.com/erigontech/erigon/core/types"
 	engine_types "github.com/erigontech/erigon/turbo/engineapi/engine_types"

@@ -22,14 +22,14 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	proto_txpool "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
+	types2 "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/types"

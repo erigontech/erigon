@@ -17,7 +17,7 @@
 package p2p
 
 import (
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
 )

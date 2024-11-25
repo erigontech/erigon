@@ -30,11 +30,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/params"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -42,11 +42,11 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon/migrations"
 )
 

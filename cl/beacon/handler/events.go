@@ -23,7 +23,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	event "github.com/erigontech/erigon/cl/beacon/beaconevents"
 )
 

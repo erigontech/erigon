@@ -19,7 +19,7 @@ package rpctest
 import (
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 )
 

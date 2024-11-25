@@ -34,9 +34,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/urfave/cli/v2"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	types "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/debug"
 )

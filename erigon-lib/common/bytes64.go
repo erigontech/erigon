@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 )
 
 var (

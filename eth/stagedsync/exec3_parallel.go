@@ -10,10 +10,10 @@ import (
 
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	state2 "github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb"

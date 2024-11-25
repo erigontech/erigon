@@ -23,11 +23,11 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/order"
+	"github.com/erigontech/erigon/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"

@@ -25,7 +25,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // typeWithoutStringer is a alias for the Type type which simply doesn't implement

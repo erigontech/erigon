@@ -28,9 +28,9 @@ import (
 	"sync/atomic"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"

@@ -24,17 +24,17 @@ import (
 	"path/filepath"
 	"strings"
 
-	state3 "github.com/erigontech/erigon-lib/state"
+	state3 "github.com/erigontech/erigon/erigon-lib/state"
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	kv2 "github.com/erigontech/erigon/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"

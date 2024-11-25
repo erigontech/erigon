@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/seg"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 func BenchmarkBpsTreeSeek(t *testing.B) {

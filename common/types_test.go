@@ -29,7 +29,7 @@ import (
 	"strings"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 func TestBytesConversion(t *testing.T) {

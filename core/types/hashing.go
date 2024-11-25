@@ -26,9 +26,9 @@ import (
 
 	"github.com/protolambda/ztyp/codec"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/cryptopool"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/crypto/cryptopool"
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/rlphacks"
 	"github.com/erigontech/erigon/turbo/trie"

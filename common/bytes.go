@@ -24,7 +24,7 @@ import (
 	"bytes"
 	"encoding/hex"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // FromHex returns the bytes represented by the hexadecimal string s.

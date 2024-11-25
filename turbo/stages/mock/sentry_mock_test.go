@@ -23,11 +23,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/wrap"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	sentry "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/erigon-lib/wrap"
 
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"

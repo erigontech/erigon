@@ -29,9 +29,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	rlp2 "github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/rlp"
 )
 

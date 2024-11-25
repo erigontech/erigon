@@ -21,13 +21,13 @@ import (
 	"fmt"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
-	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon/erigon-lib/kv/dbutils"
 
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/temporal/historyv2"
+	"github.com/erigontech/erigon/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/kv/temporal/historyv2"
 	"github.com/erigontech/erigon/common"
 )
 

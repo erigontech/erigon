@@ -25,12 +25,12 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )

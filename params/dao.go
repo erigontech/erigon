@@ -22,7 +22,7 @@ package params
 import (
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/erigontech/erigon/common"
 )

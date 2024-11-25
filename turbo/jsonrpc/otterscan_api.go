@@ -24,12 +24,12 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	hexutil2 "github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"

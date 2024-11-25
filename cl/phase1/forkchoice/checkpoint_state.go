@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"

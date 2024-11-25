@@ -24,7 +24,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/debug"

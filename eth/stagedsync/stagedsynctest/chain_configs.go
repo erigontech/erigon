@@ -17,7 +17,7 @@
 package stagedsynctest
 
 import (
-	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon/erigon-lib/chain"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )

@@ -32,13 +32,13 @@ import (
 
 	"google.golang.org/grpc"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/concurrent"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/concurrent"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/grpcutil"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	txpool "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
 
 	"github.com/erigontech/erigon/core/types"

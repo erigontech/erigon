@@ -23,8 +23,8 @@ import (
 	"sort"
 	"strconv"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 )

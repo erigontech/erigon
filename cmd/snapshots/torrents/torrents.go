@@ -28,14 +28,14 @@ import (
 	gosync "sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/downloader"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/erigon-lib/downloader"
+	"github.com/erigontech/erigon/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon/cmd/snapshots/manifest"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	"github.com/erigontech/erigon/cmd/utils"

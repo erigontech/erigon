@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	execution "github.com/erigontech/erigon/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"

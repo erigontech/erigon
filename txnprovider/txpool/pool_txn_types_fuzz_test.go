@@ -21,7 +21,7 @@ package txpool
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon/erigon-lib/common/u256"
 )
 
 // golang.org/s/draft-fuzzing-design

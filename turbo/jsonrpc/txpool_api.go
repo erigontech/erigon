@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	proto_txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	proto_txpool "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"

@@ -43,7 +43,7 @@ import (
 	"fmt"
 	"hash"
 
-	ethcrypto "github.com/erigontech/erigon-lib/crypto"
+	ethcrypto "github.com/erigontech/erigon/erigon-lib/crypto"
 )
 
 var (

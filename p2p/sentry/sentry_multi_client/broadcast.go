@@ -25,9 +25,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	proto_sentry "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentryproto"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"

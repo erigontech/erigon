@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/Giulio2002/bls"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"

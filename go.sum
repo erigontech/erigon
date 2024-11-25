@@ -53,6 +53,8 @@ github.com/99designs/gqlgen v0.17.56 h1:+J42ARAHvnysH6klO9Wq+tCsGF32cpAgU3SyF0VR
 github.com/99designs/gqlgen v0.17.56/go.mod h1:rmB6vLvtL8uf9F9w0/irJ5alBkD8DJvj35ET31BKbtY=
 github.com/AskAlexSharov/bloomfilter/v2 v2.0.8 h1:eRExAhnCcGHKC4/s8bpbYHJTQfOtn/urU/CYXNx2Q+8=
 github.com/AskAlexSharov/bloomfilter/v2 v2.0.8/go.mod h1:zpoh+gs7qcpqrHr3dB55AMiJwo0iURXE7ZOP9L9hSkA=
+github.com/AskAlexSharov/btree v1.6.2 h1:5+GQo+SmoAmBEsnW/ksj1csim/aQMRuLUywvwMphs2Y=
+github.com/AskAlexSharov/btree v1.6.2/go.mod h1:twD9XRA5jj9VUQGELzDO4HPQTNJsoWWfYEL+EUQ2cKY=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/Giulio2002/bls v0.0.0-20241116091023-2ddcc8954ec0 h1:6DVEDL29nd7f2GoHZIA9rjpW90gYeNE3x5aUadOgTB4=
@@ -84,8 +86,8 @@ github.com/alecthomas/atomic v0.1.0-alpha2 h1:dqwXmax66gXvHhsOS4pGPZKqYOlTkapELk
 github.com/alecthomas/atomic v0.1.0-alpha2/go.mod h1:zD6QGEyw49HIq19caJDc2NMXAy8rNi9ROrxtMXATfyI=
 github.com/alecthomas/kong v0.8.1 h1:acZdn3m4lLRobeh3Zi2S2EpnXTd1mOL6U7xVml+vfkY=
 github.com/alecthomas/kong v0.8.1/go.mod h1:n1iCIO2xS46oE8ZfYCNDqdR0b0wZNrXAIAqro/2132U=
-github.com/alecthomas/repr v0.1.0 h1:ENn2e1+J3k09gyj2shc0dHr/yjaWSHRlrJ4DPMevDqE=
-github.com/alecthomas/repr v0.1.0/go.mod h1:2kn6fqh/zIyPLmm3ugklbEi5hg5wS435eygvNfaDQL8=
+github.com/alecthomas/repr v0.4.0 h1:GhI2A8MACjfegCPVq9f1FLvIBS+DrQ2KQBFZP1iFzXc=
+github.com/alecthomas/repr v0.4.0/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
 github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751/go.mod h1:LOuyumcjzFXgccqObfd/Ljyb9UuFJ6TxHnclSeseNhc=
 github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf/go.mod h1:ybxpYRFXyAe+OPACYpWeL0wqObRcbAqCMya13uyzqw0=
@@ -269,6 +271,8 @@ github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e h1:Zp
 github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXEfZoBjV4buzjWmCmoqVLXiGCq0ZmQ2OjeRvQ=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
+github.com/erigontech/interfaces v0.0.0-20241116035842-5d396f10468e h1:KD/yuduvNJDKkdmEaaiDYb9RQstnkJn5ZcSZHjH/C/w=
+github.com/erigontech/interfaces v0.0.0-20241116035842-5d396f10468e/go.mod h1:N7OUkhkcagp9+7yb4ycHsG2VWCOmuJ1ONBecJshxtLE=
 github.com/erigontech/mdbx-go v0.38.4 h1:S9T7mTe9KPcFe4dOoOtVdI6gPzht9y7wMnYfUBgrQLo=
 github.com/erigontech/mdbx-go v0.38.4/go.mod h1:IcOLQDPw3VM/asP6T5JVPPN4FHHgJtY16XfYjzWKVNI=
 github.com/erigontech/secp256k1 v1.1.0 h1:mO3YJMUSoASE15Ya//SoHiisptUhdXExuMUN1M0X9qY=
@@ -882,8 +886,6 @@ github.com/supranational/blst v0.3.13/go.mod h1:jZJtfjgudtNl4en1tzwPIV3KjUnQUvG3
 github.com/tarm/serial v0.0.0-20180830185346-98f6abe2eb07/go.mod h1:kDXzergiv9cbyO7IOYJZWg1U88JhDg3PB6klq9Hg2pA=
 github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e h1:cR8/SYRgyQCt5cNCMniB/ZScMkhI9nk8U5C7SbISXjo=
 github.com/thomaso-mirodin/intmath v0.0.0-20160323211736-5dc6d854e46e/go.mod h1:Tu4lItkATkonrYuvtVjG0/rhy15qrNGNTjPdaphtZ/8=
-github.com/tidwall/btree v1.6.0 h1:LDZfKfQIBHGHWSwckhXI0RPSXzlo+KYdjK7FWSqOzzg=
-github.com/tidwall/btree v1.6.0/go.mod h1:twD9XRA5jj9VUQGELzDO4HPQTNJsoWWfYEL+EUQ2cKY=
 github.com/tinylib/msgp v1.0.2/go.mod h1:+d+yLhGm8mzTaHzB+wgMYrodPfmZrzkirds8fDWklFE=
 github.com/tinylib/msgp v1.1.0/go.mod h1:+d+yLhGm8mzTaHzB+wgMYrodPfmZrzkirds8fDWklFE=
 github.com/tinylib/msgp v1.1.2/go.mod h1:+d+yLhGm8mzTaHzB+wgMYrodPfmZrzkirds8fDWklFE=

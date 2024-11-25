@@ -25,9 +25,9 @@ import (
 	"net"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/direct"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/direct"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/forkid"
 	"github.com/erigontech/erigon/eth/protocols/eth"

@@ -22,8 +22,8 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"

@@ -35,9 +35,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
-	"github.com/erigontech/erigon-lib/crypto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/types/typestest"

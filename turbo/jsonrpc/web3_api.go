@@ -19,8 +19,8 @@ package jsonrpc
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon/turbo/rpchelper"
 )

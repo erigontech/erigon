@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/p2p"
 
 	"github.com/erigontech/erigon/turbo/rpchelper"

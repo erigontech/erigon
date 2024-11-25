@@ -33,10 +33,10 @@ import (
 	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	sentinel "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"

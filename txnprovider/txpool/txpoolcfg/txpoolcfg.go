@@ -24,9 +24,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
-	emath "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/fixedgas"
+	emath "github.com/erigontech/erigon/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core/types"
 )
 

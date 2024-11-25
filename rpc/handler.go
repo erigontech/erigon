@@ -31,7 +31,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )

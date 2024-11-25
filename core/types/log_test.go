@@ -25,10 +25,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 var unmarshalLogTests = map[string]struct {

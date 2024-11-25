@@ -35,15 +35,15 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
-	"github.com/erigontech/erigon-lib/seg"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon/erigon-lib/recsplit"
+	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/erigon-lib/seg"
 
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
 	"github.com/erigontech/erigon/cmd/hack/flow"

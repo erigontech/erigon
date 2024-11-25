@@ -31,8 +31,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/rlp"

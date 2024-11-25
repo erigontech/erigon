@@ -6,12 +6,12 @@ import (
 	"reflect"
 	"strconv"
 
-	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
+	hexutil2 "github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
 
 	"github.com/erigontech/erigon/core/types"
 )

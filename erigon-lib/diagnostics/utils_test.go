@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
 )
 

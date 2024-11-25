@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"

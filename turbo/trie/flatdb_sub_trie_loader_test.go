@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"

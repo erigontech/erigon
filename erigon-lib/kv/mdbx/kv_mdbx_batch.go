@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 // Batch is only useful when there are multiple goroutines calling it.

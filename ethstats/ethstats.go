@@ -34,13 +34,13 @@ import (
 	"sync"
 	"time"
 
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	txpool "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
 
 	"github.com/gorilla/websocket"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/services"
 
 	"github.com/erigontech/erigon/consensus"

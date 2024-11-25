@@ -26,9 +26,9 @@ import (
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/etl"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/etl"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rlp"

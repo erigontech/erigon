@@ -19,9 +19,9 @@ package cltypes
 import (
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/types/ssz"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	sentinel "github.com/erigontech/erigon/erigon-lib/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )

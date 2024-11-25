@@ -17,8 +17,8 @@
 package mdbx
 
 import (
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 func MustOpen(path string) kv.RwDB {

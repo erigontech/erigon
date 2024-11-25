@@ -34,8 +34,8 @@ import (
 	"github.com/go-echarts/go-echarts/v2/opts"
 	"github.com/go-echarts/go-echarts/v2/types"
 
-	"github.com/erigontech/erigon-lib/commitment"
-	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon/erigon-lib/commitment"
+	"github.com/erigontech/erigon/erigon-lib/seg"
 )
 
 var (

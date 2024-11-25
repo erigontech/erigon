@@ -26,10 +26,10 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/rawdbv3"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"

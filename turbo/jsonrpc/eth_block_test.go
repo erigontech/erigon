@@ -21,15 +21,15 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/common"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	txpool "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/erigon-lib/kv/kvcache"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core/rawdb"

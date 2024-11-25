@@ -24,7 +24,7 @@ import (
 	"os"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // Compares response of Erigon with OpenEthereum

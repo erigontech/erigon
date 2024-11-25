@@ -22,17 +22,17 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
 
 	"github.com/erigontech/erigon/rpc/rpccfg"
 
 	"github.com/stretchr/testify/assert"
 
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
+	txpool "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/erigon-lib/kv/kvcache"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/eth/filters"

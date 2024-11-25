@@ -41,7 +41,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // ForkNode is a struct that represents a node in the fork choice tree.

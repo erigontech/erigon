@@ -22,8 +22,8 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/fixedgas"
 )
 
 // Config is the core config which determines the blockchain settings.

@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	typesproto "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	typesproto "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 	gomock "go.uber.org/mock/gomock"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )

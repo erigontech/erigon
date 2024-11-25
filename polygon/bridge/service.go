@@ -25,11 +25,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	liberrors "github.com/erigontech/erigon-lib/common/errors"
-	"github.com/erigontech/erigon-lib/log/v3"
+	liberrors "github.com/erigontech/erigon/erigon-lib/common/errors"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"

@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
 	"github.com/holiman/uint256"

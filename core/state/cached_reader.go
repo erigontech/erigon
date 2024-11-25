@@ -17,7 +17,7 @@
 package state
 
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"

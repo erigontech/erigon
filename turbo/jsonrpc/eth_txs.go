@@ -21,13 +21,13 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces"
+	txpool "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
+	types "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 
 	"github.com/erigontech/erigon/core/rawdb"

@@ -20,10 +20,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	txpool "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
 	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/core/types"

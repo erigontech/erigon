@@ -22,13 +22,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm/evmtypes"

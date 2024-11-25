@@ -19,7 +19,7 @@ package trie
 import (
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rlp"

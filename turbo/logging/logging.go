@@ -26,9 +26,9 @@ import (
 	"github.com/urfave/cli/v2"
 	"gopkg.in/natefinch/lumberjack.v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/common/metrics"
+	"github.com/erigontech/erigon/erigon-lib/common/metrics"
 )
 
 // Determine the log dir path based on the given urfave context

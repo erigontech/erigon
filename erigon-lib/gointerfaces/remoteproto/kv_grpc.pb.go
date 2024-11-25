@@ -9,7 +9,7 @@ package remoteproto
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

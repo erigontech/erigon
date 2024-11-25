@@ -20,7 +20,7 @@ import (
 	"context"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/core/types"

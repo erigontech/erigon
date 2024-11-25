@@ -40,7 +40,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // DefaultClient is the default simulation API client which expects the API

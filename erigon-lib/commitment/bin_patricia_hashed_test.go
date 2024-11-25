@@ -25,7 +25,7 @@ package commitment
 //
 //	"github.com/stretchr/testify/require"
 //
-//	"github.com/erigontech/erigon-lib/common/length"
+//	"github.com/erigontech/erigon/erigon-lib/common/length"
 //)
 //
 //func Test_BinPatriciaTrie_UniqueRepresentation(t *testing.T) {

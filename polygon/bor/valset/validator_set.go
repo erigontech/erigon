@@ -27,8 +27,8 @@ import (
 	"sort"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // MaxTotalVotingPower - the maximum allowed total voting power.

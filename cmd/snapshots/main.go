@@ -26,10 +26,10 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
+	"github.com/erigontech/erigon/erigon-lib/common/disk"
+	"github.com/erigontech/erigon/erigon-lib/common/mem"
 	"github.com/erigontech/erigon/cmd/snapshots/cmp"
 	"github.com/erigontech/erigon/cmd/snapshots/copy"
 	"github.com/erigontech/erigon/cmd/snapshots/manifest"

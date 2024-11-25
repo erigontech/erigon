@@ -24,13 +24,13 @@ import (
 	"math/bits"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	length2 "github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
-	dbutils2 "github.com/erigontech/erigon-lib/kv/dbutils"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	length2 "github.com/erigontech/erigon/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	dbutils2 "github.com/erigontech/erigon/erigon-lib/kv/dbutils"
 
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/turbo/rlphacks"

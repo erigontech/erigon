@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"net/http"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 )

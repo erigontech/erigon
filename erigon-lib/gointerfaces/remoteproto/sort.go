@@ -19,7 +19,7 @@ package remoteproto
 import (
 	"strings"
 
-	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	types "github.com/erigontech/erigon/erigon-lib/gointerfaces/typesproto"
 )
 
 func NodeInfoReplyCmp(i, j *types.NodeInfoReply) int {

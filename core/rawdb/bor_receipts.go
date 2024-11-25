@@ -20,8 +20,8 @@ import (
 	"encoding/binary"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )

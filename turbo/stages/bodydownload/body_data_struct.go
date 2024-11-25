@@ -20,9 +20,9 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/services"
 
 	"github.com/erigontech/erigon/consensus"

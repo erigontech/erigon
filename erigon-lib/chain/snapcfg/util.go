@@ -34,8 +34,8 @@ import (
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
 
-	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon/erigon-lib/downloader/snaptype"
 )
 
 var (

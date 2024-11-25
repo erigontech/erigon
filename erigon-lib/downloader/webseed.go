@@ -39,10 +39,10 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/downloader/snaptype"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/chain/snapcfg"
+	"github.com/erigontech/erigon/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 )
 
 // WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network

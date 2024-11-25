@@ -30,13 +30,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/protolambda/ztyp/codec"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/fixedgas"
-	"github.com/erigontech/erigon-lib/common/math"
-	libcrypto "github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
+	libcrypto "github.com/erigontech/erigon/erigon-lib/crypto"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
+	rlp2 "github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/rlp"
 )
 

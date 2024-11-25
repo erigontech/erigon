@@ -22,8 +22,8 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/erigon-lib/common/length"
+	"github.com/erigontech/erigon/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/utils"
 )

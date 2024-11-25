@@ -23,11 +23,11 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/bitmapdb"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv/bitmapdb"
+	"github.com/erigontech/erigon/erigon-lib/kv/order"
+	"github.com/erigontech/erigon/erigon-lib/kv/stream"
+	"github.com/erigontech/erigon/erigon-lib/recsplit/eliasfano32"
 )
 
 // InvertedIdxStreamFiles allows iteration over range of txn numbers

@@ -17,7 +17,7 @@
 package utils
 
 import (
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 // Check if leaf at index verifies against the Merkle root and branch

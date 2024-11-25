@@ -19,11 +19,11 @@ package stagedsync
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/wrap"
+	remote "github.com/erigontech/erigon/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )

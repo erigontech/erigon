@@ -23,9 +23,9 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
 
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/types"

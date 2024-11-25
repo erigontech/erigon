@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	txPoolProto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/erigon-lib/common"
+	"github.com/erigontech/erigon/erigon-lib/common/hexutility"
+	txPoolProto "github.com/erigontech/erigon/erigon-lib/gointerfaces/txpoolproto"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"

@@ -19,7 +19,7 @@ package validator_params
 import (
 	"sync"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
 )
 
 type ValidatorParams struct {

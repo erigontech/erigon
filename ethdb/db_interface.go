@@ -22,7 +22,7 @@ package ethdb
 import (
 	"errors"
 
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/erigon-lib/kv"
 )
 
 // DESCRIBED: For info on database buckets see docs/programmers_guide/db_walkthrough.MD

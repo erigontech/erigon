@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
 	"github.com/erigontech/erigon/cmd/devnet/devnetutils"
 	"github.com/erigontech/erigon/cmd/devnet/requests"

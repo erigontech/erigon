@@ -21,9 +21,9 @@ import (
 	"encoding/json"
 	"math/big"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
+	libcommon "github.com/erigontech/erigon/erigon-lib/common"
+	hexutil2 "github.com/erigontech/erigon/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/erigon-lib/common/math"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
