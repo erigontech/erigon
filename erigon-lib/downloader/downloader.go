@@ -2917,22 +2917,22 @@ func (d *Downloader) logProgress() {
 			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.CompletionRate)),
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys))
-
-		diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
-			Downloaded:           bytesDone,
-			Total:                d.stats.BytesTotal,
-			TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
-			DownloadRate:         d.stats.DownloadRate,
-			UploadRate:           d.stats.UploadRate,
-			Peers:                d.stats.PeersUnique,
-			Files:                d.stats.FilesTotal,
-			Connections:          d.stats.ConnectionsTotal,
-			Alloc:                m.Alloc,
-			Sys:                  m.Sys,
-			DownloadFinished:     d.stats.Completed,
-			TorrentMetadataReady: d.stats.MetadataReady,
-		})
 	}
+
+	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
+		Downloaded:           bytesDone,
+		Total:                d.stats.BytesTotal,
+		TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
+		DownloadRate:         d.stats.DownloadRate,
+		UploadRate:           d.stats.UploadRate,
+		Peers:                d.stats.PeersUnique,
+		Files:                d.stats.FilesTotal,
+		Connections:          d.stats.ConnectionsTotal,
+		Alloc:                m.Alloc,
+		Sys:                  m.Sys,
+		DownloadFinished:     d.stats.Completed,
+		TorrentMetadataReady: d.stats.MetadataReady,
+	})
 }
 
 func calculateTime(amountLeft, rate uint64) string {
