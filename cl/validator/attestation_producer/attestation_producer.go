@@ -147,7 +147,8 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		}
 		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)
 		if err != nil {
-			return solid.AttestationData{}, err
+			log.Debug("Failed to compute target checkpoint - falling back to the cached one", "slot", slot, "err", err)
+			targetCheckpoint = baseAttestationData.Target
 		}
 		return solid.AttestationData{
 			Slot:            slot,
@@ -163,25 +164,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 	// at the same time, which would be a waste of memory resources
 	ap.attCacheMutex.Lock()
 	defer ap.attCacheMutex.Unlock()
-	// check again if the target epoch is already generated
-	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
-		beaconBlockRoot, err := ap.beaconBlockRootForSlot(baseState, baseStateBlockRoot, slot)
-		if err != nil {
-			return solid.AttestationData{}, err
-		}
-		targetCheckpoint, err := ap.computeTargetCheckpoint(tx, baseState, baseStateBlockRoot, slot)
-		if err != nil {
-			log.Debug("Failed to compute target checkpoint - falling back to the cached one", "slot", slot, "err", err)
-			targetCheckpoint = baseAttestationData.Target
-		}
-		return solid.AttestationData{
-			Slot:            slot,
-			CommitteeIndex:  committeeIndex,
-			BeaconBlockRoot: beaconBlockRoot,
-			Source:          baseAttestationData.Source,
-			Target:          targetCheckpoint,
-		}, nil
-	}
 
 	stateEpoch := state.Epoch(baseState)
 	if baseState.Slot() > slot {
