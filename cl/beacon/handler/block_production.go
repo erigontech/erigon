@@ -181,12 +181,8 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		log.Warn("Failed to get attestation data", "err", err)
 	}
 	if ok {
-		fmt.Println("cache-hit", time.Since(start))
 		return newBeaconResponse(attestationData), nil
 	}
-	defer func() {
-		fmt.Println("cache-miss", time.Since(start))
-	}()
 
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
