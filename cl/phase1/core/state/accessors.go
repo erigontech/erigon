@@ -303,7 +303,23 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltype
 		// Get the validator and balance for the current validator index
 		// supposedly this operation is safe because we checked the validator length about
 		currentValidator, _ := b.ValidatorForValidatorIndex(int(nextWithdrawalValidatorIndex))
-		currentBalance, _ := b.ValidatorBalance(int(nextWithdrawalValidatorIndex))
+		currentBalance, err := b.ValidatorBalance(int(nextWithdrawalValidatorIndex))
+		if err != nil {
+			log.Warn("Failed to get validator balance", "index", nextWithdrawalValidatorIndex, "error", err)
+		}
+		if b.Version() >= clparams.ElectraVersion {
+			partiallyWithdrawnBalance := uint64(0)
+			for _, w := range withdrawals {
+				if w.Validator == nextWithdrawalValidatorIndex {
+					partiallyWithdrawnBalance += w.Amount
+				}
+			}
+			if currentBalance <= partiallyWithdrawnBalance {
+				currentBalance = 0
+			} else {
+				currentBalance -= partiallyWithdrawnBalance
+			}
+		}
 		wd := currentValidator.WithdrawalCredentials()
 		// Check if the validator is fully withdrawable
 		if isFullyWithdrawableValidator(b, currentValidator, currentBalance, currentEpoch) {
@@ -318,16 +334,19 @@ func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltype
 			nextWithdrawalIndex++
 		} else if isPartiallyWithdrawableValidator(b, currentValidator, currentBalance) { // Check if the validator is partially withdrawable
 			// Add a new withdrawal with the validator's withdrawal credentials and balance minus the maximum effective balance
+			amount := currentBalance - b.BeaconConfig().MaxEffectiveBalance
+			if b.Version() >= clparams.ElectraVersion {
+				amount = currentBalance - getMaxEffectiveBalanceElectra(currentValidator, b.BeaconConfig())
+			}
 			newWithdrawal := &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
 				Address:   libcommon.BytesToAddress(wd[12:]),
-				Amount:    currentBalance - b.BeaconConfig().MaxEffectiveBalance,
+				Amount:    amount,
 			}
 			withdrawals = append(withdrawals, newWithdrawal)
 			nextWithdrawalIndex++
 		}
-
 		// Increment the validator index, looping back to 0 if necessary
 		nextWithdrawalValidatorIndex = (nextWithdrawalValidatorIndex + 1) % maxValidators
 	}

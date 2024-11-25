@@ -210,7 +210,9 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 		if s.Version() >= clparams.ElectraVersion {
 			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, 0)
 		} else {
+			// Append validator and done
 			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, amount)
+			return nil
 		}
 	}
 	if s.Version() >= clparams.ElectraVersion {
