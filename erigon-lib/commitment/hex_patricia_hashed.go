@@ -778,12 +778,12 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			storageRootHash = *(*[length.Hash]byte)(cell.stateHash[:cell.stateHashLen])
 		} else {
 			if !cell.loaded.storage() {
-				update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
-				if err != nil {
-					return nil, err
-				}
-				cell.setFromUpdate(update)
-				panic(fmt.Sprintf("Storage %x was not loaded: %v\n", cell.storageAddr[:cell.storageAddrLen], cell.String()))
+				return nil, fmt.Errorf("storage %x was not loaded as expected: cell %v", cell.storageAddr[:cell.storageAddrLen], cell.String())
+				// update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+				// if err != nil {
+				// 	return nil, err
+				// }
+				// cell.setFromUpdate(update)
 			}
 
 			leafHash, err := hph.leafHashWithKeyVal(buf, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], singleton)
