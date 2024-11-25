@@ -57,6 +57,11 @@ func NewAttesterSlashing(version clparams.StateVersion) *AttesterSlashing {
 	}
 }
 
+func (a *AttesterSlashing) SetVersion(v clparams.StateVersion) {
+	a.Attestation_1.SetVersion(v)
+	a.Attestation_2.SetVersion(v)
+}
+
 func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, a.Attestation_1, a.Attestation_2)
 }

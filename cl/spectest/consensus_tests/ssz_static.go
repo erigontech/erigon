@@ -132,13 +132,26 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 	})
 }
 
-func sszStaticTestNewObjectByVersion[T unmarshalerMarshalerHashable](
+func sszStaticTestByEmptyObject[T unmarshalerMarshalerHashable](
+	obj T, opts ...func(*sszStaticTestOption),
+) spectest.Handler {
+	return sszStaticTestNewObjectByFunc(func(v clparams.StateVersion) T {
+		return obj.Clone().(T)
+	}, opts...)
+}
+
+func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 	newObjFunc func(v clparams.StateVersion) T, opts ...func(*sszStaticTestOption),
 ) spectest.Handler {
 	return spectest.HandlerFunc(func(t *testing.T, fsroot fs.FS, c spectest.TestCase) (err error) {
 		testOptions := sszStaticTestOption{}
 		for _, opt := range opts {
 			opt(&testOptions)
+		}
+
+		if c.Version() < testOptions.runAfterVersion {
+			// skip
+			return nil
 		}
 
 		// expected root
@@ -176,6 +189,33 @@ func sszStaticTestNewObjectByVersion[T unmarshalerMarshalerHashable](
 			jsonBytes, err := json.Marshal(object)
 			require.NoError(t, err, "json.Marshal failed")
 			require.NoError(t, json.Unmarshal(jsonBytes, jsonObject), "json.Unmarshal failed")
+			// check object and jsonObject data one by one
+			//require.Equal(t, object, jsonObject, "object not equal")
+			// if obj is cltypes.BeaconBlock, we need to check the fields one by one
+			var jo, o unmarshalerMarshalerHashable = jsonObject, object
+
+			hashEqual := func(a, b solid.EncodableHashableSSZ, msg string) {
+				hashRoot, err := a.HashSSZ()
+				require.NoError(t, err)
+				hashRoot2, err := b.HashSSZ()
+				require.NoError(t, err)
+				require.Equal(t, hashRoot, hashRoot2)
+			}
+
+			if block, ok := o.(*cltypes.BeaconBody); ok {
+				if block2, ok := jo.(*cltypes.BeaconBody); ok {
+					hashEqual(block.Attestations, block2.Attestations, "Attestations not equal")
+					hashEqual(block.Deposits, block2.Deposits, "Deposits not equal")
+					hashEqual(block.ProposerSlashings, block2.ProposerSlashings, "ProposerSlashings not equal")
+					hashEqual(block.VoluntaryExits, block2.VoluntaryExits, "VoluntaryExits not equal")
+					hashEqual(block.BlobKzgCommitments, block2.BlobKzgCommitments, "BlobKzgCommitments not equal")
+					hashEqual(block.ExecutionPayload, block2.ExecutionPayload, "execution payload not equal")
+					//hashEqual(block.ExecutionRequests, block2.ExecutionRequests, "execution requests not equal")
+
+					hashEqual(block.AttesterSlashings, block2.AttesterSlashings, "AttesterSlashings not equal")
+					hashEqual(block.SyncAggregate, block2.SyncAggregate, "SyncAggregate not equal")
+				}
+			}
 
 			// check hash root again
 			hashRoot, err := jsonObject.HashSSZ()
@@ -187,11 +227,18 @@ func sszStaticTestNewObjectByVersion[T unmarshalerMarshalerHashable](
 }
 
 type sszStaticTestOption struct {
-	testJson bool
+	testJson        bool
+	runAfterVersion clparams.StateVersion
 }
 
 func withTestJson() func(*sszStaticTestOption) {
 	return func(opt *sszStaticTestOption) {
 		opt.testJson = true
+	}
+}
+
+func runAfterVersion(version clparams.StateVersion) func(*sszStaticTestOption) {
+	return func(opt *sszStaticTestOption) {
+		opt.runAfterVersion = version
 	}
 }

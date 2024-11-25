@@ -56,9 +56,9 @@ func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
 
 func (i *IndexedAttestation) SetVersion(v clparams.StateVersion) {
 	if v >= clparams.ElectraVersion {
-		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimitElectra, []uint64{})
+		i.AttestingIndices.SetCap(attestingIndicesLimitElectra)
 	} else {
-		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, []uint64{})
+		i.AttestingIndices.SetCap(attestingIndicesLimit)
 	}
 }
 
@@ -76,6 +76,7 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
+
 	if i.AttestingIndices == nil {
 		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, nil)
 	}
@@ -86,7 +87,6 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 		}
 		i.AttestingIndices.Append(v)
 	}
-	//slot := tmp.Data.Slot
 	i.Data = tmp.Data
 	i.Signature = tmp.Signature
 	return nil

@@ -257,7 +257,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation),
 		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
 		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
-		ExecutionPayload:   NewEth1Block(clparams.Phase0Version, beaconCfg),
+		ExecutionPayload:   NewEth1Block(version, beaconCfg),
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
 		ExecutionRequests:  executionRequests,
@@ -461,6 +461,12 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
+	tmp.AttesterSlashings.Range(func(_ int, value *AttesterSlashing, _ int) bool {
+		// Trick to set version
+		value.SetVersion(b.Version)
+		return true
+	})
+
 	b.RandaoReveal = tmp.RandaoReveal
 	b.Eth1Data = tmp.Eth1Data
 	b.Graffiti = tmp.Graffiti
