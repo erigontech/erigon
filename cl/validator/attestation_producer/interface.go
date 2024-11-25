@@ -21,9 +21,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 type AttestationDataProducer interface {
 	ProduceAndCacheAttestationData(tx kv.Tx, baseState *state.CachingBeaconState, baseStateBlockRoot libcommon.Hash, slot uint64, committeeIndex uint64) (solid.AttestationData, error)
-	CachedAttestationData(slot uint64, committeeIndex uint64) (solid.AttestationData, bool, error)
+	CachedAttestationData(slot uint64, committeeIndex uint64, beaconBlockRoot common.Hash) (solid.AttestationData, bool, error)
 }

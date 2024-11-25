@@ -124,10 +124,14 @@ func (ap *attestationProducer) CachedAttestationData(slot uint64, committeeIndex
 	ap.attCacheMutex.RLock()
 	defer ap.attCacheMutex.RUnlock()
 	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
+		beaconBlockRoot, ok := ap.blockRootsUsedForSlotCache.Get(slot)
+		if !ok {
+			return solid.AttestationData{}, false, nil
+		}
 		return solid.AttestationData{
 			Slot:            slot,
 			CommitteeIndex:  committeeIndex,
-			BeaconBlockRoot: baseAttestationData.BeaconBlockRoot,
+			BeaconBlockRoot: beaconBlockRoot,
 			Source:          baseAttestationData.Source,
 			Target:          baseAttestationData.Target,
 		}, true, nil
