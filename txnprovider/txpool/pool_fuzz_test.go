@@ -301,7 +301,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(12))
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(14))
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(123))
-	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, senderAddr []byte, pendingBaseFee1 uint8) {
+	f.Fuzz(func(t *testing.T, txnNonce, values, tips, feeCap, senderAddr []byte, pendingBaseFee1 uint8) {
 		//t.Parallel()
 		ctx := context.Background()
 
@@ -309,7 +309,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		if pendingBaseFee == 0 {
 			t.Skip()
 		}
-		senders, senderIDs, txns, ok := poolsFromFuzzBytes(txNonce, values, tips, feeCap, senderAddr)
+		senders, senderIDs, txns, ok := poolsFromFuzzBytes(txnNonce, values, tips, feeCap, senderAddr)
 		if !ok {
 			t.Skip()
 		}
@@ -325,10 +325,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-		pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+		pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
 		assert.NoError(err)
 
-		err = pool.Start(ctx, db)
+		err = pool.Start(ctx)
 		assert.NoError(err)
 
 		pool.senders.senderIDs = senderIDs
@@ -551,7 +551,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxnSlots{}, "after_flush")
 		checkNotify(p2pReceived, TxnSlots{}, "after_flush")
 
-		p2, err := New(ch, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+		p2, err := New(ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
 		assert.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted
