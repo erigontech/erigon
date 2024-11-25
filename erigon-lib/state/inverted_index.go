@@ -1214,6 +1214,11 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	// Design decision: `why Enum=true and LessFalsePositives=true`?
 	//
+	// Test on: rpcdaemon (erigon shut-down), `--http.compression=false`, after `sync && sudo sysctl vm.drop_caches=3`, query:
+	//```sh
+	//curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method": "eth_getLogs","params": [{"fromBlock": "0x115B624", "toBlock": "0x115B664"}], "id":1}' -s -o /dev/null  localhost:8545
+	//```
+	//
 	// On compared it with `Enum=false and LessFalsePositives=false` on ethmainnet (on small machine with cloud drives and `sync && sudo sysctl vm.drop_caches=3`):
 	//  - `du -hsc *.efi` changed from `24Gb` to `17Gb` (better)
 	//  - `vmtouch of .ef` changed from `152M/426G` to `787M/426G` (worse)
