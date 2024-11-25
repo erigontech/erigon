@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -32,7 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 )
 
-func DefaultPageSize() uint64 {
+func DefaultPageSize() datasize.ByteSize {
 	osPageSize := os.Getpagesize()
 	if osPageSize < 4096 { // reduce further may lead to errors (because some data is just big)
 		osPageSize = 4096
@@ -40,7 +41,7 @@ func DefaultPageSize() uint64 {
 		osPageSize = mdbx.MaxPageSize
 	}
 	osPageSize = osPageSize / 4096 * 4096 // ensure it's rounded
-	return uint64(osPageSize)
+	return datasize.ByteSize(osPageSize)
 }
 
 // BigChunks - read `table` by big chunks - restart read transaction after each 1 minutes

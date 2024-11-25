@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -161,7 +162,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := memdb.New(os.TempDir())
+	db := memdb.New(os.TempDir(), kv.ChainDB)
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))

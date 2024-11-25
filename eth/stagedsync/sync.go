@@ -512,7 +512,7 @@ func CollectTableSizes(db kv.RoDB, tx kv.Tx, buckets []string) []interface{} {
 	bucketSizes = append(bucketSizes, "FreeList", libcommon.ByteCount(sz))
 	amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
 	if db != nil {
-		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize()))
+		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*db.PageSize().Bytes()))
 	}
 
 	return bucketSizes

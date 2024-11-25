@@ -73,7 +73,8 @@ func (p Publisher) PublishNewBlockHashes(block *types.Block) {
 }
 
 func (p Publisher) Run(ctx context.Context) error {
-	p.logger.Debug("[p2p-publisher] running publisher")
+	p.logger.Info("[p2p-publisher] running publisher component")
+
 	for {
 		select {
 		case <-ctx.Done():

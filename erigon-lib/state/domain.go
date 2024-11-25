@@ -69,13 +69,17 @@ var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", "
 // Domain should not have any go routines or locks
 //
 // Data-Existence in .kv vs .v files:
-//  1. key doesn’t exists, then create: .kv - yes, .v - yes
-//  2. acc exists, then update/delete:  .kv - yes, .v - yes
-//  3. acc doesn’t exists, then delete: .kv - no,  .v - no
+//  1. key doesn’t exist, then create: .kv - yes, .v - yes
+//  2. acc exists, then update/delete: .kv - yes, .v - yes
+//  3. acc doesn’t exist, then delete: .kv - no,  .v - no
 type Domain struct {
+	domainCfg // keep it above *History to avoid unexpected shadowing
 	*History
 
-	name kv.Domain
+	// Schema:
+	//  - .kv - key -> value
+	//  - .bt - key -> offset index
+	//  - .kvei - key -> existence (bloom filter)
 
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
@@ -91,29 +95,25 @@ type Domain struct {
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *domainVisible
+}
 
-	integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool
+type domainCfg struct {
+	hist histCfg
+
+	name        kv.Domain
+	compression seg.FileCompression
+	compressCfg seg.Cfg
+	indexList   idxList // list of indexes for given domain
+	valuesTable string  // bucket to store domain values; key -> inverted_step + values (Dupsort)
+	largeValues bool
+
+	integrity rangeDomainIntegrityChecker
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
 	replaceKeysInValues bool
-	// restricts subset file deletions on open/close. Needed to hold files until commitment is merged
-	restrictSubsetFileDeletions bool
-	largeVals                   bool
 
-	compressCfg seg.Cfg
-	compression seg.FileCompression
-
-	valsTable string // key -> inverted_step + values (Dupsort)
-	indexList idxList
-}
-
-type domainCfg struct {
-	hist     histCfg
-	compress seg.FileCompression
-
-	largeVals                   bool
-	replaceKeysInValues         bool
+	// restricts subset file deletions on domain open/close. Needed to hold files until commitment is merged
 	restrictSubsetFileDeletions bool
 }
 
@@ -133,31 +133,28 @@ var DomainCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
-func NewDomain(cfg domainCfg, aggregationStep uint64, name kv.Domain, valsTable, indexKeysTable, historyValsTable, indexTable string, integrityCheck func(name kv.Domain, fromStep, toStep uint64) bool, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
 
-	d := &Domain{
-		name:      name,
-		valsTable: valsTable,
-
-		compressCfg: DomainCompressCfg,
-		compression: cfg.compress,
-
-		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-
-		indexList:                   withBTree | withExistence,
-		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
-		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
-		largeVals:                   cfg.largeVals,
-		integrityCheck:              integrityCheck,
+	cfg.compressCfg = DomainCompressCfg
+	if cfg.indexList == 0 {
+		cfg.indexList = withBTree | withExistence
 	}
 
-	d._visible = newDomainVisible(d.name, []visibleFile{})
+	d := &Domain{
+		domainCfg:  cfg,
+		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		_visible:   newDomainVisible(cfg.name, []visibleFile{}),
+	}
 
 	var err error
-	if d.History, err = NewHistory(cfg.hist, aggregationStep, name.String(), indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
+	if cfg.hist.filenameBase == "" {
+		cfg.hist.filenameBase = cfg.name.String()
+		cfg.hist.iiCfg.filenameBase = cfg.hist.filenameBase
+	}
+	if d.History, err = NewHistory(cfg.hist, logger); err != nil {
 		return nil, err
 	}
 
@@ -178,7 +175,7 @@ func (d *Domain) kvBtFilePath(fromStep, toStep uint64) string {
 
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
 func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
-	lstIdx, _ := kv.LastKey(tx, d.History.indexKeysTable)
+	lstIdx, _ := kv.LastKey(tx, d.History.keysTable)
 	if len(lstIdx) == 0 {
 		return 0
 	}
@@ -188,7 +185,7 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb uint64) {
 // maxStepInDBNoHistory - return latest available step in db (at-least 1 value in such step)
 // Does not use history table to find the latest step
 func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb uint64) {
-	lstIdx, err := kv.FirstKey(tx, d.valsTable)
+	lstIdx, err := kv.FirstKey(tx, d.valuesTable)
 	if err != nil {
 		d.logger.Warn("Domain.maxStepInDBNoHistory:", "FirstKey", lstIdx, "err", err)
 		return 0
@@ -196,10 +193,10 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb uint64) {
 	if len(lstIdx) == 0 {
 		return 0
 	}
-	if d.largeVals {
+	if d.largeValues {
 		return (^binary.BigEndian.Uint64(lstIdx[len(lstIdx)-8:])) / d.aggregationStep
 	}
-	lstVal, err := tx.GetOne(d.valsTable, lstIdx)
+	lstVal, err := tx.GetOne(d.valuesTable, lstIdx)
 	if err != nil {
 		d.logger.Warn("Domain.maxStepInDBNoHistory:", "GetOne", lstIdx, "err", err)
 		return 0
@@ -209,7 +206,7 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb uint64) {
 }
 
 func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
-	lstIdx, _ := kv.FirstKey(tx, d.History.indexKeysTable)
+	lstIdx, _ := kv.FirstKey(tx, d.History.keysTable)
 	if len(lstIdx) == 0 {
 		return 0
 	}
@@ -311,7 +308,7 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) 
 	for _, dirtyFile := range scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger) {
 		startStep, endStep := dirtyFile.startTxNum/d.aggregationStep, dirtyFile.endTxNum/d.aggregationStep
 		domainName, _ := kv.String2Domain(d.filenameBase)
-		if d.integrityCheck != nil && !d.integrityCheck(domainName, startStep, endStep) {
+		if d.integrity != nil && !d.integrity(domainName, startStep, endStep) {
 			d.logger.Debug("[agg] skip garbage file", "name", d.filenameBase, "startStep", startStep, "endStep", endStep)
 			continue
 		}
@@ -498,8 +495,8 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWrit
 	w := &domainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
-		valsTable: dt.d.valsTable,
-		largeVals: dt.d.largeVals,
+		valsTable: dt.d.valuesTable,
+		largeVals: dt.d.largeValues,
 		values:    etl.NewCollector(dt.name.String()+"domain.flush", tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dt.d.logger).LogLvl(log.LvlTrace),
 
 		h: dt.ht.newWriter(tmpdir, discardHistory),
@@ -860,7 +857,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 
 	//var stepInDB []byte
 	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if d.largeVals {
+		if d.largeValues {
 			kvs = append(kvs, struct {
 				k, v []byte
 			}{k[:len(k)-8], v})
@@ -959,13 +956,13 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 	var valsCursor kv.Cursor
 
-	if d.largeVals {
-		valsCursor, err = roTx.Cursor(d.valsTable)
+	if d.largeValues {
+		valsCursor, err = roTx.Cursor(d.valuesTable)
 		if err != nil {
 			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.filenameBase, err)
 		}
 	} else {
-		valsCursor, err = roTx.CursorDupSort(d.valsTable)
+		valsCursor, err = roTx.CursorDupSort(d.valuesTable)
 		if err != nil {
 			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.filenameBase, err)
 		}
@@ -982,7 +979,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			return coll, err
 		}
 
-		if d.largeVals {
+		if d.largeValues {
 			stepInDB = k[len(k)-8:]
 		} else {
 			stepInDB = v[:8]
@@ -992,7 +989,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			continue
 		}
 
-		if d.largeVals {
+		if d.largeValues {
 			kvs = append(kvs, struct {
 				k, v []byte
 			}{k[:len(k)-8], v})
@@ -1452,7 +1449,7 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 
-	valsCursor, err := rwTx.RwCursorDupSort(d.valsTable)
+	valsCursor, err := rwTx.RwCursorDupSort(d.valuesTable)
 	if err != nil {
 		return err
 	}
@@ -1460,19 +1457,19 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	// First revert keys
 	for i := range domainDiffs {
 		key, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
-		if dt.d.largeVals {
+		if dt.d.largeValues {
 			if len(value) == 0 {
 				if !bytes.Equal(key[len(key)-8:], prevStepBytes) {
-					if err := rwTx.Delete(d.valsTable, key); err != nil {
+					if err := rwTx.Delete(d.valuesTable, key); err != nil {
 						return err
 					}
 				} else {
-					if err := rwTx.Put(d.valsTable, key, []byte{}); err != nil {
+					if err := rwTx.Put(d.valuesTable, key, []byte{}); err != nil {
 						return err
 					}
 				}
 			} else {
-				if err := rwTx.Put(d.valsTable, key, value); err != nil {
+				if err := rwTx.Put(d.valuesTable, key, value); err != nil {
 					return err
 				}
 			}
@@ -1606,7 +1603,7 @@ func (dt *DomainRoTx) GetAsOfFile(key []byte, txNum uint64) ([]byte, bool, error
 
 	if traceGetLatest == dt.name {
 		defer func() {
-			fmt.Printf("GetAsOfFile(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
+			fmt.Printf("getAsOfFile(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
 				dt.name.String(), key, v, found, foundStep, dt.files.EndTxNum()/dt.d.aggregationStep)
 		}()
 	}
@@ -1720,11 +1717,11 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 		return dt.valsC, nil
 	}
 
-	if dt.d.largeVals {
-		dt.valsC, err = tx.Cursor(dt.d.valsTable)
+	if dt.d.largeValues {
+		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
 		return dt.valsC, err
 	}
-	dt.valsC, err = tx.CursorDupSort(dt.d.valsTable)
+	dt.valsC, err = tx.CursorDupSort(dt.d.valuesTable)
 	return dt.valsC, err
 }
 
@@ -1735,7 +1732,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 	}
 	var v, foundInvStep []byte
 
-	if dt.d.largeVals {
+	if dt.d.largeValues {
 		var fullkey []byte
 		fullkey, v, err = valsC.Seek(key)
 		if err != nil {
@@ -1806,29 +1803,29 @@ func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, 
 	return v, endTxNum / dt.d.aggregationStep, foundInFile, nil
 }
 
-// DomainRange - if key doesn't exists in history - then look in latest state
-func (dt *DomainRoTx) DomainRange(ctx context.Context, tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
+// RangeAsOf - if key doesn't exists in history - then look in latest state
+func (dt *DomainRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	if !asc {
 		panic("implement me")
 	}
-	histStateIt, err := dt.ht.WalkAsOf(ctx, ts, fromKey, toKey, asc, kv.Unlim, tx)
+	histStateIt, err := dt.ht.RangeAsOf(ctx, ts, fromKey, toKey, asc, kv.Unlim, tx)
 	if err != nil {
 		return nil, err
 	}
-	lastestStateIt, err := dt.DomainRangeLatest(tx, fromKey, toKey, kv.Unlim)
+	lastestStateIt, err := dt.RangeLatest(tx, fromKey, toKey, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
 	return stream.UnionKV(histStateIt, lastestStateIt, limit), nil
 }
 
-func (dt *DomainRoTx) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+func (dt *DomainRoTx) RangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
 	s := &DomainLatestIterFile{
 		from: fromKey, to: toKey, limit: limit,
 		orderAscend: order.Asc,
 		aggStep:     dt.d.aggregationStep,
 		roTx:        roTx,
-		valsTable:   dt.d.valsTable,
+		valsTable:   dt.d.valuesTable,
 		logger:      dt.d.logger,
 		h:           &CursorHeap{},
 	}
@@ -1862,7 +1859,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 	if untilTx > 0 {
 		untilStep = (untilTx - 1) / dt.d.aggregationStep
 	}
-	sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.valsTable))
+	sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.valuesTable))
 	if err != nil {
 		dt.d.logger.Error("get domain pruning progress", "name", dt.d.filenameBase, "error", err)
 		return false, maxStepToPrune
@@ -1956,13 +1953,13 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	ancientDomainValsCollector := etl.NewCollector(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, sortableBuffer, dt.d.logger).LogLvl(log.LvlTrace)
 	defer ancientDomainValsCollector.Close()
 
-	if dt.d.largeVals {
-		valsCursor, err = rwTx.RwCursor(dt.d.valsTable)
+	if dt.d.largeValues {
+		valsCursor, err = rwTx.RwCursor(dt.d.valuesTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}
 	} else {
-		valsCursor, err = rwTx.RwCursorDupSort(dt.d.valsTable)
+		valsCursor, err = rwTx.RwCursorDupSort(dt.d.valuesTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}
@@ -1970,13 +1967,13 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	defer valsCursor.Close()
 
 	loadFunc := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if dt.d.largeVals {
+		if dt.d.largeValues {
 			return valsCursor.Delete(k)
 		}
 		return valsCursor.(kv.RwCursorDupSort).DeleteExact(k, v)
 	}
 
-	prunedKey, err := GetExecV3PruneProgress(rwTx, dt.d.valsTable)
+	prunedKey, err := GetExecV3PruneProgress(rwTx, dt.d.valuesTable)
 	if err != nil {
 		dt.d.logger.Error("get domain pruning progress", "name", dt.name.String(), "error", err)
 	}
@@ -1996,7 +1993,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			return stat, fmt.Errorf("iterate over %s domain keys: %w", dt.name.String(), err)
 		}
 
-		if dt.d.largeVals {
+		if dt.d.largeValues {
 			stepBytes = k[len(k)-8:]
 		} else {
 			stepBytes = v[:8]
@@ -2007,10 +2004,10 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			continue
 		}
 		if limit == 0 {
-			if err := ancientDomainValsCollector.Load(rwTx, dt.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			if err := ancientDomainValsCollector.Load(rwTx, dt.d.valuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 				return stat, fmt.Errorf("load domain values: %w", err)
 			}
-			if err := SaveExecV3PruneProgress(rwTx, dt.d.valsTable, k); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dt.d.valuesTable, k); err != nil {
 				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.name.String(), err)
 			}
 			return stat, nil
@@ -2034,14 +2031,14 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		}
 	}
 	mxPruneSizeDomain.AddUint64(stat.Values)
-	if err := ancientDomainValsCollector.Load(rwTx, dt.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := ancientDomainValsCollector.Load(rwTx, dt.d.valuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return stat, fmt.Errorf("load domain values: %w", err)
 	}
-	if err := SaveExecV3PruneProgress(rwTx, dt.d.valsTable, nil); err != nil {
+	if err := SaveExecV3PruneProgress(rwTx, dt.d.valuesTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.filenameBase, err)
 	}
 
-	if err := SaveExecV3PrunableProgress(rwTx, []byte(dt.d.valsTable), step+1); err != nil {
+	if err := SaveExecV3PrunableProgress(rwTx, []byte(dt.d.valuesTable), step+1); err != nil {
 		return stat, err
 	}
 	mxPruneTookDomain.ObserveDuration(st)

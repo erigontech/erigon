@@ -31,7 +31,7 @@ import (
 )
 
 func setupTestDB(t *testing.T) kv.RwDB {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	return db
 }
 

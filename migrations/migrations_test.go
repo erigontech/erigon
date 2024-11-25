@@ -31,7 +31,7 @@ import (
 )
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			"one",
@@ -96,7 +96,7 @@ func TestApplyWithInit(t *testing.T) {
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			"one",
@@ -161,7 +161,7 @@ func TestApplyWithoutInit(t *testing.T) {
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			"one",
@@ -243,7 +243,7 @@ func TestMarshalStages(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			Name: "repeated_name",
@@ -293,7 +293,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t)
+	require, db := require.New(t), memdb.NewTestDB(t, kv.ChainDB)
 	m := []Migration{
 		{
 			Name: "one",

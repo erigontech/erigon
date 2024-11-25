@@ -25,19 +25,16 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
 	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -58,21 +55,6 @@ var stateBuckets = []string{
 	kv.E2AccountsHistory,
 	kv.E2StorageHistory,
 	kv.TxLookup,
-}
-
-var cmdWarmup = &cobra.Command{
-	Use: "warmup",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common2.RootContext()
-		logger := debug.SetupCobra(cmd, "integration")
-		err := doWarmup(ctx, chaindata, bucket, logger)
-		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
 }
 
 var cmdMdbxTopDup = &cobra.Command{
@@ -167,11 +149,6 @@ func init() {
 
 	rootCmd.AddCommand(cmdCompareBucket)
 
-	withDataDir(cmdWarmup)
-	withBucket(cmdWarmup)
-
-	rootCmd.AddCommand(cmdWarmup)
-
 	withDataDir(cmdMdbxTopDup)
 	withBucket(cmdMdbxTopDup)
 
@@ -196,66 +173,9 @@ func init() {
 	rootCmd.AddCommand(cmdFToMdbx)
 }
 
-func doWarmup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
-	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
-		WriteMap(dbWriteMap)
-
-	db := dbOpts.MustOpen()
-	defer db.Close()
-
-	var total uint64
-	db.View(ctx, func(tx kv.Tx) error {
-		total, _ = tx.Count(bucket)
-		return nil
-	})
-	progress := atomic.Int64{}
-
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(ThreadsLimit)
-	for i := 0; i < 256; i++ {
-		for j := 0; j < 256; j++ {
-			i := i
-			j := j
-			g.Go(func() error {
-				return db.View(ctx, func(tx kv.Tx) error {
-					it, err := tx.Prefix(bucket, []byte{byte(i), byte(j)})
-					if err != nil {
-						return err
-					}
-					defer it.Close()
-					for it.HasNext() {
-						_, v, err := it.Next()
-						if len(v) > 0 {
-							_ = v[len(v)-1]
-						}
-						progress.Add(1)
-						if err != nil {
-							return err
-						}
-
-						select {
-						case <-logEvery.C:
-
-							logger.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
-						default:
-						}
-					}
-					return nil
-				})
-			})
-		}
-	}
-	g.Wait()
-	return nil
-}
-
 func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.NewMDBX(log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+	dbOpts := mdbx2.New(kv.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
 		WriteMap(dbWriteMap)
 
 	db := dbOpts.MustOpen()
@@ -421,7 +341,7 @@ func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	}
 	defer file.Close()
 
-	dstOpts := mdbx2.NewMDBX(logger).Path(to).WriteMap(dbWriteMap)
+	dstOpts := mdbx2.New(kv.ChainDB, logger).Path(to).WriteMap(dbWriteMap)
 	dst := dstOpts.MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
