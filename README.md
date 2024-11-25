@@ -168,31 +168,27 @@ datadir
 ### Erigon3 datadir size
 
 ```sh
-# eth-mainnet - archive - April 2024
+# eth-mainnet - archive - Nov 2024
 
 du -hsc /erigon/* 
 6G  	/erigon/caplin
-50G 	/erigon/chaindata
-1.8T	/erigon/snapshots
-1.9T	total
+10G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-100G 	/erigon/snapshots/accessor
-240G	/erigon/snapshots/domain
-260G	/erigon/snapshots/history
-410G	/erigon/snapshots/idx
-1.7T	/erigon/snapshots
+120G 	/erigon/snapshots/accessor
+300G	/erigon/snapshots/domain
+280G	/erigon/snapshots/history
+430G	/erigon/snapshots/idx
+2.3T	/erigon/snapshots
 ```
 
 ```sh
-# bor-mainnet - archive - Jun 2024
+# bor-mainnet - archive - Nov 2024
 
 du -hsc /erigon/* 
 
 160M	/erigon/bor
-50G 	/erigon/chaindata
-3.7T	/erigon/snapshots
-3.8T	total
+20G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
 360G	/erigon-data/snapshots/accessor
