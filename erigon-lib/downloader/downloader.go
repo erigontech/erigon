@@ -848,7 +848,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 					}
-
 					t.AddWebSeeds(urls)
 				}
 			}
@@ -2576,7 +2575,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if err != nil {
 		return err
 	}
-
 	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
 		return err

@@ -54,6 +54,7 @@ func init() {
 
 var Enums = struct {
 	snaptype.Enums
+	Salt,
 	Headers,
 	Bodies,
 	Transactions,
@@ -64,14 +65,15 @@ var Enums = struct {
 	Txt snaptype.Enum
 }{
 	Enums:            snaptype.Enums{},
-	Headers:          snaptype.MinCoreEnum,
-	Bodies:           snaptype.MinCoreEnum + 1,
-	Transactions:     snaptype.MinCoreEnum + 2,
-	Domains:          snaptype.MinCoreEnum + 3,
-	Histories:        snaptype.MinCoreEnum + 4,
-	InvertedIndicies: snaptype.MinCoreEnum + 5,
-	Accessor:         snaptype.MinCoreEnum + 6,
-	Txt:              snaptype.MinCoreEnum + 7,
+	Salt:             snaptype.MinCoreEnum,
+	Headers:          snaptype.MinCoreEnum + 1,
+	Bodies:           snaptype.MinCoreEnum + 2,
+	Transactions:     snaptype.MinCoreEnum + 3,
+	Domains:          snaptype.MinCoreEnum + 4,
+	Histories:        snaptype.MinCoreEnum + 5,
+	InvertedIndicies: snaptype.MinCoreEnum + 6,
+	Accessor:         snaptype.MinCoreEnum + 7,
+	Txt:              snaptype.MinCoreEnum + 8,
 }
 
 var Indexes = struct {
@@ -87,6 +89,17 @@ var Indexes = struct {
 }
 
 var (
+	Salt = snaptype.RegisterType(
+		Enums.Domains,
+		"salt",
+		snaptype.Versions{
+			Current:      0, //2,
+			MinSupported: 0,
+		},
+		nil,
+		nil,
+		nil,
+	)
 	Headers = snaptype.RegisterType(
 		Enums.Headers,
 		"headers",
