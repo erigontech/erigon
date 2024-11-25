@@ -76,11 +76,11 @@ func RootCommand() *cobra.Command {
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	const ThreadsLimit = 9_000
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
-	opts := kv2.New(label, log.New()).Path(path).RoTxsLimiter(limiterB).WriteMap(dbWriteMap)
-
-	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
-	// to read all options from DB, instead of overriding them
-	opts = opts.Accede()
+	opts := kv2.New(label, log.New()).
+		Path(path).
+		RoTxsLimiter(limiterB).
+		WriteMap(dbWriteMap).
+		Accede(true) // integration tool: must not create db. must open db without stoping erigon.
 
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
@@ -100,7 +100,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB
 			if has {
 				logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 				db.Close()
-				db = opts.Exclusive().MustOpen()
+				db = opts.Exclusive(true).MustOpen()
 				if err := migrator.Apply(db, datadirCli, "", logger); err != nil {
 					return nil, err
 				}

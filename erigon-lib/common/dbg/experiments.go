@@ -34,7 +34,6 @@ var (
 	doMemstat           = EnvBool("NO_MEMSTAT", true)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	mdbxReadahead       = EnvBool("MDBX_READAHEAD", false)
 	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
 
@@ -46,7 +45,6 @@ var (
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
 	noMerge              = EnvBool("NO_MERGE", false)
-	discardHistory       = EnvBool("DISCARD_HISTORY", false)
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -77,10 +75,8 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 }
 
-func MdbxReadAhead() bool { return mdbxReadahead }
 func MdbxLockInRam() bool { return mdbxLockInRam }
 
-func DiscardHistory() bool       { return discardHistory }
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
 func NoMerge() bool              { return noMerge }

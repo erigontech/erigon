@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -127,9 +128,9 @@ func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remote.KVClie
 	return remoteOpts{bucketsCfg: kv.ChaindataTablesCfg, version: v, log: logger, remoteKV: remoteKV}
 }
 
-func (db *DB) PageSize() uint64       { panic("not implemented") }
-func (db *DB) ReadOnly() bool         { return true }
-func (db *DB) AllTables() kv.TableCfg { return db.buckets }
+func (db *DB) PageSize() datasize.ByteSize { panic("not implemented") }
+func (db *DB) ReadOnly() bool              { return true }
+func (db *DB) AllTables() kv.TableCfg      { return db.buckets }
 
 func (db *DB) EnsureVersionCompatibility() bool {
 	versionReply, err := db.remoteKV.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
