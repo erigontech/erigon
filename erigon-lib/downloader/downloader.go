@@ -2294,7 +2294,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.lock.Unlock()
 
 	if !stats.Completed {
-		logger.Info("[snapshots] downloading",
+		log.Info("[1snapshots] downloading",
 			"len", len(torrents),
 			"webTransfers", webTransfers,
 			"torrent", torrentInfo,
