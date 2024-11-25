@@ -50,7 +50,6 @@ type indexSeekerIterator interface {
 }
 
 type dataLookupFunc func(di uint64, g *seg.Reader) ([]byte, []byte, uint64, error)
-type dataLookupFuncCursor func(di uint64, g *seg.Reader, c *Cursor) error
 type keyCmpFunc func(k []byte, di uint64, g *seg.Reader, copyBuf []byte) (int, []byte, error)
 
 // M limits amount of child for tree node.
