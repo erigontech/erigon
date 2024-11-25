@@ -170,8 +170,7 @@ datadir
 ```sh
 # eth-mainnet - archive - Nov 2024
 
-du -hsc /erigon/* 
-6G  	/erigon/caplin
+du -hsc /erigon/chaindata
 10G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
@@ -185,9 +184,7 @@ du -hsc /erigon/snapshots/*
 ```sh
 # bor-mainnet - archive - Nov 2024
 
-du -hsc /erigon/* 
-
-160M	/erigon/bor
+du -hsc /erigon/chaindata
 20G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
