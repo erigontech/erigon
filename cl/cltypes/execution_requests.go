@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"encoding/json"
+
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -57,4 +59,24 @@ func (e *ExecutionRequests) HashSSZ() ([32]byte, error) {
 
 func (e *ExecutionRequests) Static() bool {
 	return false
+}
+
+func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
+	c := struct {
+		Deposits       *solid.ListSSZ[*solid.DepositRequest]       `json:"deposits"`
+		Withdrawals    *solid.ListSSZ[*solid.WithdrawalRequest]    `json:"withdrawals"`
+		Consolidations *solid.ListSSZ[*solid.ConsolidationRequest] `json:"consolidations"`
+	}{
+		Deposits:       solid.NewStaticListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest),
+		Withdrawals:    solid.NewStaticListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest),
+		Consolidations: solid.NewStaticListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest),
+	}
+	if err := json.Unmarshal(b, &c); err != nil {
+		return err
+	}
+
+	e.Deposits = c.Deposits
+	e.Withdrawals = c.Withdrawals
+	e.Consolidations = c.Consolidations
+	return nil
 }

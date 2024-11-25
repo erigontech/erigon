@@ -146,7 +146,10 @@ func addSszTests() {
 		With("Validator", getSSZStaticConsensusTest(solid.NewValidator())).
 		With("PendingPartialWithdrawal", getSSZStaticConsensusTest(&solid.PendingPartialWithdrawal{})).
 		With("WithdrawalRequest", getSSZStaticConsensusTest(&solid.WithdrawalRequest{})).
-		With("ExecutionRequests", getSSZStaticConsensusTest(cltypes.NewExecutionRequests(&clparams.MainnetBeaconConfig))).
+		With("ExecutionRequests", sszStaticTestNewObjectByVersion(
+			func(v clparams.StateVersion) *cltypes.ExecutionRequests {
+				return cltypes.NewExecutionRequests(&clparams.MainnetBeaconConfig)
+			})).
 		With("IndexedAttestation", sszStaticTestNewObjectByVersion(
 			func(v clparams.StateVersion) *cltypes.IndexedAttestation {
 				return cltypes.NewIndexedAttestation(v)
