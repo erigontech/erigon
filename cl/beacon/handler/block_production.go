@@ -144,6 +144,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
+	start := time.Now()
 	slot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -180,10 +181,12 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		log.Warn("Failed to get attestation data", "err", err)
 	}
 	if ok {
-		fmt.Println("cache-hit")
+		fmt.Println("cache-hit", time.Since(start))
 		return newBeaconResponse(attestationData), nil
 	}
-	fmt.Println("cache-miss")
+	defer func() {
+		fmt.Println("cache-miss", time.Since(start))
+	}()
 
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
