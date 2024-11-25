@@ -13,7 +13,7 @@ ChangeLog
 
 ### Changes
 
-- Decided to fix snapshots format and go for `beta1`. Main focus: fast bug-reports fixes, chain-tip perf, rpc perf.
+- Decided to fix snapshots format and go for `beta1`. Main focus: fast bug-reports fixes, chain-tip/rpc perf, validator mode.
 - Erigon3 book: https://development.erigon-documentation-preview.pages.dev/
 - Known problem:
     - external CL support
