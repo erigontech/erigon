@@ -101,10 +101,10 @@ jobs:
           ${{ github.workspace }}/result-${{ env.CHAIN }}.json
           ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
 
-    - name: Delete Erigon Testbed Data Directory
+    - name: Delete Erigon Testbed Data Directory (except snapshots)
       if: always()
       run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR
+        find $ERIGON_TESTBED_DATA_DIR -mindepth 1 -maxdepth 1 ! -name 'snapshots' -exec rm -rf {} +
 
     - name: Resume the Erigon instance dedicated to db maintenance
       run: |
