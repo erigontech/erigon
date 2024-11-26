@@ -3,11 +3,12 @@ package receipts
 import (
 	"context"
 	"fmt"
+	"unsafe"
 
-	lru "github.com/hashicorp/golang-lru/v2"
-
+	"github.com/elastic/go-freelru"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -22,9 +23,12 @@ import (
 )
 
 type Generator struct {
-	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
-	blockReader   services.FullBlockReader
-	engine        consensus.EngineReader
+	//receiptsCache      *lru.Cache[common.Hash, []*types.Receipt]
+	receiptsCache      *freelru.LRU[uint32, types.Receipts]
+	receiptsCacheTrace bool
+
+	blockReader services.FullBlockReader
+	engine      consensus.EngineReader
 }
 
 type ReceiptEnv struct {
@@ -37,22 +41,39 @@ type ReceiptEnv struct {
 	header      *types.Header
 }
 
-func NewGenerator(cacheSize int, blockReader services.FullBlockReader,
-	engine consensus.EngineReader) *Generator {
-	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](cacheSize)
+var (
+	receiptsCacheLimit = dbg.EnvInt("R_LRU", 128)
+	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
+)
+
+func cacheKey(u common.Hash) uint32 { return *(*uint32)(unsafe.Pointer(&u[0])) } //nolint
+func u32noHash(u uint32) uint32     { return u }                                 //nolint
+
+func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader) *Generator {
+	receiptsCache, err := freelru.New[uint32, types.Receipts](uint32(receiptsCacheLimit), u32noHash)
+	//receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
 	if err != nil {
 		panic(err)
 	}
 
 	return &Generator{
-		receiptsCache: receiptsCache,
-		blockReader:   blockReader,
-		engine:        engine,
+		receiptsCache:      receiptsCache,
+		blockReader:        blockReader,
+		engine:             engine,
+		receiptsCacheTrace: receiptsCacheTrace,
 	}
 }
 
+func (g *Generator) LogStats() {
+	if g == nil || !g.receiptsCacheTrace {
+		return
+	}
+	m := g.receiptsCache.Metrics()
+	log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+}
+
 func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {
-	return g.receiptsCache.Get(blockHash)
+	return g.receiptsCache.Get(cacheKey(blockHash))
 }
 
 func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.Tx, txIndex int) (*ReceiptEnv, error) {
@@ -121,7 +142,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx,
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error) {
-	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
+	if receipts, ok := g.receiptsCache.Get(cacheKey(block.Hash())); ok {
 		return receipts, nil
 	}
 
@@ -142,6 +163,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 		receipts[i] = receipt
 	}
 
-	g.receiptsCache.Add(block.Hash(), receipts)
+	g.receiptsCache.Add(cacheKey(block.Hash()), receipts)
 	return receipts, nil
 }
