@@ -581,7 +581,6 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFr
 		return start, end, err
 	}
 	if v == nil {
-		panic(fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum))
 		return start, end, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
 	}
 
