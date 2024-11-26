@@ -90,7 +90,7 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 }
 
 func GetLatestBadBlocks(tx kv.Tx, limit int) ([]*types.Block, error) {
-	bheap := utils.NewBlockMaxHeap(limit)
+	bheap := utils.NewBlockMinHeap(limit)
 	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
 		heap.Push(bheap, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
 		return nil
@@ -99,9 +99,9 @@ func GetLatestBadBlocks(tx kv.Tx, limit int) ([]*types.Block, error) {
 	}
 
 	res := make([]*types.Block, bheap.Len())
-	for i := 0; bheap.Len() > 0; i++ {
+	for bheap.Len() > 0 {
 		blockId := heap.Pop(bheap).(*utils.BlockId)
-		res[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
+		res[bheap.Len()] = ReadBlock(tx, blockId.Hash, blockId.Number)
 	}
 
 	return res, nil
