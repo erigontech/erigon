@@ -525,7 +525,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 			return nil, err
 		}
 
-		if len(events) != 0 {
+		if len(events) != 0 && err != nil {
 			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
 			if err != nil {
 				return nil, err
