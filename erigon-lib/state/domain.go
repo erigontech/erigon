@@ -137,11 +137,10 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-
-	cfg.compressCfg = DomainCompressCfg
 	if cfg.indexList == 0 {
 		cfg.indexList = withBTree | withExistence
 	}
+	cfg.compressCfg = DomainCompressCfg
 
 	d := &Domain{
 		domainCfg:  cfg,
@@ -362,7 +361,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 			}
 
-			if item.index == nil && !UseBpsTree {
+			if item.index == nil && d.indexList&withHashMap != 0 {
 				fPath := d.kvAccessorFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -377,7 +376,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
-			if item.bindex == nil {
+			if item.bindex == nil && d.indexList&withBTree != 0 {
 				fPath := d.kvBtFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -392,7 +391,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
-			if item.existence == nil {
+			if item.existence == nil && d.indexList&withExistence != 0 {
 				fPath := d.kvExistenceIdxFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -669,7 +668,15 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 	}
 
 	g := dt.statelessGetter(i)
-	if !(UseBtree || UseBpsTree) {
+	if dt.d.indexList&withBTree != 0 {
+		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
+		if err != nil || !ok {
+			return nil, false, 0, err
+		}
+		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
+		return v, true, offset, nil
+	}
+	if dt.d.indexList&withHashMap != 0 {
 		reader := dt.statelessIdxReader(i)
 		if reader.Empty() {
 			return nil, false, 0, nil
@@ -687,13 +694,8 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		v, _ := g.Next(nil)
 		return v, true, 0, nil
 	}
+	return nil, false, 0, errors.New("no index defined")
 
-	_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
-	if err != nil || !ok {
-		return nil, false, 0, err
-	}
-	//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
-	return v, true, offset, nil
 }
 
 func (dt *DomainRoTx) DebugKVFilesWithKey(k []byte) (res []string, err error) {
@@ -1108,7 +1110,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
-	if !UseBpsTree {
+	if d.indexList&withHashMap != 0 {
 		if err = d.buildAccessor(ctx, stepFrom, stepTo, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
@@ -1118,14 +1120,14 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		}
 	}
 
-	{
+	if d.indexList&withBTree != 0 {
 		btPath := d.kvBtFilePath(stepFrom, stepTo)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	{
+	if d.indexList&withExistence != 0 {
 		fPath := d.kvExistenceIdxFilePath(stepFrom, stepTo)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
@@ -1206,7 +1208,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
-	if !UseBpsTree {
+	if d.indexList&withHashMap != 0 {
 		if err = d.buildAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
@@ -1216,14 +1218,14 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		}
 	}
 
-	{
+	if d.indexList&withBTree != 0 {
 		btPath := d.kvBtFilePath(step, step+1)
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	{
+	if d.indexList&withExistence != 0 {
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
@@ -1325,7 +1327,7 @@ func (d *Domain) missedAccessors() (l []*filesItem) {
 func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedAccessors(ctx, g, ps)
 	for _, item := range d.missedBtreeAccessors() {
-		if !UseBpsTree {
+		if d.indexList&withBTree == 0 {
 			continue
 		}
 		if item.decompressor == nil {
@@ -1343,7 +1345,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		})
 	}
 	for _, item := range d.missedAccessors() {
-		if UseBpsTree {
+		if d.indexList&withHashMap == 0 {
 			continue
 		}
 		if item.decompressor == nil {
@@ -1351,10 +1353,6 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		}
 		item := item
 		g.Go(func() error {
-			if UseBpsTree {
-				return nil
-			}
-
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			err := d.buildAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 			if err != nil {
@@ -1505,10 +1503,6 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	}
 	return nil
 }
-
-var (
-	UseBtree = true // if true, will use btree for all files
-)
 
 // getFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 // of file where the value is stored (not exact step when kv has been set)

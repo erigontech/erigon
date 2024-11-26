@@ -89,10 +89,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	logger := log.New()
 	aggStep := rc.aggStep
 	db, agg := testDbAndAggregatorv3(t, aggStep)
-	//if rc.useBplus {
-	//	UseBpsTree = true
-	//	defer func() { UseBpsTree = false }()
-	//}
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
