@@ -31,6 +31,7 @@ import (
 )
 
 type Scraper[TEntity Entity] struct {
+	name            string
 	store           EntityStore[TEntity]
 	fetcher         entityFetcher[TEntity]
 	pollDelay       time.Duration
@@ -41,6 +42,7 @@ type Scraper[TEntity Entity] struct {
 }
 
 func NewScraper[TEntity Entity](
+	name string,
 	store EntityStore[TEntity],
 	fetcher entityFetcher[TEntity],
 	pollDelay time.Duration,
@@ -48,6 +50,7 @@ func NewScraper[TEntity Entity](
 	logger log.Logger,
 ) *Scraper[TEntity] {
 	return &Scraper[TEntity]{
+		name:            name,
 		store:           store,
 		fetcher:         fetcher,
 		pollDelay:       pollDelay,
@@ -59,10 +62,15 @@ func NewScraper[TEntity Entity](
 }
 
 func (s *Scraper[TEntity]) Run(ctx context.Context) error {
+	s.logger.Info(heimdallLogPrefix("running scraper component"), "name", s.name)
+
 	defer s.store.Close()
 	if err := s.store.Prepare(ctx); err != nil {
 		return err
 	}
+
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
 
 	for ctx.Err() == nil {
 		lastKnownId, hasLastKnownId, err := s.store.LastEntityId(ctx)
@@ -116,8 +124,25 @@ func (s *Scraper[TEntity]) Run(ctx context.Context) error {
 			}
 
 			s.observers.NotifySync(entities) // NotifySync preserves order of events
+
+			select {
+			case <-progressLogTicker.C:
+				if len(entities) > 0 {
+					s.logger.Info(
+						heimdallLogPrefix("scraper periodic progress"),
+						"name", s.name,
+						"rangeStart", idRange.Start,
+						"rangeEnd", idRange.End,
+						"priorLastKnownId", lastKnownId,
+						"newLast", entities[len(entities)-1].RawId(),
+					)
+				}
+			default:
+				// carry on
+			}
 		}
 	}
+
 	return ctx.Err()
 }
 

@@ -772,7 +772,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	roTx := sd.roTx
-	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valsTable)
+	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valuesTable)
 	if err != nil {
 		return err
 	}
@@ -827,7 +827,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				if UseBtree || UseBpsTree {
+				indexList := sd.aggTx.d[kv.StorageDomain].d.indexList
+				if indexList&withBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
@@ -837,7 +838,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					} else {
 						ci1.btCursor.Close()
 					}
-				} else {
+				}
+				if indexList&withHashMap != 0 {
 					ci1.dg.Reset(ci1.latestOffset)
 					if !ci1.dg.HasNext() {
 						break
@@ -974,7 +976,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, st
 	return v, step, nil
 }
 
-// getAsOfFile returns value from domain with respect to limit ofMaxTxnum
+// GetAsOfFile returns value from domain with respect to limit ofMaxTxnum
 func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
@@ -1283,6 +1285,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		return
 	}
 	ks := []byte(key)
+
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchAccount)
