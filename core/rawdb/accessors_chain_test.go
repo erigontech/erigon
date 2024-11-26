@@ -759,7 +759,7 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	require.Equal(uint32(2), body.TxCount)
 }
 
-func TestBadBlockEndpoint(t *testing.T) {
+func TestBadBlocks(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
