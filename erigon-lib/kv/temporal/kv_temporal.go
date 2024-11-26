@@ -2,7 +2,9 @@ package temporal
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/config3"
@@ -198,36 +200,36 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 		})
 		it = iter.UnionKV(histStateIt2, latestStateIt2, limit)
 	case kv.StorageDomain:
-		//storageIt := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
-		//storageIt1 := iter.TransformKV(storageIt, func(k, v []byte) ([]byte, []byte, error) {
-		//	return k, v, nil
-		//})
+		storageIt := tx.aggCtx.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
+		storageIt1 := iter.TransformKV(storageIt, func(k, v []byte) ([]byte, []byte, error) {
+			return k, v, nil
+		})
 
-		//accData, err := tx.GetOne(kv.PlainState, fromKey[:20])
-		//if err != nil {
-		//	return nil, err
-		//}
-		//inc, err := tx.db.parseInc(accData)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
-		//copy(startkey, fromKey[:20])
-		//binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
-		//copy(startkey[length.Addr+length.Incarnation:], fromKey[20:])
-		//
-		//toPrefix := make([]byte, length.Addr+length.Incarnation)
-		//copy(toPrefix, fromKey[:20])
-		//binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
+		accData, err := tx.GetOne(kv.PlainState, fromKey[:20])
+		if err != nil {
+			return nil, err
+		}
+		inc, err := tx.db.parseInc(accData)
+		if err != nil {
+			return nil, err
+		}
+		startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
+		copy(startkey, fromKey[:20])
+		binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
+		copy(startkey[length.Addr+length.Incarnation:], fromKey[20:])
 
-		//it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
-		//	return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
-		//})
-		//it = iter.UnionKV(storageIt1, it3, limit)
+		toPrefix := make([]byte, length.Addr+length.Incarnation)
+		copy(toPrefix, fromKey[:20])
+		binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
+
+		it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
+		if err != nil {
+			return nil, err
+		}
+		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
+			return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
+		})
+		it = iter.UnionKV(storageIt1, it3, limit)
 	case kv.CodeDomain:
 		panic("not implemented yet")
 	default:
