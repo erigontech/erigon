@@ -273,6 +273,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 
 	t.Run("checkNextAgainstGetter", func(t *testing.T) {
 		cur, err := bt.Seek(getter, nil)
+		require.NoError(t, err)
 		defer cur.Close()
 
 		require.NoError(t, err)
