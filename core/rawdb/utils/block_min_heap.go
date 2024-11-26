@@ -1,6 +1,10 @@
 package utils
 
-import "container/heap"
+import (
+	"container/heap"
+
+	"github.com/erigontech/erigon-lib/common"
+)
 
 // blockMinHeap stores a (limited-length) priority queue of blocks, wherein the "min" block is the one with lowest block num
 // the queue will maintain a fixed length of blocks, discarding the lowest block num when limit is exceeded.
@@ -13,7 +17,7 @@ type blockMinHeap struct {
 
 type BlockId struct {
 	Number uint64
-	Hash   []byte
+	Hash   common.Hash
 }
 
 func NewBlockMinHeap(limit int) heap.Interface {

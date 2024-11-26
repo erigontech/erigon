@@ -796,20 +796,31 @@ func TestBadBlockEndpoint(t *testing.T) {
 	}
 
 	// put some blocks
-	putBlock(1)
-	putBlock(2)
-	putBlock(3)
-	hash4 := putBlock(4)
-	hash5 := putBlock(5)
+	for i := 1; i <= 6; i++ {
+		putBlock(uint64(i))
+	}
+	hash1 := putBlock(7)
+	hash2 := putBlock(8)
+	hash3 := putBlock(9)
+	hash4 := putBlock(10)
 
 	// mark some blocks as bad
-	require.NoError(rawdb.TruncateCanonicalHash(tx, 4, true))
-	badBlks, err := rawdb.GetLatestBadBlocks(tx, 3)
+	require.NoError(rawdb.TruncateCanonicalHash(tx, 7, true))
+	badBlks, err := rawdb.GetLatestBadBlocks(tx, 10)
+	require.NoError(err)
+	require.Len(badBlks, 4)
+
+	require.Equal(badBlks[0].Hash(), hash4)
+	require.Equal(badBlks[1].Hash(), hash3)
+	require.Equal(badBlks[2].Hash(), hash2)
+	require.Equal(badBlks[3].Hash(), hash1)
+
+	// testing the "limit"
+	badBlks, err = rawdb.GetLatestBadBlocks(tx, 2)
 	require.NoError(err)
 	require.Len(badBlks, 2)
-
-	require.Equal(badBlks[1].Hash(), hash5)
 	require.Equal(badBlks[0].Hash(), hash4)
+	require.Equal(badBlks[1].Hash(), hash3)
 }
 
 func checkReceiptsRLP(have, want types.Receipts) error {
