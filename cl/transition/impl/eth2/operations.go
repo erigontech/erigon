@@ -483,10 +483,39 @@ func (I *impl) ProcessBlsToExecutionChange(
 	if err != nil {
 		return err
 	}
+	credentials := validator.WithdrawalCredentials()
+	// assert validator.withdrawal_credentials[:1] == BLS_WITHDRAWAL_PREFIX
+	if credentials[0] != byte(beaconConfig.BLSWithdrawalPrefixByte) {
+		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials prefix mismatch")
+	}
+	// assert validator.withdrawal_credentials[1:] == hash(address_change.from_bls_pubkey)[1:]
+	hashKey := utils.Sha256(change.From[:])
+	if !bytes.Equal(credentials[1:], hashKey[1:]) {
+		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials mismatch")
+	}
+
+	// Fork-agnostic domain since address changes are valid across forks
+	domain, err := fork.ComputeDomain(
+		s.BeaconConfig().DomainBLSToExecutionChange[:],
+		utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
+		s.GenesisValidatorsRoot())
+	if err != nil {
+		return err
+	}
+	signingRoot, err := fork.ComputeSigningRoot(change, domain)
+	if err != nil {
+		return err
+	}
+	// Verify the signature
+	ok, err := bls.Verify(signedChange.Signature[:], signingRoot[:], change.From[:])
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("ProcessBlsToExecutionChange: invalid signature")
+	}
 
 	// Perform full validation if requested.
-	wc := validator.WithdrawalCredentials()
-	credentials := wc
 	// Reset the validator's withdrawal credentials.
 	credentials[0] = byte(beaconConfig.ETH1AddressWithdrawalPrefixByte)
 	copy(credentials[1:], make([]byte, 11))
@@ -988,10 +1017,14 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 				return err
 			}
 		}
+
+		fmt.Printf("Epoch: %d, Slot: %d. ForkEpoch %d\n", state.Epoch(s), sSlot, beaconConfig.ElectraForkEpoch)
+
 		if state.Epoch(s) == beaconConfig.ElectraForkEpoch {
 			if err := s.UpgradeToElectra(); err != nil {
 				return err
 			}
+			fmt.Printf("Upgraded to Electra. version %v\n", s.Version())
 		}
 	}
 	return nil

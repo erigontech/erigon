@@ -228,5 +228,6 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		}
 		return true
 	})
+	b.SetVersion(clparams.ElectraVersion)
 	return nil
 }

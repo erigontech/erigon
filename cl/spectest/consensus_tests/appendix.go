@@ -48,7 +48,9 @@ func init() {
 		With("rewards_and_penalties", rewardsAndPenaltiesTest).
 		With("slashings", slashingsTest).
 		With("slashings_reset", slashingsResetTest).
-		With("participation_record_updates", participationRecordUpdatesTest)
+		With("participation_record_updates", participationRecordUpdatesTest).
+		With("pending_deposits", pendingDepositTest).
+		With("pending_consolidations", PendingConsolidationTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
 	TestFormats.Add("fork_choice").
@@ -76,7 +78,10 @@ func init() {
 		WithFn("voluntary_exit", operationVoluntaryExitHandler).
 		WithFn("sync_aggregate", operationSyncAggregateHandler).
 		WithFn("withdrawals", operationWithdrawalHandler).
-		WithFn("bls_to_execution-change", operationSignedBlsChangeHandler)
+		WithFn("bls_to_execution_change", operationSignedBlsChangeHandler).
+		WithFn("consolidation_request", operationConsolidationRequestHandler).
+		WithFn("deposit_request", operationDepositRequstHandler).
+		WithFn("withdrawal_request", operationWithdrawalRequstHandler)
 	TestFormats.Add("random").
 		With("random", SanityBlocks)
 	TestFormats.Add("rewards").

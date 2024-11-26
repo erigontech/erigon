@@ -68,7 +68,9 @@ type SignedBeaconBlock struct {
 }
 
 func NewSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *SignedBeaconBlock {
-	return &SignedBeaconBlock{Block: NewBeaconBlock(beaconCfg, version)}
+	return &SignedBeaconBlock{
+		Block: NewBeaconBlock(beaconCfg, version),
+	}
 }
 
 func (b *SignedBeaconBlock) Blinded() (*SignedBlindedBeaconBlock, error) {

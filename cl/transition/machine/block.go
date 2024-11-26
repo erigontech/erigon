@@ -46,14 +46,14 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 
 	// Check the state version is correct.
 	if block.Version() != version {
-		return fmt.Errorf("processBlindedBlock: wrong state version for block at slot %d", block.GetSlot())
+		return fmt.Errorf("processBlock: wrong state version for block at slot %d. state version %v. block version %v", block.GetSlot(), version, block.Version())
 	}
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {
-		return errors.WithMessagef(err, "processBlindedBlock: failed to hash block body")
+		return errors.WithMessagef(err, "processBlock: failed to hash block body")
 	}
 	if err := impl.ProcessBlockHeader(s, block.GetSlot(), block.GetProposerIndex(), block.GetParentRoot(), bodyRoot); err != nil {
-		return fmt.Errorf("processBlindedBlock: failed to process block header: %v", err)
+		return fmt.Errorf("processBlock: failed to process block header: %v", err)
 	}
 	// Process execution payload if enabled.
 	if version >= clparams.BellatrixVersion && executionEnabled(s, payloadHeader.BlockHash) {
