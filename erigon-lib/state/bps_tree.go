@@ -305,9 +305,9 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, found bool, 
 		return cur, true, nil
 	}
 
-	_, l, r := b.bs(seekKey) // l===r when key is found
+	n, l, r := b.bs(seekKey) // l===r when key is found
 	if l == r {
-		cur.Reset(l)
+		cur.Reset(n.di)
 		// if err = b.dataLookupFuncCursor(l, g, cur); err != nil {
 		// 	return nil, false, err
 		// }
