@@ -25,14 +25,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -54,7 +52,7 @@ type txJSON struct {
 
 	// Access list transaction fields:
 	ChainID        *hexutil.Big         `json:"chainId,omitempty"`
-	AccessList     *types2.AccessList   `json:"accessList,omitempty"`
+	AccessList     *AccessList          `json:"accessList,omitempty"`
 	Authorizations *[]JsonAuthorization `json:"authorizationList,omitempty"`
 
 	// Blob transaction fields:
@@ -519,7 +517,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if dec.AccessList != nil {
 		tx.AccessList = *dec.AccessList
 	} else {
-		tx.AccessList = []types2.AccessTuple{}
+		tx.AccessList = []AccessTuple{}
 	}
 	if dec.ChainID == nil {
 		return nil, errors.New("missing required field 'chainId' in transaction")

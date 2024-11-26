@@ -55,7 +55,7 @@ func NewPolygonSyncStageCfg(
 	logger log.Logger,
 	chainConfig *chain.Config,
 	db kv.RwDB,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	bridgeStore bridge.Store,
 	sentry sentryproto.SentryClient,
@@ -1541,9 +1541,7 @@ func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(ctx co
 	}
 
 	if e.cachedForkChoice.state == forkChoiceConnected {
-		if err := e.executeForkChoice(tx); err != nil {
-			return err
-		}
+		return e.executeForkChoice(tx)
 	}
 
 	if e.cachedForkChoice.state == forkChoiceExecuted {

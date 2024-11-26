@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
@@ -122,8 +122,8 @@ func TestDump(t *testing.T) {
 		chainID, _ := uint256.FromBig(m.ChainConfig.ChainID)
 		t.Run("txs", func(t *testing.T) {
 			require := require.New(t)
-			slot := types2.TxSlot{}
-			parseCtx := types2.NewTxParseContext(*chainID)
+			slot := txpool.TxnSlot{}
+			parseCtx := txpool.NewTxnParseContext(*chainID)
 			parseCtx.WithSender(false)
 			var sender [20]byte
 
@@ -147,8 +147,8 @@ func TestDump(t *testing.T) {
 		})
 		t.Run("txs_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
-			slot := types2.TxSlot{}
-			parseCtx := types2.NewTxParseContext(*chainID)
+			slot := txpool.TxnSlot{}
+			parseCtx := txpool.NewTxnParseContext(*chainID)
 			parseCtx.WithSender(false)
 			var sender [20]byte
 

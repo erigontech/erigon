@@ -157,7 +157,7 @@ Loop:
 		for accs := 0; accs < 256; accs++ {
 			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
-			pv, step, err := domains.DomainGet(kv.AccountsDomain, k0, nil)
+			pv, step, err := domains.GetLatest(kv.AccountsDomain, k0, nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv, step)
@@ -413,7 +413,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
 
-			pv, step, err := domains.DomainGet(kv.AccountsDomain, k0, nil)
+			pv, step, err := domains.GetLatest(kv.AccountsDomain, k0, nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv, step)
@@ -422,7 +422,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 			for locs := 0; locs < 15000; locs++ {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
-				pv, step, err := domains.DomainGet(kv.AccountsDomain, append(k0, l0...), nil)
+				pv, step, err := domains.GetLatest(kv.AccountsDomain, append(k0, l0...), nil)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.StorageDomain, k0, l0, l0[24:], pv, step)
@@ -476,7 +476,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	for accs := 0; accs < accounts; accs++ {
 		k0[0] = byte(accs)
-		pv, step, err := domains.DomainGet(kv.AccountsDomain, k0, nil)
+		pv, step, err := domains.GetLatest(kv.AccountsDomain, k0, nil)
 		require.NoError(t, err)
 
 		existed := make(map[string]struct{})

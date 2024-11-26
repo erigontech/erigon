@@ -89,10 +89,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	logger := log.New()
 	aggStep := rc.aggStep
 	db, agg := testDbAndAggregatorv3(t, aggStep)
-	//if rc.useBplus {
-	//	UseBpsTree = true
-	//	defer func() { UseBpsTree = false }()
-	//}
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -268,15 +264,15 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 	maxInt := math.MaxInt
 	{
-		it, err := ac.DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := ac.RangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRange = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRange = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRange = extractKVErrIterator(t, it)
 
@@ -331,15 +327,15 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 
 	{
-		it, err := ac.DomainRangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := ac.RangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRangeAfter = extractKVErrIterator(t, it)
 
@@ -475,7 +471,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 		switch {
 		case r <= 33:
 			buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
-			prev, step, err := domains.DomainGet(kv.AccountsDomain, key, nil)
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, key, nil)
 			require.NoError(t, err)
 
 			usedKeys[string(key)] = struct{}{}
@@ -495,7 +491,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			prev, step, err := domains.DomainGet(kv.CodeDomain, key, nil)
+			prev, step, err := domains.GetLatest(kv.CodeDomain, key, nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CodeDomain, key, nil, codeUpd, prev, step)
@@ -515,7 +511,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 				key = key[:length.Addr]
 			}
 
-			prev, step, err := domains.DomainGet(kv.AccountsDomain, key, nil)
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, key, nil)
 			require.NoError(t, err)
 			if prev == nil {
 				usedKeys[string(key)] = struct{}{}
@@ -532,7 +528,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 				copy(sk[length.Addr:], loc)
 				usedKeys[string(sk)] = struct{}{}
 
-				prev, step, err := domains.DomainGet(kv.StorageDomain, sk[:length.Addr], sk[length.Addr:])
+				prev, step, err := domains.GetLatest(kv.StorageDomain, sk[:length.Addr], sk[length.Addr:])
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.StorageDomain, sk[:length.Addr], sk[length.Addr:], uint256.NewInt(txNum).Bytes(), prev, step)
@@ -615,9 +611,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, os.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
-	newDb := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
 	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
@@ -881,19 +875,18 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	return compPath
 }
 
-func testDbAndAggregatorv3(t *testing.T, aggStep uint64) (kv.RwDB, *Aggregator) {
-	t.Helper()
-	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
-	logger := log.New()
-	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator) {
+	tb.Helper()
+	require, logger := require.New(tb), log.New()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
-	t.Cleanup(db.Close)
+	tb.Cleanup(db.Close)
 
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(err)
-	t.Cleanup(agg.Close)
+	tb.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
 	agg.DisableFsync()
@@ -962,7 +955,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 		for j := 0; j < len(keys); j++ {
 			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
-			prev, step, err := domains.DomainGet(kv.AccountsDomain, keys[j], nil)
+			prev, step, err := domains.GetLatest(kv.AccountsDomain, keys[j], nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, keys[j], nil, buf, prev, step)

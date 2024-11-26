@@ -17,6 +17,7 @@
 package dbg
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -70,20 +71,14 @@ func EnvInt(envVarName string, defaultVal int) int {
 	v, _ := os.LookupEnv(envVarName)
 	if v != "" {
 		WarnOnErigonPrefix(envVarName)
-		i, err := strconv.Atoi(v)
-		if err != nil {
-			panic(err)
-		}
+		i := MustParseInt(v)
 		log.Info("[env]", envVarName, i)
 		return i
 	}
 
 	v, _ = os.LookupEnv("ERIGON_" + envVarName)
 	if v != "" {
-		i, err := strconv.Atoi(v)
-		if err != nil {
-			panic(err)
-		}
+		i := MustParseInt(v)
 		log.Info("[env]", envVarName, i)
 		return i
 	}
@@ -140,4 +135,13 @@ func WarnOnErigonPrefix(envVarName string) {
 	if !strings.HasPrefix(envVarName, "ERIGON_") {
 		log.Warn("[env] please use ERIGON_ prefix for env variables of erigon", "var", envVarName)
 	}
+}
+
+func MustParseInt(strNum string) int {
+	cleanNum := strings.ReplaceAll(strNum, "_", "")
+	parsed, err := strconv.ParseInt(cleanNum, 10, 64)
+	if err != nil {
+		panic(fmt.Errorf("%w, str: %s", err, strNum))
+	}
+	return int(parsed)
 }

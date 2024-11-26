@@ -33,7 +33,7 @@ import (
 )
 
 // StateAsOfIter - returns state range at given time in history
-type StateAsOfIterF struct {
+type HistoryRangeAsOfFiles struct {
 	hc    *HistoryRoTx
 	limit int
 
@@ -53,10 +53,10 @@ type StateAsOfIterF struct {
 	ctx    context.Context
 }
 
-func (hi *StateAsOfIterF) Close() {
+func (hi *HistoryRangeAsOfFiles) Close() {
 }
 
-func (hi *StateAsOfIterF) init(files visibleFiles) error {
+func (hi *HistoryRangeAsOfFiles) init(files visibleFiles) error {
 	for i, item := range files {
 		if item.endTxNum <= hi.startTxNum {
 			continue
@@ -84,11 +84,11 @@ func (hi *StateAsOfIterF) init(files visibleFiles) error {
 	return hi.advanceInFiles()
 }
 
-func (hi *StateAsOfIterF) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
-	return stream.TraceDuo(hi, hi.logger, "[dbg] StateAsOfIterF.Next "+prefix)
+func (hi *HistoryRangeAsOfFiles) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
+	return stream.TraceDuo(hi, hi.logger, "[dbg] HistoryRangeAsOfFiles.Next "+prefix)
 }
 
-func (hi *StateAsOfIterF) advanceInFiles() error {
+func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
 		key := top.key
@@ -141,7 +141,7 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 	return nil
 }
 
-func (hi *StateAsOfIterF) HasNext() bool {
+func (hi *HistoryRangeAsOfFiles) HasNext() bool {
 	if hi.limit == 0 { // limit reached
 		return false
 	}
@@ -158,7 +158,7 @@ func (hi *StateAsOfIterF) HasNext() bool {
 	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
-func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
+func (hi *HistoryRangeAsOfFiles) Next() ([]byte, []byte, error) {
 	select {
 	case <-hi.ctx.Done():
 		return nil, nil, hi.ctx.Err()
@@ -178,8 +178,8 @@ func (hi *StateAsOfIterF) Next() ([]byte, []byte, error) {
 	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
 }
 
-// StateAsOfIterDB - returns state range at given time in history
-type StateAsOfIterDB struct {
+// HistoryRangeAsOfDB - returns state range at given time in history
+type HistoryRangeAsOfDB struct {
 	largeValues bool
 	roTx        kv.Tx
 	valsC       kv.Cursor
@@ -202,17 +202,17 @@ type StateAsOfIterDB struct {
 	ctx    context.Context
 }
 
-func (hi *StateAsOfIterDB) Close() {
+func (hi *HistoryRangeAsOfDB) Close() {
 	if hi.valsC != nil {
 		hi.valsC.Close()
 	}
 }
 
-func (hi *StateAsOfIterDB) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
-	return stream.TraceDuo(hi, hi.logger, "[dbg] StateAsOfIterDB.Next "+prefix)
+func (hi *HistoryRangeAsOfDB) Trace(prefix string) *stream.TracedDuo[[]byte, []byte] {
+	return stream.TraceDuo(hi, hi.logger, "[dbg] HistoryRangeAsOfDB.Next "+prefix)
 }
 
-func (hi *StateAsOfIterDB) advance() (err error) {
+func (hi *HistoryRangeAsOfDB) advance() (err error) {
 	// not large:
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2 -> txNum + value (DupSort)
@@ -224,7 +224,7 @@ func (hi *StateAsOfIterDB) advance() (err error) {
 	}
 	return hi.advanceSmallVals()
 }
-func (hi *StateAsOfIterDB) advanceLargeVals() error {
+func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 	var seek []byte
 	var err error
 	if hi.valsC == nil {
@@ -267,7 +267,7 @@ func (hi *StateAsOfIterDB) advanceLargeVals() error {
 	hi.nextKey = nil
 	return nil
 }
-func (hi *StateAsOfIterDB) advanceSmallVals() error {
+func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 	var seek []byte
 	var err error
 	if hi.valsCDup == nil {
@@ -305,7 +305,7 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 	return nil
 }
 
-func (hi *StateAsOfIterDB) HasNext() bool {
+func (hi *HistoryRangeAsOfDB) HasNext() bool {
 	if hi.err != nil {
 		return true
 	}
@@ -325,7 +325,7 @@ func (hi *StateAsOfIterDB) HasNext() bool {
 	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
 
-func (hi *StateAsOfIterDB) Next() ([]byte, []byte, error) {
+func (hi *HistoryRangeAsOfDB) Next() ([]byte, []byte, error) {
 	select {
 	case <-hi.ctx.Done():
 		return nil, nil, hi.ctx.Err()

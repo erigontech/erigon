@@ -44,8 +44,6 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
-var UseBpsTree = true
-
 const BtreeLogPrefix = "btree"
 
 // DefaultBtreeM - amount of keys on leaf of BTree
@@ -736,6 +734,7 @@ type BtIndex struct {
 	file     *os.File
 	alloc    *btAlloc // pointless?
 	bplus    *BpsTree
+	useBplus bool
 	size     int64
 	modTime  time.Time
 	filePath string
@@ -873,8 +872,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	defer kv.EnableMadvNormal().DisableReadAhead()
 	kvGetter := seg.NewReader(kv.MakeGetter(), compress)
 
+	idx.useBplus = true
+
 	//fmt.Printf("open btree index %s with %d keys b+=%t data compressed %t\n", indexPath, idx.ef.Count(), UseBpsTree, idx.compressed)
-	switch UseBpsTree {
+	switch idx.useBplus {
 	case true:
 		if len(idx.data[pos:]) == 0 {
 			idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
@@ -1004,7 +1005,7 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 	// defer func() {
 	// 	fmt.Printf("[Bindex][%s] Get (%t) '%x' -> '%x' di=%d err %v\n", b.FileName(), found, lookup, v, index, err)
 	// }()
-	if UseBpsTree {
+	if b.useBplus {
 		if b.bplus == nil {
 			panic(fmt.Errorf("Get: `b.bplus` is nil: %s", gr.FileName()))
 		}
@@ -1050,7 +1051,7 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
-	if UseBpsTree {
+	if b.useBplus {
 		k, v, dt, _, err := b.bplus.Seek(g, x)
 		if err != nil /*|| !found*/ {
 			if errors.Is(err, ErrBtIndexLookupBounds) {

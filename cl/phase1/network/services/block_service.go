@@ -121,12 +121,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return ErrIgnore
 	}
 
-	// headState, cn := b.syncedData.HeadState()
-	// defer cn()
-	// if headState == nil {
-	// 	b.scheduleBlockForLaterProcessing(msg)
-	// 	return ErrIgnore
-	// }
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 		// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).

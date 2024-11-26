@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -100,19 +99,19 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 	return cc, blockNum, nil
 }
 
-func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cache, newTxs chan types.Announcements, chainDB kv.RoDB,
+func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cache, newTxns chan txpool.Announcements, chainDB kv.RoDB,
 	sentryClients []sentryproto.SentryClient, stateChangesClient txpool.StateChangesClient, feeCalculator txpool.FeeCalculator, logger log.Logger) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
-	opts := mdbx.NewMDBX(logger).Label(kv.TxPoolDB).Path(cfg.DBDir).
+	opts := mdbx.New(kv.TxPoolDB, logger).Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		WriteMergeThreshold(3 * 8192).
-		PageSize(uint64(16 * datasize.KB)).
+		PageSize(16 * datasize.KB).
 		GrowthStep(16 * datasize.MB).
 		DirtySpace(uint64(128 * datasize.MB)).
 		MapSize(1 * datasize.TB).
 		WriteMap(cfg.MdbxWriteMap)
 
-	if cfg.MdbxPageSize.Bytes() > 0 {
-		opts = opts.PageSize(cfg.MdbxPageSize.Bytes())
+	if cfg.MdbxPageSize > 0 {
+		opts = opts.PageSize(cfg.MdbxPageSize)
 	}
 	if cfg.MdbxDBSizeLimit > 0 {
 		opts = opts.MapSize(cfg.MdbxDBSizeLimit)
@@ -146,8 +145,21 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		pragueTime = cfg.OverridePragueTime
 	}
 
-	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime,
-		maxBlobsPerBlock, feeCalculator, logger)
+	txPool, err := txpool.New(
+		newTxns,
+		txPoolDB,
+		chainDB,
+		cfg,
+		cache,
+		*chainID,
+		shanghaiTime,
+		agraBlock,
+		cancunTime,
+		pragueTime,
+		maxBlobsPerBlock,
+		feeCalculator,
+		logger,
+	)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

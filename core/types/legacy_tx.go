@@ -30,8 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -120,8 +118,8 @@ func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	}
 }
 
-func (tx *LegacyTx) GetAccessList() types2.AccessList {
-	return types2.AccessList{}
+func (tx *LegacyTx) GetAccessList() AccessList {
+	return AccessList{}
 }
 
 func (tx *LegacyTx) Protected() bool {

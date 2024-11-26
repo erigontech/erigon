@@ -80,7 +80,6 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	logger := log.New()
 	keyCount, M := 120, 30
 	compressFlags := seg.CompressKeys | seg.CompressVals
-	//UseBpsTree = true
 
 	t.Run("empty index", func(t *testing.T) {
 		dataPath := generateKV(t, tmp, 52, 180, 0, logger, 0)

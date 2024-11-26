@@ -76,7 +76,7 @@ func (e *EngineBlockDownloader) download(ctx context.Context, hashToDownload lib
 	}
 	defer tmpTx.Rollback()
 
-	memoryMutation := membatchwithdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx, e.tmpdir)
+	memoryMutation := membatchwithdb.NewMemoryBatchWithCustomDB(tx, tmpDb, tmpTx)
 	defer memoryMutation.Rollback()
 
 	startBlock, endBlock, startHash, err := e.loadDownloadedHeaders(memoryMutation)

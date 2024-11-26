@@ -28,7 +28,6 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -113,20 +112,20 @@ func (tr *TRand) RandHeader() *Header {
 	}
 }
 
-func (tr *TRand) RandAccessTuple() types2.AccessTuple {
+func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
 	sk := make([]libcommon.Hash, n)
 	for i := 0; i < n; i++ {
 		sk[i] = tr.RandHash()
 	}
-	return types2.AccessTuple{
+	return AccessTuple{
 		Address:     tr.RandAddress(),
 		StorageKeys: sk,
 	}
 }
 
-func (tr *TRand) RandAccessList(size int) types2.AccessList {
-	al := make([]types2.AccessTuple, size)
+func (tr *TRand) RandAccessList(size int) AccessList {
+	al := make([]AccessTuple, size)
 	for i := 0; i < size; i++ {
 		al[i] = tr.RandAccessTuple()
 	}

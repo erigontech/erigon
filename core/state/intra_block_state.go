@@ -25,17 +25,17 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/turbo/trie"
-	"github.com/holiman/uint256"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
@@ -96,6 +96,7 @@ type IntraBlockState struct {
 	validRevisions []revision
 	nextRevisionID int
 	trace          bool
+	tracingHooks   *tracing.Hooks
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 }
 
@@ -114,6 +115,10 @@ func New(stateReader StateReader) *IntraBlockState {
 		txIndex:           0,
 		//trace:             true,
 	}
+}
+
+func (sdb *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
+	sdb.tracingHooks = hooks
 }
 
 func (sdb *IntraBlockState) SetTrace(trace bool) {
@@ -167,6 +172,9 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
+		sdb.tracingHooks.OnLog(log2)
+	}
 	sdb.logSize++
 	for len(sdb.logs) <= sdb.txIndex {
 		sdb.logs = append(sdb.logs, nil)
@@ -383,6 +391,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
+
 	// If this account has not been read, add to the balance increment map
 	_, needAccount := sdb.stateObjects[addr]
 	if !needAccount && addr == ripemd && amount.IsZero() {
@@ -393,11 +402,26 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			account:  &addr,
 			increase: *amount,
 		})
+
 		bi, ok := sdb.balanceInc[addr]
 		if !ok {
 			bi = &BalanceIncrease{}
 			sdb.balanceInc[addr] = bi
 		}
+
+		if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
+			// TODO: discuss if we should ignore error
+			prev := new(uint256.Int)
+			account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
+			if account != nil {
+				prev.Add(&account.Balance, &bi.increase)
+			} else {
+				prev.Add(prev, &bi.increase)
+			}
+
+			sdb.tracingHooks.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
+		}
+
 		bi.increase.Add(&bi.increase, amount)
 		bi.count++
 		return
@@ -488,11 +512,18 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 	if stateObject == nil || stateObject.deleted {
 		return false
 	}
+
+	prevBalance := *stateObject.Balance()
 	sdb.journal.append(selfdestructChange{
 		account:     &addr,
 		prev:        stateObject.selfdestructed,
-		prevbalance: *stateObject.Balance(),
+		prevbalance: prevBalance,
 	})
+
+	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
+		sdb.tracingHooks.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestruct)
+	}
+
 	stateObject.markSelfdestructed()
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
@@ -684,9 +715,12 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool) error {
+func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, tracingHooks *tracing.Hooks) error {
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
+		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
+			tracingHooks.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
+		}
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
 		}
@@ -758,7 +792,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		}
 
 		//fmt.Printf("FinalizeTx: %x, balance=%d %T\n", addr, so.data.Balance.Uint64(), stateWriter)
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.tracingHooks); err != nil {
 			return err
 		}
 		so.newlyCreated = false
@@ -814,7 +848,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.tracingHooks); err != nil {
 			return err
 		}
 	}
@@ -873,7 +907,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add authorities to access list (EIP-7702)
 // - Add delegated designation (if it exists for dst) to access list (EIP-7702)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcommon.Address, dst *libcommon.Address,
-	precompiles []libcommon.Address, list types2.AccessList, authorities []libcommon.Address) {
+	precompiles []libcommon.Address, list types.AccessList, authorities []libcommon.Address) {
 	if sdb.trace {
 		fmt.Printf("ibs.Prepare %x, %x, %x, %x, %v, %v, %v\n", sender, coinbase, dst, precompiles, list, rules, authorities)
 	}

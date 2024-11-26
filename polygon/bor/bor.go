@@ -325,7 +325,7 @@ type Bor struct {
 
 	spanner         Spanner
 	stateReceiver   StateReceiver
-	HeimdallClient  heimdall.HeimdallClient
+	HeimdallClient  heimdall.Client
 	useSpanReader   bool
 	spanReader      spanReader
 	useBridgeReader bool
@@ -354,7 +354,7 @@ func New(
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	genesisContracts StateReceiver,
 	logger log.Logger,
 	bridgeReader bridgeReader,
@@ -1608,7 +1608,7 @@ func (c *Bor) CommitStates(
 	return nil
 }
 
-func (c *Bor) SetHeimdallClient(h heimdall.HeimdallClient) {
+func (c *Bor) SetHeimdallClient(h heimdall.Client) {
 	c.HeimdallClient = h
 }
 

@@ -27,8 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -43,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/types/accounts"
@@ -85,7 +84,7 @@ type Progress struct {
 	logger       log.Logger
 }
 
-func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool) {
+func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
 	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -122,6 +121,7 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 		"buf", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.HistoryV3AggregationStep)),
+		"inMem", inMemExec,
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 
@@ -143,10 +143,7 @@ func ExecV3(ctx context.Context,
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
 
-	batchSize := cfg.batchSize
-	chainDb := cfg.db
 	blockReader := cfg.blockReader
-	engine := cfg.engine
 	chainConfig := cfg.chainConfig
 	totalGasUsed := uint64(0)
 	start := time.Now()
@@ -161,7 +158,7 @@ func ExecV3(ctx context.Context,
 	if !useExternalTx {
 		if !parallel {
 			var err error
-			applyTx, err = chainDb.BeginRw(ctx) //nolint
+			applyTx, err = cfg.db.BeginRw(ctx) //nolint
 			if err != nil {
 				return err
 			}
@@ -278,7 +275,7 @@ func ExecV3(ctx context.Context,
 		}
 	} else {
 		var _nothing bool
-		if err := chainDb.View(ctx, func(tx kv.Tx) (err error) {
+		if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 			if _nothing, err = nothingToExec(applyTx); err != nil {
 				return err
 			} else if _nothing {
@@ -302,14 +299,14 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.syncCfg.AlwaysGenerateChangesets
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
 
 	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 	}
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
@@ -346,7 +343,7 @@ func ExecV3(ctx context.Context,
 	applyWorker.ResetState(rs, accumulator)
 	defer applyWorker.LogLRUStats()
 
-	commitThreshold := batchSize.Bytes()
+	commitThreshold := cfg.batchSize.Bytes()
 	progress := NewProgress(blockNum, commitThreshold, workerCount, false, execStage.LogPrefix(), logger)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -363,7 +360,7 @@ func ExecV3(ctx context.Context,
 	if parallel {
 		pe := &parallelExecutor{
 			execStage:                execStage,
-			chainDb:                  chainDb,
+			chainDb:                  cfg.db,
 			applyWorker:              applyWorker,
 			applyTx:                  applyTx,
 			outputTxNum:              &outputTxNum,
@@ -385,7 +382,7 @@ func ExecV3(ctx context.Context,
 		defer executorCancel()
 
 		defer func() {
-			processed.Log("Done", executor.readState(), in, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+			processed.Log("Done", executor.readState(), in, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = pe
@@ -409,7 +406,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			processed.Log("Done", executor.readState(), in, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+			processed.Log("Done", executor.readState(), in, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = se
@@ -467,7 +464,7 @@ Loop:
 		inputBlockNum.Store(blockNum)
 		executor.domains().SetBlockNum(blockNum)
 
-		b, err = blockWithSenders(ctx, chainDb, executor.tx(), blockReader, blockNum)
+		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
 		if err != nil {
 			return err
 		}
@@ -489,7 +486,7 @@ Loop:
 			return f(n)
 		}
 		totalGasUsed += b.GasUsed()
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, cfg.author /* author */, chainConfig)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
 		// print type of engine
 		if parallel {
 			if err := executor.status(ctx, commitThreshold); err != nil {
@@ -649,7 +646,7 @@ Loop:
 				}
 
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState(), in, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets)
+				progress.Log("", executor.readState(), in, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {
@@ -747,7 +744,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -762,7 +759,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -775,7 +772,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
