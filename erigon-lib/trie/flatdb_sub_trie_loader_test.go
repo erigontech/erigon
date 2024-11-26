@@ -26,17 +26,16 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/common"
 )
 
 func TestCreateLoadingPrefixes(t *testing.T) {
 	assert := assert.New(t)
 
 	tr := New(libcommon.Hash{})
-	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
+	kAcc1 := libcommon.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	kInc := make([]byte, 8)
 	binary.BigEndian.PutUint64(kInc, uint64(1))
-	ks1 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
+	ks1 := libcommon.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
 	acc1 := accounts.NewAccount()
 	acc1.Balance.SetUint64(12345)
 	acc1.Incarnation = 1
@@ -44,9 +43,9 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	tr.UpdateAccount(kAcc1, &acc1)
 	tr.Update(concat(kAcc1, ks1...), []byte{1, 2, 3})
 
-	kAcc2 := common.FromHex("0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
-	ks2 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
-	ks22 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000002")
+	kAcc2 := libcommon.FromHex("0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
+	ks2 := libcommon.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
+	ks22 := libcommon.FromHex("0000000000000000000000000000000000000000000000000000000000000002")
 	acc2 := accounts.NewAccount()
 	acc2.Balance.SetUint64(6789)
 	acc2.Incarnation = 1
@@ -125,8 +124,8 @@ func TestIsSequence(t *testing.T) {
 		{prev: "1234", next: "5678", expect: false},
 	}
 	for _, tc := range cases {
-		next, _ := kv.NextSubtree(common.FromHex(tc.prev))
-		res := isSequenceOld(next, common.FromHex(tc.next))
+		next, _ := kv.NextSubtree(libcommon.FromHex(tc.prev))
+		res := isSequenceOld(next, libcommon.FromHex(tc.next))
 		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
 	}
 

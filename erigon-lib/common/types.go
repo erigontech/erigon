@@ -24,10 +24,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"strings"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -42,7 +40,7 @@ const (
 )
 
 // UnprefixedHash allows marshaling a Hash without 0x prefix.
-type UnprefixedHash libcommon.Hash
+type UnprefixedHash Hash
 
 // UnmarshalText decodes the hash from hex. The 0x prefix is optional.
 func (h *UnprefixedHash) UnmarshalText(input []byte) error {
@@ -54,12 +52,8 @@ func (h UnprefixedHash) MarshalText() ([]byte, error) {
 	return []byte(hex.EncodeToString(h[:])), nil
 }
 
-/////////// Address
-
-var addressT = reflect.TypeOf(libcommon.Address{})
-
 // UnprefixedAddress allows marshaling an Address without 0x prefix.
-type UnprefixedAddress libcommon.Address
+type UnprefixedAddress Address
 
 // UnmarshalText decodes the address from hex. The 0x prefix is optional.
 func (a *UnprefixedAddress) UnmarshalText(input []byte) error {
@@ -74,22 +68,22 @@ func (a UnprefixedAddress) MarshalText() ([]byte, error) {
 // MixedcaseAddress retains the original string, which may or may not be
 // correctly checksummed
 type MixedcaseAddress struct {
-	addr     libcommon.Address
+	addr     Address
 	original string
 }
 
 // NewMixedcaseAddress constructor (mainly for testing)
-func NewMixedcaseAddress(addr libcommon.Address) MixedcaseAddress {
+func NewMixedcaseAddress(addr Address) MixedcaseAddress {
 	return MixedcaseAddress{addr: addr, original: addr.Hex()}
 }
 
 // NewMixedcaseAddressFromString is mainly meant for unit-testing
 func NewMixedcaseAddressFromString(hexaddr string) (*MixedcaseAddress, error) {
-	if !libcommon.IsHexAddress(hexaddr) {
+	if !IsHexAddress(hexaddr) {
 		return nil, errors.New("invalid address")
 	}
 	a := FromHex(hexaddr)
-	return &MixedcaseAddress{addr: libcommon.BytesToAddress(a), original: hexaddr}, nil
+	return &MixedcaseAddress{addr: BytesToAddress(a), original: hexaddr}, nil
 }
 
 // UnmarshalJSON parses MixedcaseAddress
@@ -109,7 +103,7 @@ func (ma *MixedcaseAddress) MarshalJSON() ([]byte, error) {
 }
 
 // Address returns the address
-func (ma *MixedcaseAddress) Address() libcommon.Address {
+func (ma *MixedcaseAddress) Address() Address {
 	return ma.addr
 }
 
@@ -132,7 +126,7 @@ func (ma *MixedcaseAddress) Original() string {
 }
 
 // Addresses is a slice of libcommon.Address, implementing sort.Interface
-type Addresses []libcommon.Address
+type Addresses []Address
 
 func (addrs Addresses) Len() int {
 	return len(addrs)
@@ -145,7 +139,7 @@ func (addrs Addresses) Swap(i, j int) {
 }
 
 // Hashes is a slice of libcommon.Hash, implementing sort.Interface
-type Hashes []libcommon.Hash
+type Hashes []Hash
 
 func (hashes Hashes) Len() int {
 	return len(hashes)

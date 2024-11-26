@@ -31,7 +31,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 
-	"github.com/erigontech/erigon/common/paths"
+	"github.com/erigontech/erigon-lib/common/paths"
 )
 
 //go:embed chainspecs

@@ -31,12 +31,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/rlphacks"
-	"github.com/erigontech/erigon/common"
 )
 
 func TestV2HashBuilding(t *testing.T) {
@@ -261,28 +261,28 @@ func TestEmbeddedStorage11(t *testing.T) {
 	}{
 
 		{
-			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae9800000000000000010d2f4a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"),
-			v: common.FromHex("496e7374616e6365000000000000000000000000000000000000000000000000"),
+			k: libcommon.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae9800000000000000010d2f4a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"),
+			v: libcommon.FromHex("496e7374616e6365000000000000000000000000000000000000000000000000"),
 		},
 		{
-			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae98000000000000000123a5384746519cbca71a22098063e5608768276f2dc212e71fd2c6c643c726c4"),
-			v: common.FromHex("65eea643e9a9d6f5f2f7e13ccdff36cf45b46aab"),
+			k: libcommon.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae98000000000000000123a5384746519cbca71a22098063e5608768276f2dc212e71fd2c6c643c726c4"),
+			v: libcommon.FromHex("65eea643e9a9d6f5f2f7e13ccdff36cf45b46aab"),
 		},
 		{
-			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001387a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
-			v: common.FromHex("01"),
+			k: libcommon.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001387a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"),
+			v: libcommon.FromHex("01"),
 		},
 		{
-			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001a8dc6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
-			v: common.FromHex("53706f7265000000000000000000000000000000000000000000000000000000"),
+			k: libcommon.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001a8dc6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"),
+			v: libcommon.FromHex("53706f7265000000000000000000000000000000000000000000000000000000"),
 		},
 		{
-			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001dee260551c74e3b37ed31b6e5f482a3ff9342f863a5880c9090db0cc9e002750"),
-			v: common.FromHex("5067247f2214dca445bfb213277b5f19711e309f"),
+			k: libcommon.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001dee260551c74e3b37ed31b6e5f482a3ff9342f863a5880c9090db0cc9e002750"),
+			v: libcommon.FromHex("5067247f2214dca445bfb213277b5f19711e309f"),
 		},
 		{
-			k: common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001fe59747b95e3ddbc3fd7e47a8bdf2465d2d88a030c9bd19cc3c0b7a9860c0d5f"),
-			v: common.FromHex("01"),
+			k: libcommon.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001fe59747b95e3ddbc3fd7e47a8bdf2465d2d88a030c9bd19cc3c0b7a9860c0d5f"),
+			v: libcommon.FromHex("01"),
 		},
 	}
 	hb := NewHashBuilder(true)
@@ -332,16 +332,16 @@ func TestAccountsOnly(t *testing.T) {
 		k []byte
 		v []byte
 	}{
-		{k: common.FromHex("10002a312d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: common.FromHex("01")},
-		{k: common.FromHex("10002a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: common.FromHex("01")},
-		{k: common.FromHex("10002b412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: common.FromHex("01")},
-		{k: common.FromHex("10009384w46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: common.FromHex("01")},
-		{k: common.FromHex("10009484w46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: common.FromHex("01")},
-		{k: common.FromHex("1000a9e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: common.FromHex("01")},
-		{k: common.FromHex("110006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
-		{k: common.FromHex("120006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
-		{k: common.FromHex("121006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
-		{k: common.FromHex("200c6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
+		{k: libcommon.FromHex("10002a312d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: libcommon.FromHex("01")},
+		{k: libcommon.FromHex("10002a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: libcommon.FromHex("01")},
+		{k: libcommon.FromHex("10002b412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: libcommon.FromHex("01")},
+		{k: libcommon.FromHex("10009384w46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: libcommon.FromHex("01")},
+		{k: libcommon.FromHex("10009484w46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: libcommon.FromHex("01")},
+		{k: libcommon.FromHex("1000a9e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: libcommon.FromHex("01")},
+		{k: libcommon.FromHex("110006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: libcommon.FromHex("01")},
+		{k: libcommon.FromHex("120006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: libcommon.FromHex("01")},
+		{k: libcommon.FromHex("121006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: libcommon.FromHex("01")},
+		{k: libcommon.FromHex("200c6a21510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: libcommon.FromHex("01")},
 	}
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
@@ -356,22 +356,22 @@ func TestAccountsOnly(t *testing.T) {
 		i++
 		switch i {
 		case 1:
-			require.Equal(t, common.FromHex("0100000002"), keyHex)
+			require.Equal(t, libcommon.FromHex("0100000002"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10000000000)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 2:
-			require.Equal(t, common.FromHex("01000000"), keyHex)
+			require.Equal(t, libcommon.FromHex("01000000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b1000000100)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 3:
-			require.Equal(t, common.FromHex("01"), keyHex)
+			require.Equal(t, libcommon.FromHex("01"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b001)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 4:
-			require.Equal(t, common.FromHex(""), keyHex)
+			require.Equal(t, libcommon.FromHex(""), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
@@ -412,19 +412,19 @@ func TestBranchesOnly(t *testing.T) {
 		k       []byte
 		hasTree bool
 	}{
-		{k: common.FromHex("0100000002000a03"), hasTree: false},
-		{k: common.FromHex("0100000002000a04"), hasTree: true},
-		{k: common.FromHex("01000000020b"), hasTree: false},
-		{k: common.FromHex("010000000900000103"), hasTree: false},
-		//{k: common.FromHex("010000000900000104"), hasTree: false},
-		//{k: common.FromHex("010000000900000203"), hasTree: false},
-		//{k: common.FromHex("010000000900000204"), hasTree: false},
-		{k: common.FromHex("010000000901"), hasTree: false},
-		{k: common.FromHex("010000000a"), hasTree: false},
-		{k: common.FromHex("0101"), hasTree: false},
-		{k: common.FromHex("010200000a"), hasTree: false},
-		{k: common.FromHex("010200000b"), hasTree: false},
-		{k: common.FromHex("0201"), hasTree: false},
+		{k: libcommon.FromHex("0100000002000a03"), hasTree: false},
+		{k: libcommon.FromHex("0100000002000a04"), hasTree: true},
+		{k: libcommon.FromHex("01000000020b"), hasTree: false},
+		{k: libcommon.FromHex("010000000900000103"), hasTree: false},
+		//{k:libcommon.FromHex("010000000900000104"), hasTree: false},
+		//{k:libcommon.FromHex("010000000900000203"), hasTree: false},
+		//{k:libcommon.FromHex("010000000900000204"), hasTree: false},
+		{k: libcommon.FromHex("010000000901"), hasTree: false},
+		{k: libcommon.FromHex("010000000a"), hasTree: false},
+		{k: libcommon.FromHex("0101"), hasTree: false},
+		{k: libcommon.FromHex("010200000a"), hasTree: false},
+		{k: libcommon.FromHex("010200000b"), hasTree: false},
+		{k: libcommon.FromHex("0201"), hasTree: false},
 	}
 	hb := NewHashBuilder(false)
 	var succ, curr bytes.Buffer
@@ -438,37 +438,37 @@ func TestBranchesOnly(t *testing.T) {
 		i++
 		switch i {
 		case 1:
-			require.Equal(t, common.FromHex("0100000002000a"), keyHex)
+			require.Equal(t, libcommon.FromHex("0100000002000a"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b11000)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b1000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 2:
-			require.Equal(t, common.FromHex("0100000002"), keyHex)
+			require.Equal(t, libcommon.FromHex("0100000002"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000000000)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b1)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 3:
-			require.Equal(t, common.FromHex("0100000009"), keyHex)
+			require.Equal(t, libcommon.FromHex("0100000009"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 4:
-			require.Equal(t, common.FromHex("01000000"), keyHex)
+			require.Equal(t, libcommon.FromHex("01000000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b11000000100)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b01000000100)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 5:
-			require.Equal(t, common.FromHex("01020000"), keyHex)
+			require.Equal(t, libcommon.FromHex("01020000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b110000000000)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 6:
-			require.Equal(t, common.FromHex("01"), keyHex)
+			require.Equal(t, libcommon.FromHex("01"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b101)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 7:
-			require.Equal(t, common.FromHex(""), keyHex)
+			require.Equal(t, libcommon.FromHex(""), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
@@ -500,28 +500,28 @@ func TestBranchesOnly(t *testing.T) {
 }
 
 func TestStorageOnly(t *testing.T) {
-	//acc := common.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001")
+	//acc :=libcommon.FromHex("fff9c1aa5884f1130301f60f98419b9d4217bc4ab65a2976b41e9a00bbceae980000000000000001")
 	keys := []struct {
 		k []byte
 		v []byte
 	}{
 		{
-			k: common.FromHex("500020e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: common.FromHex("01"),
+			k: libcommon.FromHex("500020e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: libcommon.FromHex("01"),
 		},
 		{
-			k: common.FromHex("500021e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: common.FromHex("01"),
+			k: libcommon.FromHex("500021e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: libcommon.FromHex("01"),
 		},
 		{
-			k: common.FromHex("500027e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: common.FromHex("01"),
+			k: libcommon.FromHex("500027e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: libcommon.FromHex("01"),
 		},
 		{
-			k: common.FromHex("5000979e93fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: common.FromHex("01"),
+			k: libcommon.FromHex("5000979e93fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: libcommon.FromHex("01"),
 		},
 		{
-			k: common.FromHex("5000a7e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: common.FromHex("01"),
+			k: libcommon.FromHex("5000a7e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: libcommon.FromHex("01"),
 		},
 		{
-			k: common.FromHex("600a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: common.FromHex("01"),
+			k: libcommon.FromHex("600a79e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: libcommon.FromHex("01"),
 		},
 	}
 	hb := NewHashBuilder(false)
@@ -537,17 +537,17 @@ func TestStorageOnly(t *testing.T) {
 		i++
 		switch i {
 		case 1:
-			require.Equal(t, common.FromHex("05000000"), keyHex)
+			require.Equal(t, libcommon.FromHex("05000000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 3:
-			require.Equal(t, common.FromHex("05000000"), keyHex)
+			require.Equal(t, libcommon.FromHex("05000000"), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 4:
-			require.Equal(t, common.FromHex(""), keyHex)
+			require.Equal(t, libcommon.FromHex(""), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
@@ -595,15 +595,15 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 		hasTree bool
 	}{
 		{
-			k:       common.FromHex("500020"),
+			k:       libcommon.FromHex("500020"),
 			hasTree: true,
 		},
 		{
-			k:       common.FromHex("500021"),
+			k:       libcommon.FromHex("500021"),
 			hasTree: false,
 		},
 		{
-			k:       common.FromHex("500027"),
+			k:       libcommon.FromHex("500027"),
 			hasTree: false,
 		},
 	}
@@ -615,13 +615,13 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 		i++
 		switch i {
 		case 1:
-			require.Equal(t, common.FromHex("0500000002"), keyHex)
+			require.Equal(t, libcommon.FromHex("0500000002"), keyHex)
 			//require.Equal(t, fmt.Sprintf("%b", uint16(0b10000011)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b10000011)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b1)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
 		case 2:
-			require.Equal(t, common.FromHex(""), keyHex)
+			require.Equal(t, libcommon.FromHex(""), keyHex)
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b0)), fmt.Sprintf("%b", hasHash))
 			require.Equal(t, fmt.Sprintf("%b", uint16(0b100000)), fmt.Sprintf("%b", hasTree))
 			require.NotNil(t, hashes)
@@ -671,32 +671,32 @@ func Test2(t *testing.T) {
 		v []byte
 	}{
 		{
-			k: common.FromHex("000000"),
-			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+			k: libcommon.FromHex("000000"),
+			v: libcommon.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
 		},
 		{
-			k: common.FromHex("000001"),
-			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+			k: libcommon.FromHex("000001"),
+			v: libcommon.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
 		},
 		{
-			k: common.FromHex("000009"),
-			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+			k: libcommon.FromHex("000009"),
+			v: libcommon.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
 		},
 		//{
-		//	k: common.FromHex("000010"),
-		//	v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		//	k:libcommon.FromHex("000010"),
+		//	v:libcommon.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
 		//},
 		//{
-		//	k: common.FromHex("000020"),
-		//	v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+		//	k:libcommon.FromHex("000020"),
+		//	v:libcommon.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
 		//},
 		{
-			k: common.FromHex("01"),
-			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+			k: libcommon.FromHex("01"),
+			v: libcommon.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
 		},
 		{
-			k: common.FromHex("02"),
-			v: common.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
+			k: libcommon.FromHex("02"),
+			v: libcommon.FromHex("0100000000000000000000000000000000000000000000000000000000000000"),
 		},
 	}
 	hb := NewHashBuilder(false)

@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/common"
 )
 
 func init() {
@@ -632,7 +631,7 @@ func TestNextSubtreeHex(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		res := isDenseSequence(common.FromHex(tc.prev), common.FromHex(tc.next))
+		res := isDenseSequence(libcommon.FromHex(tc.prev), libcommon.FromHex(tc.next))
 		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
 	}
 }
