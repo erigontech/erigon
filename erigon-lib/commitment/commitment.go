@@ -232,10 +232,10 @@ func (be *BranchEncoder) Load(pc PatriciaContext, args etl.TransformArgs) error 
 }
 
 func (be *BranchEncoder) CollectUpdate(
-		ctx PatriciaContext,
-		prefix []byte,
-		bitmap, touchMap, afterMap uint16,
-		readCell func(nibble int, skip bool) (*cell, error),
+	ctx PatriciaContext,
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
 	prev, prevStep, err := ctx.Branch(prefix)
@@ -1188,7 +1188,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 			return err
 		}
 		_ = d
-		if err = pph.mounts[prevByte].branchEncoder.Load(pph.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		if err := pph.mounts[prevByte].branchEncoder.Load(pph.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
 

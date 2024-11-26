@@ -1179,6 +1179,72 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	updateKey := hexToCompact(hph.currentKey[:updateKeyLen])
 	partsCount := bits.OnesCount16(hph.afterMap[row])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
+	// if row == 0 && hph.mounted {
+	// 	partsCount = 1
+	// }
+	b := [...]byte{0x80}
+	cellGetter := func(nibble int, skip bool) (*cell, error) {
+		if skip {
+			if _, err := hph.keccak2.Write(b[:]); err != nil {
+				return nil, fmt.Errorf("failed to write empty nibble to hash: %w", err)
+			}
+			if hph.trace {
+				fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", nibble, row, nibble, depth)
+			}
+			return nil, nil
+		}
+		cell := &hph.grid[row][nibble]
+		if cell.accountAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.account() && !cell.Deleted() {
+			//panic("account not loaded" + fmt.Sprintf("%x", cell.accountAddr[:cell.accountAddrLen]))
+			log.Warn("account not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
+		}
+		if cell.storageAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.storage() && !cell.Deleted() {
+			//panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
+			log.Warn("storage not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
+		}
+
+		loadedBefore := cell.loaded
+		hashBefore := common.Copy(cell.stateHash[:cell.stateHashLen])
+
+		cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
+		if err != nil {
+			return nil, err
+		}
+		if hph.trace {
+			fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
+		}
+
+		if hashBefore != nil && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
+			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
+			if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
+				if cell.accountAddrLen > 0 {
+					counters.accReset++
+					counters.accLoaded++
+				}
+				if cell.storageAddrLen > 0 {
+					counters.storReset++
+					counters.storLoaded++
+				}
+			} else {
+				if cell.accountAddrLen > 0 && (!loadedBefore.account() && !cell.loaded.account()) {
+					counters.accSkipped++
+				}
+				if cell.storageAddrLen > 0 && (!loadedBefore.storage() && !cell.loaded.storage()) {
+					counters.storSkipped++
+				}
+			}
+			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
+		}
+		//if len(updateKey) > DepthWithoutNodeHashes {
+		//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
+		//  cell.extLen = 0
+		//}
+		if _, err := hph.keccak2.Write(cellHash); err != nil {
+			return nil, err
+		}
+
+		return cell, nil
+	}
 
 	if hph.trace {
 		fmt.Printf("fold: (row=%d, {%s}, depth=%d) prefix [%x] touchMap: %016b afterMap: %016b \n",
@@ -1226,13 +1292,35 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			}
 		}
 		nibble := bits.TrailingZeros16(hph.afterMap[row])
+		// if row == 0 && hph.mounted {
+		// 	// nibble = hph.mountedNib
+
+		// 	cell := &hph.grid[row][nibble]
+		// 	upCell.extLen = 0
+		// 	upCell.stateHashLen = 0
+		// 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
+		// 	fmt.Printf("folding mounted [%x] [%s] cell %s\n", nibble, updatedNibs(hph.afterMap[row]), cell.String())
+		// 	c, _ := cellGetter(nibble, false)
+		// 	fmt.Printf("folding mounted cell %s\n", c.String())
+		// 	// Delete if it existed
+		// 	// fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
+		// 	// _, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, cellGetterFn)
+		// 	// if err != nil {
+		// 	// 	return fmt.Errorf("failed to encode leaf node update: %w", err)
+		// 	// }
+		// 	hph.activeRows--
+		// 	hph.currentKeyLen = max(upDepth-1, 0)
+		// 	if hph.trace {
+		// 		fmt.Printf("formed leaf (%d %x, depth=%d) [%x] %s\n", row, nibble, depth, updateKey, cell.FullString())
+		// 	}
+		// } else {
 		cell := &hph.grid[row][nibble]
 		upCell.extLen = 0
 		upCell.stateHashLen = 0
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 		// Delete if it existed
 		if hph.branchBefore[row] {
-			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
+			// fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
 			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
@@ -1243,6 +1331,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		if hph.trace {
 			fmt.Printf("formed leaf (%d %x, depth=%d) [%x] %s\n", row, nibble, depth, updateKey, cell.FullString())
 		}
+
+		// }
 	default: // Branch node
 		if hph.touchMap[row] != 0 { // any modifications
 			if row == 0 {
@@ -1317,70 +1407,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		pt := rlp.GenerateStructLen(hph.hashAuxBuffer[:], totalBranchLen)
 		if _, err := hph.keccak2.Write(hph.hashAuxBuffer[:pt]); err != nil {
 			return err
-		}
-
-		b := [...]byte{0x80}
-		cellGetter := func(nibble int, skip bool) (*cell, error) {
-			if skip {
-				if _, err := hph.keccak2.Write(b[:]); err != nil {
-					return nil, fmt.Errorf("failed to write empty nibble to hash: %w", err)
-				}
-				if hph.trace {
-					fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", nibble, row, nibble, depth)
-				}
-				return nil, nil
-			}
-			cell := &hph.grid[row][nibble]
-			if cell.accountAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.account() && !cell.Deleted() {
-				//panic("account not loaded" + fmt.Sprintf("%x", cell.accountAddr[:cell.accountAddrLen]))
-				log.Warn("account not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
-			}
-			if cell.storageAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.storage() && !cell.Deleted() {
-				//panic("storage not loaded" + fmt.Sprintf("%x", cell.storageAddr[:cell.storageAddrLen]))
-				log.Warn("storage not loaded", "pref", updateKey, "c", fmt.Sprintf("(%d, %x, depth=%d", row, nibble, depth), "cell", cell.String())
-			}
-
-			loadedBefore := cell.loaded
-			hashBefore := common.Copy(cell.stateHash[:cell.stateHashLen])
-
-			cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
-			if err != nil {
-				return nil, err
-			}
-			if hph.trace {
-				fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
-			}
-
-			if hashBefore != nil && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
-				counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
-				if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
-					if cell.accountAddrLen > 0 {
-						counters.accReset++
-						counters.accLoaded++
-					}
-					if cell.storageAddrLen > 0 {
-						counters.storReset++
-						counters.storLoaded++
-					}
-				} else {
-					if cell.accountAddrLen > 0 && (!loadedBefore.account() && !cell.loaded.account()) {
-						counters.accSkipped++
-					}
-					if cell.storageAddrLen > 0 && (!loadedBefore.storage() && !cell.loaded.storage()) {
-						counters.storSkipped++
-					}
-				}
-				hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
-			}
-			//if len(updateKey) > DepthWithoutNodeHashes {
-			//	cell.hashLen = 0 // do not write hashes for storages in the branch node, should reset ext as well which can break unfolding.. -
-			//  cell.extLen = 0
-			//}
-			if _, err := hph.keccak2.Write(cellHash); err != nil {
-				return nil, err
-			}
-
-			return cell, nil
 		}
 
 		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
@@ -1557,14 +1583,16 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 }
 
 func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, int, error) {
-	fmt.Printf("=======[%x] folding rows %d depth=%d =========\n", nib, hph.activeRows, hph.depths[hph.activeRows])
-	fmt.Printf("depths %+v\n", hph.depths[:hph.activeRows])
-	hph.trace = true
+	fmt.Printf("=======[%x] folding rows %d depths %+v =========\n", nib, hph.activeRows, hph.depths[:hph.activeRows])
 	if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == 1 {
 		fmt.Printf("mount nibble %x-%x %s\n", nib, hph.mountedNib, hph.grid[0][hph.mountedNib].FullString())
 		return hph.grid[0][hph.mountedNib], 1, nil
 	}
+	// rows := hph.activeRows
 	for hph.activeRows > 0 {
+		// if rows > 1 && hph.activeRows == 1 {
+		// 	break
+		// }
 		if err := hph.fold(); err != nil {
 			panic(err)
 			return cell{}, 0, fmt.Errorf("final fold: %w", err)
@@ -2234,6 +2262,9 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	copy(hph.touchMap[:], root.touchMap[:])
 	copy(hph.afterMap[:], root.afterMap[:])
 
+	// hph.currentKeyLen = 1
+	// hph.currentKey[0] = byte(nibble)
+
 	for i := 0; i < len(hph.grid[0]); i++ {
 		hph.grid[0][i] = root.grid[0][i]
 	}
@@ -2274,6 +2305,14 @@ func (p *ParallelPatriciaHashed) unfoldRoot() error {
 			panic(fmt.Sprintf("nibble %x is nil", i))
 		}
 		hph := p.mounts[i]
+
+		// zero = hexToCompact([]byte{byte(i)})
+		// for unfolding := hph.needUnfolding(zero); unfolding > 0; unfolding = hph.needUnfolding(zero) {
+		// 	if err := hph.unfold(zero, unfolding); err != nil {
+		// 		return fmt.Errorf("unfold: %w", err)
+		// 	}
+		// }
+
 		hph.mountTo(p.root, i)
 		//hph.Reset()
 		//if err = hph.SetState(rs); err != nil {
