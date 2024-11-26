@@ -5,6 +5,11 @@ env:
   APP_REPO: "erigontech/erigon"
 
 on:
+  push:
+    branches:
+        - main
+        - release/*
+        - docker_pectra
   workflow_call:
   workflow_dispatch:
 
