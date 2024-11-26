@@ -88,7 +88,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 	}, nil
 }
 
-func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, index int, txNum uint64, optimize bool) (*types.Receipt, error) {
+func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, index int, txNum uint64) (*types.Receipt, error) {
 	var receipt *types.Receipt
 	genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, index)
 	if err != nil {

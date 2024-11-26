@@ -52,8 +52,8 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
 }
 
-func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, block *types.Block, index int, txNum uint64, optimize bool) (*types.Receipt, error) {
-	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, txNum, optimize)
+func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, block *types.Block, index int, txNum uint64) (*types.Receipt, error) {
+	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, txNum)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -500,17 +500,17 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	//} else {
 	//	println("found in txnums blocknum:", blockNumFromTxNums)
 	//}
-	ok, blockNumFromFiles, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		println("not found in files")
-	} else {
-		println("found in files blocknum:", blockNumFromFiles)
-	}
+	//ok, blockNumFromFiles, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//if !ok {
+	//	println("not found in files")
+	//} else {
+	//	println("found in files blocknum:", blockNumFromFiles)
+	//}
 	//txNum = txNumMin + txnIndex
-	receipt, err := api.getReceipt(ctx, chainConfig, tx.(kv.TemporalTx), block, int(txnIndex), txNum, true)
+	receipt, err := api.getReceipt(ctx, chainConfig, tx.(kv.TemporalTx), block, int(txnIndex), txNum)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
