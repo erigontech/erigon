@@ -164,5 +164,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 	}
 
 	g.receiptsCache.Add(cacheKey(block.Hash()), receipts)
+	if block.NumberU64()%100 == 0 {
+		g.LogStats()
+	}
 	return receipts, nil
 }
