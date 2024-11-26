@@ -835,8 +835,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 							ci1.val = ci1.btCursor.Value()
 							heap.Push(cpPtr, ci1)
 						}
-					} else {
-						ci1.btCursor.Close()
+						// } else {
+						// 	ci1.btCursor.Close()
 					}
 				}
 				if indexList&withHashMap != 0 {
@@ -849,6 +849,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 						ci1.key = key
 						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
 						heap.Push(cpPtr, ci1)
+					} else {
+						ci1.dg = nil
 					}
 				}
 			case DB_CURSOR:
@@ -868,6 +870,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					ci1.val = common.Copy(v[8:])
 					ci1.step = step
 					heap.Push(cpPtr, ci1)
+				} else {
+					ci1.cDup.Close()
 				}
 			}
 		}
