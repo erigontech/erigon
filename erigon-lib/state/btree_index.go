@@ -116,7 +116,7 @@ func (c *Cursor) Next() bool { // could return error instead
 		return false
 	}
 
-	if err := c.nextKV(); err != nil {
+	if err := c.readKV(); err != nil {
 		fmt.Printf("nextKV error %v\n", err)
 		return false
 	}
@@ -136,10 +136,10 @@ func (c *Cursor) next() bool {
 func (c *Cursor) Reset(di uint64, g *seg.Reader) error {
 	c.d = di
 	c.getter = g
-	return c.nextKV()
+	return c.readKV()
 }
 
-func (c *Cursor) nextKV() error {
+func (c *Cursor) readKV() error {
 	if c.d >= c.ef.Count() {
 		return fmt.Errorf("cursor out of bounds %d/%d", c.d, c.ef.Count())
 	}

@@ -122,15 +122,13 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
+		cur.Close()
 	})
 
 	c, err := bt.Seek(getter, nil)
 	require.NoError(t, err)
 	for i := 0; i < len(keys); i++ {
 		k := c.Key()
-		//if !bytes.Equal(keys[i], k) {
-		//	fmt.Printf("\tinvalid, want %x, got %x\n", keys[i], k)
-		//}
 		require.EqualValues(t, keys[i], k)
 		c.Next()
 	}
@@ -252,25 +250,65 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
+		cur.Close()
 	})
 
-	c, err := bt.Seek(getter, nil)
-	require.NoError(t, err)
-	for i := 0; i < len(keys); i++ {
-		k := c.Key()
-		if !bytes.Equal(keys[i], k) {
-			fmt.Printf("\tinvalid, want %x\n", keys[i])
-		}
-		c.Next()
-	}
+	// c, err := bt.Seek(getter, nil)
+	// require.NoError(t, err)
+	// for i := 0; i < len(keys); i++ {
+	// 	k := c.Key()
+	// 	require.EqualValuesf(t, keys[i], k, "invalid key at %d", i)
+	// 	c.Next()
+	// }
+	// c.Close()
 
-	for i := 0; i < len(keys); i++ {
-		cur, err := bt.Seek(getter, keys[i])
-		require.NoErrorf(t, err, "i=%d", i)
-		require.EqualValues(t, keys[i], cur.key)
-		require.NotEmptyf(t, cur.Value(), "i=%d", i)
-		// require.EqualValues(t, uint64(i), cur.Value())
-	}
+	// for i := 0; i < len(keys); i++ {
+	// 	cur, err := bt.Seek(getter, keys[i])
+	// 	require.NoErrorf(t, err, "i=%d", i)
+	// 	require.EqualValues(t, keys[i], cur.Key())
+	// 	require.NotEmptyf(t, cur.Value(), "i=%d", i)
+	// 	cur.Close()
+	// 	// require.EqualValues(t, uint64(i), cur.Value())
+	// }
+
+	t.Run("checkNextAgainstGetter", func(t *testing.T) {
+		cur, err := bt.Seek(getter, nil)
+		defer cur.Close()
+
+		require.NoError(t, err)
+		require.EqualValues(t, keys[0], cur.Key())
+		require.NotEmptyf(t, cur.Value(), "i=%d", 0)
+
+		k, v, _, err := bt.dataLookup(0, getter)
+		require.NoError(t, err)
+		cur.Reset(0, getter)
+
+		require.EqualValues(t, k, cur.Key())
+		require.EqualValues(t, v, cur.Value())
+
+		totalKeys := kv.Count() / 2
+
+		for i := 1; i < totalKeys; i++ {
+			k, v, _, err = bt.dataLookup(uint64(i), getter)
+			require.NoError(t, err)
+
+			b := cur.Next()
+			require.True(t, b)
+
+			require.EqualValuesf(t, k, cur.Key(), "i=%d", i)
+			require.EqualValuesf(t, v, cur.Value(), "i=%d", i)
+
+			curS, err := bt.Seek(getter, cur.Key())
+			require.NoError(t, err)
+
+			require.EqualValuesf(t, cur.Key(), curS.Key(), "i=%d", i)
+			require.EqualValuesf(t, cur.Value(), curS.Value(), "i=%d", i)
+			require.EqualValues(t, cur.d, curS.d)
+			require.EqualValues(t, cur.getter, curS.getter)
+			curS.Close()
+		}
+	})
+
 	for i := 1; i < len(keys); i++ {
 		alt := common.Copy(keys[i])
 		for j := len(alt) - 1; j >= 0; j-- {
