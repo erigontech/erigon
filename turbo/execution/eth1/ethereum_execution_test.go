@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
 	"github.com/erigontech/erigon/eth/stagedsync"
@@ -47,7 +48,9 @@ import (
 	stages2 "github.com/erigontech/erigon/turbo/stages"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func skipOnUnsupportedPlatform(t testing.TB) {
@@ -79,15 +82,17 @@ type MockTest struct {
 
 func setup(t testing.TB) *MockTest {
 
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	// key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	key := core.DevnetSignPrivateKey
 
 	m := &MockTest{
 		Key:     key,
 		Address: crypto.PubkeyToAddress(key.PublicKey),
+		Log:     log.Root(),
 	}
 
-	tempDir := t.TempDir()
-
+	// tempDir := t.TempDir()
+	tempDir := "/tmp/erigon/execution/eth1"
 	os.RemoveAll(tempDir)
 	os.MkdirAll(tempDir, os.ModePerm)
 
@@ -118,15 +123,6 @@ func setup(t testing.TB) *MockTest {
 	// genesis := core.GenesisBlockByChainName(network)
 
 	m.GenesisSpec = core.DeveloperGenesisBlock(1, m.Address)
-	// genspec := &types.Genesis{
-	// 	ExtraData: make([]byte, clique.ExtraVanity+length.Addr+clique.ExtraSeal),
-	// 	Alloc: map[libcommon.Address]types.GenesisAccount{
-	// 		m.Address: {Balance: big.NewInt(10000000000000000)},
-	// 	},
-	// 	Config: params.AllCliqueProtocolChanges,
-	// }
-	// copy(genspec.ExtraData[clique.ExtraVanity:], m.Address[:])
-	// m.GenesisSpec = genspec
 
 	var err error
 	m.ChainConfig, m.GenesisBlock, err = core.CommitGenesisBlock(m.DB, m.GenesisSpec, m.Dirs, m.Log)
@@ -142,6 +138,16 @@ func setup(t testing.TB) *MockTest {
 	// require.NoError(t, err)
 	// tx.Commit()
 
+	// tx, err := m.DB.BeginRw(context.Background())
+	// require.NoError(t, err)
+	// defer tx.Rollback()
+	// c, b, err := core.WriteGenesisBlock(tx, m.GenesisSpec, nil, m.Dirs, m.Log)
+	// require.NoError(t, err)
+	// err = tx.Commit()
+	// require.NoError(t, err)
+	// m.ChainConfig = c
+	// m.GenesisBlock = b
+
 	// 0. Setup
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
@@ -154,7 +160,7 @@ func setup(t testing.TB) *MockTest {
 
 	// 11. Logger
 	m.Log = log.Root()
-	m.Log.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	m.Log.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	m.Notifications = &shards.Notifications{
 		Events:      shards.NewEvents(),
@@ -202,6 +208,7 @@ func setup(t testing.TB) *MockTest {
 		m.Log,
 	)
 	require.NoError(t, err)
+	m.SentriesClient.IsMock = true
 
 	// 4. Fork validator
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
@@ -211,9 +218,10 @@ func setup(t testing.TB) *MockTest {
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stages2.NewInMemoryExecution(m.Ctx, m.DB, &cfg, m.SentriesClient, m.Dirs,
 			notifications, m.BlockReader, m.BlockWriter, m.Agg, nil, terseLogger)
-		chainReader := stagedsync.NewChainReaderImpl(m.ChainConfig, txc.Tx, m.BlockReader, m.Log)
+		// chainReader := stagedsync.NewChainReaderImpl(m.ChainConfig, txc.Tx, m.BlockReader, m.Log)
+		chainReader := consensuschain.NewReader(m.ChainConfig, txc.Tx, m.BlockReader, m.Log)
 		// We start the mining step
-		if err := stages2.StateStep(m.Ctx, chainReader, m.Engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, false /*histV3*/); err != nil {
+		if err := stages2.StateStep(m.Ctx, chainReader, m.Engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, true /*histV3*/); err != nil {
 			m.Log.Warn("Could not validate block", "err", err)
 			return errors.Join(consensus.ErrInvalidBlock, err)
 		}
@@ -233,11 +241,31 @@ func setup(t testing.TB) *MockTest {
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	m.Agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
-	var snapshotsDownloader proto_downloader.DownloaderClient
+	// var snapshotsDownloader proto_downloader.DownloaderClient
+
+	ctrl := gomock.NewController(t)
+	snapDownloader := proto_downloader.NewMockDownloaderClient(ctrl)
+	snapDownloader.EXPECT().
+		Add(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		ProhibitNewDownloads(gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		SetLogPrefix(gomock.Any(), gomock.Any()).
+		Return(&emptypb.Empty{}, nil).
+		AnyTimes()
+	snapDownloader.EXPECT().
+		Completed(gomock.Any(), gomock.Any()).
+		Return(&proto_downloader.CompletedReply{Completed: true}, nil).
+		AnyTimes()
+
 	blockRetire := freezeblocks.NewBlockRetire(1, m.Dirs, m.BlockReader, m.BlockWriter, m.DB, nil, nil, m.ChainConfig, &cfg, m.Notifications.Events, blockSnapBuildSema, m.Log)
 
 	pipelineStages := stages2.NewPipelineStages(m.Ctx, m.DB, &cfg, p2p.Config{}, m.SentriesClient, m.Notifications,
-		snapshotsDownloader, m.BlockReader, blockRetire, m.Agg, nil /*silkworm*/, forkValidator, m.Log, true /*checkStateRoot*/)
+		snapDownloader, m.BlockReader, blockRetire, m.Agg, nil /*silkworm*/, forkValidator, m.Log, true /*checkStateRoot*/)
 	stagedSync := stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, m.Log)
 
 	m.Eth1ExecutionService = NewEthereumExecutionModule(m.BlockReader, m.DB, stagedSync, forkValidator, m.ChainConfig, nil /*builderFunc*/, nil /*hook*/, m.Notifications.Accumulator, m.Notifications.StateChangesConsumer, m.Log, m.Engine, cfg.Sync, m.Ctx)

@@ -22,6 +22,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/state"
 	silkworm_go "github.com/erigontech/silkworm-go"
 
 	"github.com/erigontech/erigon-lib/kv"
@@ -128,4 +129,18 @@ func ExecuteBlocksPerpetual(s *Silkworm, db kv.RwDB, chainID *big.Int, startBloc
 
 type CanAddSnapshotsToSilkwarm interface {
 	AddSnapshotsToSilkworm(*Silkworm) error
+}
+
+func ExecuteTx(s *Silkworm, txn kv.Tx, txTask *state.TxTask) error {
+	var txnHandle unsafe.Pointer
+	if txn != nil {
+		txnHandle = txn.CHandle()
+	}
+
+	gasUsed, _, err := s.ExecuteTx(txnHandle, txTask.BlockNum, uint64(txTask.TxIndex))
+
+	txTask.UsedGas = gasUsed
+	// txTask.BlobGasUsed = blobGasUsed
+
+	return err
 }

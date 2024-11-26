@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"sync/atomic"
 	"time"
+
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -19,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/shards"
+	"github.com/erigontech/erigon/turbo/silkworm"
 )
 
 type serialExecutor struct {
@@ -57,7 +59,12 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, nil
 		}
 
-		se.worker.RunTxTaskNoLock(txTask, se.isMining)
+		if se.cfg.silkworm != nil {
+			txTask.Error = silkworm.ExecuteTx(se.cfg.silkworm, se.applyTx, txTask)
+		} else {
+			se.worker.RunTxTaskNoLock(txTask, se.isMining)
+		}
+
 		if err := func() error {
 			if errors.Is(txTask.Error, context.Canceled) {
 				return txTask.Error
