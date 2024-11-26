@@ -1196,12 +1196,13 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) Disca
 			if bytes.Equal(found.Tx.IDHash[:], mt.Tx.IDHash[:]) {
 				return NotSet
 			}
+			log.Info(fmt.Sprintf("Transaction %s was attempted"))
 			return NotReplaced
 		}
 
 		// Log nonce issue
-		log.Warn("Nonce issue detected",
-			"account", mt.Tx.SenderID,
+		log.Info("Transaction is to be replaced",
+			"account", p.senders.senderID2Addr[mt.Tx.SenderID],
 			"oldTxHash", hex.EncodeToString(found.Tx.IDHash[:]),
 			"newTxHash", hex.EncodeToString(mt.Tx.IDHash[:]),
 			"nonce", mt.Tx.Nonce,
