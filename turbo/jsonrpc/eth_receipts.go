@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
+	"github.com/erigontech/erigon/polygon/bridge"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -521,11 +522,11 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 
 	if chainConfig.Bor != nil {
 		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
-		if err != nil {
+		if err != nil && !errors.Is(err, bridge.ErrEventIdRangeNotFound) {
 			return nil, err
 		}
 
-		if len(events) != 0 && err != nil {
+		if len(events) != 0 {
 			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
 			if err != nil {
 				return nil, err
