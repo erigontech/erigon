@@ -52,6 +52,7 @@ type Config struct {
 	ProcessRemoteTxsEvery time.Duration
 	CommitEvery           time.Duration
 	LogEvery              time.Duration
+	PurgeEvery            time.Duration
 
 	//txpool db
 	MdbxPageSize    datasize.ByteSize
@@ -59,6 +60,8 @@ type Config struct {
 	MdbxGrowthStep  datasize.ByteSize
 
 	NoGossip bool // this mode doesn't broadcast any txs, and if receive remote-txn - skip it
+
+	PurgeDistance time.Duration
 }
 
 var DefaultConfig = Config{
@@ -66,6 +69,8 @@ var DefaultConfig = Config{
 	ProcessRemoteTxsEvery: 100 * time.Millisecond,
 	CommitEvery:           15 * time.Second,
 	LogEvery:              30 * time.Second,
+	PurgeEvery:            1 * time.Minute,
+	PurgeDistance:         24 * time.Hour,
 
 	PendingSubPoolLimit: 10_000,
 	BaseFeeSubPoolLimit: 10_000,

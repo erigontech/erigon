@@ -76,6 +76,8 @@ var DefaultTxPool2Config = func(fullCfg *Config) txpoolcfg.Config {
 	cfg.CommitEvery = 5 * time.Minute
 	cfg.TracedSenders = pool1Cfg.TracedSenders
 	cfg.CommitEvery = pool1Cfg.CommitEvery
+	cfg.PurgeEvery = fullCfg.TxPool.PurgeEvery
+	cfg.PurgeDistance = fullCfg.TxPool.PurgeDistance
 
 	return cfg
 }

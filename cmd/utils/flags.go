@@ -237,6 +237,16 @@ var (
 		Usage: "How often transactions should be committed to the storage",
 		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
+	TxpoolPurgeEveryFlag = cli.DurationFlag{
+		Name:  "txpool.purge.every",
+		Usage: "How often transactions should be purged from the storage",
+		Value: txpoolcfg.DefaultConfig.PurgeEvery,
+	}
+	TxpoolPurgeDistanceFlag = cli.DurationFlag{
+		Name:  "txpool.purge.distance",
+		Usage: "Transactions older than this distance will be purged",
+		Value: txpoolcfg.DefaultConfig.PurgeDistance,
+	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
 		Name:  "mine",
@@ -1919,6 +1929,12 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
 	}
 	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
+
+	purgeEvery := ctx.Duration(TxpoolPurgeEveryFlag.Name)
+	purgeDistance := ctx.Duration(TxpoolPurgeDistanceFlag.Name)
+
+	fullCfg.TxPool.PurgeEvery = common2.RandomizeDuration(purgeEvery)
+	fullCfg.TxPool.PurgeDistance = purgeDistance
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {

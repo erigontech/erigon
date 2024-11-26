@@ -59,7 +59,9 @@ var (
 
 	noTxGossip bool
 
-	commitEvery time.Duration
+	commitEvery   time.Duration
+	purgeEvery    time.Duration
+	purgeDistance time.Duration
 )
 
 func init() {
@@ -85,6 +87,8 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpoolcfg.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
 	rootCmd.PersistentFlags().Uint64Var(&blobPriceBump, "txpool.blobpricebump", txpoolcfg.DefaultConfig.BlobPriceBump, "Price bump percentage to replace an existing blob (type-3) transaction")
 	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
+	rootCmd.PersistentFlags().DurationVar(&purgeEvery, utils.TxpoolPurgeEveryFlag.Name, utils.TxpoolPurgeEveryFlag.Value, utils.TxpoolPurgeEveryFlag.Usage)
+	rootCmd.PersistentFlags().DurationVar(&purgeDistance, utils.TxpoolPurgeDistanceFlag.Name, utils.TxpoolPurgeDistanceFlag.Value, utils.TxpoolPurgeDistanceFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&noTxGossip, utils.TxPoolGossipDisableFlag.Name, utils.TxPoolGossipDisableFlag.Value, utils.TxPoolGossipDisableFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 }
@@ -144,6 +148,8 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.DBDir = dirs.TxPool
 
 	cfg.CommitEvery = common2.RandomizeDuration(commitEvery)
+	cfg.PurgeEvery = common2.RandomizeDuration(purgeEvery)
+	cfg.PurgeDistance = purgeDistance
 	cfg.PendingSubPoolLimit = pendingPoolLimit
 	cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 	cfg.QueuedSubPoolLimit = queuedPoolLimit

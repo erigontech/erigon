@@ -149,6 +149,7 @@ const (
 	DiscardByLimbo                  DiscardReason = 27
 	SmartContractDeploymentDisabled DiscardReason = 28 // to == null not allowed, config set to block smart contract deployment
 	GasLimitTooHigh                 DiscardReason = 29 // gas limit is too high
+	Expired                         DiscardReason = 30 // used when a transaction is purged from the pool
 )
 
 func (r DiscardReason) String() string {
@@ -228,13 +229,14 @@ type metaTx struct {
 	bestIndex                 int
 	worstIndex                int
 	timestamp                 uint64 // when it was added to pool
+	created                   uint64 // unix timestamp of creation
 	subPool                   SubPoolMarker
 	currentSubPool            SubPoolType
 	alreadyYielded            bool
 }
 
 func newMetaTx(slot *types.TxSlot, isLocal bool, timestmap uint64) *metaTx {
-	mt := &metaTx{Tx: slot, worstIndex: -1, bestIndex: -1, timestamp: timestmap}
+	mt := &metaTx{Tx: slot, worstIndex: -1, bestIndex: -1, timestamp: timestmap, created: uint64(time.Now().Unix())}
 	if isLocal {
 		mt.subPool = IsLocal
 	}
@@ -1393,6 +1395,8 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	defer commitEvery.Stop()
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
+	purgeEvery := time.NewTicker(p.cfg.PurgeEvery)
+	defer purgeEvery.Stop()
 
 	for {
 		select {
@@ -1522,6 +1526,8 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 			types, sizes, hashes = p.AppendAllAnnouncements(types, sizes, hashes[:0])
 			go send.PropagatePooledTxsToPeersList(newPeers, types, sizes, hashes)
 			propagateToNewPeerTimer.UpdateDuration(t)
+		case <-purgeEvery.C:
+			p.purge()
 		}
 	}
 }
@@ -1833,6 +1839,57 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		}
 		return true
 	})
+}
+
+func (p *TxPool) purge() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	// go through all transactions and remove the ones that have a timestamp older than the purge time in config
+	cutOff := uint64(time.Now().Add(-p.cfg.PurgeDistance).Unix())
+	log.Debug("[txpool] purging", "cutOff", cutOff)
+
+	toDelete := make([]*metaTx, 0)
+
+	p.all.ascendAll(func(mt *metaTx) bool {
+		// don't purge from pending
+		if mt.currentSubPool == PendingSubPool {
+			return true
+		}
+		if mt.created < cutOff {
+			toDelete = append(toDelete, mt)
+		}
+		return true
+	})
+
+	for _, mt := range toDelete {
+		switch mt.currentSubPool {
+		case PendingSubPool:
+			p.pending.Remove(mt)
+		case BaseFeeSubPool:
+			p.baseFee.Remove(mt)
+		case QueuedSubPool:
+			p.queued.Remove(mt)
+		default:
+			//already removed
+		}
+
+		p.discardLocked(mt, Expired)
+
+		// do not hold on to the discard reason as we're purging it completely from the pool and an end user
+		// may wish to resubmit it and we should allow this
+		p.discardReasonsLRU.Remove(string(mt.Tx.IDHash[:]))
+
+		// get the address of the sender
+		addr := common.Address{}
+		if checkAddr, ok := p.senders.senderID2Addr[mt.Tx.SenderID]; ok {
+			addr = checkAddr
+		}
+		log.Debug("[txpool] purge",
+			"sender", addr,
+			"hash", hex.EncodeToString(mt.Tx.IDHash[:]),
+			"ts", mt.created)
+	}
 }
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.

@@ -29,6 +29,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolLifetimeFlag,
 	&utils.TxPoolTraceSendersFlag,
 	&utils.TxPoolCommitEveryFlag,
+	&utils.TxpoolPurgeEveryFlag,
+	&utils.TxpoolPurgeDistanceFlag,
 	&PruneFlag,
 	&PruneHistoryFlag,
 	&PruneReceiptFlag,
