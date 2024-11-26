@@ -37,10 +37,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // the following 2 functions are replica for the test

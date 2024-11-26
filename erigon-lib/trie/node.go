@@ -27,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/types/accounts"
 
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 const codeSizeUncached = -1

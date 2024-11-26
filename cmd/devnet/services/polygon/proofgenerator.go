@@ -32,6 +32,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/cmd/devnet/requests"
 	"github.com/erigontech/erigon/core/types"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
