@@ -90,6 +90,7 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 }
 
 func GetLatestBadBlocks(tx kv.Tx, limit int) ([]*types.Block, error) {
+	// BadHeaderNumber table is typically small, so that we can go through all of it.
 	bheap := utils.NewBlockMaxHeap(limit)
 	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
 		heap.Push(bheap, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
