@@ -908,7 +908,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	idx.pool = sync.Pool{}
 	idx.pool.New = func() any {
 		// idx.newCursor()
-		return &Cursor{ef: idx.ef, returnInto: &idx.pool, getter: seg.NewReader(kv.MakeGetter(), compress)}
+		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 
 	defer kv.EnableMadvNormal().DisableReadAhead()
