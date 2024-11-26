@@ -263,7 +263,6 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 		}
 	}
 
-	panic(fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum))
 	return 0, 0, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
 }
 
