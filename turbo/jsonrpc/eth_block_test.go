@@ -368,7 +368,7 @@ func TestGetBadBlocks(t *testing.T) {
 	// put some blocks
 	i := number
 	for i <= number+6 {
-		putBlock(uint64(i))
+		putBlock(i)
 		i++
 	}
 	hash1 := putBlock(i)
