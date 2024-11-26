@@ -333,19 +333,14 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			Path(dbPath).
 			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
-			WriteMap(config.MdbxWriteMap)
-
-		if readonly {
-			opts = opts.Readonly()
-		}
-		if exclusive {
-			opts = opts.Exclusive()
-		}
+			WriteMap(config.MdbxWriteMap).
+			Readonly(readonly).
+			Exclusive(exclusive)
 
 		switch label {
 		case kv.ChainDB:
 			if config.MdbxPageSize.Bytes() > 0 {
-				opts = opts.PageSize(config.MdbxPageSize.Bytes())
+				opts = opts.PageSize(config.MdbxPageSize)
 			}
 			if config.MdbxDBSizeLimit > 0 {
 				opts = opts.MapSize(config.MdbxDBSizeLimit)
@@ -356,7 +351,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
 		case kv.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
-				opts = opts.PageSize(config.MdbxPageSize.Bytes())
+				opts = opts.PageSize(config.MdbxPageSize)
 			}
 			// Don't adjust up the consensus DB - this will lead to resource exhaustion lor large map sizes
 			if config.MdbxDBSizeLimit > 0 && config.MdbxDBSizeLimit < mdbx.DefaultMapSize {

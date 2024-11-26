@@ -175,7 +175,7 @@ func init() {
 
 func mdbxTopDup(ctx context.Context, chaindata string, bucket string, logger log.Logger) error {
 	const ThreadsLimit = 5_000
-	dbOpts := mdbx2.New(kv.ChainDB, log.New()).Path(chaindata).Accede().RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
+	dbOpts := mdbx2.New(kv.ChainDB, logger).Path(chaindata).Accede(true).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).
 		WriteMap(dbWriteMap)
 
 	db := dbOpts.MustOpen()

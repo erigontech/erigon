@@ -136,9 +136,7 @@ func aggregateResultsFromStateTests(
 	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
 	_db := mdbx.New(kv.ChainDB, log.New()).
 		Path(dirs.Chaindata).
-		Flags(func(u uint) uint {
-			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap
-		}).
+		AddFlags(mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap).
 		GrowthStep(1 * datasize.MB).
 		MustOpen()
 	defer _db.Close()
