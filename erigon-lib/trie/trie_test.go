@@ -33,8 +33,8 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/rlp"
 )
 

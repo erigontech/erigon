@@ -32,6 +32,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cmd/devnet/devnet"
@@ -41,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var ErrTokenIndexOutOfRange = errors.New("index is grater than the number of tokens in transaction")
