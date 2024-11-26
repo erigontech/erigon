@@ -73,7 +73,7 @@ func (t *attestationTestSuite) SetupTest() {
 	t.gomockCtrl = gomock.NewController(t.T())
 	t.mockForkChoice = &mock_services.ForkChoiceStorageMock{}
 	_, st, _ := tests.GetBellatrixRandom()
-	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true, 0)
+	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	t.syncedData.OnHeadState(st)
 	t.committeeSubscibe = mockCommittee.NewMockCommitteeSubscribe(t.gomockCtrl)
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)

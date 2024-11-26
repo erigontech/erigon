@@ -8,7 +8,7 @@ disabled_tests=(
     trace_rawTransaction
     # Erigon bug https://github.com/erigontech/erigon/issues/12603
     erigon_getLatestLogs
-    # created task https://github.com/erigontech/erigon/issues/12668
+    # created task https://github.com/erigontech/erigon/issues/12668 is merged
     debug_traceCallMany/test_02.tar
     debug_traceCallMany/test_04.tar
     debug_traceCallMany/test_05.tar
@@ -20,6 +20,7 @@ disabled_tests=(
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
+    # waiting PR https://github.com/erigontech/rpc-tests/pull/298 to be merged
     trace_replayBlockTransactions/test_29.tar
     # these tests requires Erigon active
     admin_nodeInfo/test_01.json

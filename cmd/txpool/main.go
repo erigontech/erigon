@@ -191,6 +191,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	defer txPoolDB.Close()
 	fetch.ConnectCore()
 	fetch.ConnectSentries()
 
@@ -202,7 +203,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	}
 
 	notifyMiner := func() {}
-	txpool.MainLoop(ctx, txPoolDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
+	txpool.MainLoop(ctx, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
 
 	grpcServer.GracefulStop()
 	return nil
