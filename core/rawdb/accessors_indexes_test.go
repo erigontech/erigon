@@ -72,7 +72,7 @@ func TestLookupStorage(t *testing.T) {
 
 			// Check that no transactions entries are in a pristine database
 			for i, txn := range txs {
-				if txn2, _, _, _, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 != nil {
+				if txn2, _, _, _, _, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 != nil {
 					t.Fatalf("txn #%d [%x]: non existent transaction returned: %v", i, txn.Hash(), txn2)
 				}
 			}
@@ -86,22 +86,25 @@ func TestLookupStorage(t *testing.T) {
 			if err := rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
 				t.Fatal(err)
 			}
-			txNum, err := rawdbv3.TxNums.Min(tx, block.NumberU64())
+			txNumMin, err := rawdbv3.TxNums.Min(tx, block.NumberU64())
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			tc.writeTxLookupEntries(tx, block, txNum)
+			tc.writeTxLookupEntries(tx, block, txNumMin)
 
 			for i, txn := range txs {
-				if txn2, hash, number, index, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 == nil {
+				if txn2, hash, blockNumber, txNum, index, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 == nil {
 					t.Fatalf("txn #%d [%x]: transaction not found", i, txn.Hash())
 				} else {
-					if hash != block.Hash() || number != block.NumberU64() || index != uint64(i) {
-						t.Fatalf("txn #%d [%x]: positional metadata mismatch: have %x/%d/%d, want %x/%v/%v", i, txn.Hash(), hash, number, index, block.Hash(), block.NumberU64(), i)
+					if hash != block.Hash() || blockNumber != block.NumberU64() || index != uint64(i) {
+						t.Fatalf("txn #%d [%x]: positional metadata mismatch: have %x/%d/%d, want %x/%v/%v", i, txn.Hash(), hash, blockNumber, index, block.Hash(), block.NumberU64(), i)
 					}
 					if txn.Hash() != txn2.Hash() {
 						t.Fatalf("txn #%d [%x]: transaction mismatch: have %v, want %v", i, txn.Hash(), txn, txn2)
+					}
+					if txNum != txNumMin+uint64(i)+1 {
+						t.Fatalf("txn #%d [%x]: txnum mismatch: have %d, want %d", i, txn.Hash(), txNum, txNumMin+uint64(i)+1)
 					}
 				}
 			}
@@ -110,7 +113,7 @@ func TestLookupStorage(t *testing.T) {
 				if err := rawdb.DeleteTxLookupEntry(tx, txn.Hash()); err != nil {
 					t.Fatal(err)
 				}
-				if txn2, _, _, _, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 != nil {
+				if txn2, _, _, _, _, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 != nil {
 					t.Fatalf("txn #%d [%x]: deleted transaction returned: %v", i, txn.Hash(), txn2)
 				}
 			}
@@ -120,36 +123,41 @@ func TestLookupStorage(t *testing.T) {
 
 // ReadTransactionByHash retrieves a specific transaction from the database, along with
 // its added positional metadata.
-func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockReader) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
-	blockNumber, _, err := rawdb.ReadTxLookupEntry(db, hash)
+func readTransactionByHash(db kv.Tx, hash libcommon.Hash, br services.FullBlockReader) (txn types.Transaction, blockHash libcommon.Hash, blockNumber uint64, txNum uint64, txIndex uint64, err error) {
+	blockNumberPtr, txNumPtr, err := rawdb.ReadTxLookupEntry(db, hash)
 	if err != nil {
-		return nil, libcommon.Hash{}, 0, 0, err
+		return nil, libcommon.Hash{}, 0, 0, 0, err
 	}
-	if blockNumber == nil {
-		return nil, libcommon.Hash{}, 0, 0, nil
+	if blockNumberPtr == nil {
+		return nil, libcommon.Hash{}, 0, 0, 0, nil
 	}
-	blockHash, ok, err := br.CanonicalHash(context.Background(), db, *blockNumber)
+	blockNumber = *blockNumberPtr
+	if txNumPtr == nil {
+		return nil, libcommon.Hash{}, 0, 0, 0, nil
+	}
+	txNum = *txNumPtr
+	blockHash, ok, err := br.CanonicalHash(context.Background(), db, blockNumber)
 	if err != nil {
-		return nil, libcommon.Hash{}, 0, 0, err
+		return nil, libcommon.Hash{}, 0, 0, 0, err
 	}
 	if !ok || blockHash == (libcommon.Hash{}) {
-		return nil, libcommon.Hash{}, 0, 0, nil
+		return nil, libcommon.Hash{}, 0, 0, 0, nil
 	}
-	body, _ := br.BodyWithTransactions(context.Background(), db, blockHash, *blockNumber)
+	body, _ := br.BodyWithTransactions(context.Background(), db, blockHash, blockNumber)
 	if body == nil {
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
-		return nil, libcommon.Hash{}, 0, 0, nil
+		return nil, libcommon.Hash{}, 0, 0, 0, nil
 	}
-	senders, err1 := rawdb.ReadSenders(db, blockHash, *blockNumber)
+	senders, err1 := rawdb.ReadSenders(db, blockHash, blockNumber)
 	if err1 != nil {
-		return nil, libcommon.Hash{}, 0, 0, err1
+		return nil, libcommon.Hash{}, 0, 0, 0, err1
 	}
 	body.SendersToTxs(senders)
-	for txIndex, txn := range body.Transactions {
-		if txn.Hash() == hash {
-			return txn, blockHash, *blockNumber, uint64(txIndex), nil
+	for txInd, txnValue := range body.Transactions {
+		if txnValue.Hash() == hash {
+			return txnValue, blockHash, blockNumber, txNum, uint64(txInd), nil
 		}
 	}
 	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
-	return nil, libcommon.Hash{}, 0, 0, nil
+	return nil, libcommon.Hash{}, 0, 0, 0, nil
 }

@@ -38,23 +38,16 @@ type TxLookupEntry struct {
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (*uint64, *uint64, error) {
+func ReadTxLookupEntry(db kv.Getter, txnHash libcommon.Hash) (blockNumber *uint64, txNum *uint64, err error) {
 	data, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(data) == 0 {
+	if len(data) != 16 {
 		return nil, nil, nil
 	}
-	numberBlockNum := binary.BigEndian.Uint64(data[:min(8, len(data))])
-
-	var numberTxNum uint64
-	if len(data) >= 8 {
-		numberTxNum = binary.BigEndian.Uint64(data[8:])
-		numberTxNum += 2
-	} else {
-		return &numberBlockNum, nil, nil
-	}
+	numberBlockNum := binary.BigEndian.Uint64(data[:8])
+	numberTxNum := binary.BigEndian.Uint64(data[8:])
 
 	return &numberBlockNum, &numberTxNum, nil
 }
@@ -66,6 +59,7 @@ func WriteTxLookupEntries(db kv.Putter, block *types.Block, txNum uint64) {
 	for i, txn := range block.Transactions() {
 		binary.BigEndian.PutUint64(data[:8], block.NumberU64())
 		binary.BigEndian.PutUint64(data[8:], txNum+uint64(i)+1)
+
 		if err := db.Put(kv.TxLookup, txn.Hash().Bytes(), data); err != nil {
 			log.Crit("Failed to store transaction lookup entry", "err", err)
 		}
