@@ -35,6 +35,8 @@ const (
 	sequencedBatchesMapSignature    = "0xb4d63f58"
 )
 
+//go:generate mockgen -typed=true -destination=./mocks/etherman_mock.go -package=mocks . IEtherman
+
 type IEtherman interface {
 	HeaderByNumber(ctx context.Context, blockNumber *big.Int) (*ethTypes.Header, error)
 	BlockByNumber(ctx context.Context, blockNumber *big.Int) (*ethTypes.Block, error)

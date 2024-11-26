@@ -25,7 +25,6 @@ import (
 )
 
 type IL1Syncer interface {
-
 	// atomic
 	IsSyncStarted() bool
 	IsDownloading() bool
@@ -46,8 +45,7 @@ type IL1Syncer interface {
 }
 
 var (
-	ErrStateRootMismatch = errors.New("state root mismatch")
-
+	ErrStateRootMismatch      = errors.New("state root mismatch")
 	lastCheckedL1BlockCounter = metrics.GetOrCreateGauge(`last_checked_l1_block`)
 )
 
@@ -266,15 +264,9 @@ func parseLogType(l1RollupId uint64, log *ethTypes.Log) (l1BatchInfo types.L1Bat
 		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
 		stateRoot = common.BytesToHash(log.Data[:32])
 	case contracts.VerificationValidiumTopicEtrog:
-		bigRollupId := new(big.Int).SetUint64(l1RollupId)
-		isRollupIdMatching := log.Topics[1] == common.BigToHash(bigRollupId)
-		if isRollupIdMatching {
-			batchLogType = logVerifyEtrog
-			batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
-			stateRoot = common.BytesToHash(log.Data[:32])
-		} else {
-			batchLogType = logIncompatible
-		}
+		batchLogType = logVerifyEtrog
+		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
+		stateRoot = common.BytesToHash(log.Data[:32])
 	case contracts.VerificationTopicEtrog:
 		bigRollupId := new(big.Int).SetUint64(l1RollupId)
 		isRollupIdMatching := log.Topics[1] == common.BigToHash(bigRollupId)
