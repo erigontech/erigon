@@ -135,8 +135,9 @@ func (c *Cursor) next() bool {
 	return true
 }
 
-func (c *Cursor) Reset(di uint64) error {
+func (c *Cursor) Reset(di uint64, g *seg.Reader) error {
 	c.d = di
+	c.getter = g
 	return c.nextKV()
 }
 
