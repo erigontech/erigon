@@ -3,10 +3,8 @@ package receipts
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"unsafe"
 
-	"github.com/elastic/go-freelru"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -21,11 +19,11 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type Generator struct {
-	//receiptsCache      *lru.Cache[common.Hash, []*types.Receipt]
-	receiptsCache      *freelru.LRU[uint32, types.Receipts]
+	receiptsCache      *lru.Cache[common.Hash, types.Receipts]
 	receiptsCacheTrace bool
 
 	blockReader services.FullBlockReader
@@ -51,8 +49,8 @@ func cacheKey(u common.Hash) uint32 { return *(*uint32)(unsafe.Pointer(&u[0])) }
 func u32noHash(u uint32) uint32     { return u }                                 //nolint
 
 func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader) *Generator {
-	receiptsCache, err := freelru.New[uint32, types.Receipts](uint32(receiptsCacheLimit), u32noHash)
-	//receiptsCache, err := lru.New[common.Hash, []*types.Receipt](receiptsCacheLimit)
+	//receiptsCache, err := freelru.New[uint32, types.Receipts](uint32(receiptsCacheLimit), u32noHash)
+	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit)
 	if err != nil {
 		panic(err)
 	}
@@ -69,14 +67,14 @@ func (g *Generator) LogStats() {
 	if g == nil || !g.receiptsCacheTrace {
 		return
 	}
-	m := g.receiptsCache.Metrics()
-	var m2 runtime.MemStats
-	dbg.ReadMemStats(&m2)
-	log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "alloc", common.ByteCount(m2.Alloc), "sys", common.ByteCount(m2.Sys))
+	//m := g.receiptsCache.Metrics()
+	//var m2 runtime.MemStats
+	//dbg.ReadMemStats(&m2)
+	//log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "alloc", common.ByteCount(m2.Alloc), "sys", common.ByteCount(m2.Sys))
 }
 
 func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {
-	return g.receiptsCache.Get(cacheKey(blockHash))
+	return g.receiptsCache.Get(blockHash)
 }
 
 func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.Tx, txIndex int) (*ReceiptEnv, error) {
@@ -145,10 +143,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx,
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error) {
-	if receipts, ok := g.receiptsCache.Get(cacheKey(block.Hash())); ok {
-		if block.NumberU64()%100 == 0 {
-			g.LogStats()
-		}
+	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}
 
@@ -169,9 +164,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 		receipts[i] = receipt
 	}
 
-	g.receiptsCache.Add(cacheKey(block.Hash()), receipts.Copy())
-	if block.NumberU64()%100 == 0 {
-		g.LogStats()
-	}
+	g.receiptsCache.Add(block.Hash(), receipts.Copy())
 	return receipts, nil
 }
