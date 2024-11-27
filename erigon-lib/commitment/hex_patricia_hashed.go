@@ -2285,36 +2285,31 @@ func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 }
 
 func (p *ParallelPatriciaHashed) unfoldRoot() error {
-	zero := []byte{0}
 	// Now unfold until we step on an empty cell
 	//rs, err := p.root.EncodeCurrentState(nil)
 	//if err != nil {
 	//	return fmt.Errorf("encode current state: %w", err)
 	//}
-	p.root.trace = true
-	fmt.Printf("==============================\n")
+	if p.root.trace {
+		fmt.Printf("=============ROOT unfold============\n")
+	}
+	zero := []byte{0}
 	for unfolding := p.root.needUnfolding(zero); unfolding > 0; unfolding = p.root.needUnfolding(zero) {
 		if err := p.root.unfold(zero, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
 	}
-	p.root.trace = false
-	fmt.Printf("==============================\n")
+	if p.root.trace {
+		fmt.Printf("=========END=ROOT unfold============\n")
+	}
 
 	for i := range p.mounts {
 		if p.mounts[i] == nil {
 			panic(fmt.Sprintf("nibble %x is nil", i))
 		}
-		hph := p.mounts[i]
+		p.mounts[i].mountTo(p.root, i)
 
-		// zero = hexToCompact([]byte{byte(i)})
-		// for unfolding := hph.needUnfolding(zero); unfolding > 0; unfolding = hph.needUnfolding(zero) {
-		// 	if err := hph.unfold(zero, unfolding); err != nil {
-		// 		return fmt.Errorf("unfold: %w", err)
-		// 	}
-		// }
-
-		hph.mountTo(p.root, i)
+		// hph := p.mounts[i]
 		//hph.Reset()
 		//if err = hph.SetState(rs); err != nil {
 		//	return fmt.Errorf("set state %x: %w", i, err)
@@ -2327,7 +2322,7 @@ func (p *ParallelPatriciaHashed) unfoldRoot() error {
 		//		return fmt.Errorf("unfold: %w", err)
 		//	}
 		//}
-		p.mounts[i] = hph
+		// p.mounts[i] = hph
 	}
 	return nil
 }
@@ -2388,7 +2383,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 		mainLock.Lock()
 		defer mainLock.Unlock()
 
-		fmt.Printf("mounted %02x => %s\n", prevByte, c.String())
+		// fmt.Printf("mounted %02x => %s\n", prevByte, c.String())
 		c.extLen = 0
 		c.hashedExtLen = 0
 
@@ -2451,8 +2446,9 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 		return nil, err
 	}
 
-	fmt.Printf("======= folding root =========\n")
-	p.root.SetTrace(true)
+	if p.root.trace {
+		fmt.Printf("======= folding root =========\n")
+	}
 	// p.root.currentKeyLen = 0
 	if p.root.activeRows == 0 {
 		p.root.activeRows = 1
@@ -2468,7 +2464,9 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("======= folding root done =========\n")
+	if p.root.trace {
+		fmt.Printf("======= folding root done =========\n")
+	}
 
 	err = p.root.branchEncoder.Load(p.ctx, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
