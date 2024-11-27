@@ -46,7 +46,8 @@ func NewExistenceFilter(keysCount uint64, filePath string) (*ExistenceFilter, er
 		e.empty = true
 	} else {
 		var err error
-		e.filter, err = bloomfilter.New(m)
+		const HardcodedK = 3
+		e.filter, err = bloomfilter.New(m, HardcodedK)
 		if err != nil {
 			return nil, fmt.Errorf("%w, %s", err, fileName)
 		}
