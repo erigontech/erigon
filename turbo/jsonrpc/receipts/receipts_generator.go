@@ -43,7 +43,7 @@ type ReceiptEnv struct {
 }
 
 var (
-	receiptsCacheLimit = dbg.EnvInt("R_LRU", 128)
+	receiptsCacheLimit = dbg.EnvInt("R_LRU", 1024) //ethmainnet: 1K receipts is ~200mb RAM
 	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
 )
 
