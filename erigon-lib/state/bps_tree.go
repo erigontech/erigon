@@ -305,7 +305,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, found bool, 
 	n, l, r := b.bs(seekKey) // l===r when key is found
 	if l == r {
 		cur.Reset(n.di, g)
-		if bytes.Compare(cur.key, seekKey) != 0 {
+		if bytes.Compare(cur.key, seekKey) < 0 {
 			panic("seek failed")
 		}
 		return cur, true, nil
