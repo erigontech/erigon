@@ -128,14 +128,14 @@ func (b *BitVector) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(dst) < b.EncodingSizeSSZ() {
 		dst = make([]byte, b.EncodingSizeSSZ())
 	}
-	copy(dst[:], b.container[:])
+	copy(dst[:], b.container)
 	return dst, nil
 }
 
 func (b *BitVector) HashSSZ() ([32]byte, error) {
 	// zero padding
 	buf := make([]byte, b.EncodingSizeSSZ())
-	copy(buf[:], b.container[:])
+	copy(buf[:], b.container)
 	return merkle_tree.BitvectorRootWithLimit(buf, uint64(b.bitCap))
 }
 
