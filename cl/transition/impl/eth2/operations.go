@@ -1018,13 +1018,10 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 			}
 		}
 
-		fmt.Printf("Epoch: %d, Slot: %d. ForkEpoch %d\n", state.Epoch(s), sSlot, beaconConfig.ElectraForkEpoch)
-
 		if state.Epoch(s) == beaconConfig.ElectraForkEpoch {
 			if err := s.UpgradeToElectra(); err != nil {
 				return err
 			}
-			fmt.Printf("Upgraded to Electra. version %v\n", s.Version())
 		}
 	}
 	return nil
