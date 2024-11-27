@@ -286,12 +286,11 @@ func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
 	return n, dl, dr
 }
 
-// Seek returns first key which is >= key.
-// Found is true iff exact key match is found.
-// If key is nil, returns first key and found=true
-// If found item.key has a prefix of key, returns found=false and item.key
-// if key is greater than all keys, returns nil, found=false
-func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, found bool, err error) {
+// Seek returns cursor pointing at first key which is >= seekKey.
+// If key is nil, returns cursor with first key
+// If found item.key has a prefix of key, returns item.key
+// if key is greater than all keys, returns nil
+func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
@@ -299,16 +298,14 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, found bool, 
 	cur = b.cursorGetter(nil, nil, 0, g)
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
 		cur.Reset(0, g)
-		return cur, true, nil
+		return cur, nil
 	}
 
+	// check cached nodes and narrow roi
 	n, l, r := b.bs(seekKey) // l===r when key is found
 	if l == r {
 		cur.Reset(n.di, g)
-		if bytes.Compare(cur.key, seekKey) < 0 {
-			panic("seek failed")
-		}
-		return cur, true, nil
+		return cur, nil
 	}
 
 	// if b.trace {
@@ -317,7 +314,6 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, found bool, 
 	// }
 	var m uint64
 	var cmp int
-	// var offset uint64
 	for l < r {
 		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
@@ -328,27 +324,19 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, found bool, 
 				cur.Next()
 			}
 
-			// if offset == 0 {
-			// 	offset = b.offt.Get(m)
-			// 	g.Reset(offset)
-			// }
-			// cur.key, _ = g.Next(cur.key[:0])
 			if cmp = bytes.Compare(cur.key, seekKey); cmp < 0 {
-				// g.Skip()
 				l++
 				continue
 			}
-			// cur.value, _ = g.Next(cur.value[:0])
-			// cur.d, cur.getter = m, g
-			return cur, cmp >= 0, err
+			return cur, err
 		}
 
 		cmp, cur.key, err = b.keyCmpFunc(seekKey, m, g, cur.key[:0])
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		if b.trace {
-			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, cur.key)
+			fmt.Printf("[%d %d] k: %x\n", l, r, cur.key)
 		}
 
 		if cmp == 0 {
@@ -365,14 +353,10 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, found bool, 
 	}
 
 	err = cur.Reset(m, g)
-	if err != nil {
-		return nil, false, err
+	if err != nil || bytes.Compare(cur.Key(), seekKey) < 0 {
+		return nil, err
 	}
-	cmp = bytes.Compare(cur.Key(), seekKey)
-	if cmp < 0 {
-		return nil, false, err
-	}
-	return cur, cmp == 0, nil
+	return cur, nil
 }
 
 // Get: returns for exact given key, value and offset in file where key starts

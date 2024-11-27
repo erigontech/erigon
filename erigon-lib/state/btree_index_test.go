@@ -273,7 +273,6 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 
 	t.Run("checkNextAgainstGetter", func(t *testing.T) {
 		cur, err := bt.Seek(getter, nil)
-		require.NoError(t, err)
 		defer cur.Close()
 
 		require.NoError(t, err)
@@ -306,7 +305,6 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 			require.EqualValuesf(t, cur.Value(), curS.Value(), "i=%d", i)
 			require.EqualValues(t, cur.d, curS.d)
 			require.EqualValues(t, cur.getter, curS.getter)
-			curS.Close()
 		}
 	})
 
@@ -373,12 +371,10 @@ func TestBpsTree_Seek(t *testing.T) {
 
 	for i := 0; i < len(keys); i++ {
 		sk := keys[i]
-		c, found, err := bp.Seek(g, sk[:len(sk)/2])
-		// _ = found
+		c, err := bp.Seek(g, sk[:len(sk)/2])
 		require.NoError(t, err)
 		require.NotNil(t, c)
 		require.NotNil(t, c.Key())
-		require.False(t, found) // we are looking up by half of key, while FOUND=true when exact match found.
 
 		//k, _, err := it.KVFromGetter(g)
 		//require.NoError(t, err)

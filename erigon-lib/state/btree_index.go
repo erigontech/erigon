@@ -141,7 +141,7 @@ func (c *Cursor) Reset(di uint64, g *seg.Reader) error {
 
 func (c *Cursor) readKV() error {
 	if c.d >= c.ef.Count() {
-		return fmt.Errorf("cursor out of bounds %d/%d", c.d, c.ef.Count())
+		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, c.d, c.ef.Count())
 	}
 	if c.getter == nil {
 		return fmt.Errorf("getter is nil")
@@ -1099,11 +1099,8 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 		return nil, nil
 	}
 	if b.useBplus {
-		c, found, err := b.bplus.Seek(g, x)
-		if !found {
-			return nil, nil
-		}
-		if err != nil /*|| !found*/ {
+		c, err := b.bplus.Seek(g, x)
+		if err != nil || c == nil {
 			if errors.Is(err, ErrBtIndexLookupBounds) {
 				return nil, nil
 			}
@@ -1111,7 +1108,6 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 		}
 		return c, nil
 	}
-
 	_, dt, found, err := b.alloc.Seek(g, x)
 	if err != nil || !found {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
