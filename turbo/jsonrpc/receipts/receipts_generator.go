@@ -3,7 +3,6 @@ package receipts
 import (
 	"context"
 	"fmt"
-	"unsafe"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -45,11 +44,7 @@ var (
 	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
 )
 
-func cacheKey(u common.Hash) uint32 { return *(*uint32)(unsafe.Pointer(&u[0])) } //nolint
-func u32noHash(u uint32) uint32     { return u }                                 //nolint
-
 func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader) *Generator {
-	//receiptsCache, err := freelru.New[uint32, types.Receipts](uint32(receiptsCacheLimit), u32noHash)
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit)
 	if err != nil {
 		panic(err)
@@ -68,9 +63,7 @@ func (g *Generator) LogStats() {
 		return
 	}
 	//m := g.receiptsCache.Metrics()
-	//var m2 runtime.MemStats
-	//dbg.ReadMemStats(&m2)
-	//log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "alloc", common.ByteCount(m2.Alloc), "sys", common.ByteCount(m2.Sys))
+	//log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
 
 func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {

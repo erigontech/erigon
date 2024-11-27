@@ -149,13 +149,11 @@ type BaseAPI struct {
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
 	var (
-		blocksLRUSize      = 128 // ~32Mb
-		receiptsCacheLimit = 128
+		blocksLRUSize = 128 // ~32Mb
 	)
 	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !singleNodeMode {
 		blocksLRUSize *= 5
-		receiptsCacheLimit *= 5
 	}
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
@@ -171,7 +169,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
 		receiptsGenerator:   receipts.NewGenerator(blockReader, engine),
-		borReceiptGenerator: receipts.NewBorGenerator(receiptsCacheLimit, blockReader, engine),
+		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine),
 		dirs:                dirs,
 		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
 		bridgeReader:        bridgeReader,

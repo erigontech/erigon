@@ -27,9 +27,9 @@ type BorGenerator struct {
 	engine       consensus.EngineReader
 }
 
-func NewBorGenerator(cacheSize int, blockReader services.FullBlockReader,
+func NewBorGenerator(blockReader services.FullBlockReader,
 	engine consensus.EngineReader) *BorGenerator {
-	receiptCache, err := lru.New[libcommon.Hash, *types.Receipt](cacheSize)
+	receiptCache, err := lru.New[libcommon.Hash, *types.Receipt](receiptsCacheLimit)
 	if err != nil {
 		panic(err)
 	}
