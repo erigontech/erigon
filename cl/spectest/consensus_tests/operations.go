@@ -466,3 +466,35 @@ func operationWithdrawalRequstHandler(t *testing.T, root fs.FS, c spectest.TestC
 	assert.EqualValues(t, haveRoot, expectedRoot)
 	return nil
 }
+
+func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	body := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
+	if err := spectest.ReadSszOld(root, body, c.Version(), "body.ssz_snappy"); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessExecutionPayload(preState, body); err != nil {
+		//if err := machine.ProcessBlock(c.Machine, preState, body); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, haveRoot, expectedRoot)
+	return nil
+}

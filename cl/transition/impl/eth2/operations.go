@@ -357,13 +357,24 @@ func (I *impl) ProcessWithdrawals(
 }
 
 // ProcessExecutionPayload sets the latest payload header accordinly.
-func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevRandao common.Hash, time uint64, payloadHeader *cltypes.Eth1Header) error {
+func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.GenericBeaconBody) error {
+	payloadHeader, err := body.GetPayloadHeader()
+	if err != nil {
+		return err
+	}
+	parentHash := payloadHeader.ParentHash
+	prevRandao := payloadHeader.PrevRandao
+	time := payloadHeader.Time
 	if state.IsMergeTransitionComplete(s) {
+		// Verify consistency of the parent hash with respect to the previous execution payload header
+		// assert payload.parent_hash == state.latest_execution_payload_header.block_hash
 		if parentHash != s.LatestExecutionPayloadHeader().BlockHash {
 			return errors.New("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
 		}
 	}
 	if prevRandao != s.GetRandaoMixes(state.Epoch(s)) {
+		// Verify prev_randao
+		// assert payload.prev_randao == get_randao_mix(state, get_current_epoch(state))
 		return fmt.Errorf(
 			"ProcessExecutionPayload: randao mix mismatches with mix digest, expected %x, got %x",
 			s.GetRandaoMixes(state.Epoch(s)),
@@ -371,8 +382,17 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, parentHash, prevR
 		)
 	}
 	if time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+		// Verify timestamp
+		// assert payload.timestamp == compute_timestamp_at_slot(state, state.slot)
 		return errors.New("ProcessExecutionPayload: invalid Eth1 timestamp")
 	}
+
+	// Verify commitments are under limit
+	// assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
+	if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlock) {
+		return errors.New("ProcessExecutionPayload: too many blob commitments")
+	}
+
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
 	return nil
 }

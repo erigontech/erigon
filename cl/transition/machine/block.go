@@ -68,10 +68,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
 		}
-		parentHash := payloadHeader.ParentHash
-		prevRandao := payloadHeader.PrevRandao
-		time := payloadHeader.Time
-		if err := impl.ProcessExecutionPayload(s, parentHash, prevRandao, time, payloadHeader); err != nil {
+		if err := impl.ProcessExecutionPayload(s, body); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
 		}
 	}
