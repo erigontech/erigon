@@ -502,7 +502,6 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 	if block == nil {
-		panic(err)
 		return nil, nil
 	}
 	chainConfig, err := api.chainConfig(ctx, tx)
