@@ -352,6 +352,14 @@ type Receipts []*Receipt
 // Len returns the number of receipts in this list.
 func (rs Receipts) Len() int { return len(rs) }
 
+func (rs Receipts) Copy() Receipts {
+	rsCopy := make(Receipts, 0, rs.Len())
+	for _, r := range rs {
+		rsCopy = append(rsCopy, r.Copy())
+	}
+	return rsCopy
+}
+
 // EncodeIndex encodes the i'th receipt to w.
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
