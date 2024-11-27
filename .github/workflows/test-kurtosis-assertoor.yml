@@ -7,9 +7,8 @@ env:
 on:
   push:
     branches:
-        - main
         - release/*
-        - docker_pectra
+        - pectra_e2
   workflow_call:
   workflow_dispatch:
 
