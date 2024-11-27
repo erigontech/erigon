@@ -30,6 +30,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1583,29 +1584,37 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 }
 
 func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, int, error) {
-	fmt.Printf("=======[%x] folding rows %d depths %+v =========\n", nib, hph.activeRows, hph.depths[:hph.activeRows])
-	if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == 1 {
-		fmt.Printf("mount nibble %x-%x %s\n", nib, hph.mountedNib, hph.grid[0][hph.mountedNib].FullString())
-		return hph.grid[0][hph.mountedNib], 1, nil
+	if nib != hph.mountedNib {
+		panic(fmt.Sprintf("foldMounted: nib (%x)!= mountedNib (%x)", nib, hph.mountedNib))
 	}
-	// rows := hph.activeRows
+
+	if hph.trace {
+		fmt.Printf("=======[%x] folding rows %d depths %+v\n", hph.mountedNib, hph.activeRows, hph.depths[:hph.activeRows])
+		defer func() { fmt.Printf("=======[%x] folded =========\n", hph.mountedNib) }()
+	}
+
 	for hph.activeRows > 0 {
-		// if rows > 1 && hph.activeRows == 1 {
-		// 	break
-		// }
+		if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == 1 {
+			if hph.trace {
+				fmt.Printf("mount early as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
+			}
+			return hph.grid[0][hph.mountedNib], hph.mountedNib, nil
+		}
 		if err := hph.fold(); err != nil {
-			panic(err)
 			return cell{}, 0, fmt.Errorf("final fold: %w", err)
 		}
 	}
-	fmt.Printf("=======[%x] folded =========\n", nib)
-	_ = nib
 	if hph.rootPresent && hph.rootTouched {
-		fmt.Printf("mount root %x %s\n", nib, hph.root.FullString())
-		return hph.root, 0, nil
+		if hph.trace {
+			fmt.Printf("mount root as %02x %s\n", hph.mountedNib, hph.root.String())
+		}
+		return hph.root, -1, nil
 	}
-	fmt.Printf("mount nibble %x-%x %s\n", nib, hph.mountedNib, hph.grid[0][hph.mountedNib].FullString())
-	return hph.grid[0][hph.mountedNib], 1, nil
+	if hph.trace {
+		fmt.Printf("mount as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
+	}
+	// todo potential bug
+	return hph.grid[0][hph.mountedNib], hph.mountedNib, nil
 }
 
 func (hph *HexPatriciaHashed) flush(ctx context.Context) error {
@@ -2356,6 +2365,83 @@ func (p *ParallelPatriciaHashed) SetParticularTrace(b bool, n int) {
 	}
 }
 
+func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHashed) error {
+	if t.mode != ModeDirect {
+		return errors.New("parallel hashsort for indirect mode is not supported")
+	}
+	if !t.sortPerNibble {
+		return errors.New("sortPerNibble disabled")
+	}
+
+	mainLock := new(sync.Mutex)
+	foldAndFlush := func(prevByte byte) error {
+		// prevbyte - can we avoid it?
+		c, d, err := pph.mounts[prevByte].foldMounted(int(prevByte))
+		if err != nil {
+			return err
+		}
+		_ = d
+		if err := pph.mounts[prevByte].branchEncoder.Load(pph.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+
+		mainLock.Lock()
+		defer mainLock.Unlock()
+
+		fmt.Printf("mounted %02x => %s\n", prevByte, c.String())
+		c.extLen = 0
+		c.hashedExtLen = 0
+
+		pph.root.grid[0][prevByte] = c
+		pph.mounts[prevByte].Reset()
+		pph.mounts[prevByte].currentKeyLen = 0
+		if pph.mounts[prevByte].activeRows >= 0 {
+			pph.mounts[prevByte].depths[0] = 0
+			pph.mounts[prevByte].activeRows = 0
+			pph.mounts[prevByte].touchMap[0] = 0
+			pph.mounts[prevByte].afterMap[0] = 0
+		}
+
+		pph.root.touchMap[0] |= uint16(1) << prevByte
+		pph.root.afterMap[0] |= uint16(1) << prevByte
+		pph.root.depths[0] = 1
+		return nil
+	}
+
+	//g, ctx := errgroup.WithContext(ctx)
+	//g.SetLimit(16)
+
+	for n := 0; n < len(t.nibbles); n++ {
+		nib := t.nibbles[n]
+		phnib := pph.mounts[n]
+		n = n
+
+		//g.Go(func() error {
+		//n = n
+		cnt := 0
+		err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			cnt++
+			if phnib.trace {
+				fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", n, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
+			}
+			return phnib.followAndUpdate(hashedKey, plainKey, nil)
+		}, etl.TransformArgs{Quit: ctx.Done()})
+		if err != nil {
+			panic(err)
+			return err
+		}
+		if cnt > 0 {
+			if err = foldAndFlush(byte(n)); err != nil {
+				return err
+			}
+		}
+		//return nil
+		//})
+	}
+	//return g.Wait()
+	return nil
+}
+
 func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string) (rootHash []byte, err error) {
 	if err = p.unfoldRoot(); err != nil {
 		return nil, err
@@ -2365,12 +2451,14 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 		return nil, err
 	}
 
+	fmt.Printf("======= folding root =========\n")
+	p.root.SetTrace(true)
+	// p.root.currentKeyLen = 0
 	if p.root.activeRows == 0 {
 		p.root.activeRows = 1
+	} else {
+		fmt.Printf("\troot active rows %d\n", p.root.activeRows)
 	}
-	p.root.SetTrace(true)
-	p.root.currentKeyLen = 0
-	fmt.Printf("======= folding root =========\n")
 	for p.root.activeRows > 0 {
 		if err = p.root.fold(); err != nil {
 			return nil, err
