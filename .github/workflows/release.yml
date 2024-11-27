@@ -1,5 +1,5 @@
 name: Release
-run-name: "Release ${{ inputs.release_version}} from branch ${{ github.ref_name }} started by ${{ github.actor}}"
+run-name: "Release version ${{ inputs.release_version}} from branch ${{ inputs.checkout_ref }} started by @${{ github.actor}}"
 
 env:
   APPLICATION: "erigon"
