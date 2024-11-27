@@ -52,13 +52,18 @@ type bridgeStore interface {
 	ReplayInitialBlock(ctx context.Context, block *types.Block) error
 }
 
-func NewStore(logger log.Logger, executionStore executionStore, bridgeStore bridgeStore) *ExecutionClientStore {
+type wiggleCalculator interface {
+	CalculateWiggle(ctx context.Context, header *types.Header) (time.Duration, error)
+}
+
+func NewStore(logger log.Logger, executionStore executionStore, bridgeStore bridgeStore, wiggleCalculator wiggleCalculator) *ExecutionClientStore {
 	return &ExecutionClientStore{
-		logger:          logger,
-		executionStore:  executionStore,
-		bridgeStore:     bridgeStore,
-		queue:           make(chan []*types.Block),
-		tasksDoneSignal: make(chan bool, 1),
+		logger:           logger,
+		executionStore:   executionStore,
+		bridgeStore:      bridgeStore,
+		queue:            make(chan []*types.Block),
+		tasksDoneSignal:  make(chan bool, 1),
+		wiggleCalculator: wiggleCalculator,
 	}
 }
 
@@ -70,9 +75,10 @@ type ExecutionClientStore struct {
 	// tasksCount includes both tasks pending in the queue and a task that was taken and hasn't finished yet
 	tasksCount atomic.Int32
 	// tasksDoneSignal gets sent a value when tasksCount becomes 0
-	tasksDoneSignal chan bool
-	prepared        bool
-	lastQueuedBlock uint64
+	tasksDoneSignal  chan bool
+	prepared         bool
+	lastQueuedBlock  uint64
+	wiggleCalculator wiggleCalculator
 }
 
 func (s *ExecutionClientStore) Prepare(ctx context.Context) error {
@@ -178,6 +184,21 @@ func (s *ExecutionClientStore) insertBlocks(ctx context.Context, blocks []*types
 			"duration", time.Since(insertStartTime),
 			"blks/sec", float64(len(blocks))/math.Max(time.Since(insertStartTime).Seconds(), 0.0001))
 	}
+
+	go func() {
+		for i := range blocks {
+			wiggle, err := s.wiggleCalculator.CalculateWiggle(ctx, blocks[i].Header())
+			if err != nil {
+				s.logger.Error(
+					syncLogPrefix("failed update wiggle metrics"),
+					"err", err,
+				)
+				continue
+			}
+
+			UpdateWiggleDuration(wiggle)
+		}
+	}()
 
 	return nil
 }

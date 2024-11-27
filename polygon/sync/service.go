@@ -22,7 +22,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -52,7 +55,13 @@ func NewService(
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData)
 	execution := newExecutionClient(executionClient)
-	store := NewStore(logger, execution, bridgeService)
+
+	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
+	if err != nil {
+		panic(err)
+	}
+
+	store := NewStore(logger, execution, bridgeService, NewWiggleCalculator(borConfig, signaturesCache, heimdallService))
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
@@ -63,7 +72,7 @@ func NewService(
 		store,
 		blockLimit,
 	)
-	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService)
+	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache)
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
 		logger,
