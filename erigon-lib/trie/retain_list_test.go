@@ -39,7 +39,7 @@ func FakePreimage(hash libcommon.Hash) libcommon.Hash {
 // manually construct a ProofRetainer based on a set of keys.  This is
 // especially useful for tests which want to manually manipulate the hash
 // databases without worrying about generating and tracking pre-images.
-func NewManualProofRetainer(t *testing.T, acc *accounts.Account, rl *RetainList, keys [][]byte) *ProofRetainer {
+func NewManualProofRetainer(t *testing.T, acc *accounts.Account, rl *RetainList, keys [][]byte) *ProofRetainer { //nolint
 	var accHexKey []byte
 	var storageKeys []libcommon.Hash
 	var storageHexKeys [][]byte
