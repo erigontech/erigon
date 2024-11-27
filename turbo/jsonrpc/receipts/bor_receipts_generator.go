@@ -62,7 +62,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *
 		return nil, err
 	}
 
-	g.receiptCache.Add(block.Hash(), receipt)
+	g.receiptCache.Add(block.Hash(), receipt.Copy())
 	return receipt, nil
 }
 
