@@ -1196,7 +1196,7 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) Disca
 			if bytes.Equal(found.Tx.IDHash[:], mt.Tx.IDHash[:]) {
 				return NotSet
 			}
-			log.Info(fmt.Sprintf("Transaction %s was attempted"))
+			log.Info(fmt.Sprintf("Transaction %s was attempted to be replaced.", hex.EncodeToString(mt.Tx.IDHash[:])))
 			return NotReplaced
 		}
 
