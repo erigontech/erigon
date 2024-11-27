@@ -257,6 +257,17 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
+		if txTask.Tx.Type() == types.AccountAbstractionTxType {
+			aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction)
+			paymasterContext, err := aaTxn.ValidateAATransaction(ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
+			if err != nil {
+				txTask.Error = err
+				break
+			}
+			_ = aaTxn.ExecuteAATransaction(paymasterContext)
+			_ = aaTxn.PostExecAATransaction()
+		}
+		// TODO: add AccountAbstractionTransaction tx handling here
 		msg := txTask.TxAsMessage
 		if msg.FeeCap().IsZero() && rw.engine != nil {
 			// Only zero-gas transactions may be service ones
