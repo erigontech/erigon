@@ -54,6 +54,7 @@ const (
 	DynamicFeeTxType
 	BlobTxType
 	SetCodeTxType
+	AccountAbstractionTxType
 )
 
 // Transaction is an Ethereum transaction.
