@@ -480,7 +480,6 @@ func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestC
 		return err
 	}
 	if err := c.Machine.ProcessExecutionPayload(preState, body); err != nil {
-		//if err := machine.ProcessBlock(c.Machine, preState, body); err != nil {
 		if expectedError {
 			return nil
 		}

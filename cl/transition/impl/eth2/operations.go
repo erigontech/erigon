@@ -368,16 +368,17 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.Gene
 	if state.IsMergeTransitionComplete(s) {
 		// Verify consistency of the parent hash with respect to the previous execution payload header
 		// assert payload.parent_hash == state.latest_execution_payload_header.block_hash
-		if parentHash != s.LatestExecutionPayloadHeader().BlockHash {
+		if !bytes.Equal(parentHash[:], s.LatestExecutionPayloadHeader().BlockHash[:]) {
 			return errors.New("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
 		}
 	}
-	if prevRandao != s.GetRandaoMixes(state.Epoch(s)) {
+	random := s.GetRandaoMixes(state.Epoch(s))
+	if !bytes.Equal(prevRandao[:], random[:]) {
 		// Verify prev_randao
 		// assert payload.prev_randao == get_randao_mix(state, get_current_epoch(state))
 		return fmt.Errorf(
 			"ProcessExecutionPayload: randao mix mismatches with mix digest, expected %x, got %x",
-			s.GetRandaoMixes(state.Epoch(s)),
+			random,
 			prevRandao,
 		)
 	}

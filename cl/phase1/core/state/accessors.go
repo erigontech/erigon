@@ -246,6 +246,12 @@ func IsValidatorEligibleForActivation(b abstract.BeaconState, validator solid.Va
 
 // IsMergeTransitionComplete returns whether a merge transition is complete by verifying the presence of a valid execution payload header.
 func IsMergeTransitionComplete(b abstract.BeaconState) bool {
+	if b.Version() < clparams.BellatrixVersion {
+		return false
+	}
+	if b.Version() > clparams.BellatrixVersion {
+		return true
+	}
 	return !b.LatestExecutionPayloadHeader().IsZero()
 }
 
