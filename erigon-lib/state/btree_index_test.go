@@ -253,24 +253,6 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		cur.Close()
 	})
 
-	// c, err := bt.Seek(getter, nil)
-	// require.NoError(t, err)
-	// for i := 0; i < len(keys); i++ {
-	// 	k := c.Key()
-	// 	require.EqualValuesf(t, keys[i], k, "invalid key at %d", i)
-	// 	c.Next()
-	// }
-	// c.Close()
-
-	// for i := 0; i < len(keys); i++ {
-	// 	cur, err := bt.Seek(getter, keys[i])
-	// 	require.NoErrorf(t, err, "i=%d", i)
-	// 	require.EqualValues(t, keys[i], cur.Key())
-	// 	require.NotEmptyf(t, cur.Value(), "i=%d", i)
-	// 	cur.Close()
-	// 	// require.EqualValues(t, uint64(i), cur.Value())
-	// }
-
 	t.Run("checkNextAgainstGetter", func(t *testing.T) {
 		cur, err := bt.Seek(getter, nil)
 		require.NoError(t, err)

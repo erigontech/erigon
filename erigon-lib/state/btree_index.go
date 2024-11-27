@@ -907,7 +907,6 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kv *seg.Decompre
 	idx.ef, pos = eliasfano32.ReadEliasFano(idx.data[pos:])
 	idx.pool = sync.Pool{}
 	idx.pool.New = func() any {
-		// idx.newCursor()
 		return &Cursor{ef: idx.ef, returnInto: &idx.pool}
 	}
 

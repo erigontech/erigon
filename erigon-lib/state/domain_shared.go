@@ -835,8 +835,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 							ci1.val = ci1.btCursor.Value()
 							heap.Push(cpPtr, ci1)
 						}
-						// } else {
-						// 	ci1.btCursor.Close()
+					} else {
+						ci1.btCursor.Close()
 					}
 				}
 				if indexList&withHashMap != 0 {
