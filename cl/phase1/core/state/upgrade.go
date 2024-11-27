@@ -140,8 +140,22 @@ func (b *CachingBeaconState) UpgradeToDeneb() error {
 }
 
 func (b *CachingBeaconState) UpgradeToElectra() error {
+	b.previousStateRoot = libcommon.Hash{}
 	epoch := Epoch(b.BeaconState)
-	earliestExitEpoch := ComputeActivationExitEpoch(b.BeaconConfig(), epoch)
+	// update version
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().ElectraForkVersion))
+	b.SetFork(fork)
+	// Update the payload header.
+	header := b.LatestExecutionPayloadHeader()
+	header.SetVersion(clparams.ElectraVersion)
+	b.SetLatestExecutionPayloadHeader(header)
+	// Update the state root cache
+	b.SetVersion(clparams.ElectraVersion)
+
+	earliestExitEpoch := epoch
 	b.ValidatorSet().Range(func(i int, v solid.Validator, _ int) bool {
 		if v.ExitEpoch() != b.BeaconConfig().FarFutureEpoch {
 			if v.ExitEpoch() > earliestExitEpoch {
@@ -163,15 +177,10 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	b.SetPendingPartialWithdrawals(solid.NewPendingWithdrawalList(b.BeaconConfig()))
 	b.SetPendingConsolidations(solid.NewPendingConsolidationList(b.BeaconConfig()))
 	// update
-	b.SetExitBalanceToConsume(GetActivationExitChurnLimit(b))
-	b.SetConsolidationBalanceToConsume(GetConsolidationChurnLimit(b))
-
-	// update version
-	fork := b.Fork()
-	fork.Epoch = epoch
-	fork.PreviousVersion = fork.CurrentVersion
-	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().ElectraForkVersion))
-	b.SetFork(fork)
+	newExitBalanceToConsume := GetActivationExitChurnLimit(b)
+	newConsolidationBalanceToConsume := GetConsolidationChurnLimit(b)
+	b.SetExitBalanceToConsume(newExitBalanceToConsume)
+	b.SetConsolidationBalanceToConsume(newConsolidationBalanceToConsume)
 
 	// add validators that are not yet active to pending balance deposits
 	type tempValidator struct {
@@ -228,6 +237,5 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		}
 		return true
 	})
-	b.SetVersion(clparams.ElectraVersion)
 	return nil
 }

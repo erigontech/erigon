@@ -270,6 +270,14 @@ func (b *BeaconState) GetEarlistConsolidationEpoch() uint64 {
 	return b.earliestConsolidationEpoch
 }
 
+func (b *BeaconState) GetEarlistExitEpoch() uint64 {
+	return b.earliestExitEpoch
+}
+
+func (b *BeaconState) GetExitBalanceToConsume() uint64 {
+	return b.exitBalanceToConsume
+}
+
 func (b *BeaconState) GetConsolidationBalanceToConsume() uint64 {
 	return b.consolidationBalanceToConsume
 }
