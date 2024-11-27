@@ -372,7 +372,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, found bool, 
 	if cmp < 0 {
 		return nil, false, err
 	}
-	return cur, true, nil
+	return cur, cmp == 0, nil
 }
 
 // Get: returns for exact given key, value and offset in file where key starts
