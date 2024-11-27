@@ -189,12 +189,14 @@ func (r DiscardReason) String() string {
 }
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-// TODO: move input data to a struct
-func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai bool) (uint64, DiscardReason) {
+// TODO: move input data to a struct, this probably shouldn't be here in txpoolcfg (used by state transition in core)
+func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai, isAATxn bool) (uint64, DiscardReason) {
 	// Set the starting gas for the raw transaction
 	var gas uint64
 	if isContractCreation && isHomestead {
 		gas = fixedgas.TxGasContractCreation
+	} else if isAATxn {
+		gas = fixedgas.TxAAGas
 	} else {
 		gas = fixedgas.TxGas
 	}

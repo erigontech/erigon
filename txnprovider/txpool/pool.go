@@ -809,6 +809,7 @@ func toBlobs(_blobs [][]byte) []gokzg4844.Blob {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
+	// TODO: run AccountAbstractionTransaction validation phases here and ERC7562
 	isShanghai := p.isShanghai() || p.isAgra()
 	if isShanghai && txn.Creation && txn.DataLen > fixedgas.MaxInitCodeSize {
 		return txpoolcfg.InitCodeTooLarge // EIP-3860
