@@ -696,12 +696,12 @@ func (hb *HashBuilder) rootHash() libcommon.Hash {
 
 func (hb *HashBuilder) topHash() []byte {
 	pos := len(hb.hashStack) - hashStackStride
-	len := hb.hashStack[pos] - 0x80
-	if len > 32 {
+	length := hb.hashStack[pos] - 0x80
+	if length > 32 {
 		// node itself (RLP list), not its hash
-		len = hb.hashStack[pos] - 0xc0
+		length = hb.hashStack[pos] - 0xc0
 	}
-	return hb.hashStack[pos : pos+1+int(len)]
+	return hb.hashStack[pos : pos+1+int(length)]
 }
 
 func (hb *HashBuilder) printTopHashes(prefix []byte, _, children uint16) {

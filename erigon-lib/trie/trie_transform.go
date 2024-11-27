@@ -21,10 +21,9 @@ import (
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
-type keyTransformFunc func([]byte) []byte
+type keyTransformFunc func([]byte) []byte //nolint
 
-// nolint
-func transformSubTrie(nd node, hex []byte, newTrie *Trie, transformFunc keyTransformFunc) {
+func transformSubTrie(nd node, hex []byte, newTrie *Trie, transformFunc keyTransformFunc) { //nolint
 	switch n := nd.(type) {
 	case nil:
 		return
