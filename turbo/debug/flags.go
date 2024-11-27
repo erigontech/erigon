@@ -38,7 +38,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common/fdlimit"
+	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 
