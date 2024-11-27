@@ -3,6 +3,7 @@ package receipts
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/elastic/go-freelru"
@@ -69,7 +70,9 @@ func (g *Generator) LogStats() {
 		return
 	}
 	m := g.receiptsCache.Metrics()
-	log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+	var m2 runtime.MemStats
+	dbg.ReadMemStats(&m2)
+	log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "alloc", common.ByteCount(m2.Alloc), "sys", common.ByteCount(m2.Sys))
 }
 
 func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {
