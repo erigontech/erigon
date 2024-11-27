@@ -325,6 +325,7 @@ func TestIncarnationWithInvalidEncodedAccount(t *testing.T) {
 }
 
 func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnation uint64) {
+	t.Helper()
 	if initialIncarnation != decodedIncarnation {
 		t.Fatal("Can't decode the incarnation", initialIncarnation, decodedIncarnation)
 	}
