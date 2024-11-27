@@ -108,7 +108,7 @@ func TestDecodingCycle(t *testing.T) {
 		data := hexutil.MustDecode(tt.input)
 
 		orig, err := bitsetDecodeBytes(data, tt.size)
-		if errors.Is(err, tt.fail) {
+		if !errors.Is(err, tt.fail) {
 			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.fail)
 		}
 		if err != nil {
