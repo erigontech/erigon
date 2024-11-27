@@ -143,6 +143,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx,
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error) {
 	if receipts, ok := g.receiptsCache.Get(cacheKey(block.Hash())); ok {
+		if block.NumberU64()%100 == 0 {
+			g.LogStats()
+		}
 		return receipts, nil
 	}
 
