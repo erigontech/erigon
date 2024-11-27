@@ -23,6 +23,7 @@ import (
 
 type keyTransformFunc func([]byte) []byte
 
+// nolint
 func transformSubTrie(nd node, hex []byte, newTrie *Trie, transformFunc keyTransformFunc) {
 	switch n := nd.(type) {
 	case nil:
