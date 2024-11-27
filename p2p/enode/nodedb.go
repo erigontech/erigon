@@ -101,9 +101,8 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 
 // newMemoryDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, error) {
-	db, err := mdbx.NewMDBX(logger).
+	db, err := mdbx.New(kv.SentryDB, logger).
 		InMem(tmpDir).
-		Label(kv.SentryDB).
 		WithTableCfg(bucketsConfig).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
@@ -120,9 +119,8 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 // newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
-	db, err := mdbx.NewMDBX(logger).
+	db, err := mdbx.New(kv.SentryDB, logger).
 		Path(path).
-		Label(kv.SentryDB).
 		WithTableCfg(bucketsConfig).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).

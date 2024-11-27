@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/optimistic"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -41,7 +42,6 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 )
 
 // ForkNode is a struct that represents a node in the fork choice tree.
@@ -103,10 +103,10 @@ type ForkChoiceStore struct {
 	forkGraph            fork_graph.ForkGraph
 	blobStorage          blob_storage.BlobStorage
 	// I use the cache due to the convenient auto-cleanup feauture.
-	checkpointStates sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	publicKeysRegistry public_keys_registry.PublicKeyRegistry
 
-	latestMessages    []LatestMessage
-	anchorPublicKeys  []byte
+	latestMessages    *latestMessagesStore
 	syncedDataManager *synced_data.SyncedDataManager
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
@@ -160,6 +160,7 @@ func NewForkChoiceStore(
 	syncedDataManager *synced_data.SyncedDataManager,
 	blobStorage blob_storage.BlobStorage,
 	validatorMonitor monitor.ValidatorMonitor,
+	publicKeysRegistry public_keys_registry.PublicKeyRegistry,
 	probabilisticHeadGetter bool,
 ) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
@@ -192,15 +193,6 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
-	anchorPublicKeys := make([]byte, anchorState.ValidatorLength()*length.Bytes48)
-	for idx := 0; idx < anchorState.ValidatorLength(); idx++ {
-		pk, err := anchorState.ValidatorPublicKey(idx)
-		if err != nil {
-			return nil, err
-		}
-		copy(anchorPublicKeys[idx*length.Bytes48:], pk[:])
-	}
-
 	preverifiedSizes, err := lru.New[libcommon.Hash, preverifiedAppendListsSizes](checkpointsPerCache * 10)
 	if err != nil {
 		return nil, err
@@ -225,7 +217,7 @@ func NewForkChoiceStore(
 	if err != nil {
 		return nil, err
 	}
-
+	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
 	totalActiveBalances.Add(anchorRoot, anchorState.GetTotalActiveBalance())
@@ -237,11 +229,10 @@ func NewForkChoiceStore(
 	f := &ForkChoiceStore{
 		forkGraph:               forkGraph,
 		equivocatingIndicies:    make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:          make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:          newLatestMessagesStore(anchorState.ValidatorLength()),
 		eth2Roots:               eth2Roots,
 		engine:                  engine,
 		operationsPool:          operationsPool,
-		anchorPublicKeys:        anchorPublicKeys,
 		beaconCfg:               anchorState.BeaconConfig(),
 		preverifiedSizes:        preverifiedSizes,
 		finalityCheckpoints:     finalityCheckpoints,
@@ -262,6 +253,7 @@ func NewForkChoiceStore(
 		optimisticStore:         optimistic.NewOptimisticStore(),
 		validatorMonitor:        validatorMonitor,
 		probabilisticHeadGetter: probabilisticHeadGetter,
+		publicKeysRegistry:      publicKeysRegistry,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -394,16 +386,6 @@ func (f *ForkChoiceStore) GetSyncCommittees(period uint64) (*solid.SyncCommittee
 	return f.forkGraph.GetSyncCommittees(period)
 }
 
-func (f *ForkChoiceStore) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	headState, cn := f.syncedDataManager.HeadState()
-	defer cn()
-	if headState == nil {
-		return nil, nil
-	}
-
-	return headState.GetBeaconCommitee(slot, committeeIndex)
-}
-
 func (f *ForkChoiceStore) BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {
 	return f.forkGraph.GetBlockRewards(root)
 }
@@ -524,7 +506,11 @@ func (f *ForkChoiceStore) GetInactivitiesScores(blockRoot libcommon.Hash) (solid
 }
 
 func (f *ForkChoiceStore) GetPreviousParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
-	return f.forkGraph.GetPreviousParticipationIndicies(blockRoot)
+	header, ok := f.GetHeader(blockRoot)
+	if !ok {
+		return nil, nil
+	}
+	return f.forkGraph.GetPreviousParticipationIndicies(header.Slot / f.beaconCfg.SlotsPerEpoch)
 }
 
 func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error) {
@@ -532,7 +518,11 @@ func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.Vali
 }
 
 func (f *ForkChoiceStore) GetCurrentParticipationIndicies(blockRoot libcommon.Hash) (*solid.ParticipationBitList, error) {
-	return f.forkGraph.GetCurrentParticipationIndicies(blockRoot)
+	header, ok := f.GetHeader(blockRoot)
+	if !ok {
+		return nil, nil
+	}
+	return f.forkGraph.GetCurrentParticipationIndicies(header.Slot / f.beaconCfg.SlotsPerEpoch)
 }
 
 func (f *ForkChoiceStore) IsRootOptimistic(root libcommon.Hash) bool {

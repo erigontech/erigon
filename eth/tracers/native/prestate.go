@@ -75,7 +75,9 @@ type prestateTracer struct {
 }
 
 type prestateTracerConfig struct {
-	DiffMode bool `json:"diffMode"` // If true, this tracer will return state modifications
+	DiffMode       bool `json:"diffMode"`       // If true, this tracer will return state modifications
+	DisableCode    bool `json:"disableCode"`    // If true, this tracer will not return the contract code
+	DisableStorage bool `json:"disableStorage"` // If true, this tracer will not return the contract storage
 }
 
 func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
@@ -203,7 +205,6 @@ func (t *prestateTracer) CaptureTxEnd(restGas uint64) {
 		postAccount := &account{Storage: make(map[libcommon.Hash]libcommon.Hash)}
 		newBalance := t.env.IntraBlockState().GetBalance(addr).ToBig()
 		newNonce := t.env.IntraBlockState().GetNonce(addr)
-		newCode := t.env.IntraBlockState().GetCode(addr)
 
 		if newBalance.Cmp(t.pre[addr].Balance) != 0 {
 			modified = true
@@ -213,26 +214,32 @@ func (t *prestateTracer) CaptureTxEnd(restGas uint64) {
 			modified = true
 			postAccount.Nonce = newNonce
 		}
-		if !bytes.Equal(newCode, t.pre[addr].Code) {
-			modified = true
-			postAccount.Code = newCode
+
+		if !t.config.DisableCode {
+			newCode := t.env.IntraBlockState().GetCode(addr)
+			if !bytes.Equal(newCode, t.pre[addr].Code) {
+				modified = true
+				postAccount.Code = newCode
+			}
 		}
 
-		for key, val := range state.Storage {
-			// don't include the empty slot
-			if val == (libcommon.Hash{}) {
-				delete(t.pre[addr].Storage, key)
-			}
+		if !t.config.DisableStorage {
+			for key, val := range state.Storage {
+				// don't include the empty slot
+				if val == (libcommon.Hash{}) {
+					delete(t.pre[addr].Storage, key)
+				}
 
-			var newVal uint256.Int
-			t.env.IntraBlockState().GetState(addr, &key, &newVal)
-			if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
-				// Omit unchanged slots
-				delete(t.pre[addr].Storage, key)
-			} else {
-				modified = true
-				if !newVal.IsZero() {
-					postAccount.Storage[key] = newVal.Bytes32()
+				var newVal uint256.Int
+				t.env.IntraBlockState().GetState(addr, &key, &newVal)
+				if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
+					// Omit unchanged slots
+					delete(t.pre[addr].Storage, key)
+				} else {
+					modified = true
+					if !newVal.IsZero() {
+						postAccount.Storage[key] = newVal.Bytes32()
+					}
 				}
 			}
 		}
@@ -288,8 +295,13 @@ func (t *prestateTracer) lookupAccount(addr libcommon.Address) {
 	t.pre[addr] = &account{
 		Balance: t.env.IntraBlockState().GetBalance(addr).ToBig(),
 		Nonce:   t.env.IntraBlockState().GetNonce(addr),
-		Code:    t.env.IntraBlockState().GetCode(addr),
-		Storage: make(map[libcommon.Hash]libcommon.Hash),
+	}
+
+	if !t.config.DisableCode {
+		t.pre[addr].Code = t.env.IntraBlockState().GetCode(addr)
+	}
+	if !t.config.DisableStorage {
+		t.pre[addr].Storage = make(map[libcommon.Hash]libcommon.Hash)
 	}
 }
 
@@ -297,6 +309,10 @@ func (t *prestateTracer) lookupAccount(addr libcommon.Address) {
 // it to the prestate of the given contract. It assumes `lookupAccount`
 // has been performed on the contract before.
 func (t *prestateTracer) lookupStorage(addr libcommon.Address, key libcommon.Hash) {
+	if t.config.DisableStorage {
+		return
+	}
+
 	if _, ok := t.pre[addr].Storage[key]; ok {
 		return
 	}

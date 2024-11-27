@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -50,6 +51,7 @@ type Antiquary struct {
 	downloader                     proto_downloader.DownloaderClient
 	logger                         log.Logger
 	sn                             *freezeblocks.CaplinSnapshots
+	stateSn                        *snapshotsync.CaplinStateSnapshots
 	snReader                       freezeblocks.BeaconSnapshotReader
 	snBuildSema                    *semaphore.Weighted // semaphore for building only one type (blocks, caplin, v3) at a time
 	ctx                            context.Context
@@ -65,7 +67,7 @@ type Antiquary struct {
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
+func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, stateSn *snapshotsync.CaplinStateSnapshots, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks, blobs, snapgen bool, snBuildSema *semaphore.Weighted) *Antiquary {
 	backfilled := &atomic.Bool{}
 	blobBackfilled := &atomic.Bool{}
 	backfilled.Store(false)
@@ -89,6 +91,7 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 		blocks:          blocks,
 		blobs:           blobs,
 		snapgen:         snapgen,
+		stateSn:         stateSn,
 	}
 }
 
@@ -160,6 +163,12 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.OpenFolder(); err != nil {
 		return err
 	}
+	if a.stateSn != nil {
+		if err := a.stateSn.OpenFolder(); err != nil {
+			return err
+		}
+	}
+
 	defer logInterval.Stop()
 	if from != a.sn.BlocksAvailable() && a.sn.BlocksAvailable() != 0 {
 		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())

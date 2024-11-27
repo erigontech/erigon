@@ -28,7 +28,6 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/rlp"
 )
 
@@ -44,8 +43,8 @@ func NewTRand() *TRand {
 	return &TRand{rnd: rand.New(src)}
 }
 
-func (tr *TRand) RandIntInRange(min, max int) int {
-	return (tr.rnd.Intn(max-min) + min)
+func (tr *TRand) RandIntInRange(_min, _max int) int {
+	return (tr.rnd.Intn(_max-_min) + _min)
 }
 
 func (tr *TRand) RandUint64() *uint64 {
@@ -113,20 +112,20 @@ func (tr *TRand) RandHeader() *Header {
 	}
 }
 
-func (tr *TRand) RandAccessTuple() types2.AccessTuple {
+func (tr *TRand) RandAccessTuple() AccessTuple {
 	n := tr.RandIntInRange(1, 5)
 	sk := make([]libcommon.Hash, n)
 	for i := 0; i < n; i++ {
 		sk[i] = tr.RandHash()
 	}
-	return types2.AccessTuple{
+	return AccessTuple{
 		Address:     tr.RandAddress(),
 		StorageKeys: sk,
 	}
 }
 
-func (tr *TRand) RandAccessList(size int) types2.AccessList {
-	al := make([]types2.AccessTuple, size)
+func (tr *TRand) RandAccessList(size int) AccessList {
+	al := make([]AccessTuple, size)
 	for i := 0; i < size; i++ {
 		al[i] = tr.RandAccessTuple()
 	}
@@ -137,10 +136,10 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	auths := make([]Authorization, size)
 	for i := 0; i < size; i++ {
 		auths[i] = Authorization{
-			ChainID: uint256.NewInt(*tr.RandUint64()),
+			ChainID: *tr.RandUint64(),
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
-			V:       *uint256.NewInt(*tr.RandUint64()),
+			YParity: uint8(*tr.RandUint64()),
 			R:       *uint256.NewInt(*tr.RandUint64()),
 			S:       *uint256.NewInt(*tr.RandUint64()),
 		}

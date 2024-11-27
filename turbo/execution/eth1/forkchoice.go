@@ -194,22 +194,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	//}
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
-	// Update the last new block seen.
-	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
-	if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
-		if err != nil {
-			return err
-		}
-		if num != nil {
-			return rawdb.WriteLastNewBlockSeen(tx, *num)
-		}
-		return nil
-	}); err != nil {
-		sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		return
-	}
-
 	var validationError string
 	type canonicalEntry struct {
 		hash   common.Hash
@@ -221,6 +205,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer tx.Rollback()
+
+	{ // used by eth_syncing
+		num, err := e.blockReader.HeaderNumber(ctx, tx, originalBlockHash)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
+		}
+		if num != nil {
+			e.hook.LastNewBlockSeen(*num) // used by eth_syncing
+		}
+	}
 
 	blockHash := originalBlockHash
 
@@ -347,11 +342,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return
 		}
-		if e.hook != nil {
-			if err = e.hook.BeforeRun(tx, isSynced); err != nil {
-				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-				return
-			}
+		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			return
 		}
 		// Run the unwind
 		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {

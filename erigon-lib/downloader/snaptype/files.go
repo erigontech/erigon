@@ -124,38 +124,53 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			}
 		}
 	}
+	if strings.Contains(fileName, "caplin/") {
+		return res, isStateFile, true
+	}
 	return res, isStateFile, isStateFile
 }
 
 func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
-	parts := strings.Split(onlyName, "-")
+	parts := strings.SplitN(onlyName, "-", 4)
 	res = FileInfo{Path: filepath.Join(dir, fileName), name: fileName, Ext: ext}
-	if len(parts) < 4 {
+
+	if len(parts) < 2 {
+		return res, ok
+	}
+
+	res.Type, ok = ParseFileType(parts[len(parts)-1])
+
+	if !ok {
+		res.Type, ok = ParseFileType(parts[0])
+	}
+
+	if ok {
+		res.TypeString = res.Type.Name()
+	}
+
+	if len(parts) < 3 {
 		return res, ok
 	}
 
 	var err error
 	res.Version, err = ParseVersion(parts[0])
 	if err != nil {
-		return
+		return res, false
 	}
 
 	from, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
-		return
+		return res, false
 	}
 	res.From = from * 1_000
 	to, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
-		return
+		return res, false
 	}
 	res.To = to * 1_000
-	res.Type, ok = ParseFileType(parts[3])
-	if !ok {
-		return res, ok
-	}
+
 	return res, ok
 }
 
@@ -243,6 +258,7 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
+	TypeString      string // This is for giulio's generic snapshots
 }
 
 func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
@@ -263,8 +279,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 		return res
 	}
 
-	// this is a lexical comparison (don't use enum)
-	return strings.Compare(f.Type.Name(), o.Type.Name())
+	return strings.Compare(f.name, o.name)
 }
 
 func (f FileInfo) As(t Type) FileInfo {

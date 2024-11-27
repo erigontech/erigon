@@ -39,7 +39,7 @@ import (
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	txpool2 "github.com/erigontech/erigon-lib/txpool"
+	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
 
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/filters"

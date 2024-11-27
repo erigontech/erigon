@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,8 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
-
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
@@ -139,7 +138,8 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_engine      consensus.EngineReader
 
-	bridgeReader bridgeReader
+	useBridgeReader bool
+	bridgeReader    bridgeReader
 
 	evmCallTimeout      time.Duration
 	dirs                datadir.Dirs
@@ -173,6 +173,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		receiptsGenerator:   receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
 		borReceiptGenerator: receipts.NewBorGenerator(receiptsCacheLimit, blockReader, engine),
 		dirs:                dirs,
+		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
 		bridgeReader:        bridgeReader,
 	}
 }
@@ -302,7 +303,7 @@ func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumbe
 
 func (api *BaseAPI) stateSyncEvents(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum uint64, chainConfig *chain.Config) ([]*types.Message, error) {
 	var stateSyncEvents []*types.Message
-	if api.bridgeReader != nil {
+	if api.useBridgeReader {
 		events, err := api.bridgeReader.Events(ctx, blockNum)
 		if err != nil {
 			return nil, err
@@ -395,7 +396,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
-	if base.bridgeReader != nil {
+	if base.useBridgeReader {
 		logger.Info("starting rpc with polygon bridge")
 	}
 
@@ -432,7 +433,7 @@ type RPCTransaction struct {
 	TransactionIndex    *hexutil.Uint64            `json:"transactionIndex"`
 	Value               *hexutil.Big               `json:"value"`
 	Type                hexutil.Uint64             `json:"type"`
-	Accesses            *types2.AccessList         `json:"accessList,omitempty"`
+	Accesses            *types.AccessList          `json:"accessList,omitempty"`
 	ChainID             *hexutil.Big               `json:"chainId,omitempty"`
 	MaxFeePerBlobGas    *hexutil.Big               `json:"maxFeePerBlobGas,omitempty"`
 	BlobVersionedHashes []common.Hash              `json:"blobVersionedHashes,omitempty"`

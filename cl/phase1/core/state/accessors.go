@@ -120,7 +120,7 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 
 	// We divide computation into multiple threads to speed up the process.
 	numThreads := runtime.NumCPU()
-	wp := threading.CreateWorkerPool(numThreads)
+	wp := threading.NewParallelExecutor()
 	eligibleValidatorsShards := make([][]uint64, numThreads)
 	shardSize := b.ValidatorLength() / numThreads
 	for i := range eligibleValidatorsShards {
@@ -148,7 +148,7 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 			return nil
 		})
 	}
-	wp.WaitAndClose()
+	wp.Execute()
 	// Merge the results from all threads.
 	for i := range eligibleValidatorsShards {
 		eligibleValidators = append(eligibleValidators, eligibleValidatorsShards[i]...)

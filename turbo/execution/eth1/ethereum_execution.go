@@ -121,14 +121,6 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 }
 
 func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Header, error) {
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if td == nil {
-		return nil, nil
-	}
-
 	if e.blockReader == nil {
 		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
 	}
@@ -142,13 +134,6 @@ func (e *EthereumExecutionModule) getTD(_ context.Context, tx kv.Tx, blockHash l
 }
 
 func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash libcommon.Hash, blockNumber uint64) (*types.Body, error) {
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if td == nil {
-		return nil, nil
-	}
 	if e.blockReader == nil {
 		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
 		return body, nil
@@ -175,13 +160,6 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 		}
 	}
 
-	td, err := rawdb.ReadTd(tx, canonical, blockNumber)
-	if err != nil {
-		return libcommon.Hash{}, err
-	}
-	if td == nil {
-		return libcommon.Hash{}, nil
-	}
 	return canonical, nil
 }
 
@@ -200,10 +178,8 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(tx kv.RwTx, header *ty
 			return err
 		}
 	}
-	if e.hook != nil {
-		if err := e.hook.BeforeRun(tx, true); err != nil {
-			return err
-		}
+	if err := e.hook.BeforeRun(tx, true); err != nil {
+		return err
 	}
 	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
@@ -224,13 +200,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	defer e.semaphore.Release(1)
 
-	// Update the last new block seen.
-	// This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
-	if err := e.db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteLastNewBlockSeen(tx, req.Number)
-	}); err != nil {
-		return nil, err
-	}
+	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 

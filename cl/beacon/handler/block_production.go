@@ -112,6 +112,34 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 		time.Sleep(30 * time.Millisecond)
 	}
 }
+
+func (a *ApiHandler) waitForHeadSlot(slot uint64) {
+	stopCh := time.After(time.Second)
+	for {
+		headSlot := a.syncedData.HeadSlot()
+		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
+			return
+		}
+		_, ok, err := a.attestationProducer.CachedAttestationData(slot, 0)
+		if err != nil {
+			log.Warn("Failed to get attestation data", "err", err)
+		}
+		if ok {
+			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
+			return
+		}
+
+		time.Sleep(1 * time.Millisecond)
+		select {
+		case <-stopCh:
+			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
+			return
+		default:
+		}
+
+	}
+}
+
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -141,6 +169,20 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			errors.New("slot is required"),
 		)
 	}
+	if *slot > a.ethClock.GetCurrentSlot() {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
+	}
+
+	a.waitForHeadSlot(*slot)
+
+	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot, *committeeIndex)
+	if err != nil {
+		log.Warn("Failed to get attestation data", "err", err)
+	}
+	if ok {
+		return newBeaconResponse(attestationData), nil
+	}
+
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
 		return nil, beaconhttp.NewEndpointError(
@@ -153,30 +195,26 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeeIndex = &zero
 	}
 
-	headState, cn := a.syncedData.HeadState()
-	defer cn()
-
-	if headState == nil {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusServiceUnavailable,
-			errors.New("beacon node is still syncing"),
+	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
+			tx,
+			headState,
+			a.syncedData.HeadRoot(),
+			*slot,
+			*committeeIndex,
 		)
-	}
 
-	attestationData, err := a.attestationProducer.ProduceAndCacheAttestationData(
-		tx,
-		headState,
-		a.syncedData.HeadRoot(),
-		*slot,
-		*committeeIndex,
-	)
-	if err == attestation_producer.ErrHeadStateBehind {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusServiceUnavailable,
-			errors.New("beacon node is still syncing"),
-		)
-	} else if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+		if err == attestation_producer.ErrHeadStateBehind {
+			return beaconhttp.NewEndpointError(
+				http.StatusServiceUnavailable,
+				synced_data.ErrNotSynced,
+			)
+		} else if err != nil {
+			return beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return newBeaconResponse(attestationData), nil
@@ -1164,7 +1202,7 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		candidateAggregationBits := candidate.AggregationBits.Bytes()
 		for _, curAtt := range hashToAtts[dataRoot] {
 			currAggregationBitsBytes := curAtt.AggregationBits.Bytes()
-			if !utils.IsOverlappingBitlist(currAggregationBitsBytes, candidateAggregationBits) {
+			if !utils.IsOverlappingSSZBitlist(currAggregationBitsBytes, candidateAggregationBits) {
 				// merge signatures
 				candidateSig := candidate.Signature
 				curSig := curAtt.Signature

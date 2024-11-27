@@ -30,6 +30,7 @@ import (
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -65,6 +66,7 @@ type GossipManager struct {
 	voluntaryExitService         services.VoluntaryExitService
 	blsToExecutionChangeService  services.BLSToExecutionChangeService
 	proposerSlashingService      services.ProposerSlashingService
+	attestationsLimiter          *timeBasedRateLimiter
 }
 
 func NewGossipReceiver(
@@ -102,6 +104,7 @@ func NewGossipReceiver(
 		voluntaryExitService:         voluntaryExitService,
 		blsToExecutionChangeService:  blsToExecutionChangeService,
 		proposerSlashingService:      proposerSlashingService,
+		attestationsLimiter:          newTimeBasedRateLimiter(6*time.Second, 250),
 	}
 }
 
@@ -142,7 +145,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	if err := g.routeAndProcess(ctx, data); err != nil {
 		return err
 	}
-	if errors.Is(err, services.ErrIgnore) {
+	if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
 		return nil
 	}
 	if err != nil {
@@ -197,14 +200,20 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
 		return g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
-		obj := &cltypes.SignedContributionAndProof{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := &cltypes.SignedContributionAndProofWithGossipData{
+			GossipData:                 copyOfSentinelData(data),
+			SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
+		}
+		if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
-		obj := &cltypes.SignedVoluntaryExit{}
-		if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+		obj := &cltypes.SignedVoluntaryExitWithGossipData{
+			GossipData:          copyOfSentinelData(data),
+			SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
+		}
+		if err := obj.SignedVoluntaryExit.DecodeSSZ(data.Data, int(version)); err != nil {
 			return err
 		}
 		return g.voluntaryExitService.ProcessMessage(ctx, data.SubnetId, obj)
@@ -248,8 +257,11 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			// The background checks above are enough for now.
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
-			msg := &cltypes.SyncCommitteeMessage{}
-			if err := msg.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+			msg := &cltypes.SyncCommitteeMessageWithGossipData{
+				GossipData:           copyOfSentinelData(data),
+				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
+			}
+			if err := msg.SyncCommitteeMessage.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
@@ -263,12 +275,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}
-
-			if g.committeeSub.NeedToAggregate(obj.Attestation) {
+			if g.committeeSub.NeedToAggregate(obj.Attestation) || g.attestationsLimiter.tryAcquire() {
 				return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
 			}
-
-			return nil
+			return services.ErrIgnore
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)
 		}

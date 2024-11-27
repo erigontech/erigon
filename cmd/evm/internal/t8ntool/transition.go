@@ -472,7 +472,11 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 
 		auths := make([]types.Authorization, 0)
 		for _, auth := range *txJson.Authorizations {
-			auths = append(auths, auth.ToAuthorization())
+			a, err := auth.ToAuthorization()
+			if err != nil {
+				return nil, err
+			}
+			auths = append(auths, a)
 		}
 
 		return &types.SetCodeTransaction{

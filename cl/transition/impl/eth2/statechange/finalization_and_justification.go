@@ -142,7 +142,7 @@ func computePreviousAndCurrentTargetBalancePostAltair(s abstract.BeaconState, un
 		shardSize = s.ValidatorSet().Length()
 	}
 
-	wp := threading.CreateWorkerPool(numWorkers)
+	wp := threading.NewParallelExecutor()
 	for i := 0; i < numWorkers; i++ {
 		workerID := i
 		from := workerID * shardSize
@@ -182,7 +182,7 @@ func computePreviousAndCurrentTargetBalancePostAltair(s abstract.BeaconState, un
 		}
 	}
 
-	wp.WaitAndClose()
+	wp.Execute()
 
 	for i := 0; i < numWorkers; i++ {
 		previousTargetBalance += previousTargetBalanceShards[i]

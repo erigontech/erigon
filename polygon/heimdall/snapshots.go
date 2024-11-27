@@ -257,7 +257,7 @@ func ValidateBorEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB
 }
 
 func RemoteEventCheckForBlock(header *types.Header, previousHeader *types.Header, chainId string, startEventId uint64, events []rlp.RawValue,
-	heimdallClient HeimdallClient, config *borcfg.BorConfig, logger log.Logger) error {
+	heimdallClient Client, config *borcfg.BorConfig, logger log.Logger) error {
 
 	blockNum := header.Number.Uint64()
 

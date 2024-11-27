@@ -34,7 +34,7 @@ func TestHeimdallServer(t *testing.T) {
 
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	client := heimdall.NewMockHeimdallClient(ctrl)
+	client := heimdall.NewMockClient(ctrl)
 
 	events := []*heimdall.EventRecordWithTime{
 		{

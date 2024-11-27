@@ -76,7 +76,7 @@ func identifyToken(b byte) Token {
 		return TokenLongBlob
 	case b >= 192 && b <= 247:
 		return TokenShortList
-	case b >= 248 && b <= 255:
+	case b >= 248:
 		return TokenLongList
 	}
 	return TokenUnknown

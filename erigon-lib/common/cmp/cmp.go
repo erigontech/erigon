@@ -21,12 +21,12 @@ import (
 )
 
 // InRange - ensure val is in [min,max] range
-func InRange[T cmp.Ordered](min, max, val T) T {
-	if min >= val {
-		return min
+func InRange[T cmp.Ordered](_min, _max, val T) T {
+	if _min >= val {
+		return _min
 	}
-	if max <= val {
-		return max
+	if _max <= val {
+		return _max
 	}
 	return val
 }

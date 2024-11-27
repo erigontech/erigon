@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 )
 
@@ -67,18 +68,22 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 				syncnets = append(syncnets, uint64(i))
 			}
 		} else {
-			headState, cn := a.syncedData.HeadState()
-			defer cn()
-			if headState == nil {
-				http.Error(w, "head state not available", http.StatusServiceUnavailable)
-				return
-			}
-			syncnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
-			if err != nil {
+			// headState, cn := a.syncedData.HeadState()
+			// defer cn()
+			// if headState == nil {
+			// 	http.Error(w, "head state not available", http.StatusServiceUnavailable)
+			// 	return
+			// }
+			if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+				syncnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, subRequest.ValidatorIndex)
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			cn()
 		}
 
 		// subscribe to subnets

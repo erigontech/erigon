@@ -95,11 +95,11 @@ func TestCalcDifficulty(t *testing.T) {
 	}
 }
 
-func randSlice(min, max uint32) []byte {
+func randSlice(_min, _max uint32) []byte {
 	var b = make([]byte, 4)
 	rand.Read(b)
 	a := binary.LittleEndian.Uint32(b)
-	size := min + a%(max-min)
+	size := _min + a%(_max-_min)
 	out := make([]byte, size)
 	rand.Read(out)
 	return out

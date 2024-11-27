@@ -51,17 +51,16 @@ func makeRoot() *types.Header {
 	}
 }
 
-func makeCCB(root *types.Header) CanonicalChainBuilder {
+func makeCCB(root *types.Header) *CanonicalChainBuilder {
 	difficultyCalc := mockDifficultyCalculator{}
 	builder := NewCanonicalChainBuilder(root, &difficultyCalc, &mockHeaderValidator{})
 	return builder
 }
 
 type connectCCBTest struct {
-	t       *testing.T
-	root    *types.Header
-	builder CanonicalChainBuilder
-
+	t                 *testing.T
+	root              *types.Header
+	builder           *CanonicalChainBuilder
 	currentHeaderTime uint64
 }
 
@@ -331,7 +330,7 @@ func TestCCBPruneNode(t *testing.T) {
 	// |
 	// +--------> P(td:3)
 	type example struct {
-		ccb     CanonicalChainBuilder
+		ccb     *CanonicalChainBuilder
 		headerR *types.Header
 		headerA *types.Header
 		headerB *types.Header
@@ -522,7 +521,7 @@ func TestCCBLowestCommonAncestor(t *testing.T) {
 	})
 }
 
-func assertLca(t *testing.T, ccb CanonicalChainBuilder, a, b, wantLca *types.Header, wantOk bool) {
+func assertLca(t *testing.T, ccb *CanonicalChainBuilder, a, b, wantLca *types.Header, wantOk bool) {
 	lca, ok := ccb.LowestCommonAncestor(a.Hash(), b.Hash())
 	require.Equal(t, wantOk, ok)
 	require.Equal(t, wantLca, lca)

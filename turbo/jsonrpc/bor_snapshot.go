@@ -79,7 +79,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	}
 	defer borTx.Rollback()
 
-	if api.spanProducersReader != nil {
+	if api.useSpanProducersReader {
 		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
@@ -173,7 +173,7 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	}
 	defer borTx.Rollback()
 
-	if api.spanProducersReader != nil {
+	if api.useSpanProducersReader {
 		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
@@ -226,7 +226,7 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	}
 	defer borTx.Rollback()
 
-	if api.spanProducersReader != nil {
+	if api.useSpanProducersReader {
 		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
@@ -280,7 +280,7 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	}
 	defer borTx.Rollback()
 
-	if api.spanProducersReader != nil {
+	if api.useSpanProducersReader {
 		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
@@ -424,7 +424,7 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 	defer borTx.Rollback()
 
 	var snap *Snapshot
-	if api.spanProducersReader != nil {
+	if api.useSpanProducersReader {
 		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 		if err != nil {
 			return common.Address{}, err
@@ -496,7 +496,7 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	defer borTx.Rollback()
 
 	var snap *Snapshot
-	if api.spanProducersReader != nil {
+	if api.useSpanProducersReader {
 		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 		if err != nil {
 			return BlockSigners{}, err

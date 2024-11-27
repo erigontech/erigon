@@ -195,8 +195,8 @@ func (tx *Tx) Commit() error {
 	return mdbxTx.Commit()
 }
 
-func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.filesTx.DomainRange(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
+func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	it, err := tx.filesTx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return it, nil
 }
 
-func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+func (tx *Tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
 	v, step, ok, err := tx.filesTx.GetLatest(name, k, k2, tx.MdbxTx)
 	if err != nil {
 		return nil, step, err
@@ -214,14 +214,14 @@ func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, er
 	}
 	return v, step, nil
 }
-func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	if key2 != nil {
 		key = append(common.Copy(key), key2...)
 	}
-	return tx.filesTx.DomainGetAsOf(tx.MdbxTx, name, key, ts)
+	return tx.filesTx.GetAsOf(tx.MdbxTx, name, key, ts)
 }
 
-func (tx *Tx) HistorySeek(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return tx.filesTx.HistorySeek(name, key, ts, tx.MdbxTx)
 }
 
@@ -234,7 +234,7 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	return timestamps, nil
 }
 
-func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
 	it, err := tx.filesTx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
 	if err != nil {
 		return nil, err

@@ -43,7 +43,7 @@ type HeimdallSimulator struct {
 	logger log.Logger
 }
 
-var _ heimdall.HeimdallClient = (*HeimdallSimulator)(nil)
+var _ heimdall.Client = (*HeimdallSimulator)(nil)
 
 type sprintLengthCalculator struct{}
 

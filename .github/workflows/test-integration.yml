@@ -37,7 +37,7 @@ jobs:
         run: sudo apt update && sudo apt install build-essential
 
       - name: test-integration
-        run: make test-integration
+        run: GOGC=80 make test-integration
 
   tests-windows:
     strategy:

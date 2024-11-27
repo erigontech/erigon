@@ -161,18 +161,6 @@ func (dt *DomainRoTx) lookupVisibleFileByItsRange(txFrom uint64, txTo uint64) *f
 		}
 	}
 	if item == nil || item.bindex == nil {
-		visibleFiles := ""
-		for _, f := range dt.files {
-			visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
-		}
-		dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file not found",
-			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
-			"_visible", visibleFiles, "visibleFilesCount", len(dt.files))
-
-		if item != nil && item.bindex == nil {
-			dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
-		}
-
 		return nil
 	}
 	return item
@@ -246,6 +234,15 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	if mergedStorage == nil {
 		mergedStorage = storage.lookupVisibleFileByItsRange(rng.from, rng.to)
 		if mergedStorage == nil {
+			visibleFiles := ""
+			for _, f := range dt.files {
+				visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
+			}
+
+			dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file not found",
+				"stepFrom", rng.from/dt.d.aggregationStep, "stepTo", rng.to/dt.d.aggregationStep,
+				"_visible", visibleFiles, "visibleFilesCount", len(dt.files))
+
 			// TODO may allow to merge, but storage keys will be stored as plainkeys
 			return nil, fmt.Errorf("merged v1-storage.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
 		}
@@ -254,6 +251,14 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	if mergedAccount == nil {
 		mergedAccount = accounts.lookupVisibleFileByItsRange(rng.from, rng.to)
 		if mergedAccount == nil {
+			visibleFiles := ""
+			for _, f := range dt.files {
+				visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
+			}
+
+			dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file not found",
+				"stepFrom", rng.from/dt.d.aggregationStep, "stepTo", rng.to/dt.d.aggregationStep,
+				"_visible", visibleFiles, "visibleFilesCount", len(dt.files))
 			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
 		}
 	}
