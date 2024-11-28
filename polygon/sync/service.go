@@ -61,7 +61,7 @@ func NewService(
 		panic(err)
 	}
 
-	store := NewStore(logger, execution, bridgeService, NewWiggleCalculator(borConfig, signaturesCache, heimdallService))
+	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
@@ -87,6 +87,7 @@ func NewService(
 		bridgeService,
 		events.Events(),
 		notifications,
+		NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
 	)
 	return &Service{
 		logger:          logger,

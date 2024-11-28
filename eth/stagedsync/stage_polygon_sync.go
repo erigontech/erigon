@@ -124,7 +124,7 @@ func NewPolygonSyncStageCfg(
 		panic(err)
 	}
 
-	syncStore := polygonsync.NewStore(logger, executionEngine, bridgeService, sync.NewWiggleCalculator(borConfig, signaturesCache, heimdallService))
+	syncStore := polygonsync.NewStore(logger, executionEngine, bridgeService)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
 		p2pService,
@@ -149,6 +149,7 @@ func NewPolygonSyncStageCfg(
 		bridgeService,
 		events.Events(),
 		notifications,
+		sync.NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
 	)
 	syncService := &polygonSyncStageService{
 		logger:          logger,
