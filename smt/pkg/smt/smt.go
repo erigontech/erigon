@@ -503,7 +503,9 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 
 	utils.RemoveOver(siblings, level+1)
 
-	s.updateDepth(len(siblings))
+	if err := s.updateDepth(len(siblings)); err != nil {
+		return nil, fmt.Errorf("updateDepth: %w", err)
+	}
 
 	for level >= 0 {
 		hashValueIn, err := utils.NodeValue8FromBigIntArray(siblings[level][0:8])
@@ -639,7 +641,7 @@ func (s *SMT) CheckOrphanedNodes(ctx context.Context) int {
 	return len(orphanedNodes)
 }
 
-func (s *SMT) updateDepth(newDepth int) {
+func (s *SMT) updateDepth(newDepth int) error {
 	oldDepth, err := s.Db.GetDepth()
 	if err != nil {
 		oldDepth = 0
@@ -652,8 +654,11 @@ func (s *SMT) updateDepth(newDepth int) {
 
 	newDepthAsByte := byte(newDepth & 0xFF)
 	if oldDepth < newDepthAsByte {
-		_ = s.Db.SetDepth(newDepthAsByte)
+		if err := s.Db.SetDepth(newDepthAsByte); err != nil {
+			return fmt.Errorf("s.Db.SetDepth: %w", err)
+		}
 	}
+	return nil
 }
 
 /*
