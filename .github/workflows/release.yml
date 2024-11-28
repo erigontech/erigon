@@ -183,16 +183,19 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+        path: dist/
 
     - name: Download amd64 artifact
       uses: actions/download-artifact@v4
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+        path: dist/
 
-    - name: Download arm64 artifact
+    - name: Download amd64v2 artifact
       uses: actions/download-artifact@v4
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+        path: dist/
 
     - name: Set up QEMU
       uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf ## v3.2.0
