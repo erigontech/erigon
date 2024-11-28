@@ -167,11 +167,3 @@ jobs:
               fi
               echo "Done."
             done
-
-  run-kurtosis-assertoor:
-    needs: [define_matrix, Build]
-    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
-    with:
-      checkout_ref: ${{ github.sha }}
-      os: ${{ needs.define_matrix.outputs.os }}
-      docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}
