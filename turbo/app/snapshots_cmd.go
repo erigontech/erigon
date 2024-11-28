@@ -454,7 +454,6 @@ func doBtSearch(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	defer cur.Close()
 	if cur != nil {
 		fmt.Printf("seek: %x, -> %x, %x\n", seek, cur.Key(), cur.Value())
 	} else {
