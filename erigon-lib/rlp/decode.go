@@ -157,18 +157,18 @@ func (err *decodeError) Error() string {
 }
 
 func wrapStreamError(err error, typ reflect.Type) error {
-	switch err {
-	case ErrCanonInt:
+	switch {
+	case errors.Is(err, ErrCanonInt):
 		return &decodeError{msg: "non-canonical integer (leading zero bytes)", typ: typ}
-	case ErrCanonSize:
+	case errors.Is(err, ErrCanonSize):
 		return &decodeError{msg: "non-canonical size information", typ: typ}
-	case ErrExpectedList:
+	case errors.Is(err, ErrExpectedList):
 		return &decodeError{msg: "expected input list", typ: typ}
-	case ErrExpectedString:
+	case errors.Is(err, ErrExpectedString):
 		return &decodeError{msg: "expected input string or byte", typ: typ}
-	case errUintOverflow:
+	case errors.Is(err, errUintOverflow):
 		return &decodeError{msg: "input string too long", typ: typ}
-	case errNotAtEOL:
+	case errors.Is(err, errNotAtEOL):
 		return &decodeError{msg: "input list has too many elements", typ: typ}
 	}
 	return err
@@ -179,7 +179,8 @@ func WrapStreamError(err error, typ reflect.Type) error {
 }
 
 func addErrorContext(err error, ctx string) error {
-	if decErr, ok := err.(*decodeError); ok {
+	var decErr *decodeError
+	if errors.As(err, &decErr) {
 		decErr.ctx = append(decErr.ctx, ctx)
 	}
 	return err
@@ -368,7 +369,7 @@ func decodeSliceElems(s *Stream, val reflect.Value, elemdec decoder) error {
 			val.SetLen(i + 1)
 		}
 		// decode into element
-		if err := elemdec(s, val.Index(i)); err == EOL {
+		if err := elemdec(s, val.Index(i)); errors.Is(err, EOL) {
 			break
 		} else if err != nil {
 			return addErrorContext(err, fmt.Sprint("[", i, "]"))
@@ -387,7 +388,7 @@ func decodeListArray(s *Stream, val reflect.Value, elemdec decoder) error {
 	vlen := val.Len()
 	i := 0
 	for ; i < vlen; i++ {
-		if err := elemdec(s, val.Index(i)); err == EOL {
+		if err := elemdec(s, val.Index(i)); errors.Is(err, EOL) {
 			break
 		} else if err != nil {
 			return addErrorContext(err, fmt.Sprint("[", i, "]"))
@@ -461,7 +462,7 @@ func makeStructDecoder(typ reflect.Type) (decoder, error) {
 		}
 		for i, f := range fields {
 			err := f.info.decoder(s, val.Field(f.index))
-			if err == EOL {
+			if errors.Is(err, EOL) {
 				if f.optional {
 					// The field is optional, so reaching the end of the list before
 					// reaching the last field is acceptable. All remaining undecoded
@@ -756,7 +757,7 @@ func (s *Stream) uint(maxbits int) (uint64, error) {
 		}
 		v, err := s.readUint(byte(size))
 		switch {
-		case err == ErrCanonSize:
+		case errors.Is(err, ErrCanonSize):
 			// Adjust error because we're not reading a size right now.
 			return 0, ErrCanonInt
 		case err != nil:
@@ -904,7 +905,8 @@ func (s *Stream) Decode(val interface{}) error {
 	}
 
 	err = dcd(s, rval.Elem())
-	if decErr, ok := err.(*decodeError); ok && len(decErr.ctx) > 0 {
+	var decErr *decodeError
+	if errors.As(err, &decErr) && len(decErr.ctx) > 0 {
 		// add decode target type to error so context has more meaning
 		decErr.ctx = append(decErr.ctx, fmt.Sprint("(", rtyp.Elem(), ")"))
 	}
@@ -1000,10 +1002,10 @@ func (s *Stream) readKind() (kind Kind, size uint64, err error) {
 		if len(s.stack) == 0 {
 			// At toplevel, Adjust the error to actual EOF. io.EOF is
 			// used by callers to determine when to stop decoding.
-			switch err {
-			case io.ErrUnexpectedEOF:
+			switch {
+			case errors.Is(err, io.ErrUnexpectedEOF):
 				err = io.EOF
-			case ErrValueTooLarge:
+			case errors.Is(err, ErrValueTooLarge):
 				err = io.EOF
 			}
 		}
