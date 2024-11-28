@@ -491,32 +491,31 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	//well, let's find amogus
 	println("truly blocknum is:", blockNum)
-	//ok, blockNumFromTxNums, err := rawdbv3.TxNums.FindBlockNum(tx, txNumMin+txnIndex)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//if !ok {
-	//	println("not found in txnums")
-	//} else {
-	//	println("found in txnums blocknum:", blockNumFromTxNums)
-	//}
-	//ok, blockNumFromFiles, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//if !ok {
-	//	println("not found in files")
-	//} else {
-	//	println("found in files blocknum:", blockNumFromFiles)
-	//}
-	//txNum = txNumMin + txnIndex
+	ok, blockNumFromTxNums, err := rawdbv3.TxNums.FindBlockNum(tx, txNumMin+txnIndex)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		println("not found in txnums")
+	} else {
+		println("found in txnums blocknum:", blockNumFromTxNums)
+	}
+	ok, blockNumFromFiles, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		println("not found in files")
+	} else {
+		println("found in files blocknum:", blockNumFromFiles)
+	}
+	txNum = txNumMin + txnIndex
 	receipt, err := api.getReceipt(ctx, chainConfig, tx.(kv.TemporalTx), block, int(txnIndex), txNum)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
 
 	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
-
 }
 
 // GetBlockReceipts - receipts for individual block
