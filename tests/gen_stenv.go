@@ -10,7 +10,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 
-	common0 "github.com/erigontech/erigon-lib/common"
+	common0 "github.com/erigontech/erigon/common"
 )
 
 var _ = (*stEnvMarshaling)(nil)
