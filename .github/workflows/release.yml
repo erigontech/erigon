@@ -51,6 +51,7 @@ jobs:
       commit-id: ${{ steps.getCommitId.outputs.id }}
       short-commit-id: ${{ steps.getCommitId.outputs.short_commit_id }}
       application: ${{ env.APPLICATION }}
+      parsed-version: ${{ steps.getCommitId.outputs.parsed_version}}
 
     steps:
       - name: Checkout git repository ${{ env.APP_REPO }}
@@ -78,6 +79,7 @@ jobs:
         run: |
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+          echo "parsed_version=$(echo ${{ inputs.version }} | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf ## v3.2.0
@@ -159,7 +161,7 @@ jobs:
     uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@feature/issue-12891 #### !!!! FIX-IT-BEFORE-MERGE !!!!
     with:
       application: ${{ needs.build-release.outputs.application }}
-      version: ${{ inputs.release_version }}
+      version: ${{ needs.build-release.outputs.parsed-version }}
 
 
 
@@ -245,7 +247,7 @@ jobs:
 
 
   publish-release:
-    needs: [ build-debian-pkg, publish-docker-image ]
+    needs: [ build-debian-pkg, publish-docker-image, build-release ]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: Publish release notes
@@ -284,13 +286,13 @@ jobs:
     - name: Download arm64 debian package
       uses: actions/download-artifact@v4
       with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_arm64.deb
+        name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
         path: dist/
 
     - name: Download amd64 debian package
       uses: actions/download-artifact@v4
       with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_amd64.deb
+        name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
         path: dist/
 
     - name: Publish draft of the Release notes with assets in case perform_release is set

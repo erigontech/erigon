@@ -30,27 +30,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get upgrade -y
-          sudo apt-get install -y dpkg-dev debhelper rclone reprepro
+          sudo apt-get install -y dpkg-dev debhelper
           sudo dpkg --clear-avail
-
-      - name: Setup parsed version
-        id: variables
-        run: |
-          echo "PARSED_VERSION=$(echo ${{ inputs.version }} | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
-
-      - name: Configure rclone [skip for now]
-        if: 1>2
-        run: |
-          mkdir -p ~/.config/rclone
-          cat <<-END > ~/.config/rclone/rclone.conf
-          [r2]
-          type = s3
-          provider = Cloudflare
-          access_key_id = ${R2_ACCESS_KEY_ID}
-          secret_access_key = ${R2_SECRET_ACCESS_KEY}
-          endpoint = ${R2_ENDPOINT}
-          acl = private
-          END
 
       - name: Extract archives and rename amd64v2 to amd64
         run: |
@@ -64,13 +45,12 @@ jobs:
       - name: Build debian package for amd64
         env:
           ARCH: "amd64"
-          PARSED_VERSION: ${{ steps.variables.outputs.PARSED_VERSION }}
         run: |
-          mkdir -p deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}/usr/bin \
-                   deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}/DEBIAN
-          cat <<-END  > deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}/DEBIAN/control
+          mkdir -p deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin \
+                   deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN
+          cat <<-END  > deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/control
           Package: ${{ inputs.application }}
-          Version: ${PARSED_VERSION}
+          Version: ${{ inputs.version }}
           Section: misc
           Priority: optional
           Architecture: ${ARCH}
@@ -80,19 +60,18 @@ jobs:
           Vcs-Browser: https://github.com/erigontech/erigon 
           END
           install -v -p ${{ inputs.application }}_${{ inputs.version }}_linux_${ARCH}/* \
-                      deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}/usr/bin
-          dpkg-deb --build --root-owner-group deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}
+                      deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin
+          dpkg-deb --build --root-owner-group deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}
 
       - name: Build debian package for arm64
         env:
           ARCH: "arm64"
-          PARSED_VERSION: ${{ steps.variables.outputs.PARSED_VERSION }}
         run: |
-          mkdir -p deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}/usr/bin \
-                    deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}/DEBIAN
-          cat <<-END  > deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}/DEBIAN/control
+          mkdir -p deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin \
+                    deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN
+          cat <<-END  > deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/control
           Package: ${{ inputs.application }}
-          Version: ${PARSED_VERSION}
+          Version: ${{ inputs.version }}
           Section: misc
           Priority: optional
           Architecture: ${ARCH}
@@ -102,26 +81,24 @@ jobs:
           Vcs-Browser: https://github.com/erigontech/erigon 
           END
           echo "debug start"
-          cat deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}/DEBIAN/control
+          cat deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/DEBIAN/control
           echo "debug end"
           install -v -p ${{ inputs.application }}_${{ inputs.version }}_linux_${ARCH}/* \
-                      deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}/usr/bin
-          dpkg-deb --build --root-owner-group deb-pkg/${{ inputs.application }}_${PARSED_VERSION}_${ARCH}
+                      deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}/usr/bin
+          dpkg-deb --build --root-owner-group deb-pkg/${{ inputs.application }}_${{ inputs.version }}_${ARCH}
 
       - name: Debug output
-        env:
-          PARSED_VERSION: ${{ steps.variables.outputs.PARSED_VERSION }}
         run: |
           cd ./deb-pkg
-          sha256sum ${{ inputs.application }}_${PARSED_VERSION}_amd64.deb > ${{ inputs.application }}_${PARSED_VERSION}_amd64.deb.checksum
-          sha256sum ${{ inputs.application }}_${PARSED_VERSION}_arm64.deb > ${{ inputs.application }}_${PARSED_VERSION}_arm64.deb.checksum
+          sha256sum ${{ inputs.application }}_${{ inputs.version }}_amd64.deb > ${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
+          sha256sum ${{ inputs.application }}_${{ inputs.version }}_arm64.deb > ${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
           ls -l *deb *.checksum
 
       - name: Apload artifact amd64.deb
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
-          name: ${{ inputs.application }}_${{ steps.variables.outputs.PARSED_VERSION }}_amd64.deb
-          path: ./deb-pkg/${{ inputs.application }}_${{ steps.variables.outputs.PARSED_VERSION }}_amd64.deb
+          name: ${{ inputs.application }}_${{ inputs.version }}_amd64.deb
+          path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_amd64.deb
           retention-days: 5
           compression-level: 0
           if-no-files-found: error
@@ -129,8 +106,8 @@ jobs:
       - name: Apload artifact amd64.deb.checksum
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
-          name: ${{ inputs.application }}_${{ steps.variables.outputs.PARSED_VERSION }}_amd64.deb.checksum
-          path: ./deb-pkg/${{ inputs.application }}_${{ steps.variables.outputs.PARSED_VERSION }}_amd64.deb.checksum
+          name: ${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
+          path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_amd64.deb.checksum
           retention-days: 5
           compression-level: 0
           if-no-files-found: error
@@ -138,8 +115,8 @@ jobs:
       - name: Apload artifact arm64.deb
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
-          name: ${{ inputs.application }}_${{ steps.variables.outputs.PARSED_VERSION }}_arm64.deb
-          path: ./deb-pkg/${{ inputs.application }}_${{ steps.variables.outputs.PARSED_VERSION }}_arm64.deb
+          name: ${{ inputs.application }}_${{ inputs.version }}_arm64.deb
+          path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_arm64.deb
           retention-days: 5
           compression-level: 0
           if-no-files-found: error
@@ -147,8 +124,8 @@ jobs:
       - name: Apload artifact arm64.deb.checksum
         uses: actions/upload-artifact@834a144ee995460fba8ed112a2fc961b36a5ec5a  ## v4.3.6
         with:
-          name: ${{ inputs.application }}_${{ steps.variables.outputs.PARSED_VERSION }}_arm64.deb.checksum
-          path: ./deb-pkg/${{ inputs.application }}_${{ steps.variables.outputs.PARSED_VERSION }}_arm64.deb.checksum
+          name: ${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
+          path: ./deb-pkg/${{ inputs.application }}_${{ inputs.version }}_arm64.deb.checksum
           retention-days: 5
           compression-level: 0
           if-no-files-found: error
