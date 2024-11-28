@@ -36,7 +36,7 @@ jobs:
       - name: Extract archives and rename amd64v2 to amd64
         run: |
           tar xzvf ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar.gz
-          mv -v ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2 ${{ inputs.application }}_${{ inputs.version }}_linux_amd64
+          mv -v ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2 ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64
           tar xzvf ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar.gz
 
       # Creating directory structure
