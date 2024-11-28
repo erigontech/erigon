@@ -37,7 +37,7 @@ jobs:
         run: |
           tar xzvf ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar.gz
           mv -v ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2 ${{ inputs.application }}_${{ inputs.version }}_linux_amd64
-          tar xzvf ${{ inputs.application }}_${{ inputs.version }}_linux_arm64.tar.gz
+          tar xzvf ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar.gz
 
       # Creating directory structure
       # see https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
