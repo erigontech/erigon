@@ -52,13 +52,11 @@ jobs:
           acl = private
           END
 
-      - name: Extract archives
+      - name: Extract archives and rename amd64v2 to amd64
         run: |
           tar xzvf ${{ inputs.application }}_${{ inputs.version }}_linux_amd64v2.tar.gz
-          #### mv -v ${{ inputs.application }}_${{ inputs.version }}_linux_amd64v2 ${{ inputs.application }}_${{ inputs.version }}_linux_amd64
-          mv erigon_v3.0.0-alpha5_linux_amd64v2 ${{ inputs.application }}_${{ inputs.version }}_linux_amd64
+          mv -v ${{ inputs.application }}_${{ inputs.version }}_linux_amd64v2 ${{ inputs.application }}_${{ inputs.version }}_linux_amd64
           tar xzvf ${{ inputs.application }}_${{ inputs.version }}_linux_arm64.tar.gz
-          mv erigon_v3.0.0-alpha5_linux_arm64 ${{ inputs.application }}_${{ inputs.version }}_linux_arm64
 
       # Creating directory structure
       # see https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
