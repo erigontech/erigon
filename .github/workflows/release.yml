@@ -157,7 +157,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     name: Build debian packages for both arch
-    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
+    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@feature/issue-12891 #### !!!! FIX-IT-BEFORE-MERGE !!!!
     with:
       application: ${{ env.APPLICATION }}
       version: ${{ inputs.release_version }}
