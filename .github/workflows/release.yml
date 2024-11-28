@@ -157,14 +157,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     name: Build debian packages for both arch
-
-    steps:
-
-    - name: Build debian packages
-      uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
-      with:
-        application: ${{ env.APPLICATION }}
-        version: ${{ inputs.release_version }}
+    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
+    with:
+      application: ${{ env.APPLICATION }}
+      version: ${{ inputs.release_version }}
 
 
 
