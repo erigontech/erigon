@@ -63,8 +63,8 @@ var (
 
 // Definition of SignedBeaconBlock
 type SignedBeaconBlock struct {
-	Signature libcommon.Bytes96 `json:"signature"`
 	Block     *BeaconBlock      `json:"message"`
+	Signature libcommon.Bytes96 `json:"signature"`
 }
 
 func NewSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *SignedBeaconBlock {

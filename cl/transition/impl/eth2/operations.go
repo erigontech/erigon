@@ -1211,6 +1211,7 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 	// Initiate source validator exit and append pending consolidation
 	sourceValidator.SetExitEpoch(computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance()))
 	sourceValidator.SetWithdrawableEpoch(sourceValidator.ExitEpoch() + s.BeaconConfig().MinValidatorWithdrawabilityDelay)
+	s.SetValidatorAtIndex(int(sourceIndex), sourceValidator) // update the state and underlying validator set. Mark the merkle tree dirty.
 	s.AppendPendingConsolidation(&solid.PendingConsolidation{
 		SourceIndex: sourceIndex,
 		TargetIndex: targetIndex,
@@ -1268,6 +1269,7 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	copy(newWc[:], wc[:])
 	newWc[0] = s.BeaconConfig().CompoundingWithdrawalPrefix
 	validator.SetWithdrawalCredentials(newWc)
+	s.SetValidatorAtIndex(int(vindex), validator) // update the state
 	return state.QueueExcessActiveBalance(s, vindex, &validator)
 }
 
