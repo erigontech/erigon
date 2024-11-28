@@ -16,7 +16,7 @@ version: '2.2'
 # Basic erigon's service
 x-erigon-service: &default-erigon-service
   image: erigontech/erigon:${TAG:-latest}
-  pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
+  pid: service:erigon # Processes must have different PID: to open Erigon's DB from another process (RPCDaemon). So, use same PID sequence across all containers.
   volumes_from: [ erigon ]
   restart: unless-stopped
   mem_swappiness: 0
