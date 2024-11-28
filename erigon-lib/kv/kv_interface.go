@@ -345,6 +345,8 @@ type Tx interface {
 	Count(bucket string) (uint64, error)
 
 	ListBuckets() ([]string, error)
+
+	Apply(ctx context.Context, f func(tx Tx) error) error
 }
 
 // RwTx
@@ -362,6 +364,8 @@ type RwTx interface {
 	RwCursorDupSort(table string) (RwCursorDupSort, error)
 
 	Commit() error // Commit all the operations of a transaction into the database.
+
+	ApplyRw(ctx context.Context, f func(tx RwTx) error) error
 }
 
 // Cursor - class for navigating through a database
