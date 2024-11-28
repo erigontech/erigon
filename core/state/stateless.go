@@ -25,8 +25,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 var (
@@ -87,6 +87,10 @@ func (s *Stateless) SetBlockNr(blockNr uint64) {
 
 func (s *Stateless) SetStrictHash(strict bool) {
 	s.t.SetStrictHash(strict)
+}
+
+func (s *Stateless) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return s.ReadAccountData(address)
 }
 
 // ReadAccountData is a part of the StateReader interface

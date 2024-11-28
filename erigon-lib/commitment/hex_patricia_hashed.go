@@ -35,9 +35,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types/accounts"
-	witnesstypes "github.com/erigontech/erigon/core/types/witness"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 
@@ -46,7 +46,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	ecrypto "github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/rlp"
+	rlp "github.com/erigontech/erigon-lib/rlp2"
 	"golang.org/x/crypto/sha3"
 )
 

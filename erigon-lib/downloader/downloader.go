@@ -848,7 +848,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 					}
-
 					t.AddWebSeeds(urls)
 				}
 			}
@@ -2576,7 +2575,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if err != nil {
 		return err
 	}
-
 	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
 		return err
@@ -2801,7 +2799,7 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
-		PageSize(uint64(4 * datasize.KB)).
+		PageSize(4 * datasize.KB).
 		RoTxsLimiter(semaphore.NewWeighted(9_000)).
 		Path(dbDir).
 		WriteMap(writeMap)

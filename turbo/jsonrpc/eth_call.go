@@ -24,7 +24,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/trie"
 
 	"github.com/erigontech/erigon-lib/commitment"
 	libstate "github.com/erigontech/erigon-lib/state"
@@ -42,11 +42,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/stagedsync"

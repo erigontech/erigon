@@ -8,14 +8,14 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/types/accounts"
-	witnesstypes "github.com/erigontech/erigon/core/types/witness"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	witnesstypes "github.com/erigontech/erigon-lib/types/witness"
 	"github.com/holiman/uint256"
 )
 
@@ -627,6 +627,10 @@ func (tds *TrieDbState) GetAccount(addrHash libcommon.Hash) (*accounts.Account, 
 	defer tds.tMu.Unlock()
 	acc, ok := tds.t.GetAccount(addrHash[:])
 	return acc, ok
+}
+
+func (tds *TrieDbState) ReadAccountDataForDebug(address libcommon.Address) (*accounts.Account, error) {
+	return tds.ReadAccountData(address)
 }
 
 func (tds *TrieDbState) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {

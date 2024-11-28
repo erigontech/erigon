@@ -21,6 +21,7 @@ import (
 	"errors"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -249,7 +250,7 @@ type RoDB interface {
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
 	AllTables() TableCfg
-	PageSize() uint64
+	PageSize() datasize.ByteSize
 
 	// Pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
 	CHandle() unsafe.Pointer

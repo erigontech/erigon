@@ -86,6 +86,10 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 			res = append(res, path.Join("caplin", name))
 			continue
 		}
+		if strings.HasPrefix(name, "salt") && strings.HasSuffix(name, "txt") {
+			res = append(res, name)
+			continue
+		}
 		if !skipSeedableCheck && !snaptype.IsCorrectFileName(name) {
 			continue
 		}
