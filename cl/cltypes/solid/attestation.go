@@ -173,14 +173,14 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 //	data: AttestationData
 //	signature: BLSSignature
 type SingleAttestation struct {
-	CommitteeIndex uint64
-	AttesterIndex  uint64
-	Data           *AttestationData
-	Signature      libcommon.Bytes96
+	CommitteeIndex uint64            `json:"committee_index"`
+	AttesterIndex  uint64            `json:"attester_index"`
+	Data           *AttestationData  `json:"data"`
+	Signature      libcommon.Bytes96 `json:"signature"`
 }
 
 func (s *SingleAttestation) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, s.CommitteeIndex, s.AttesterIndex, s.Data, s.Signature[:])
+	return ssz2.MarshalSSZ(dst, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
 }
 
 func (s *SingleAttestation) DecodeSSZ(buf []byte, version int) error {
@@ -192,11 +192,13 @@ func (s *SingleAttestation) EncodingSizeSSZ() (size int) {
 }
 
 func (s *SingleAttestation) HashSSZ() (o [32]byte, err error) {
-	return merkle_tree.HashTreeRoot(s.CommitteeIndex, s.AttesterIndex, s.Data, s.Signature[:])
+	return merkle_tree.HashTreeRoot(&s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
 }
 
 func (s *SingleAttestation) Clone() clonable.Clonable {
-	return &SingleAttestation{}
+	return &SingleAttestation{
+		Data: &AttestationData{},
+	}
 }
 
 func (s *SingleAttestation) Static() bool {

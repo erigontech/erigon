@@ -189,6 +189,7 @@ func addSszTests() {
 				return &solid.Attestation{}
 			}, withTestJson())).
 		With("VoluntaryExit", sszStaticTestByEmptyObject(&cltypes.VoluntaryExit{}, withTestJson())).
+		With("SingleAttestation", sszStaticTestByEmptyObject(&solid.SingleAttestation{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
 		With("WithdrawalRequest", sszStaticTestByEmptyObject(&solid.WithdrawalRequest{}, runAfterVersion(clparams.ElectraVersion))).
 		With("DepositRequest", sszStaticTestByEmptyObject(&solid.DepositRequest{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
 		With("ConsolidationRequest", sszStaticTestByEmptyObject(&solid.ConsolidationRequest{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
