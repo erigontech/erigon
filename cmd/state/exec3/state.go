@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -65,6 +66,7 @@ type Worker struct {
 
 	callTracer  *CallTracer
 	taskGasPool *core.GasPool
+	hooks       *tracing.Hooks
 
 	evm   *vm.EVM
 	ibs   *state.IntraBlockState
@@ -75,7 +77,7 @@ type Worker struct {
 	isMining bool
 }
 
-func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
+func NewWorker(lock sync.Locker, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
@@ -93,13 +95,14 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
+		hooks:       hooks,
 
 		dirs: dirs,
 
 		isMining: isMining,
 	}
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
-	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer.Tracer().Hooks}
+	w.vmCfg = vm.Config{Debug: true, Tracer: hooks}
 	w.ibs = state.New(w.stateReader)
 	return w
 }
@@ -196,6 +199,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 	rw.ibs.Reset()
 	ibs := rw.ibs
 	//ibs.SetTrace(true)
+	ibs.SetHooks(rw.hooks)
 
 	rules := txTask.Rules
 	var err error
@@ -221,7 +225,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */, nil)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, rw.hooks)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
 		if txTask.BlockNum == 0 {
@@ -257,6 +261,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		rw.callTracer.Reset()
 		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
 		ibs.SetTxContext(txTask.TxIndex)
+		tx := txTask.Tx
 		msg := txTask.TxAsMessage
 		if msg.FeeCap().IsZero() && rw.engine != nil {
 			// Only zero-gas transactions may be service ones
@@ -268,10 +273,16 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
+		if rw.hooks != nil && rw.hooks.OnTxStart != nil {
+			rw.hooks.OnTxStart(rw.evm.GetVMContext(), tx, msg.From())
+		}
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
+			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
+				rw.hooks.OnTxEnd(nil, err)
+			}
 		} else {
 			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
@@ -281,6 +292,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
 			txTask.TraceFroms = rw.callTracer.Froms()
 			txTask.TraceTos = rw.callTracer.Tos()
+
+			if rw.hooks != nil && rw.hooks.OnTxEnd != nil {
+				txTask.CreateReceipt(rw.Tx())
+				rw.hooks.OnTxEnd(txTask.BlockReceipts[txTask.TxIndex], nil)
+			}
 		}
 
 	}
@@ -299,7 +315,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 	}
 }
 
-func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, hooks *tracing.Hooks, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8
@@ -310,7 +326,7 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, isMining)
+			reconWorkers[i] = NewWorker(lock, logger, hooks, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, isMining)
 			reconWorkers[i].ResetState(rs, accumulator)
 		}
 		if background {
@@ -337,7 +353,7 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 			//applyWorker.ResetTx(nil)
 		}
 	}
-	applyWorker = NewWorker(lock, logger, ctx, false, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, isMining)
+	applyWorker = NewWorker(lock, logger, hooks, ctx, false, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, isMining)
 
 	return reconWorkers, applyWorker, rws, clear, wait
 }
