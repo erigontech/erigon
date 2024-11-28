@@ -8,7 +8,7 @@ env:
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
-  DOCKERFILE_PATH: "./Dockerfile.release"
+  DOCKERFILE_PATH: "Dockerfile.release"
   GITHUB_AUTOMATION_EMAIL: "github-automation@erigon.tech"
   GITHUB_AUTOMATION_NAME: "Erigon Github Automation"
   LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
@@ -154,7 +154,7 @@ jobs:
 
 
   build-debian-pkg:
-    name: Build debian packages for both arch
+    name: Debian packages
     needs: [ build-release ]
     uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@feature/issue-12891 #### !!!! FIX-IT-BEFORE-MERGE !!!!
     with:
@@ -167,7 +167,7 @@ jobs:
     needs: [ build-release ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    name: Publish release notes          
+    name: Docker image        
 
     steps:
 
@@ -175,8 +175,7 @@ jobs:
       uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
       with:
         repository: ${{ env.APP_REPO }}
-        sparse-checkout: |
-          ${{ env.DOCKERFILE_PATH }}
+        sparse-checkout: ${{ env.DOCKERFILE_PATH }}
         sparse-checkout-cone-mode: false
         ref: ${{ needs.build-release.outputs.commit-id }}
 
