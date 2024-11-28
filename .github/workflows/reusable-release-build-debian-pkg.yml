@@ -19,12 +19,12 @@ jobs:
       - name: Download arm64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.application }}_${{ inputs.version }}_linux_arm64.tar.gz
+          name: ${{ inputs.application }}_v${{ inputs.version }}_linux_arm64.tar.gz
 
       - name: Download amd64v2 artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.application }}_${{ inputs.version }}_linux_amd64v2.tar.gz
+          name: ${{ inputs.application }}_v${{ inputs.version }}_linux_amd64v2.tar.gz
 
       - name: Update and install required packages, run dpkg
         run: |
