@@ -266,7 +266,7 @@ func setup(t testing.TB) *MockTest {
 
 	pipelineStages := stages2.NewPipelineStages(m.Ctx, m.DB, &cfg, p2p.Config{}, m.SentriesClient, m.Notifications,
 		snapDownloader, m.BlockReader, blockRetire, m.Agg, nil /*silkworm*/, forkValidator, m.Log, true /*checkStateRoot*/)
-	stagedSync := stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, m.Log)
+	stagedSync := stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, m.Log, stages.ModeUnknown)
 
 	m.Eth1ExecutionService = NewEthereumExecutionModule(m.BlockReader, m.DB, stagedSync, forkValidator, m.ChainConfig, nil /*builderFunc*/, nil /*hook*/, m.Notifications.Accumulator, m.Notifications.StateChangesConsumer, m.Log, m.Engine, cfg.Sync, m.Ctx)
 
