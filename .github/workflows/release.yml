@@ -50,6 +50,7 @@ jobs:
     outputs:
       commit-id: ${{ steps.getCommitId.outputs.id }}
       short-commit-id: ${{ steps.getCommitId.outputs.short_commit_id }}
+      application: ${{ env.APPLICATION }}
 
     steps:
       - name: Checkout git repository ${{ env.APP_REPO }}
@@ -157,7 +158,7 @@ jobs:
     needs: [ build-release ]
     uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@feature/issue-12891 #### !!!! FIX-IT-BEFORE-MERGE !!!!
     with:
-      application: ${{ env.APPLICATION }}
+      application: ${{ needs.build-release.outputs.application }}
       version: ${{ inputs.release_version }}
 
 
