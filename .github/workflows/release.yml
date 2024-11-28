@@ -251,25 +251,66 @@ jobs:
     name: Publish release notes
 
     steps:
+    - name: Download linux/arm64 artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar.gz
+        path: dist/
 
-      - name: Publish draft of the Release notes with assets in case perform_release is set
-        if: ${{ inputs.perform_release }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          DOCKER_TAGS: ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}
-          GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
-        run: |
-          cd dist
-          sha256sum *.tar.gz > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
-          gh release create \
-            --generate-notes \
-            --target ${GITHUB_RELEASE_TARGET} \
-            --draft=true \
-            --title "${{ inputs.release_version }}" \
-            --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
-            "${{ inputs.release_version }}" \
-            *.tar.gz ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+    - name: Download linux/amd64 artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar.gz
+        path: dist/
+
+    - name: Download linux/amd64v2 artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar.gz
+        path: dist/
+
+    - name: Download darwin/amd64 artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_amd64.tar.gz
+        path: dist/
+
+    - name: Download darwin/arm64 artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_darwin_arm64.tar.gz
+        path: dist/
+
+    - name: Download arm64 debian package
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_arm64.deb
+        path: dist/
+
+    - name: Download amd64 debian package
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_amd64.deb
+        path: dist/
+
+    - name: Publish draft of the Release notes with assets in case perform_release is set
+      if: ${{ inputs.perform_release }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        DOCKER_TAGS: ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}
+        GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
+      run: |
+        cd dist
+        sha256sum *.tar.gz *.deb > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+        gh release create \
+          --generate-notes \
+          --target ${GITHUB_RELEASE_TARGET} \
+          --draft=true \
+          --title "${{ inputs.release_version }}" \
+          --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
+          "${{ inputs.release_version }}" \
+          *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
 
 
   In-case-of-failure:
