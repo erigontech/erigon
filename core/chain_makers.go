@@ -33,17 +33,17 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // BlockGen creates blocks for testing.
@@ -477,7 +477,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
 
-	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -502,7 +502,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		}
 	}
 
-	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}

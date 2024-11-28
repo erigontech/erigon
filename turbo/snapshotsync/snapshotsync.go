@@ -343,7 +343,8 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if !caplinState && strings.Contains(p.Name, "caplin/") {
 			continue
 		}
-		if headerchain && !strings.Contains(p.Name, "headers") && !strings.Contains(p.Name, "bodies") {
+		if headerchain &&
+			!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
 			continue
 		}
 		if _, ok := blackListForPruning[p.Name]; ok {

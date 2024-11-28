@@ -223,13 +223,13 @@ func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 			if index < ncallers/2 {
 				// For half of the callers, create a context without deadline
 				// and cancel it later.
-				ctx, cancel = context.WithCancel(context.Background())
+				ctx, cancel = context.WithCancel(context.Background()) //nolint:fatcontext
 				time.AfterFunc(timeout, cancel)
 			} else {
 				// For the other half, create a context with a deadline instead. This is
 				// different because the context deadline is used to set the socket write
 				// deadline.
-				ctx, cancel = context.WithTimeout(context.Background(), timeout)
+				ctx, cancel = context.WithTimeout(context.Background(), timeout) //nolint:fatcontext
 			}
 
 			// Now perform a call with the context.

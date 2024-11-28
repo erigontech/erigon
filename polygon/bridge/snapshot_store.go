@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
@@ -83,7 +83,7 @@ func (s *SnapshotStore) LastFrozenEventBlockNum() uint64 {
 	if len(segments) == 0 {
 		return 0
 	}
-	// find the last segment which has a built index
+	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Src().Index() != nil {
@@ -161,7 +161,7 @@ func (s *SnapshotStore) LastFrozenEventId() uint64 {
 	if len(segments) == 0 {
 		return 0
 	}
-	// find the last segment which has a built index
+	// find the last segment which has a built non-empty index
 	var lastSegment *snapshotsync.VisibleSegment
 	for i := len(segments) - 1; i >= 0; i-- {
 		if segments[i].Src().Index() != nil {

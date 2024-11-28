@@ -21,6 +21,7 @@ import (
 	"os"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -36,7 +37,7 @@ func NewTemporaryMdbx(ctx context.Context, tempdir string) (kv.RwDB, error) {
 		return &TemporaryMdbx{}, err
 	}
 
-	db, err := NewMDBX(log.Root()).Label(kv.Unknown).InMem(path).Open(ctx)
+	db, err := New(kv.ChainDB, log.Root()).InMem(path).Open(ctx)
 	if err != nil {
 		return &TemporaryMdbx{}, err
 	}
@@ -75,7 +76,7 @@ func (t *TemporaryMdbx) AllTables() kv.TableCfg {
 	return t.db.AllTables()
 }
 
-func (t *TemporaryMdbx) PageSize() uint64 {
+func (t *TemporaryMdbx) PageSize() datasize.ByteSize {
 	return t.db.PageSize()
 }
 

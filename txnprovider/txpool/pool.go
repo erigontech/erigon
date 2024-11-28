@@ -99,6 +99,7 @@ var _ Pool = (*TxPool)(nil) // compile-time interface check
 type TxPool struct {
 	_chainDB               kv.RoDB // remote db - use it wisely
 	_stateCache            kvcache.Cache
+	poolDB                 kv.RwDB
 	lock                   *sync.Mutex
 	recentlyConnectedPeers *recentlyConnectedPeers // all txns will be propagated to this peers eventually, and clear list
 	senders                *sendersBatch
@@ -150,6 +151,7 @@ type FeeCalculator interface {
 
 func New(
 	newTxns chan Announcements,
+	poolDB kv.RwDB,
 	coreDB kv.RoDB,
 	cfg txpoolcfg.Config,
 	cache kvcache.Cache,
@@ -198,6 +200,7 @@ func New(
 		newPendingTxns:          newTxns,
 		_stateCache:             cache,
 		senders:                 newSendersBatch(tracedSenders),
+		poolDB:                  poolDB,
 		_chainDB:                coreDB,
 		cfg:                     cfg,
 		chainID:                 chainID,
@@ -242,15 +245,14 @@ func New(
 	return res, nil
 }
 
-func (p *TxPool) Start(ctx context.Context, db kv.RwDB) error {
+func (p *TxPool) Start(ctx context.Context) error {
 	if p.started.Load() {
 		return nil
 	}
 
-	return db.View(ctx, func(tx kv.Tx) error {
+	return p.poolDB.View(ctx, func(tx kv.Tx) error {
 		coreDb, _ := p.coreDBWithCache()
 		coreTx, err := coreDb.BeginRo(ctx)
-
 		if err != nil {
 			return err
 		}
@@ -640,7 +642,7 @@ func (p *TxPool) Started() bool {
 	return p.started.Load()
 }
 
-func (p *TxPool) best(n uint16, txns *TxnsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (bool, int, error) {
+func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (bool, int, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -653,7 +655,7 @@ func (p *TxPool) best(n uint16, txns *TxnsRlp, tx kv.Tx, onTopOf, availableGas, 
 
 	isShanghai := p.isShanghai() || p.isAgra()
 
-	txns.Resize(uint(min(int(n), len(best.ms))))
+	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
 	count := 0
 	i := 0
@@ -662,7 +664,13 @@ func (p *TxPool) best(n uint16, txns *TxnsRlp, tx kv.Tx, onTopOf, availableGas, 
 		p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
 	}()
 
-	for ; count < int(n) && i < len(best.ms); i++ {
+	tx, err := p.poolDB.BeginRo(ctx)
+	if err != nil {
+		return false, 0, err
+	}
+
+	defer tx.Rollback()
+	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
 		if availableGas < fixedgas.TxGas {
 			break
@@ -722,13 +730,43 @@ func (p *TxPool) best(n uint16, txns *TxnsRlp, tx kv.Tx, onTopOf, availableGas, 
 	return true, count, nil
 }
 
-func (p *TxPool) YieldBest(n uint16, txns *TxnsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
-	return p.best(n, txns, tx, onTopOf, availableGas, availableBlobGas, toSkip)
+func (p *TxPool) YieldBestTxns(
+	ctx context.Context,
+	amount int,
+	parentBlockNum uint64,
+	gasTarget uint64,
+	blobGasTarget uint64,
+	txnIdsFilter mapset.Set[[32]byte],
+) ([]types.Transaction, error) {
+	var txnsRlp TxnsRlp
+	_, _, err := p.YieldBest(ctx, amount, &txnsRlp, parentBlockNum, gasTarget, blobGasTarget, txnIdsFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	txns := make([]types.Transaction, 0, len(txnsRlp.Txns))
+	for i := range txnsRlp.Txns {
+		txn, err := types.DecodeWrappedTransaction(txnsRlp.Txns[i])
+		if err != nil {
+			return nil, err
+		}
+
+		var sender common.Address
+		copy(sender[:], txnsRlp.Senders.At(i))
+		txn.SetSender(sender)
+		txns = append(txns, txn)
+	}
+
+	return txns, nil
 }
 
-func (p *TxPool) PeekBest(n uint16, txns *TxnsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
+func (p *TxPool) YieldBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+	return p.best(ctx, n, txns, onTopOf, availableGas, availableBlobGas, toSkip)
+}
+
+func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.YieldBest(n, txns, tx, onTopOf, availableGas, availableBlobGas, set)
+	onTime, _, err := p.YieldBest(ctx, n, txns, onTopOf, availableGas, availableBlobGas, set)
 	return onTime, err
 }
 
@@ -1697,7 +1735,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 //
 // promote/demote transactions
 // reorgs
-func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxns chan Announcements, send *Send, newSlotsStreams *NewSlotsStreams, notifyMiningAboutNewSlots func()) {
+func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *Send, newSlotsStreams *NewSlotsStreams, notifyMiningAboutNewSlots func()) {
 	syncToNewPeersEvery := time.NewTicker(p.cfg.SyncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
 	processRemoteTxnsEvery := time.NewTicker(p.cfg.ProcessRemoteTxnsEvery)
@@ -1707,7 +1745,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxns chan Announcem
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
 
-	if err := p.Start(ctx, db); err != nil {
+	if err := p.Start(ctx); err != nil {
 		p.logger.Error("[txpool] Failed to start", "err", err)
 		return
 	}
@@ -1715,7 +1753,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxns chan Announcem
 	for {
 		select {
 		case <-ctx.Done():
-			_, _ = p.flush(ctx, db)
+			_, _ = p.flush(ctx)
 			return
 		case <-logEvery.C:
 			p.logStats()
@@ -1733,9 +1771,9 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxns chan Announcem
 				p.logger.Error("[txpool] process batch remote txns", "err", err)
 			}
 		case <-commitEvery.C:
-			if db != nil && p.Started() {
+			if p.poolDB != nil && p.Started() {
 				t := time.Now()
-				written, err := p.flush(ctx, db)
+				written, err := p.flush(ctx)
 				if err != nil {
 					p.logger.Error("[txpool] flush is local history", "err", err)
 					continue
@@ -1782,7 +1820,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxns chan Announcem
 				var broadcastHashes Hashes
 				slotsRlp := make([][]byte, 0, announcements.Len())
 
-				if err := db.View(ctx, func(tx kv.Tx) error {
+				if err := p.poolDB.View(ctx, func(tx kv.Tx) error {
 					for i := 0; i < announcements.Len(); i++ {
 						t, size, hash := announcements.At(i)
 						slotRlp, err := p.GetRlp(tx, hash)
@@ -1868,11 +1906,11 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxns chan Announcem
 	}
 }
 
-func (p *TxPool) flushNoFsync(ctx context.Context, db kv.RwDB) (written uint64, err error) {
+func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	//it's important that write db txn is done inside lock, to make last writes visible for all read operations
-	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+	if err := p.poolDB.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {
 			return err
@@ -1888,17 +1926,17 @@ func (p *TxPool) flushNoFsync(ctx context.Context, db kv.RwDB) (written uint64, 
 	return written, nil
 }
 
-func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err error) {
+func (p *TxPool) flush(ctx context.Context) (written uint64, err error) {
 	defer writeToDBTimer.ObserveDuration(time.Now())
 	// 1. get global lock on txpool and flush it to db, without fsync (to release lock asap)
 	// 2. then fsync db without txpool lock
-	written, err = p.flushNoFsync(ctx, db)
+	written, err = p.flushNoFsync(ctx)
 	if err != nil {
 		return 0, err
 	}
 
 	// fsync. increase state version - just to make RwTx non-empty (mdbx skips empty RwTx)
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
+	if err := p.poolDB.Update(ctx, func(tx kv.RwTx) error {
 		v, err := tx.GetOne(kv.PoolInfo, PoolStateVersion)
 		if err != nil {
 			return err

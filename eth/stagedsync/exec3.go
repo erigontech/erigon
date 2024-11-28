@@ -27,8 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -39,13 +37,14 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/services"
@@ -282,7 +281,7 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.keepAllChangesets
+	shouldGenerateChangesets := maxBlockNum-blockNum <= changesetSafeRange || cfg.syncCfg.AlwaysGenerateChangesets
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		shouldGenerateChangesets = false
 	}
@@ -754,7 +753,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -769,7 +768,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -782,7 +781,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).DomainRangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).RangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}

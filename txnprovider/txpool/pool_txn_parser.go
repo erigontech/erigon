@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/rlp"
+	rlp "github.com/erigontech/erigon-lib/rlp2"
 )
 
 const (

@@ -19,7 +19,7 @@ package state
 import (
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -51,6 +51,11 @@ func (cr *CachedReader) ReadAccountData(address common.Address) (*accounts.Accou
 		cr.cache.SetAccountRead(addrBytes, a)
 	}
 	return a, nil
+}
+
+// ReadAccountDataForDebug is called when an account needs to be fetched from the state
+func (cr *CachedReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return cr.ReadAccountData(address)
 }
 
 // ReadAccountStorage is called when a storage item needs to be fetched from the state

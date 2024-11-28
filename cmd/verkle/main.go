@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/cmd/verkle/verkletrie"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 )
 
@@ -495,16 +495,5 @@ func main() {
 }
 
 func openDB(ctx context.Context, path string, logger log.Logger, accede bool) (kv.RwDB, error) {
-	var db kv.RwDB
-	var err error
-	opts := mdbx.NewMDBX(logger).Path(path)
-	if accede {
-		opts = opts.Accede()
-	}
-	db, err = opts.Open(ctx)
-
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
+	return mdbx.New(kv.ChainDB, logger).Path(path).Accede(accede).Open(ctx)
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/bn256"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/crypto/secp256r1"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/params"
 
 	//lint:ignore SA1019 Needed for precompile

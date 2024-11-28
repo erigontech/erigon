@@ -35,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -46,7 +47,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -370,7 +370,7 @@ func GnosisGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.GnosisChainConfig,
 		Timestamp:  0,
-		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/gnosis.json"),
@@ -381,7 +381,7 @@ func ChiadoGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.ChiadoChainConfig,
 		Timestamp:  0,
-		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/chiado.json"),
@@ -443,9 +443,11 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		BaseFee:       g.BaseFee,
 		BlobGasUsed:   g.BlobGasUsed,
 		ExcessBlobGas: g.ExcessBlobGas,
-		AuRaStep:      g.AuRaStep,
-		AuRaSeal:      g.AuRaSeal,
 		RequestsHash:  g.RequestsHash,
+	}
+	if g.AuRaSeal != nil && len(g.AuRaSeal.AuthorityRound.Signature) > 0 {
+		head.AuRaSeal = g.AuRaSeal.AuthorityRound.Signature
+		head.AuRaStep = uint64(g.AuRaSeal.AuthorityRound.Step)
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -501,7 +503,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	// we may run inside write tx, can't open 2nd write tx in same goroutine
 	wg.Go(func() error {
 		// some users creaing > 1Gb custome genesis by `erigon init`
-		genesisTmpDB := mdbx.NewMDBX(logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+		genesisTmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(dirs.DataDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 
 		agg, err := state2.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, genesisTmpDB, logger)

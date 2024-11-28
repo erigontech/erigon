@@ -772,7 +772,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	roTx := sd.roTx
-	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valsTable)
+	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valuesTable)
 	if err != nil {
 		return err
 	}
@@ -827,15 +827,19 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				if UseBtree || UseBpsTree {
+				indexList := sd.aggTx.d[kv.StorageDomain].d.indexList
+				if indexList&withBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
 							ci1.val = ci1.btCursor.Value()
 							heap.Push(cpPtr, ci1)
 						}
+					} else {
+						ci1.btCursor.Close()
 					}
-				} else {
+				}
+				if indexList&withHashMap != 0 {
 					ci1.dg.Reset(ci1.latestOffset)
 					if !ci1.dg.HasNext() {
 						break
@@ -845,6 +849,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 						ci1.key = key
 						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
 						heap.Push(cpPtr, ci1)
+					} else {
+						ci1.dg = nil
 					}
 				}
 			case DB_CURSOR:
@@ -858,12 +864,15 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					step := ^binary.BigEndian.Uint64(v[:8])
 					endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					if haveRamUpdates && endTxNum >= sd.txNum {
+						ci1.cDup.Close()
 						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 					}
 					ci1.endTxNum = endTxNum
 					ci1.val = common.Copy(v[8:])
 					ci1.step = step
 					heap.Push(cpPtr, ci1)
+				} else {
+					ci1.cDup.Close()
 				}
 			}
 		}
@@ -981,7 +990,7 @@ func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum 
 		k = append(k, k2...)
 	}
 
-	v, ok, err := sd.aggTx.GetAsOfFile(domain, k, ofMaxTxnum)
+	v, ok, err := sd.aggTx.getAsOfFile(domain, k, ofMaxTxnum)
 	if err != nil {
 		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
 	}
@@ -1281,6 +1290,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		return
 	}
 	ks := []byte(key)
+
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchAccount)

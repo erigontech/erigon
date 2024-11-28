@@ -610,6 +610,10 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
+	if err := s.store.Prepare(ctx); err != nil {
+		return err
+	}
+
 	s.logger.Info(syncLogPrefix("running sync component"))
 
 	result, err := s.syncToTip(ctx)

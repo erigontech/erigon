@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 // CachedReader3 is a wrapper for an instance of type StateReader
@@ -40,6 +40,23 @@ func NewCachedReader3(cache kvcache.CacheView, tx kv.TemporalTx) *CachedReader3 
 
 // ReadAccountData is called when an account needs to be fetched from the state
 func (r *CachedReader3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	enc, err := r.cache.Get(address[:])
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	a := accounts.Account{}
+	if err = accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (r *CachedReader3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
 	enc, err := r.cache.Get(address[:])
 	if err != nil {
 		return nil, err

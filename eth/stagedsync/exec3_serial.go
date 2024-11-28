@@ -76,7 +76,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 
 				se.outputBlockNum.SetUint64(txTask.BlockNum)
 			}
-			if se.cfg.chaosMonkey {
+			if se.cfg.syncCfg.ChaosMonkey {
 				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, txTask.Error)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")
