@@ -96,12 +96,6 @@ linters-settings:
 
 issues:
   exclude-rules:
-    - path: rlp
-      linters:
-        - errorlint
-    - path: bitutil
-      linters:
-        - errorlint
     - linters:
         - golint
       text: "should be"

@@ -296,11 +296,3 @@ func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 	}
 	return pos
 }
-
-// EncodeAddress assumes that `to` buffer is already 21-bytes long
-func EncodeAddress(a, to []byte) int {
-	_ = to[20] // early bounds check to guarantee safety of writes below
-	to[0] = 128 + 20
-	copy(to[1:21], a[:20])
-	return 21
-}
