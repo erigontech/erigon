@@ -167,6 +167,7 @@ func BenchmarkEncoding2KBSaturated(b *testing.B) { benchmarkEncoding(b, 2048, 0.
 func BenchmarkEncoding4KBSaturated(b *testing.B) { benchmarkEncoding(b, 4096, 0.5) }
 
 func benchmarkEncoding(b *testing.B, bytes int, fill float64) {
+	b.Helper()
 	// Generate a random slice of bytes to compress
 	random := rand.NewSource(0) // reproducible and comparable
 
