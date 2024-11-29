@@ -19,7 +19,6 @@ package stagedsync
 import (
 	"context"
 	"errors"
-
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 
@@ -29,7 +28,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon/turbo/trie"
 )
 
 type TrieCfg struct {

@@ -37,7 +37,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/rlp"
 )
 
 // Keys in the node database.
