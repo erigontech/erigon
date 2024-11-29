@@ -258,23 +258,12 @@ func (be *BranchEncoder) CollectUpdate(
 	return lastNibble, nil
 }
 
-func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
+func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) (err error) {
 	n := binary.PutUvarint(be.bitmapBuf[:], size)
-	wn, err := be.buf.Write(be.bitmapBuf[:n])
-	if err != nil {
+	if _, err = be.buf.Write(be.bitmapBuf[:n]); err != nil {
 		return err
 	}
-	if n != wn {
-		return errors.New("n != wn size")
-	}
-	wn, err = be.buf.Write(val)
-	if err != nil {
-		return err
-	}
-	if len(val) != wn {
-		return errors.New("wn != value size")
-	}
-	return nil
+	return be.buf.Write(val)
 }
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
