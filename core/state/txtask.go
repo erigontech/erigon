@@ -106,6 +106,9 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 	}
 
 	cumulativeGasUsed += t.UsedGas
+	if t.UsedGas == 0 {
+		panic("no gas used")
+	}
 
 	r := t.createReceipt(cumulativeGasUsed)
 	r.FirstLogIndexWithinBlock = firstLogIndex
