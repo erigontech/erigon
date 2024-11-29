@@ -258,12 +258,12 @@ func (be *BranchEncoder) CollectUpdate(
 	return lastNibble, nil
 }
 
-func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) (err error) {
+func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 	n := binary.PutUvarint(be.bitmapBuf[:], size)
-	if _, err = be.buf.Write(be.bitmapBuf[:n]); err != nil {
+	if _, err := be.buf.Write(be.bitmapBuf[:n]); err != nil {
 		return err
 	}
-	if _, err = be.buf.Write(val); err != nil {
+	if _, err := be.buf.Write(val); err != nil {
 		return err
 	}
 	return nil
