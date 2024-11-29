@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"math"
 	"sort"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -78,19 +79,20 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	binary.BigEndian.PutUint64(prevStepBytes, ^prevStep)
 
 	key := append(common.Copy(key1), key2...)
-
-	if _, ok := d.keys[string(key)]; !ok {
-		d.keys[string(key)] = prevStepBytes
+	keyS := *(*string)(unsafe.Pointer(&key))
+	if _, ok := d.keys[keyS]; !ok {
+		d.keys[keyS] = prevStepBytes
 	}
 
 	prevValue = common.Copy(prevValue)
 
-	valsKey := string(append(common.Copy(key), stepBytes...))
-	if _, ok := d.prevValues[valsKey]; !ok {
+	valsKey := append(common.Copy(key), stepBytes...)
+	valsKeyS := *(*string)(unsafe.Pointer(&valsKey))
+	if _, ok := d.prevValues[valsKeyS]; !ok {
 		if bytes.Equal(stepBytes, prevStepBytes) {
-			d.prevValues[valsKey] = prevValue
+			d.prevValues[valsKeyS] = prevValue
 		} else {
-			d.prevValues[valsKey] = []byte{} // We need to delete the current step but restore the previous one
+			d.prevValues[valsKeyS] = []byte{} // We need to delete the current step but restore the previous one
 		}
 		d.prevValsSlice = nil
 	}
