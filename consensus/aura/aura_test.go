@@ -17,9 +17,6 @@
 package aura_test
 
 import (
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-
 	"math/big"
 	"strings"
 	"testing"
@@ -27,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 
 	"github.com/erigontech/erigon-lib/log/v3"

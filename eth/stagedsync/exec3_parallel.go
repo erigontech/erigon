@@ -423,7 +423,7 @@ func (pe *parallelExecutor) processResultQueue(ctx context.Context, inputTxNum u
 func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log.Logger) context.CancelFunc {
 	pe.slowDownLimit = time.NewTicker(time.Second)
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
-		pe.RWMutex.RLocker(), pe.accumulator, logger, ctx, true, pe.chainDb, pe.rs, pe.in,
+		pe.RWMutex.RLocker(), pe.accumulator, logger, nil, ctx, true, pe.chainDb, pe.rs, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.workerCount+1, pe.cfg.dirs, pe.isMining)
 
 	rwLoopCtx, rwLoopCtxCancel := context.WithCancel(ctx)
