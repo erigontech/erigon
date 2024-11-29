@@ -385,6 +385,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.estSize = 0
 }
 
+// put - doesn't copy
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 	// disable mutex - because work on parallel execution postponed after E3 release.
 	//sd.muMaps.Lock()
@@ -412,7 +413,6 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep ui
 	//sd.muMaps.RLock()
 	keyS := *(*string)(unsafe.Pointer(&key))
 	var dataWithPrevStep dataWithPrevStep
-	//keyS := string(key)
 	if table == kv.StorageDomain {
 		dataWithPrevStep, ok = sd.storage.Get(keyS)
 		return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
@@ -603,14 +603,14 @@ func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 }
 
 func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []byte, prevStep uint64) error {
-	addrS := string(addr)
+	addrS := *(*string)(unsafe.Pointer(&addr))
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, account)
 	sd.put(kv.AccountsDomain, addrS, account)
 	return sd.domainWriters[kv.AccountsDomain].PutWithPrev(addr, nil, account, prevAccount, prevStep)
 }
 
 func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep uint64) error {
-	addrS := string(addr)
+	addrS := *(*string)(unsafe.Pointer(&addr))
 	sd.sdCtx.TouchKey(kv.CodeDomain, addrS, code)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
@@ -620,12 +620,13 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep
 }
 
 func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte, prevStep uint64) error {
-	sd.put(kv.CommitmentDomain, string(prefix), data)
+	prefixS := *(*string)(unsafe.Pointer(&prefix))
+	sd.put(kv.CommitmentDomain, prefixS, data)
 	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(prefix, nil, data, prev, prevStep)
 }
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
-	addrS := string(addr)
+	addrS := *(*string)(unsafe.Pointer(&addr))
 	if err := sd.DomainDelPrefix(kv.StorageDomain, addr); err != nil {
 		return err
 	}
@@ -650,7 +651,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 		composite = make([]byte, 0, len(addr)+len(loc))
 		composite = append(append(composite, addr...), loc...)
 	}
-	compositeS := string(composite)
+	compositeS := *(*string)(unsafe.Pointer(&composite))
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value)
 	sd.put(kv.StorageDomain, compositeS, value)
 	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, nil, value, preVal, prevStep)
@@ -662,7 +663,7 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 		composite = make([]byte, 0, len(addr)+len(loc))
 		composite = append(append(composite, addr...), loc...)
 	}
-	compositeS := string(composite)
+	compositeS := *(*string)(unsafe.Pointer(&composite))
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, nil)
 	sd.put(kv.StorageDomain, compositeS, nil)
 	return sd.domainWriters[kv.StorageDomain].DeleteWithPrev(composite, nil, preVal, prevStep)
@@ -1371,7 +1372,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[commitment] store txn %d block %d rootHash %x\n", sdc.sharedDomains.txNum, blockNum, rootHash)
 	}
-	sdc.sharedDomains.put(kv.CommitmentDomain, string(keyCommitmentState), encodedState)
+	sdc.sharedDomains.put(kv.CommitmentDomain, keyCommitmentStateS, encodedState)
 	return sdc.sharedDomains.domainWriters[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
@@ -1398,7 +1399,8 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 }
 
 // by that key stored latest root hash and tree state
-var keyCommitmentState = []byte("state")
+var keyCommitmentStateS = "state"
+var keyCommitmentState = []byte(keyCommitmentStateS)
 
 func (sd *SharedDomains) LatestCommitmentState(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, state []byte, err error) {
 	return sd.sdCtx.LatestCommitmentState()
