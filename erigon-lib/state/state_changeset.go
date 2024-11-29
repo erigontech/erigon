@@ -78,7 +78,10 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 		d.keys[keyS] = prevStepBytes
 	}
 
-	valsKeyS := toStringZeroCopy(append(common.Copy(key), stepBytes...))
+	valsKey := make([]byte, len(key)+len(stepBytes))
+	copy(valsKey, key)
+	copy(valsKey[len(key):], stepBytes)
+	valsKeyS := toStringZeroCopy(valsKey)
 	if _, ok := d.prevValues[valsKeyS]; !ok {
 		if bytes.Equal(stepBytes, prevStepBytes) {
 			d.prevValues[valsKeyS] = common.Copy(prevValue)
