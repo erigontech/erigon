@@ -181,12 +181,14 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		log.Warn("Failed to get attestation data", "err", err)
 	}
+
+	defer func() {
+		a.logger.Debug("[Hot-Path] Produced Attestation", "slot", *slot, "committee_index", *committeeIndex, "cached", "beacon_block_root", attestationData.BeaconBlockRoot, ok, "duration", time.Since(start))
+	}()
+
 	if ok {
 		return newBeaconResponse(attestationData), nil
 	}
-	defer func() {
-		a.logger.Debug("[Hot-Path] Produced Attestation", "slot", *slot, "duration", time.Since(start))
-	}()
 
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
