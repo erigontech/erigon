@@ -1470,5 +1470,3 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	}
 	return cs.blockNum, cs.txNum, nil
 }
-
-func toStringZeroCopy(v []byte) string { return *(*string)(unsafe.Pointer(&v)) }
