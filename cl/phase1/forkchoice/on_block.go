@@ -139,7 +139,10 @@ func (f *ForkChoiceStore) ProcessBlockConsensus(ctx context.Context, block *clty
 	start := time.Now()
 	_, _, err := f.forkGraph.AddChainSegment(block, true, true)
 	fmt.Println("consensus time", time.Since(start))
-	return fmt.Errorf("ProcessBlockConsensus: replay block, status %+v", err)
+	if err != nil {
+		return fmt.Errorf("ProcessBlockConsensus: replay block, status %+v", err)
+	}
+	return nil
 }
 
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
