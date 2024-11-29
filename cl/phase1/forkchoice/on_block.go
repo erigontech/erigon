@@ -179,6 +179,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	startEngine := time.Now()
+	fmt.Println(!f.verifiedExecutionPayload.Contains(blockRoot))
 	if newPayload && f.engine != nil && !f.verifiedExecutionPayload.Contains(blockRoot) {
 		if block.Version() >= clparams.DenebVersion {
 			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
