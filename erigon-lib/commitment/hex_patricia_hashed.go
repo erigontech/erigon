@@ -87,6 +87,9 @@ type HexPatriciaHashed struct {
 
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 	hadToLoadL    map[uint64]skipStat
+
+	//temp buffers
+	keyPrefix [1]byte
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
@@ -554,7 +557,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]
 	return pos
 }
 
-func (hph *HexPatriciaHashed) completeLeafHash(buf, keyPrefix []byte, kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
+func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
 	totalLen := kp + kl + val.DoubleRLPLen()
 	var lenPrefix [4]byte
 	pl := rlp.GenerateStructLen(lenPrefix[:], totalLen)
@@ -571,7 +574,7 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf, keyPrefix []byte, kp, kl, co
 	if _, err := writer.Write(lenPrefix[:pl]); err != nil {
 		return nil, err
 	}
-	if _, err := writer.Write(keyPrefix[:kp]); err != nil {
+	if _, err := writer.Write(hph.keyPrefix[:kp]); err != nil {
 		return nil, err
 	}
 	b := [1]byte{compact0}
@@ -616,15 +619,15 @@ func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSer
 	} else {
 		compact0 = 0x20
 	}
-	var keyPrefix [1]byte
+	hph.keyPrefix[0] = 0
 	if compactLen > 1 {
-		keyPrefix[0] = 0x80 + byte(compactLen)
+		hph.keyPrefix[0] = 0x80 + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
 		kl = 1
 	}
-	return hph.completeLeafHash(buf, keyPrefix[:], kp, kl, compactLen, key, compact0, ni, val, singleton)
+	return hph.completeLeafHash(buf, kp, kl, compactLen, key, compact0, ni, val, singleton)
 }
 
 func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpSerializable) ([]byte, error) {
@@ -649,15 +652,15 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 			ni = 1
 		}
 	}
-	var keyPrefix [1]byte
+	hph.keyPrefix[0] = 0
 	if compactLen > 1 {
-		keyPrefix[0] = byte(128 + compactLen)
+		hph.keyPrefix[0] = 0x80 + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
 		kl = 1
 	}
-	return hph.completeLeafHash(buf, keyPrefix[:], kp, kl, compactLen, key, compact0, ni, val, true)
+	return hph.completeLeafHash(buf, kp, kl, compactLen, key, compact0, ni, val, true)
 }
 
 func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Hash]byte, error) {
