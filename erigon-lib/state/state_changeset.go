@@ -78,19 +78,22 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	prevStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(prevStepBytes, ^prevStep)
 
-	key := append(common.Copy(key1), key2...)
+	keyWithStep := make([]byte, len(key1)+len(key2)+len(stepBytes))
+	copy(keyWithStep, key1)
+	copy(keyWithStep[len(key1):], key2)
+	l := len(key1) + len(key2)
+	copy(keyWithStep[l:], stepBytes)
+
+	key := keyWithStep[:l]
 	keyS := *(*string)(unsafe.Pointer(&key))
 	if _, ok := d.keys[keyS]; !ok {
 		d.keys[keyS] = prevStepBytes
 	}
 
-	prevValue = common.Copy(prevValue)
-
-	valsKey := append(common.Copy(key), stepBytes...)
-	valsKeyS := *(*string)(unsafe.Pointer(&valsKey))
+	valsKeyS := *(*string)(unsafe.Pointer(&keyWithStep))
 	if _, ok := d.prevValues[valsKeyS]; !ok {
 		if bytes.Equal(stepBytes, prevStepBytes) {
-			d.prevValues[valsKeyS] = prevValue
+			d.prevValues[valsKeyS] = common.Copy(prevValue)
 		} else {
 			d.prevValues[valsKeyS] = []byte{} // We need to delete the current step but restore the previous one
 		}
