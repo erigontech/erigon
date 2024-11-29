@@ -117,6 +117,9 @@ type cell struct {
 	stateHashLen    int       // stateHash length, if > 0 can reuse
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
 	Update                    // state update
+
+	// temporary buffers
+	hashBuf [length.Hash]byte
 }
 
 type loadFlags uint8
@@ -162,6 +165,14 @@ var (
 	EmptyCodeHash      = hexutility.MustDecodeHex("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")
 	EmptyCodeHashArray = *(*[length.Hash]byte)(EmptyCodeHash)
 )
+
+func (cell *cell) hashAccKey(keccak keccakState, depth int) error {
+	return hashKey(keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth, cell.hashBuf[:])
+}
+
+func (cell *cell) hashStorageKey(keccak keccakState, accountKeyLen, downOffset int, hashedKeyOffset int) error {
+	return hashKey(keccak, cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset, cell.hashBuf[:])
+}
 
 func (cell *cell) reset() {
 	cell.accountAddrLen = 0
@@ -345,10 +356,9 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int, preExtension []
 	cell.loaded = lowCell.loaded
 }
 
-func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int) error {
+func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int, hashBuf []byte) error {
+	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1] // bounds checks elimination
 	keccak.Reset()
-	var hashBufBack [length.Hash]byte
-	hashBuf := hashBufBack[:]
 	if _, err := keccak.Write(plainKey); err != nil {
 		return err
 	}
@@ -393,7 +403,7 @@ func (cell *cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 		cell.hashedExtLen = min(extraLen+cell.hashedExtLen, len(cell.hashedExtension))
 		var hashedKeyOffset, downOffset int
 		if cell.accountAddrLen > 0 {
-			if err := hashKey(keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth); err != nil {
+			if err := cell.hashAccKey(keccak, depth); err != nil {
 				return err
 			}
 			downOffset = 64 - depth
@@ -405,7 +415,7 @@ func (cell *cell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen 
 			if depth == 0 {
 				accountKeyLen = 0
 			}
-			if err := hashKey(keccak, cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset); err != nil {
+			if err := cell.hashStorageKey(keccak, accountKeyLen, downOffset, hashedKeyOffset); err != nil {
 				return err
 			}
 		}
@@ -759,7 +769,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
 		}
-		if err = hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], cell.hashedExtension[:], hashedKeyOffset); err != nil {
+		if err = cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset); err != nil {
 			return nil, err
 		}
 		cell.hashedExtension[64-hashedKeyOffset] = 16 // Add terminator
@@ -806,7 +816,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 		}
 	}
 	if cell.accountAddrLen > 0 {
-		if err := hashKey(hph.keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth); err != nil {
+		if err := cell.hashAccKey(hph.keccak, depth); err != nil {
 			return nil, err
 		}
 		cell.hashedExtension[64-depth] = 16 // Add terminator
