@@ -557,7 +557,17 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]
 	return pos
 }
 
-func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
+func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
+	var kp, kl int
+	var keyPrefix [1]byte
+	if compactLen > 1 {
+		keyPrefix[0] = 0x80 + byte(compactLen)
+		kp = 1
+		kl = compactLen
+	} else {
+		kl = 1
+	}
+
 	totalLen := kp + kl + val.DoubleRLPLen()
 	var lenPrefix [4]byte
 	pl := rlp.GenerateStructLen(lenPrefix[:], totalLen)
@@ -574,7 +584,7 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, kp, kl, compactLen in
 	if _, err := writer.Write(lenPrefix[:pl]); err != nil {
 		return nil, err
 	}
-	if _, err := writer.Write(hph.keyPrefix[:kp]); err != nil {
+	if _, err := writer.Write(keyPrefix[:kp]); err != nil {
 		return nil, err
 	}
 	b := [1]byte{compact0}
@@ -607,7 +617,6 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, kp, kl, compactLen in
 
 func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSerializableBytes, singleton bool) ([]byte, error) {
 	// Compute the total length of binary representation
-	var kp, kl int
 	// Write key
 	var compactLen int
 	var ni int
@@ -619,20 +628,10 @@ func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSer
 	} else {
 		compact0 = 0x20
 	}
-	hph.keyPrefix[0] = 0
-	if compactLen > 1 {
-		hph.keyPrefix[0] = 0x80 + byte(compactLen)
-		kp = 1
-		kl = compactLen
-	} else {
-		kl = 1
-	}
-	return hph.completeLeafHash(buf, kp, kl, compactLen, key, compact0, ni, val, singleton)
+	return hph.completeLeafHash(buf, compactLen, key, compact0, ni, val, singleton)
 }
 
 func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpSerializable) ([]byte, error) {
-	// Compute the total length of binary representation
-	var kp, kl int
 	// Write key
 	var compactLen int
 	var ni int
@@ -652,15 +651,7 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 			ni = 1
 		}
 	}
-	hph.keyPrefix[0] = 0
-	if compactLen > 1 {
-		hph.keyPrefix[0] = 0x80 + byte(compactLen)
-		kp = 1
-		kl = compactLen
-	} else {
-		kl = 1
-	}
-	return hph.completeLeafHash(buf, kp, kl, compactLen, key, compact0, ni, val, true)
+	return hph.completeLeafHash(buf, compactLen, key, compact0, ni, val, true)
 }
 
 func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) ([length.Hash]byte, error) {
