@@ -632,7 +632,7 @@ func (sdb *IntraBlockState) Selfdestruct6780(addr libcommon.Address) error {
 	}
 	if stateObject.newlyCreated {
 		code, err := sdb.GetCode(addr)
-		if err == nil {
+		if err != nil {
 			return err
 		}
 		if _, ok := types.ParseDelegation(code); !ok {
