@@ -260,19 +260,11 @@ func (be *BranchEncoder) CollectUpdate(
 
 func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 	n := binary.PutUvarint(be.bitmapBuf[:], size)
-	wn, err := be.buf.Write(be.bitmapBuf[:n])
-	if err != nil {
+	if _, err := be.buf.Write(be.bitmapBuf[:n]); err != nil {
 		return err
 	}
-	if n != wn {
-		return errors.New("n != wn size")
-	}
-	wn, err = be.buf.Write(val)
-	if err != nil {
+	if _, err := be.buf.Write(val); err != nil {
 		return err
-	}
-	if len(val) != wn {
-		return errors.New("wn != value size")
 	}
 	return nil
 }
