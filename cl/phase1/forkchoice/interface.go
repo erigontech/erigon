@@ -89,9 +89,11 @@ type ForkChoiceStorageWriter interface {
 		fullValidation bool,
 		checkDataAvaibility bool,
 	) error
-	ProcessBlockExecution(ctx context.Context, block *cltypes.SignedBeaconBlock) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
 	ProcessAttestingIndicies(attestation *solid.Attestation, attestionIndicies []uint64)
+
+	ProcessBlockExecution(ctx context.Context, block *cltypes.SignedBeaconBlock) error
+	ProcessBlockConsensus(ctx context.Context, block *cltypes.SignedBeaconBlock) error
 }

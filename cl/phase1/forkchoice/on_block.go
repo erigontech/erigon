@@ -133,6 +133,13 @@ func (f *ForkChoiceStore) ProcessBlockExecution(ctx context.Context, block *clty
 	return nil
 }
 
+func (f *ForkChoiceStore) ProcessBlockConsensus(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, _, err := f.forkGraph.AddChainSegment(block, true, true)
+	return fmt.Errorf("ProcessBlockConsensus: replay block, status %+v", err)
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -218,7 +225,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	startStateProcess := time.Now()
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, false)
 	if err != nil {
 		return err
 	}

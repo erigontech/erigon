@@ -122,8 +122,29 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return ErrIgnore
 	}
 
-	if err := b.forkchoiceStore.ProcessBlockExecution(ctx, msg); err != nil {
-		return fmt.Errorf("failed to pre-process block execution: %w", err)
+	var wg sync.WaitGroup
+
+	var (
+		errExec      error
+		errConsensus error
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		errExec = b.forkchoiceStore.ProcessBlockExecution(ctx, msg)
+	}()
+	go func() {
+		defer wg.Done()
+		errConsensus = b.forkchoiceStore.ProcessBlockConsensus(ctx, msg)
+	}()
+	wg.Wait()
+
+	if errExec != nil {
+		return fmt.Errorf("failed to pre-process block execution: %w", errExec)
+	}
+	if errConsensus != nil {
+		return fmt.Errorf("failed to pre-process block consensus: %w", errConsensus)
 	}
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
