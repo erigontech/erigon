@@ -87,3 +87,19 @@ func TestNoEscape(t *testing.T) {
 	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
 	require.Error(err)
 }
+
+func TestVerifyData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := log.New()
+	cfg, err := downloadercfg2.New(ctx, datadir.New(t.TempDir()), "", lg.Info, 0, 0, 0, 0, 0, nil, nil, "testnet", false, false)
+	require.NoError(t, err)
+
+	d, err := New(ctx, cfg, logger, log.LvlInfo, true)
+	require.NoError(t, err)
+	defer d.Close()
+
+	err = d.VerifyData(ctx, nil, false)
+	require.NoError(t, err)
+}
