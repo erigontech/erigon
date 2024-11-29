@@ -509,7 +509,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	} else {
 		println("found in files blocknum:", blockNumFromFiles)
 	}
-	txNum = txNumMin + txnIndex
+	//txNum = txNumMin + txnIndex
 	receipt, err := api.getReceipt(ctx, chainConfig, tx.(kv.TemporalTx), block, int(txnIndex), txNum)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %w", err)
