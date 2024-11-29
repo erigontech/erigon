@@ -45,11 +45,11 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
 	"github.com/erigontech/erigon/cmd/hack/flow"
 	"github.com/erigontech/erigon/cmd/hack/tool"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"

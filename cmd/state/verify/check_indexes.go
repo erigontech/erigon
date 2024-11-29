@@ -25,10 +25,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/temporal/historyv2"
-	"github.com/erigontech/erigon/common"
 )
 
 func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, indexBucket string) error {
