@@ -95,7 +95,6 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 	}
 
 	failures := []poolingFailure{}
-
 	attestationsForGossip := make([]*services.AttestationWithGossipData, 0, len(req))
 	for i, attestation := range req {
 		if a.syncedData.Syncing() {
@@ -121,28 +120,26 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			}
 			cIndex = index
 		}
-
 		subnet := subnets.ComputeSubnetForAttestation(committeeCountPerSlot, slot, cIndex, a.beaconChainCfg.SlotsPerEpoch, a.netConfig.AttestationSubnetCount)
 		encodedSSZ, err := attestation.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
+		gossipData := &sentinel.GossipData{
+			Data:     encodedSSZ,
+			Name:     gossip.TopicNamePrefixBeaconAttestation,
+			SubnetId: &subnet,
+		}
 		attestationsForGossip = append(attestationsForGossip, &services.AttestationWithGossipData{
-			Attestation: attestation,
-			GossipData: &sentinel.GossipData{
-				Data:     encodedSSZ,
-				Name:     gossip.TopicNamePrefixBeaconAttestation,
-				SubnetId: &subnet,
-			},
+			Attestation:      attestation,
+			GossipData:       gossipData,
 			ImmediateProcess: true, // we want to process attestation immediately
-			NoPublish:        true, // we don't want to publish attestation to gossip within the processer
 		})
-	}
-
-	for _, attestationWithGossipData := range attestationsForGossip {
-		if _, err := a.sentinel.PublishGossip(r.Context(), attestationWithGossipData.GossipData); err != nil {
-			log.Warn("[Beacon REST] failed to publish attestation to gossip", "err", err)
+		// preemption: we publish gossip data before processing it
+		if _, err := a.sentinel.PublishGossip(r.Context(), gossipData); err != nil {
+			log.Warn("[Beacon REST] failed to publish attestation gossip", "err", err)
+			continue
 		}
 	}
 
@@ -153,9 +150,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 				Index:   i,
 				Message: err.Error(),
 			})
+			continue
 		}
 	}
-
 	if len(failures) > 0 {
 		errResp := poolingError{
 			Code:     http.StatusBadRequest,

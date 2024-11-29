@@ -148,6 +148,8 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	start := time.Now()
+
 	// wait until the head state is at the target slot or later
 	err = a.waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
@@ -182,6 +184,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if ok {
 		return newBeaconResponse(attestationData), nil
 	}
+	defer func() {
+		a.logger.Debug("[Hot-Path] Produced Attestation", "slot", *slot, "duration", time.Since(start))
+	}()
 
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {

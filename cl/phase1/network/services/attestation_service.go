@@ -71,7 +71,6 @@ type AttestationWithGossipData struct {
 	GossipData  *sentinel.GossipData
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
-	NoPublish        bool
 }
 
 func NewAttestationService(
@@ -270,7 +269,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		},
 	}
 
-	// For this object it is 60% faster to verify the signature in a single call than batch verify it.
+	// For this object it is 60% faster to verify the signature in a single call than to verify it in a loop.
 	if att.ImmediateProcess {
 		valid, err := bls.Verify(signature[:], signingRoot[:], pubKey[:])
 		if err != nil {
@@ -281,11 +280,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			log.Debug("[AttestationService] received invalid signature on the gossip", "topic", att.GossipData.Name)
 			return fmt.Errorf("invalid signature")
 		}
-		if !att.NoPublish {
-			if _, err = s.batchSignatureVerifier.sentinel.PublishGossip(ctx, att.GossipData); err != nil {
-				log.Debug("failed to publish gossip", "err", err)
-			}
+		if _, err = s.batchSignatureVerifier.sentinel.PublishGossip(ctx, att.GossipData); err != nil {
+			log.Debug("failed to publish gossip", "err", err)
 		}
+
 		aggregateVerificationData.F()
 		return nil
 	}
