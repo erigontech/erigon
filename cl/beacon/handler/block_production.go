@@ -183,7 +183,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	defer func() {
-		a.logger.Debug("[Hot-Path] Produced Attestation", "slot", *slot, "committee_index", *committeeIndex, "cached", "beacon_block_root", attestationData.BeaconBlockRoot, ok, "duration", time.Since(start))
+		a.logger.Debug("Produced Attestation", "slot", *slot,
+			"committee_index", *committeeIndex, "cached", "beacon_block_root",
+			attestationData.BeaconBlockRoot, ok, "duration", time.Since(start))
 	}()
 
 	if ok {
