@@ -84,13 +84,12 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	l := len(key1) + len(key2)
 	copy(keyWithStep[l:], stepBytes)
 
-	key := keyWithStep[:l]
-	keyS := *(*string)(unsafe.Pointer(&key))
+	keyS := toStringZeroCopy(keyWithStep[:l])
 	if _, ok := d.keys[keyS]; !ok {
 		d.keys[keyS] = prevStepBytes
 	}
 
-	valsKeyS := *(*string)(unsafe.Pointer(&keyWithStep))
+	valsKeyS := toStringZeroCopy(keyWithStep)
 	if _, ok := d.prevValues[valsKeyS]; !ok {
 		if bytes.Equal(stepBytes, prevStepBytes) {
 			d.prevValues[valsKeyS] = common.Copy(prevValue)
@@ -114,7 +113,7 @@ func (d *StateDiffDomain) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		})
 	}
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return string(d.prevValsSlice[i].Key) < string(d.prevValsSlice[j].Key)
+		return toStringZeroCopy(d.prevValsSlice[i].Key) < toStringZeroCopy(d.prevValsSlice[j].Key)
 	})
 
 	return d.prevValsSlice
@@ -126,10 +125,11 @@ func SerializeDiffSet(diffSet []DomainEntryDiff, out []byte) []byte {
 	dict := make(map[string]byte)
 	id := byte(0x00)
 	for _, diff := range diffSet {
-		if _, ok := dict[string(diff.PrevStepBytes)]; ok {
+		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
+		if _, ok := dict[prevStepS]; ok {
 			continue
 		}
-		dict[string(diff.PrevStepBytes)] = id
+		dict[prevStepS] = id
 		id++
 	}
 	// Write the dictionary
@@ -150,7 +150,7 @@ func SerializeDiffSet(diffSet []DomainEntryDiff, out []byte) []byte {
 		binary.BigEndian.PutUint32(tmp, uint32(len(diff.Value)))
 		ret = append(ret, tmp...)
 		ret = append(ret, diff.Value...)
-		ret = append(ret, dict[string(diff.PrevStepBytes)])
+		ret = append(ret, dict[toStringZeroCopy(diff.PrevStepBytes)])
 	}
 	return ret
 }
@@ -160,10 +160,11 @@ func SerializeDiffSetBufLen(diffSet []DomainEntryDiff) int {
 	dict := make(map[string]byte)
 	id := byte(0x00)
 	for _, diff := range diffSet {
-		if _, ok := dict[string(diff.PrevStepBytes)]; ok {
+		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
+		if _, ok := dict[prevStepS]; ok {
 			continue
 		}
-		dict[string(diff.PrevStepBytes)] = id
+		dict[prevStepS] = id
 		id++
 	}
 	// Write the dictionary
@@ -374,3 +375,5 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 	return blockNumber, nil
 
 }
+
+func toStringZeroCopy(v []byte) string { return *(*string)(unsafe.Pointer(&v)) }
