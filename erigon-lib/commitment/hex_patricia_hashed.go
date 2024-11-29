@@ -772,7 +772,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			mxTrieStateSkipRate.Inc()
 			skippedLoad.Add(1)
 			if !singleton {
-				return append([]byte{160}, cell.stateHash[:cell.stateHashLen]...), nil
+				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
 			}
 			storageRootHashIsSet = true
 			storageRootHash = *(*[length.Hash]byte)(cell.stateHash[:cell.stateHashLen])
@@ -841,7 +841,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 				if hph.trace {
 					fmt.Printf("REUSED stateHash %x apk %x\n", cell.stateHash[:cell.stateHashLen], cell.accountAddr[:cell.accountAddrLen])
 				}
-				return append([]byte{160}, cell.stateHash[:cell.stateHashLen]...), nil
+				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
