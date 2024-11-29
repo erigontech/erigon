@@ -89,6 +89,7 @@ type ForkChoiceStorageWriter interface {
 		fullValidation bool,
 		checkDataAvaibility bool,
 	) error
+
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)

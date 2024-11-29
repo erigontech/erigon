@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -119,6 +120,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 	if b.seenBlocksCache.Contains(seenCacheKey) {
 		return ErrIgnore
+	}
+
+	if err := b.forkchoiceStore.ProcessBlockExecution(ctx, msg); err != nil {
+		return fmt.Errorf("failed to pre-process block execution: %w", err)
 	}
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {

@@ -78,6 +78,61 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
+func (f *ForkChoiceStore) ProcessBlockExecution(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+
+	if f.engine == nil || f.verifiedExecutionPayload.Contains(blockRoot) {
+		return nil
+	}
+
+	var versionedHashes []libcommon.Hash
+	if f.engine != nil && block.Version() >= clparams.DenebVersion {
+		versionedHashes = []libcommon.Hash{}
+		solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
+			versionedHash, err := utils.KzgCommitmentToVersionedHash(libcommon.Bytes48(*k))
+			if err != nil {
+				return err
+			}
+			versionedHashes = append(versionedHashes, versionedHash)
+			return nil
+		})
+	}
+
+	if block.Version() >= clparams.DenebVersion {
+		if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
+			return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
+		}
+	}
+	timeStartExec := time.Now()
+
+	payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
+	switch payloadStatus {
+	case execution_client.PayloadStatusInvalidated:
+		log.Warn("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot), "err", err)
+		f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+		// remove from optimistic candidate
+		if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
+			return fmt.Errorf("failed to remove block from optimistic store: %v", err)
+		}
+		return errors.New("block is invalid")
+	case execution_client.PayloadStatusValidated:
+		log.Trace("OnBlock: block is validated", "block", libcommon.Hash(blockRoot))
+		// remove from optimistic candidate
+		if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
+			return fmt.Errorf("failed to validate block in optimistic store: %v", err)
+		}
+		f.verifiedExecutionPayload.Add(block.Block.Body.ExecutionPayload.BlockHash, struct{}{})
+	}
+	if err != nil {
+		return fmt.Errorf("newPayload failed: %v", err)
+	}
+	monitor.ObserveExecutionTime(timeStartExec)
+	return nil
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -124,7 +179,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	startEngine := time.Now()
-	if newPayload && f.engine != nil {
+	if newPayload && f.engine != nil && !f.verifiedExecutionPayload.Contains(blockRoot) {
 		if block.Version() >= clparams.DenebVersion {
 			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
 				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
@@ -141,7 +196,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 		case execution_client.PayloadStatusInvalidated:
 			log.Warn("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot), "err", err)
-			log.Debug("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot))
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			// remove from optimistic candidate
 			if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
@@ -154,6 +208,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
 				return fmt.Errorf("failed to validate block in optimistic store: %v", err)
 			}
+			f.verifiedExecutionPayload.Add(block.Block.Body.ExecutionPayload.BlockHash, struct{}{})
 		}
 		if err != nil {
 			return fmt.Errorf("newPayload failed: %v", err)
