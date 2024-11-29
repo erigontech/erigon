@@ -136,7 +136,9 @@ func (f *ForkChoiceStore) ProcessBlockExecution(ctx context.Context, block *clty
 func (f *ForkChoiceStore) ProcessBlockConsensus(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	start := time.Now()
 	_, _, err := f.forkGraph.AddChainSegment(block, true, true)
+	fmt.Println("consensus time", time.Since(start))
 	return fmt.Errorf("ProcessBlockConsensus: replay block, status %+v", err)
 }
 
