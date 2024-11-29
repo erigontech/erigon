@@ -138,9 +138,11 @@ func (f *ForkChoiceStore) ProcessBlockConsensus(ctx context.Context, block *clty
 	defer f.mu.Unlock()
 	start := time.Now()
 	_, _, err := f.forkGraph.AddChainSegment(block, true, true)
-	fmt.Println("consensus time", time.Since(start))
 	if err != nil {
 		return fmt.Errorf("ProcessBlockConsensus: replay block, status %+v", err)
+	}
+	if time.Since(start) > 1*time.Millisecond {
+		log.Debug("OnBlock", "elapsed", time.Since(start))
 	}
 	return nil
 }
@@ -190,9 +192,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
+	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
 	startEngine := time.Now()
-	fmt.Println(!f.verifiedExecutionPayload.Contains(blockRoot))
-	if newPayload && f.engine != nil && !f.verifiedExecutionPayload.Contains(blockRoot) {
+	if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
 		if block.Version() >= clparams.DenebVersion {
 			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
 				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
@@ -331,8 +333,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if f.validatorMonitor != nil {
 		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
 	}
-
-	log.Debug("OnBlock", "elapsed", time.Since(start))
+	if !isVerifiedExecutionPayload {
+		log.Debug("OnBlock", "elapsed", time.Since(start))
+	}
 	return nil
 }
 
