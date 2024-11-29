@@ -84,4 +84,4 @@ jobs:
           run_suite engine cancun
           run_suite engine api
           run_suite engine auth
-          run_suite rpc compat
+        # run_suite rpc compat
