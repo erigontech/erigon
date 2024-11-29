@@ -89,7 +89,9 @@ type HexPatriciaHashed struct {
 	hadToLoadL    map[uint64]skipStat
 
 	//temp buffers
-	keyPrefix [1]byte
+	keyPrefix       [1]byte
+	valBuf          [128]byte
+	valBufAsRLPType rlp.RlpEncodedBytes
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *HexPatriciaHashed {
@@ -102,6 +104,7 @@ func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string)
 		hadToLoadL:    make(map[uint64]skipStat),
 	}
 	hph.branchEncoder = NewBranchEncoder(1024, filepath.Join(tmpdir, "branch-encoder"))
+	hph.valBufAsRLPType = rlp.RlpEncodedBytes(hph.valBuf[:])
 	return hph
 }
 
@@ -855,14 +858,14 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int, buf []byte)
 			cell.setFromUpdate(update)
 		}
 
-		var valBuf [128]byte
-		valLen := cell.accountForHashing(valBuf[:], storageRootHash)
-		buf, err = hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+		valLen := cell.accountForHashing(hph.valBufAsRLPType, storageRootHash)
+		buf, err = hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], hph.valBufAsRLPType[:valLen])
 		if err != nil {
 			return nil, err
 		}
 		if hph.trace {
-			fmt.Printf("accountLeafHashWithKey {%x} (memorised) for [%x]=>[%x]\n", buf, cell.hashedExtension[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+			buf, err = hph.accountLeafHashWithKey(buf, cell.hashedExtension[:65-depth], hph.valBufAsRLPType[:valLen])
+			fmt.Printf("accountLeafHashWithKey {%x} (memorised) for [%x]=>[%x]\n", buf, cell.hashedExtension[:65-depth], hph.valBufAsRLPType[:valLen])
 		}
 		copy(cell.stateHash[:], buf[1:])
 		cell.stateHashLen = len(buf) - 1
