@@ -99,7 +99,7 @@ func NewAttestationService(
 		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 
-	//go a.loop(ctx)
+	//go a.loop(ct)
 	return a
 }
 
