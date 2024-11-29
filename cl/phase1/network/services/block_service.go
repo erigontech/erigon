@@ -122,20 +122,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return ErrIgnore
 	}
 
-	var wg sync.WaitGroup
-
-	var (
-		errExec      error
-		errConsensus error
-	)
-
-	if errExec != nil {
-		return fmt.Errorf("failed to pre-process block execution: %w", errExec)
-	}
-	if errConsensus != nil {
-		return fmt.Errorf("failed to pre-process block consensus: %w", errConsensus)
-	}
-
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 		// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
@@ -170,17 +156,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlock) {
 		return ErrInvalidCommitmentsCount
 	}
-
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		errExec = b.forkchoiceStore.ProcessBlockExecution(ctx, msg)
-	}()
-	go func() {
-		defer wg.Done()
-		errConsensus = b.forkchoiceStore.ProcessBlockConsensus(ctx, msg)
-	}()
-	wg.Wait()
 
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
@@ -228,6 +203,31 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 
 // processAndStoreBlock processes and stores a block
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	var wg sync.WaitGroup
+
+	var (
+		errExec      error
+		errConsensus error
+	)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		errExec = b.forkchoiceStore.ProcessBlockExecution(ctx, block)
+	}()
+	go func() {
+		defer wg.Done()
+		errConsensus = b.forkchoiceStore.ProcessBlockConsensus(ctx, block)
+	}()
+	wg.Wait()
+
+	if errExec != nil {
+		return fmt.Errorf("failed to pre-process block execution: %w", errExec)
+	}
+	if errConsensus != nil {
+		return fmt.Errorf("failed to pre-process block consensus: %w", errConsensus)
+	}
+
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 	}); err != nil {
