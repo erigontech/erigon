@@ -70,10 +70,10 @@ func (d *StateDiffDomain) Copy() *StateDiffDomain {
 // RecordDelta records a state change.
 func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, prevStep uint64) {
 	if d.keys == nil {
-		d.keys = make(map[string][]byte)
+		d.keys = make(map[string][]byte, 16)
 	}
 	if d.prevValues == nil {
-		d.prevValues = make(map[string][]byte)
+		d.prevValues = make(map[string][]byte, 16)
 	}
 	prevStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(prevStepBytes, ^prevStep)
@@ -113,9 +113,8 @@ func (d *StateDiffDomain) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		})
 	}
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return toStringZeroCopy(d.prevValsSlice[i].Key) < toStringZeroCopy(d.prevValsSlice[j].Key)
+		return bytes.Compare(d.prevValsSlice[i].Key, d.prevValsSlice[j].Key) < 0
 	})
-
 	return d.prevValsSlice
 }
 
@@ -139,16 +138,16 @@ func SerializeDiffSet(diffSet []DomainEntryDiff, out []byte) []byte {
 		ret = append(ret, v)            // v is always 1 byte
 	}
 	// Write the diffSet
-	tmp := make([]byte, 4)
-	binary.BigEndian.PutUint32(tmp, uint32(len(diffSet)))
-	ret = append(ret, tmp...)
+	var tmp [4]byte
+	binary.BigEndian.PutUint32(tmp[:], uint32(len(diffSet)))
+	ret = append(ret, tmp[:]...)
 	for _, diff := range diffSet {
 		// write uint32(len(key)) + key + uint32(len(value)) + value + prevStepBytes
-		binary.BigEndian.PutUint32(tmp, uint32(len(diff.Key)))
-		ret = append(ret, tmp...)
+		binary.BigEndian.PutUint32(tmp[:], uint32(len(diff.Key)))
+		ret = append(ret, tmp[:]...)
 		ret = append(ret, diff.Key...)
-		binary.BigEndian.PutUint32(tmp, uint32(len(diff.Value)))
-		ret = append(ret, tmp...)
+		binary.BigEndian.PutUint32(tmp[:], uint32(len(diff.Value)))
+		ret = append(ret, tmp[:]...)
 		ret = append(ret, diff.Value...)
 		ret = append(ret, dict[toStringZeroCopy(diff.PrevStepBytes)])
 	}
