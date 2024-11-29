@@ -558,6 +558,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash [length.Hash]
 }
 
 func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
+	// Compute the total length of binary representation
 	var kp, kl int
 	var keyPrefix [1]byte
 	if compactLen > 1 {
@@ -567,6 +568,7 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	} else {
 		kl = 1
 	}
+
 	totalLen := kp + kl + val.DoubleRLPLen()
 	var lenPrefix [4]byte
 	pl := rlp.GenerateStructLen(lenPrefix[:], totalLen)
@@ -615,7 +617,6 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 }
 
 func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSerializableBytes, singleton bool) ([]byte, error) {
-	// Compute the total length of binary representation
 	// Write key
 	var compactLen int
 	var ni int
