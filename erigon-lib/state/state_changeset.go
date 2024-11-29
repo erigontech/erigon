@@ -22,7 +22,6 @@ import (
 	"maps"
 	"math"
 	"sort"
-	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -365,5 +364,3 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 	return blockNumber, nil
 
 }
-
-func toStringZeroCopy(v []byte) string { return *(*string)(unsafe.Pointer(&v)) }
