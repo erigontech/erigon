@@ -209,7 +209,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
 				return fmt.Errorf("failed to validate block in optimistic store: %v", err)
 			}
-			f.verifiedExecutionPayload.Add(block.Block.Body.ExecutionPayload.BlockHash, struct{}{})
+			f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 		}
 		if err != nil {
 			return fmt.Errorf("newPayload failed: %v", err)
