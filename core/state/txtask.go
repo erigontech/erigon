@@ -109,7 +109,8 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 
 	cumulativeGasUsed += t.UsedGas
 	if t.UsedGas == 0 {
-		panic(fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx))
+		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
+		panic(msg)
 	}
 
 	r := t.createReceipt(cumulativeGasUsed)

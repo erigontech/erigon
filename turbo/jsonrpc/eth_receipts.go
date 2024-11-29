@@ -493,7 +493,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	println("truly blocknum is:", blockNum)
 	ok, blockNumFromTxNums, err := rawdbv3.TxNums.FindBlockNum(tx, txNumMin+txnIndex)
 	if err != nil {
-		return nil, err
+		println("error in finding block num from txnums.min:", err.Error())
 	}
 	if !ok {
 		println("not found in txnums")
@@ -502,7 +502,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 	ok, blockNumFromFiles, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
 	if err != nil {
-		return nil, err
+		println("error in finding block num from files:", err.Error())
 	}
 	if !ok {
 		println("not found in files")
