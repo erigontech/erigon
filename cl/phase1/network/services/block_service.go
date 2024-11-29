@@ -129,17 +129,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		errConsensus error
 	)
 
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		errExec = b.forkchoiceStore.ProcessBlockExecution(ctx, msg)
-	}()
-	go func() {
-		defer wg.Done()
-		errConsensus = b.forkchoiceStore.ProcessBlockConsensus(ctx, msg)
-	}()
-	wg.Wait()
-
 	if errExec != nil {
 		return fmt.Errorf("failed to pre-process block execution: %w", errExec)
 	}
@@ -181,6 +170,17 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlock) {
 		return ErrInvalidCommitmentsCount
 	}
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		errExec = b.forkchoiceStore.ProcessBlockExecution(ctx, msg)
+	}()
+	go func() {
+		defer wg.Done()
+		errConsensus = b.forkchoiceStore.ProcessBlockConsensus(ctx, msg)
+	}()
+	wg.Wait()
 
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
