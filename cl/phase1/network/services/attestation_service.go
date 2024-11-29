@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -269,23 +268,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		},
 	}
 
-	// For this object it is 60% faster to verify the signature in a single call than to verify it in a loop.
 	if att.ImmediateProcess {
-		valid, err := bls.Verify(signature[:], signingRoot[:], pubKey[:])
-		if err != nil {
-			log.Crit("[AttestationService] signature verification failed with the error: " + err.Error())
-			return err
-		}
-		if !valid {
-			log.Debug("[AttestationService] received invalid signature on the gossip", "topic", att.GossipData.Name)
-			return fmt.Errorf("invalid signature")
-		}
-		if _, err = s.batchSignatureVerifier.sentinel.PublishGossip(ctx, att.GossipData); err != nil {
-			log.Debug("failed to publish gossip", "err", err)
-		}
+		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 
-		aggregateVerificationData.F()
-		return nil
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
