@@ -17,30 +17,12 @@
 package commitment
 
 import (
-	"bytes"
 	"encoding/binary"
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 )
-
-func BenchmarkName(b *testing.B) {
-	b.Run("commitment1", func(b *testing.B) {
-		buf := bytes.NewBuffer(make([]byte, 1024))
-		v := uint16(1)
-		for i := 0; i < b.N; i++ {
-			buf.Reset()
-			_ = binary.Write(buf, binary.BigEndian, v)
-		}
-	})
-	b.Run("commitment2", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			var buf [2]byte
-			binary.BigEndian.PutUint16(buf[:], uint16(i))
-		}
-	})
-}
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
 	b.StopTimer()
