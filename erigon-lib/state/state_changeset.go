@@ -152,7 +152,7 @@ func SerializeDiffSet(diffSet []DomainEntryDiff, out []byte) []byte {
 		binary.BigEndian.PutUint32(tmp, uint32(len(diff.Value)))
 		ret = append(ret, tmp...)
 		ret = append(ret, diff.Value...)
-		ret = append(ret, dict[string(diff.PrevStepBytes)])
+		ret = append(ret, dict[toStringZeroCopy(diff.PrevStepBytes)])
 	}
 	return ret
 }
@@ -166,7 +166,7 @@ func SerializeDiffSetBufLen(diffSet []DomainEntryDiff) int {
 		if _, ok := dict[prevStepS]; ok {
 			continue
 		}
-		dict[string(diff.PrevStepBytes)] = id
+		dict[prevStepS] = id
 		id++
 	}
 	// Write the dictionary
