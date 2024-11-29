@@ -27,7 +27,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rlp"
 )
