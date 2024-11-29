@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/config3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -14,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/state"
+	accounts "github.com/ledgerwatch/erigon-lib/types/accounts"
 )
 
 //Variables Naming:
@@ -209,7 +209,7 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 		if err != nil {
 			return nil, err
 		}
-		inc, err := tx.db.parseInc(accData)
+		inc, err := accounts.DecodeIncarnationFromStorage(accData)
 		if err != nil {
 			return nil, err
 		}
