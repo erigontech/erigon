@@ -411,7 +411,7 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 // get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep uint64, ok bool) {
 	//sd.muMaps.RLock()
-	keyS := *(*string)(unsafe.Pointer(&key))
+	keyS := toStringZeroCopy(key)
 	var dataWithPrevStep dataWithPrevStep
 	if table == kv.StorageDomain {
 		dataWithPrevStep, ok = sd.storage.Get(keyS)
@@ -619,10 +619,9 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep
 	return sd.domainWriters[kv.CodeDomain].PutWithPrev(addr, nil, code, prevCode, prevStep)
 }
 
-func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte, prevStep uint64) error {
-	prefixS := *(*string)(unsafe.Pointer(&prefix))
-	sd.put(kv.CommitmentDomain, prefixS, data)
-	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(prefix, nil, data, prev, prevStep)
+func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, prevStep uint64) error {
+	sd.put(kv.CommitmentDomain, prefix, data)
+	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev([]byte(prefix), nil, data, prev, prevStep)
 }
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
@@ -1067,7 +1066,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 		}
 		return sd.updateAccountCode(k1, nil, prevVal, prevStep)
 	case kv.CommitmentDomain:
-		return sd.updateCommitmentData(k1, nil, prevVal, prevStep)
+		return sd.updateCommitmentData(toStringZeroCopy(k1), nil, prevVal, prevStep)
 	default:
 		sd.put(domain, string(append(k1, k2...)), nil)
 		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, prevVal, prevStep)
@@ -1156,8 +1155,7 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	prefS := *(*string)(unsafe.Pointer(&pref))
-	cached, ok := sdc.branches[prefS]
+	cached, ok := sdc.branches[toStringZeroCopy(pref)]
 	if ok {
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
@@ -1173,7 +1171,7 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
-	sdc.branches[prefS] = cachedBranch{data: v, step: step}
+	sdc.branches[string(pref)] = cachedBranch{data: v, step: step}
 
 	if len(v) == 0 {
 		return nil, 0, nil
@@ -1182,13 +1180,13 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 }
 
 func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+	prefixS := toStringZeroCopy(prefix)
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	prefixS := *(*string)(unsafe.Pointer(&prefix))
 	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
 
-	return sdc.sharedDomains.updateCommitmentData(prefix, data, prevData, prevStep)
+	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 
 func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
@@ -1472,3 +1470,5 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	}
 	return cs.blockNum, cs.txNum, nil
 }
+
+func toStringZeroCopy(v []byte) string { return *(*string)(unsafe.Pointer(&v)) }
