@@ -113,9 +113,7 @@ func (d *StateDiffDomain) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		})
 	}
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		ik := toStringZeroCopy(d.prevValsSlice[i].Key)
-		jk := toStringZeroCopy(d.prevValsSlice[j].Key)
-		return ik < jk
+		return toStringZeroCopy(d.prevValsSlice[i].Key) < toStringZeroCopy(d.prevValsSlice[j].Key)
 	})
 
 	return d.prevValsSlice
