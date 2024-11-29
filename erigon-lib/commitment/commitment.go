@@ -263,7 +263,10 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) (err error) {
 	if _, err = be.buf.Write(be.bitmapBuf[:n]); err != nil {
 		return err
 	}
-	return be.buf.Write(val)
+	if _, err = be.buf.Write(val); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
