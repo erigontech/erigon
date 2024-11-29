@@ -50,7 +50,7 @@ func (e *EngineBlockDownloader) downloadAndLoadBodiesSyncronously(ctx context.Co
 	timeout := e.timeout
 
 	// This will update bd.maxProgress
-	if _, _, _, _, err = e.bd.UpdateFromDb(tx); err != nil {
+	if err = e.bd.UpdateFromDb(tx); err != nil {
 		return
 	}
 	defer e.bd.ClearBodyCache()
