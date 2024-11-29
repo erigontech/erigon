@@ -113,8 +113,8 @@ type forkGraphDisk struct {
 	beaconCfg   *clparams.BeaconChainConfig
 	genesisTime uint64
 	// highest block seen
-	highestSeen, anchorSlot uint64
-	lowestAvailableBlock    atomic.Uint64
+	anchorSlot           uint64
+	lowestAvailableBlock atomic.Uint64
 
 	newestLightClientUpdate atomic.Value
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
@@ -314,9 +314,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// Lastly add checkpoints to caches as well.
 	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint())
 	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint())
-	if newState.Slot() > f.highestSeen {
-		f.highestSeen = newState.Slot()
-	}
 
 	return newState, Success, nil
 }
