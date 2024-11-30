@@ -733,12 +733,86 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	return f(tx)
 }
 
-func (tx *MdbxTx) Apply(_ context.Context, f func(tx kv.Tx) error) (err error) {
+func (tx *MdbxTx) Apply(f func(tx kv.Tx) error) (err error) {
 	return f(tx)
 }
 
-func (tx *MdbxTx) ApplyRw(_ context.Context, f func(tx kv.RwTx) error) (err error) {
+func (tx *MdbxTx) ApplyRw(f func(tx kv.RwTx) error) (err error) {
 	return f(tx)
+}
+
+type TxApplySource interface {
+	ApplyChan() TxApplyChan
+}
+
+type TxApplyChan chan apply
+
+type apply interface {
+	Apply()
+}
+
+type applyTx struct {
+	err chan error
+	tx  kv.Tx
+	f   func(kv.Tx) error
+}
+
+func (a *applyTx) Apply() {
+	a.err <- a.f(a.tx)
+}
+
+type applyRwTx struct {
+	err chan error
+	tx  kv.RwTx
+	f   func(kv.RwTx) error
+}
+
+func (a *applyRwTx) Apply() {
+	a.err <- a.f(a.tx)
+}
+
+type asyncTx struct {
+	kv.Tx
+	requests chan apply
+}
+
+func NewAsyncTx(tx kv.Tx, queueSize int) *asyncTx {
+	return &asyncTx{tx, make(chan apply, queueSize)}
+}
+
+func (a *asyncTx) Apply(f func(kv.Tx) error) error {
+	rc := make(chan error)
+	a.requests <- &applyTx{rc, a.Tx, f}
+	return <-rc
+}
+
+func (a *asyncTx) ApplyChan() TxApplyChan {
+	return a.requests
+}
+
+type asyncRwTx struct {
+	kv.RwTx
+	requests chan apply
+}
+
+func NewAsyncRwTx(tx kv.RwTx, queueSize int) *asyncRwTx {
+	return &asyncRwTx{tx, make(chan apply, queueSize)}
+}
+
+func (a *asyncRwTx) Apply(f func(kv.Tx) error) error {
+	rc := make(chan error)
+	a.requests <- &applyTx{rc, a.RwTx, f}
+	return <-rc
+}
+
+func (a *asyncRwTx) ApplyRw(f func(kv.RwTx) error) error {
+	rc := make(chan error)
+	a.requests <- &applyRwTx{rc, a.RwTx, f}
+	return <-rc
+}
+
+func (a *asyncRwTx) ApplyChan() TxApplyChan {
+	return a.requests
 }
 
 func (db *MdbxKV) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {

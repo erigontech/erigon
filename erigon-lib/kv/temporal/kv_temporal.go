@@ -21,7 +21,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/state"
@@ -76,7 +75,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
+	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.filesTx = db.agg.BeginFilesRo()
 	return tx, nil
@@ -108,7 +107,7 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
+	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.filesTx = db.agg.BeginFilesRo()
 	return tx, nil
@@ -128,12 +127,12 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return tx.Commit()
 }
 
-func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error) {
 	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db, ctx: ctx}
+	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.filesTx = db.agg.BeginFilesRo()
 	return tx, nil
@@ -153,50 +152,82 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 	return tx.Commit()
 }
 
-type Tx struct {
-	*mdbx.MdbxTx
+type tx struct {
 	db               *DB
 	filesTx          *state.AggregatorRoTx
 	resourcesToClose []kv.Closer
 	ctx              context.Context
 }
 
-func (tx *Tx) ForceReopenAggCtx() {
+type Tx struct {
+	kv.Tx
+	tx
+}
+
+type RwTx struct {
+	kv.RwTx
+	tx
+}
+
+func (tx *tx) ForceReopenAggCtx() {
 	tx.filesTx.Close()
 	tx.filesTx = tx.Agg().BeginFilesRo()
 }
 
-func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
-func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggTx() any                { return tx.filesTx }
-func (tx *Tx) Agg() *state.Aggregator    { return tx.db.agg }
-func (tx *Tx) Rollback() {
+func (tx *tx) AggTx() any             { return tx.filesTx }
+func (tx *tx) Agg() *state.Aggregator { return tx.db.agg }
+func (tx *tx) Rollback() {
 	tx.autoClose()
-	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+}
+
+func (tx *Tx) Rollback() {
+	if tx == nil {
 		return
 	}
-	mdbxTx := tx.MdbxTx
-	tx.MdbxTx = nil
-	mdbxTx.Rollback()
+	tx.autoClose()
+	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return
+	}
+	rb := tx.Tx
+	tx.Tx = nil
+	rb.Rollback()
 }
-func (tx *Tx) autoClose() {
+
+func (tx *RwTx) Rollback() {
+	if tx == nil {
+		return
+	}
+	tx.autoClose()
+	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return
+	}
+	rb := tx.RwTx
+	tx.RwTx = nil
+	rb.Rollback()
+}
+
+func (tx *tx) autoClose() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
 	tx.filesTx.Close()
 }
-func (tx *Tx) Commit() error {
-	tx.autoClose()
-	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+
+func (tx *RwTx) Commit() error {
+	if tx == nil {
 		return nil
 	}
-	mdbxTx := tx.MdbxTx
-	tx.MdbxTx = nil
-	return mdbxTx.Commit()
+	tx.autoClose()
+	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
+		return nil
+	}
+	t := tx.RwTx
+	tx.RwTx = nil
+	return t.Commit()
 }
 
-func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.filesTx.RangeAsOf(tx.ctx, tx.MdbxTx, name, fromKey, toKey, asOfTs, asc, limit)
+func (tx *tx) rangeAsOf(name kv.Domain, dbTx kv.Tx, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	it, err := tx.filesTx.RangeAsOf(tx.ctx, dbTx, name, fromKey, toKey, asOfTs, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -204,8 +235,16 @@ func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, as
 	return it, nil
 }
 
-func (tx *Tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
-	v, step, ok, err := tx.filesTx.GetLatest(name, k, k2, tx.MdbxTx)
+func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	return tx.rangeAsOf(name, tx.Tx, fromKey, toKey, asOfTs, asc, limit)
+}
+
+func (tx *RwTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
+	return tx.rangeAsOf(name, tx.RwTx, fromKey, toKey, asOfTs, asc, limit)
+}
+
+func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k, k2 []byte) (v []byte, step uint64, err error) {
+	v, step, ok, err := tx.filesTx.GetLatest(name, k, k2, dbTx)
 	if err != nil {
 		return nil, step, err
 	}
@@ -214,19 +253,44 @@ func (tx *Tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, er
 	}
 	return v, step, nil
 }
-func (tx *Tx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
+
+func (tx *Tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+	return tx.getLatest(name, tx.Tx, k, k2)
+}
+
+func (tx *RwTx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+	return tx.getLatest(name, tx.RwTx, k, k2)
+}
+
+func (tx *tx) getAsOf(name kv.Domain, dbTx kv.Tx, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	if key2 != nil {
 		key = append(common.Copy(key), key2...)
 	}
-	return tx.filesTx.GetAsOf(tx.MdbxTx, name, key, ts)
+	return tx.filesTx.GetAsOf(dbTx, name, key, ts)
+}
+
+func (tx *Tx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.getAsOf(name, tx.Tx, key, key2, ts)
+}
+
+func (tx *RwTx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.getAsOf(name, tx.RwTx, key, key2, ts)
+}
+
+func (tx *tx) historySeek(name kv.Domain, dbTx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.filesTx.HistorySeek(name, key, ts, dbTx)
 }
 
 func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return tx.filesTx.HistorySeek(name, key, ts, tx.MdbxTx)
+	return tx.historySeek(name, tx.Tx, key, ts)
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
-	timestamps, err = tx.filesTx.IndexRange(name, k, fromTs, toTs, asc, limit, tx.MdbxTx)
+func (tx *RwTx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.historySeek(name, tx.RwTx, key, ts)
+}
+
+func (tx *tx) indexRange(name kv.InvertedIdx, dbTx kv.Tx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
+	timestamps, err = tx.filesTx.IndexRange(name, k, fromTs, toTs, asc, limit, dbTx)
 	if err != nil {
 		return nil, err
 	}
@@ -234,11 +298,27 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	return timestamps, nil
 }
 
-func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.filesTx.HistoryRange(name, fromTs, toTs, asc, limit, tx.MdbxTx)
+func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
+	return tx.indexRange(name, tx.Tx, k, fromTs, toTs, asc, limit)
+}
+
+func (tx *RwTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
+	return tx.indexRange(name, tx.RwTx, k, fromTs, toTs, asc, limit)
+}
+
+func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	it, err := tx.filesTx.HistoryRange(name, fromTs, toTs, asc, limit, dbTx)
 	if err != nil {
 		return nil, err
 	}
 	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
+}
+
+func (tx *Tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	return tx.historyRange(name, tx.Tx, fromTs, toTs, asc, limit)
+}
+
+func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	return tx.historyRange(name, tx.RwTx, fromTs, toTs, asc, limit)
 }

@@ -26,11 +26,11 @@ type serialExecutor struct {
 	blobGasUsed uint64
 }
 
-func (se *serialExecutor) wait() error {
+func (se *serialExecutor) wait(ctx context.Context) error {
 	return nil
 }
 
-func (se *serialExecutor) status(ctx context.Context, commitThreshold uint64) error {
+func (se *serialExecutor) processEvents(ctx context.Context, commitThreshold uint64) error {
 	return nil
 }
 

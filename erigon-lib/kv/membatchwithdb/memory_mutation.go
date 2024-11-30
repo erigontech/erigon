@@ -696,11 +696,11 @@ func (m *MemoryMutation) Cursor(bucket string) (kv.Cursor, error) {
 	return m.makeCursor(bucket)
 }
 
-func (m *MemoryMutation) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+func (m *MemoryMutation) Apply(f func(tx kv.Tx) error) error {
 	return f(m)
 }
 
-func (m *MemoryMutation) ApplyRw(ctx context.Context, f func(tx kv.RwTx) error) error {
+func (m *MemoryMutation) ApplyRw(f func(tx kv.RwTx) error) error {
 	return f(m)
 }
 

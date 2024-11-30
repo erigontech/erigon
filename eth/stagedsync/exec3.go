@@ -33,7 +33,9 @@ import (
 	metrics2 "github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -206,7 +208,7 @@ func ExecV3(ctx context.Context,
 	isMining bool,
 ) error {
 	// TODO: e35 doesn't support parallel-exec yet
-	parallel = false //nolint
+	parallel = true //nolint
 
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
@@ -218,9 +220,12 @@ func ExecV3(ctx context.Context,
 		}
 	}()
 
-	applyTx := txc.Tx
-	useExternalTx := applyTx != nil
-	if !useExternalTx {
+	useExternalTx := txc.Tx != nil
+	var applyTx kv.RwTx
+
+	if useExternalTx {
+		applyTx = txc.Tx
+	} else {
 		if !parallel {
 			var err error
 			applyTx, err = cfg.db.BeginRw(ctx) //nolint
@@ -350,6 +355,16 @@ func ExecV3(ctx context.Context,
 	var executor executor
 
 	if parallel {
+		if useExternalTx {
+			switch tx := applyTx.(type) {
+			case *mdbx.MdbxTx:
+				applyTx = mdbx.NewAsyncRwTx(tx, 1000)
+			case *temporal.RwTx:
+				tx.RwTx = mdbx.NewAsyncRwTx(tx.RwTx, 1000)
+				applyTx = tx
+			}
+		}
+
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
 				cfg:            cfg,
@@ -499,7 +514,7 @@ Loop:
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
 		// print type of engine
 		if parallel {
-			if err := executor.status(ctx, commitThreshold); err != nil {
+			if err := executor.processEvents(ctx, commitThreshold); err != nil {
 				return err
 			}
 		} else if accumulator != nil {
@@ -629,7 +644,7 @@ Loop:
 				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 				return errors.New("wrong trie root")
 			}
-			
+
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
 			executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
@@ -728,7 +743,7 @@ Loop:
 	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", mxExecRepeats.GetValueUint64())
 
 	//fmt.Println("WAIT")
-	executor.wait()
+	executor.wait(ctx)
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {

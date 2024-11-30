@@ -12,6 +12,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
+	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -70,8 +72,8 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type executor interface {
 	execute(ctx context.Context, tasks []*state.TxTask) (bool, error)
-	status(ctx context.Context, commitThreshold uint64) error
-	wait() error
+	processEvents(ctx context.Context, commitThreshold uint64) error
+	wait(ctx context.Context) error
 	getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header)
 
 	//these are reset by commit - so need to be read from the executor once its processing
@@ -244,6 +246,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				logger.Info(fmt.Sprintf("[%s] Background files build", pe.execStage.LogPrefix()), "progress", pe.agg.BackgroundProgress())
 			}
 		case <-pe.pruneEvery.C:
+			break
 			if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() {
 				if pe.doms.BlockNum() != pe.outputBlockNum.GetValueUint64() {
 					panic(fmt.Errorf("%d != %d", pe.doms.BlockNum(), pe.outputBlockNum.GetValueUint64()))
@@ -477,22 +480,35 @@ func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log
 	return func() {
 		rwLoopCtxCancel()
 		pe.slowDownLimit.Stop()
-		pe.wait()
+		pe.wait(ctx)
 		pe.stopWorkers()
 		close(pe.rwsConsumed)
 		pe.in.Close()
 	}
 }
 
-func (pe *parallelExecutor) status(ctx context.Context, commitThreshold uint64) error {
-	select {
-	case err := <-pe.rwLoopErrCh:
-		if err != nil {
-			return err
+func (pe *parallelExecutor) processEvents(ctx context.Context, commitThreshold uint64) error {
+	var applyChan mdbx.TxApplyChan
+
+	if temporalTx, ok := pe.applyTx.(*temporal.RwTx); ok {
+		if applySource, ok := temporalTx.RwTx.(mdbx.TxApplySource); ok {
+			applyChan = applySource.ApplyChan()
 		}
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
+	}
+
+	for len(applyChan) > 0 {
+		select {
+		case err := <-pe.rwLoopErrCh:
+			if err != nil {
+				return err
+			}
+		case request := <-applyChan:
+			request.Apply()
+
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 
 	for pe.rws.Len() > pe.rws.Limit() || pe.rs.SizeEstimate() >= commitThreshold {
@@ -515,7 +531,7 @@ func (pe *parallelExecutor) status(ctx context.Context, commitThreshold uint64) 
 	return nil
 }
 
-func (pe *parallelExecutor) wait() error {
+func (pe *parallelExecutor) wait(ctx context.Context) error {
 	pe.applyLoopWg.Wait()
 
 	if pe.rwLoopG != nil {

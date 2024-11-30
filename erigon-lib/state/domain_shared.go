@@ -752,137 +752,138 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
 
-	haveRamUpdates := sd.storage.Len() > 0
+	return sd.roTx.Apply(func(roTx kv.Tx) error {
+		haveRamUpdates := sd.storage.Len() > 0
 
-	var cp CursorHeap
-	cpPtr := &cp
-	heap.Init(cpPtr)
-	var k, v []byte
-	var err error
+		var cp CursorHeap
+		cpPtr := &cp
+		heap.Init(cpPtr)
+		var k, v []byte
+		var err error
 
-	iter := sd.storage.Iter()
-	if iter.Seek(string(prefix)) {
-		kx := iter.Key()
-		v = iter.Value().data
-		k = []byte(kx)
+		iter := sd.storage.Iter()
+		if iter.Seek(string(prefix)) {
+			kx := iter.Key()
+			v = iter.Value().data
+			k = []byte(kx)
 
-		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
-			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: iter, endTxNum: sd.txNum, reverse: true})
-		}
-	}
-
-	roTx := sd.roTx
-	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valuesTable)
-	if err != nil {
-		return err
-	}
-	defer valsCursor.Close()
-	if k, v, err = valsCursor.Seek(prefix); err != nil {
-		return err
-	}
-	if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-		step := ^binary.BigEndian.Uint64(v[:8])
-		val := v[8:]
-		endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-		if haveRamUpdates && endTxNum >= sd.txNum {
-			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
+			if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
+				heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: iter, endTxNum: sd.txNum, reverse: true})
+			}
 		}
 
-		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), step: step, cDup: valsCursor, endTxNum: endTxNum, reverse: true})
-	}
-
-	sctx := sd.aggTx.d[kv.StorageDomain]
-	for i, item := range sctx.files {
-		cursor, err := item.src.bindex.Seek(sctx.statelessGetter(i), prefix)
+		valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valuesTable)
 		if err != nil {
 			return err
 		}
-		if cursor == nil {
-			continue
+		defer valsCursor.Close()
+		if k, v, err = valsCursor.Seek(prefix); err != nil {
+			return err
 		}
-
-		key := cursor.Key()
-		if key != nil && bytes.HasPrefix(key, prefix) {
-			val := cursor.Value()
-			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
-			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, step: 0, btCursor: cursor, endTxNum: txNum, reverse: true})
-		}
-	}
-
-	for cp.Len() > 0 {
-		lastKey := common.Copy(cp[0].key)
-		lastVal := common.Copy(cp[0].val)
-		lastStep := cp[0].step
-		// Advance all the items that have this key (including the top)
-		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := heap.Pop(cpPtr).(*CursorItem)
-			switch ci1.t {
-			case RAM_CURSOR:
-				if ci1.iter.Next() {
-					k = []byte(ci1.iter.Key())
-					if k != nil && bytes.HasPrefix(k, prefix) {
-						ci1.key = common.Copy(k)
-						ci1.val = common.Copy(ci1.iter.Value().data)
-						heap.Push(cpPtr, ci1)
-					}
-				}
-			case FILE_CURSOR:
-				indexList := sd.aggTx.d[kv.StorageDomain].d.indexList
-				if indexList&withBTree != 0 {
-					if ci1.btCursor.Next() {
-						ci1.key = ci1.btCursor.Key()
-						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
-							ci1.val = ci1.btCursor.Value()
-							heap.Push(cpPtr, ci1)
-						}
-					} else {
-						ci1.btCursor.Close()
-					}
-				}
-				if indexList&withHashMap != 0 {
-					ci1.dg.Reset(ci1.latestOffset)
-					if !ci1.dg.HasNext() {
-						break
-					}
-					key, _ := ci1.dg.Next(nil)
-					if key != nil && bytes.HasPrefix(key, prefix) {
-						ci1.key = key
-						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
-						heap.Push(cpPtr, ci1)
-					} else {
-						ci1.dg = nil
-					}
-				}
-			case DB_CURSOR:
-				k, v, err := ci1.cDup.NextNoDup()
-				if err != nil {
-					return err
-				}
-
-				if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-					ci1.key = common.Copy(k)
-					step := ^binary.BigEndian.Uint64(v[:8])
-					endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
-					if haveRamUpdates && endTxNum >= sd.txNum {
-						ci1.cDup.Close()
-						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
-					}
-					ci1.endTxNum = endTxNum
-					ci1.val = common.Copy(v[8:])
-					ci1.step = step
-					heap.Push(cpPtr, ci1)
-				} else {
-					ci1.cDup.Close()
-				}
+		if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+			step := ^binary.BigEndian.Uint64(v[:8])
+			val := v[8:]
+			endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+			if haveRamUpdates && endTxNum >= sd.txNum {
+				return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 			}
+
+			heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(val), step: step, cDup: valsCursor, endTxNum: endTxNum, reverse: true})
 		}
-		if len(lastVal) > 0 {
-			if err := it(lastKey, lastVal, lastStep); err != nil {
+
+		sctx := sd.aggTx.d[kv.StorageDomain]
+		for i, item := range sctx.files {
+			cursor, err := item.src.bindex.Seek(sctx.statelessGetter(i), prefix)
+			if err != nil {
 				return err
 			}
+			if cursor == nil {
+				continue
+			}
+
+			key := cursor.Key()
+			if key != nil && bytes.HasPrefix(key, prefix) {
+				val := cursor.Value()
+				txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
+				heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, step: 0, btCursor: cursor, endTxNum: txNum, reverse: true})
+			}
 		}
-	}
-	return nil
+
+		for cp.Len() > 0 {
+			lastKey := common.Copy(cp[0].key)
+			lastVal := common.Copy(cp[0].val)
+			lastStep := cp[0].step
+			// Advance all the items that have this key (including the top)
+			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
+				ci1 := heap.Pop(cpPtr).(*CursorItem)
+				switch ci1.t {
+				case RAM_CURSOR:
+					if ci1.iter.Next() {
+						k = []byte(ci1.iter.Key())
+						if k != nil && bytes.HasPrefix(k, prefix) {
+							ci1.key = common.Copy(k)
+							ci1.val = common.Copy(ci1.iter.Value().data)
+							heap.Push(cpPtr, ci1)
+						}
+					}
+				case FILE_CURSOR:
+					indexList := sd.aggTx.d[kv.StorageDomain].d.indexList
+					if indexList&withBTree != 0 {
+						if ci1.btCursor.Next() {
+							ci1.key = ci1.btCursor.Key()
+							if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
+								ci1.val = ci1.btCursor.Value()
+								heap.Push(cpPtr, ci1)
+							}
+						} else {
+							ci1.btCursor.Close()
+						}
+					}
+					if indexList&withHashMap != 0 {
+						ci1.dg.Reset(ci1.latestOffset)
+						if !ci1.dg.HasNext() {
+							break
+						}
+						key, _ := ci1.dg.Next(nil)
+						if key != nil && bytes.HasPrefix(key, prefix) {
+							ci1.key = key
+							ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
+							heap.Push(cpPtr, ci1)
+						} else {
+							ci1.dg = nil
+						}
+					}
+				case DB_CURSOR:
+					k, v, err := ci1.cDup.NextNoDup()
+					if err != nil {
+						return err
+					}
+
+					if len(k) > 0 && bytes.HasPrefix(k, prefix) {
+						ci1.key = common.Copy(k)
+						step := ^binary.BigEndian.Uint64(v[:8])
+						endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+						if haveRamUpdates && endTxNum >= sd.txNum {
+							ci1.cDup.Close()
+							return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
+						}
+						ci1.endTxNum = endTxNum
+						ci1.val = common.Copy(v[8:])
+						ci1.step = step
+						heap.Push(cpPtr, ci1)
+					} else {
+						ci1.cDup.Close()
+					}
+				}
+			}
+			if len(lastVal) > 0 {
+				if err := it(lastKey, lastVal, lastStep); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 func (sd *SharedDomains) Close() {
