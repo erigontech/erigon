@@ -103,9 +103,9 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 }
 
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
-	//if receipts, ok := g.receiptsCache.Get(block.Hash()); ok && len(receipts) > index {
-	//	return receipts[index], nil
-	//}
+	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok && len(receipts) > index {
+		return receipts[index], nil
+	}
 
 	var receipt *types.Receipt
 	if optimize {
