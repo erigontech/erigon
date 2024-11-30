@@ -277,9 +277,12 @@ func (r *Receipt) Copy() *Receipt {
 
 	bloom := BytesToBloom(r.Bloom.Bytes())
 
-	logs := make(Logs, 0, len(r.Logs))
-	for _, log := range r.Logs {
-		logs = append(logs, log.Copy())
+	var logs Logs
+	if r.Logs != nil {
+		logs = make(Logs, 0, len(r.Logs))
+		for _, log := range r.Logs {
+			logs = append(logs, log.Copy())
+		}
 	}
 
 	txHash := libcommon.BytesToHash(r.TxHash.Bytes())
