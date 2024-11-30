@@ -272,6 +272,9 @@ func (r *Receipt) statusEncoding() []byte {
 
 // Copy creates a deep copy of the Receipt.
 func (r *Receipt) Copy() *Receipt {
+	if r == nil {
+		return nil
+	}
 	postState := make([]byte, len(r.PostState))
 	copy(postState, r.PostState)
 
@@ -356,6 +359,9 @@ type Receipts []*Receipt
 func (rs Receipts) Len() int { return len(rs) }
 
 func (rs Receipts) Copy() Receipts {
+	if rs == nil {
+		return nil
+	}
 	rsCopy := make(Receipts, 0, rs.Len())
 	for _, r := range rs {
 		rsCopy = append(rsCopy, r.Copy())
