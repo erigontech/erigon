@@ -43,12 +43,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
@@ -202,8 +202,7 @@ func NewMultiClient(
 	if !disableBlockDownload {
 		bd = bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			_, _, _, _, err := bd.UpdateFromDb(tx)
-			return err
+			return bd.UpdateFromDb(tx)
 		}); err != nil {
 			return nil, err
 		}

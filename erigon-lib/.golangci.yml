@@ -96,6 +96,11 @@ linters-settings:
 
 issues:
   exclude-rules:
+    - path: rlp/.*\.go
+      linters:
+        - predeclared
+        - thelper
+        - all
     - linters:
         - golint
       text: "should be"

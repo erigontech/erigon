@@ -33,7 +33,7 @@ import (
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	rlp "github.com/erigontech/erigon-lib/rlp2"
 )
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
