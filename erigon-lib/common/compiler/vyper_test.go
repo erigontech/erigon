@@ -25,6 +25,7 @@ import (
 )
 
 func skipWithoutVyper(t *testing.T) {
+	t.Helper()
 	if _, err := exec.LookPath("vyper"); err != nil {
 		t.Skip(err)
 	}

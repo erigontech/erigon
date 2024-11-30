@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func TestMemoryCopy(t *testing.T) {

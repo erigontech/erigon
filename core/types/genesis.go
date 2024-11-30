@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 
-	common2 "github.com/erigontech/erigon/common"
+	common2 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/params"
 )
 

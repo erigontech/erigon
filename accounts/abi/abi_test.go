@@ -30,10 +30,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/common"
 )
 
 const jsondata = `

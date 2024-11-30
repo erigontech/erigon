@@ -27,8 +27,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon/rlp"
 )
 
 //go:generate gencodec -type Withdrawal -field-override withdrawalMarshaling -out gen_withdrawal_json.go
