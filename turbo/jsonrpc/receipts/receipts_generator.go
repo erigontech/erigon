@@ -161,6 +161,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 		receipts[i] = receipt
 	}
 
-	g.receiptsCache.Add(block.Hash(), receipts.Copy())
+	g.receiptsCache.Add(block.Hash(), receipts)
 	return receipts, nil
 }
