@@ -276,12 +276,6 @@ func (r *Receipt) Copy() *Receipt {
 	if r == nil {
 		return nil
 	}
-
-	txHash := libcommon.BytesToHash(r.TxHash.Bytes())
-	contractAddress := libcommon.BytesToAddress(r.ContractAddress.Bytes())
-	blockHash := libcommon.BytesToHash(r.BlockHash.Bytes())
-	blockNumber := big.NewInt(0).Set(r.BlockNumber)
-
 	return &Receipt{
 		Type:              r.Type,
 		PostState:         slices.Clone(r.PostState),
@@ -289,11 +283,11 @@ func (r *Receipt) Copy() *Receipt {
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		Bloom:             BytesToBloom(r.Bloom.Bytes()),
 		Logs:              r.Logs.Copy(),
-		TxHash:            txHash,
-		ContractAddress:   contractAddress,
+		TxHash:            libcommon.BytesToHash(r.TxHash.Bytes()),
+		ContractAddress:   libcommon.BytesToAddress(r.ContractAddress.Bytes()),
 		GasUsed:           r.GasUsed,
-		BlockHash:         blockHash,
-		BlockNumber:       blockNumber,
+		BlockHash:         libcommon.BytesToHash(r.BlockHash.Bytes()),
+		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,
 	}
 }
