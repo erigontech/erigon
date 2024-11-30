@@ -102,10 +102,6 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 	}, nil
 }
 
-func (g *Generator) addToCache(header *types.Header, receipts types.Receipts) {
-	g.receiptsCache.Add(header.Hash(), receipts.Copy())
-}
-
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok && len(receipts) > index {
 		return receipts[index], nil
@@ -165,6 +161,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 		receipts[i] = receipt
 	}
 
-	g.addToCache(block.HeaderNoCopy(), receipts)
+	g.receiptsCache.Add(block.Hash(), receipts.Copy())
 	return receipts, nil
 }
