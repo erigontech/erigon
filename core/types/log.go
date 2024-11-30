@@ -21,6 +21,7 @@ package types
 
 import (
 	"io"
+	"slices"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
@@ -254,19 +255,19 @@ func (l *Log) Copy() *Log {
 	if l == nil {
 		return nil
 	}
-	topics := make([]libcommon.Hash, 0, len(l.Topics))
-	for _, topic := range l.Topics {
-		topicCopy := libcommon.BytesToHash(topic.Bytes())
-		topics = append(topics, topicCopy)
+	var topics []libcommon.Hash
+	if l.Topics != nil {
+		topics = make([]libcommon.Hash, 0, len(l.Topics))
+		for _, topic := range l.Topics {
+			topicCopy := libcommon.BytesToHash(topic.Bytes())
+			topics = append(topics, topicCopy)
+		}
 	}
-
-	data := make([]byte, len(l.Data))
-	copy(data, l.Data)
 
 	return &Log{
 		Address:     libcommon.BytesToAddress(l.Address.Bytes()),
 		Topics:      topics,
-		Data:        data,
+		Data:        slices.Clone(l.Data),
 		BlockNumber: l.BlockNumber,
 		TxHash:      libcommon.BytesToHash(l.TxHash.Bytes()),
 		TxIndex:     l.TxIndex,
