@@ -154,7 +154,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 
 	statedb := sim.stateByBlockNumber(tx, new(big.Int).SetUint64(num+1))
 	bal, err := statedb.GetBalance(testAddr)
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !bal.Eq(expectedBal) {
