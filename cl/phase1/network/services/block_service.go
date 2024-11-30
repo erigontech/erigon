@@ -19,7 +19,6 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -37,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -203,29 +203,18 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 
 // processAndStoreBlock processes and stores a block
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
-	var wg sync.WaitGroup
+	group, _ := errgroup.WithContext(ctx)
 
-	var (
-		errExec      error
-		errConsensus error
-	)
+	group.Go(func() error {
+		return b.forkchoiceStore.ProcessBlockExecution(ctx, block)
+	})
+	group.Go(func() error {
+		return b.forkchoiceStore.ProcessBlockConsensus(ctx, block)
+	})
 
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		errExec = b.forkchoiceStore.ProcessBlockExecution(ctx, block)
-	}()
-	go func() {
-		defer wg.Done()
-		errConsensus = b.forkchoiceStore.ProcessBlockConsensus(ctx, block)
-	}()
-	wg.Wait()
-
-	if errExec != nil {
-		return fmt.Errorf("failed to pre-process block execution: %w", errExec)
-	}
-	if errConsensus != nil {
-		return fmt.Errorf("failed to pre-process block consensus: %w", errConsensus)
+	err := group.Wait()
+	if err != nil {
+		return err
 	}
 
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
