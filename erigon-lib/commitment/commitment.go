@@ -25,6 +25,7 @@ import (
 	"math/bits"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -113,6 +114,10 @@ type PatriciaContext interface {
 	Account(plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
 	Storage(plainKey []byte) (*Update, error)
+	// Reset performance counters, but not cumulative counters
+	ResetPerfCounters()
+	// Obtain performance counters
+	PerfCounters() map[string]time.Duration
 }
 
 type TrieVariant string
