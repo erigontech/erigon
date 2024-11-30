@@ -22,7 +22,6 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"

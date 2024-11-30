@@ -29,10 +29,10 @@ import (
 
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
 )
 

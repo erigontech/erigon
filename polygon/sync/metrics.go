@@ -14,26 +14,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bodydownload_test
+package sync
 
 import (
-	"testing"
+	"time"
 
-	"github.com/erigontech/erigon/turbo/stages/bodydownload"
-	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
-func TestCreateBodyDownload(t *testing.T) {
-	t.Parallel()
-	m := mock.Mock(t)
-	tx, err := m.DB.BeginRo(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	bd := bodydownload.NewBodyDownload(ethash.NewFaker(), 128, 100, m.BlockReader, m.Log)
-	if err := bd.UpdateFromDb(tx); err != nil {
-		t.Fatalf("update from db: %v", err)
-	}
+var (
+	wiggleDuration = metrics.NewSummary(`wiggle_duration`)
+)
+
+func UpdateWiggleDuration(duration time.Duration) {
+	wiggleDuration.ObserveDuration(time.Now().Add(-duration))
 }

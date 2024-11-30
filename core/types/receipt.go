@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 //(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
@@ -351,6 +351,14 @@ type Receipts []*Receipt
 
 // Len returns the number of receipts in this list.
 func (rs Receipts) Len() int { return len(rs) }
+
+func (rs Receipts) Copy() Receipts {
+	rsCopy := make(Receipts, 0, rs.Len())
+	for _, r := range rs {
+		rsCopy = append(rsCopy, r.Copy())
+	}
+	return rsCopy
+}
 
 // EncodeIndex encodes the i'th receipt to w.
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
