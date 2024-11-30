@@ -1134,7 +1134,7 @@ const DepthWithoutNodeHashes = 35 //nolint
 func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, depth int) func(nibble int, skip bool) (*cell, error) {
 	return func(nibble int, skip bool) (*cell, error) {
 		if skip {
-			if _, err := hph.keccak2.Write(b[:]); err != nil {
+			if _, err := hph.keccak2.Write(b); err != nil {
 				return nil, fmt.Errorf("failed to write empty nibble to hash: %w", err)
 			}
 			if hph.trace {
