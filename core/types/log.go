@@ -266,17 +266,9 @@ func (l *Log) Copy() *Log {
 	if l == nil {
 		return nil
 	}
-	var topics []libcommon.Hash
-	if l.Topics != nil {
-		topics = make([]libcommon.Hash, 0, len(l.Topics))
-		for _, topic := range l.Topics {
-			topics = append(topics, libcommon.BytesToHash(topic.Bytes()))
-		}
-	}
-
 	return &Log{
 		Address:     libcommon.BytesToAddress(l.Address.Bytes()),
-		Topics:      topics,
+		Topics:      slices.Clone(l.Topics),
 		Data:        slices.Clone(l.Data),
 		BlockNumber: l.BlockNumber,
 		TxHash:      libcommon.BytesToHash(l.TxHash.Bytes()),
