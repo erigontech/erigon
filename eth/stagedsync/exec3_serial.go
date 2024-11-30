@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"sync/atomic"
 	"time"
 
@@ -133,6 +134,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			if txTask.TxIndex >= 0 && !txTask.Final {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
+
+			if txTask.TxIndex > 0 && receipt != nil &&
+				txTask.BlockReceipts[txTask.TxIndex-1].CumulativeGasUsed == receipt.CumulativeGasUsed {
+				msg := fmt.Sprintf("bad receipts accert stack %s receipt %+v", dbg.Stack(), txTask.BlockReceipts[txTask.TxIndex])
+				panic(msg)
+			}
+
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err
 			}
