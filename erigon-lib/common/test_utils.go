@@ -21,6 +21,7 @@ package common
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -32,7 +33,8 @@ func LoadJSON(file string, val interface{}) error {
 		return err
 	}
 	if err := json.Unmarshal(content, val); err != nil {
-		if syntaxerr, ok := err.(*json.SyntaxError); ok {
+		var syntaxerr *json.SyntaxError
+		if ok := errors.As(err, &syntaxerr); ok {
 			line := findLine(content, syntaxerr.Offset)
 			return fmt.Errorf("JSON syntax error at %v:%v: %w", file, line, err)
 		}
