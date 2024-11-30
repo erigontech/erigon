@@ -18,12 +18,9 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sync"
-
-	"github.com/Giulio2002/bls"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -42,11 +39,12 @@ type seenSyncCommitteeMessage struct {
 }
 
 type syncCommitteeMessagesService struct {
-	seenSyncCommitteeMessages map[seenSyncCommitteeMessage]struct{}
+	seenSyncCommitteeMessages sync.Map
 	syncedDataManager         *synced_data.SyncedDataManager
 	beaconChainCfg            *clparams.BeaconChainConfig
 	syncContributionPool      sync_contribution_pool.SyncContributionPool
 	ethClock                  eth_clock.EthereumClock
+	batchSignatureVerifier    *BatchSignatureVerifier
 	test                      bool
 
 	mu sync.Mutex
@@ -58,91 +56,113 @@ func NewSyncCommitteeMessagesService(
 	ethClock eth_clock.EthereumClock,
 	syncedDataManager *synced_data.SyncedDataManager,
 	syncContributionPool sync_contribution_pool.SyncContributionPool,
+	batchSignatureVerifier *BatchSignatureVerifier,
 	test bool,
 ) SyncCommitteeMessagesService {
 	return &syncCommitteeMessagesService{
-		seenSyncCommitteeMessages: make(map[seenSyncCommitteeMessage]struct{}),
-		ethClock:                  ethClock,
-		syncedDataManager:         syncedDataManager,
-		beaconChainCfg:            beaconChainCfg,
-		syncContributionPool:      syncContributionPool,
-		test:                      test,
+		ethClock:               ethClock,
+		syncedDataManager:      syncedDataManager,
+		beaconChainCfg:         beaconChainCfg,
+		syncContributionPool:   syncContributionPool,
+		batchSignatureVerifier: batchSignatureVerifier,
+		test:                   test,
 	}
 }
 
 // ProcessMessage processes a sync committee message
-func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessage) error {
+func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessageWithGossipData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	headState := s.syncedDataManager.HeadState()
-	if headState == nil {
-		return ErrIgnore
-	}
-	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
-	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Slot) {
-		return ErrIgnore
-	}
 
-	// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
-	// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
-	subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.ValidatorIndex)
-	if err != nil {
-		return err
-	}
-	seenSyncCommitteeMessageIdentifier := seenSyncCommitteeMessage{
-		subnet:         *subnet,
-		slot:           msg.Slot,
-		validatorIndex: msg.ValidatorIndex,
-	}
+	return s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
+		if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot) {
+			return ErrIgnore
+		}
+		// [REJECT] The subnet_id is valid for the given validator, i.e. subnet_id in compute_subnets_for_sync_committee(state, sync_committee_message.validator_index).
+		// Note this validation implies the validator is part of the broader current sync committee along with the correct subcommittee.
+		subnets, err := subnets.ComputeSubnetsForSyncCommittee(headState, msg.SyncCommitteeMessage.ValidatorIndex)
+		if err != nil {
+			return err
+		}
+		seenSyncCommitteeMessageIdentifier := seenSyncCommitteeMessage{
+			subnet:         *subnet,
+			slot:           msg.SyncCommitteeMessage.Slot,
+			validatorIndex: msg.SyncCommitteeMessage.ValidatorIndex,
+		}
 
-	if !slices.Contains(subnets, *subnet) {
-		return fmt.Errorf("validator is not into any subnet %d", *subnet)
-	}
-	// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
-	if _, ok := s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier]; ok {
+		if !slices.Contains(subnets, *subnet) {
+			return fmt.Errorf("validator is not into any subnet %d", *subnet)
+		}
+		// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
+
+		if _, ok := s.seenSyncCommitteeMessages.Load(seenSyncCommitteeMessageIdentifier); ok {
+			return ErrIgnore
+		}
+		// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
+		signature, signingRoot, pubKey, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
+		if !s.test && err != nil {
+			return err
+		}
+		aggregateVerificationData := &AggregateVerificationData{
+			Signatures: [][]byte{signature},
+			SignRoots:  [][]byte{signingRoot},
+			Pks:        [][]byte{pubKey},
+			GossipData: msg.GossipData,
+			F: func() {
+				s.seenSyncCommitteeMessages.Store(seenSyncCommitteeMessageIdentifier, struct{}{})
+				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
+				// Aggregate the message
+				s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+			},
+		}
+
+		if msg.ImmediateVerification {
+			return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		}
+
+		// push the signatures to verify asynchronously and run final functions after that.
+		s.batchSignatureVerifier.AsyncVerifySyncCommitteeMessage(aggregateVerificationData)
+
+		// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
+		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
+		// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
+		// gossip ourselves or ban the peer which sent that particular invalid signature.
 		return ErrIgnore
-	}
-	// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
-	if err := verifySyncCommitteeMessageSignature(headState, msg); !s.test && err != nil {
-		return err
-	}
-	s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
-	s.cleanupOldSyncCommitteeMessages() // cleanup old messages
-	// Aggregate the message
-	return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg)
+	})
 }
 
 // cleanupOldSyncCommitteeMessages removes old sync committee messages from the cache
 func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	headSlot := s.syncedDataManager.HeadSlot()
-	for k := range s.seenSyncCommitteeMessages {
+
+	entriesToRemove := []seenSyncCommitteeMessage{}
+	s.seenSyncCommitteeMessages.Range(func(key, value interface{}) bool {
+		k := key.(seenSyncCommitteeMessage)
 		if headSlot > k.slot+1 {
-			delete(s.seenSyncCommitteeMessages, k)
+			entriesToRemove = append(entriesToRemove, k)
 		}
+		return true
+	})
+	for _, k := range entriesToRemove {
+		s.seenSyncCommitteeMessages.Delete(k)
 	}
 }
 
 // verifySyncCommitteeMessageSignature verifies the signature of a sync committee message
-func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltypes.SyncCommitteeMessage) error {
+func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltypes.SyncCommitteeMessage) ([]byte, []byte, []byte, error) {
 	publicKey, err := s.ValidatorPublicKey(int(msg.ValidatorIndex))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	cfg := s.BeaconConfig()
 	domain, err := s.GetDomain(cfg.DomainSyncCommittee, state.Epoch(s))
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	signingRoot, err := utils.Sha256(msg.BeaconBlockRoot[:], domain), nil
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
-	valid, err := bls.Verify(msg.Signature[:], signingRoot[:], publicKey[:])
-	if err != nil {
-		return errors.New("invalid signature")
-	}
-	if !valid {
-		return errors.New("invalid signature")
-	}
-	return nil
+	return msg.Signature[:], signingRoot[:], publicKey[:], nil
 }

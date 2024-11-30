@@ -117,5 +117,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		MevRelayUrl:            cfg.MevRelayUrl,
 		CustomConfigPath:       cfg.CustomConfig,
 		CustomGenesisStatePath: cfg.CustomGenesisState,
+		MaxPeerCount:           cfg.MaxPeerCount,
 	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
 }

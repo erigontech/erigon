@@ -34,10 +34,12 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
@@ -46,10 +48,8 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 	"github.com/erigontech/erigon/turbo/services"
@@ -67,7 +67,7 @@ type requestGenerator struct {
 }
 
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
-	db := memdb.New("")
+	db := memdb.New("", kv.ChainDB)
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		if err := rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
 			return err
@@ -154,8 +154,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 	}
 	defer tx.Rollback()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, reader, rawdbv3.TxNums, tx, 0)
-
+	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, reader, rawdbv3.TxNums, tx, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +178,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 
 	for i, txn := range block.Transactions() {
 
-		ibs.SetTxContext(txn.Hash(), i)
+		ibs.SetTxContext(i)
 
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, &usedGas, &usedBlobGas, vm.Config{})
 

@@ -38,7 +38,6 @@ func (s *Span) RawId() uint64 {
 }
 
 func (s *Span) SetRawId(_ uint64) {
-	panic("unimplemented")
 }
 
 func (s *Span) BlockNumRange() ClosedRange {
@@ -74,4 +73,23 @@ func (s *Span) Producers() []*valset.Validator {
 type SpanResponse struct {
 	Height string `json:"height"`
 	Result Span   `json:"result"`
+}
+
+type spans []*Span
+
+func (s spans) Len() int {
+	return len(s)
+}
+
+func (s spans) Less(i, j int) bool {
+	return s[i].Id < s[j].Id
+}
+
+func (s spans) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+type SpanListResponse struct {
+	Height string `json:"height"`
+	Result spans  `json:"result"`
 }

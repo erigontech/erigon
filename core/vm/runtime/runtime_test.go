@@ -40,17 +40,16 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	stateLib "github.com/erigontech/erigon-lib/state"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/asm"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/rlp"
 )
 
 func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
@@ -58,8 +57,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -180,8 +178,7 @@ func testTemporalDB(t testing.TB) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
@@ -357,7 +354,7 @@ func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                       
 func (cr *FakeChainHeaderReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
-func (cr *FakeChainHeaderReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
+func (cr *FakeChainHeaderReader) BorStartEventId(hash libcommon.Hash, number uint64) uint64 {
 	return 0
 }
 func (cr *FakeChainHeaderReader) BorSpan(spanId uint64) []byte { return nil }

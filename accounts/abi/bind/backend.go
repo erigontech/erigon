@@ -51,7 +51,7 @@ type ContractCaller interface {
 	// CodeAt returns the code of the given account. This is needed to differentiate
 	// between contract internal errors and the local chain being out of sync.
 	CodeAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) ([]byte, error)
-	// ContractCall executes an Ethereum contract call with the specified data as the
+	// CallContract executes an Ethereum contract call with the specified data as the
 	// input.
 	CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 }

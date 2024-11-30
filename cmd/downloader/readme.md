@@ -70,7 +70,7 @@ Flag `--snapshots` is compatible with `--prune` flag
  
 # Create new snapshots (can change snapshot size by: --from=0 --to=1_000_000 --segment.size=500_000)
 # It will dump blocks from Database to .seg files:
-erigon snapshots retire --datadir=<your_datadir> 
+erigon seg retire --datadir=<your_datadir> 
 
 # Create .torrent files (you can think about them as "checksum")
 downloader torrent_create --datadir=<your_datadir>
@@ -91,7 +91,7 @@ STOP_AFTER_STAGE=Senders ./build/bin/erigon --snapshots=false --datadir=<your_da
 
 
 # Erigon can use snapshots only after indexing them. Erigon will automatically index them but also can run (this step is not required for seeding):
-erigon snapshots index --datadir=<your_datadir> 
+erigon seg index --datadir=<your_datadir> 
 ```
 
 ## Architecture

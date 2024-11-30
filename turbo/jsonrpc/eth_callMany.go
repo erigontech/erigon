@@ -26,12 +26,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -166,9 +165,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
+		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
+		if err != nil || !ok {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
 		return hash
 	}
@@ -210,7 +209,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		st.SetTxContext(txn.Hash(), idx)
+		st.SetTxContext(idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
@@ -278,7 +277,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: false})
-			result, err := core.ApplyMessage(evm, msg, gp, true, false)
+			result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 			if err != nil {
 				return nil, err
 			}
@@ -292,7 +291,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			jsonResult := make(map[string]interface{})
 			if result.Err != nil {
 				if len(result.Revert()) > 0 {
-					jsonResult["error"] = ethapi.NewRevertError(result)
+					revertErr := ethapi.NewRevertError(result)
+					jsonResult["error"] = map[string]interface{}{
+						"message": revertErr.Error(),
+						"data":    revertErr.ErrorData(),
+					}
 				} else {
 					jsonResult["error"] = result.Err.Error()
 				}

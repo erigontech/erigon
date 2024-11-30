@@ -5,13 +5,11 @@
   - [Healthcheck](#healthcheck)
   - [Testing](#testing)
 - [FAQ](#faq)
-  - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
+  - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-methods)
   - [RPC Implementation Status](#rpc-implementation-status)
   - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
   - [Ethstats](#ethstats)
-  - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
-  - [Trace transactions progress](#trace-transactions-progress)
-  - [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
+  - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods-allowlist)
   - [Server load too high](#server-load-too-high)
   - [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)
@@ -103,7 +101,7 @@ Example request
 `http POST http://localhost:8545/health --raw '{"min_peer_count": 3, "known_block": "0x1F"}'`
 Example response
 
-```
+```json
 {
     "check_block": "HEALTHY",
     "healthcheck_query": "HEALTHY",
@@ -130,7 +128,7 @@ Available Options:
 
 Example Request
 
-```
+```bash
 curl --location --request GET 'http://localhost:8545/health' \
 --header 'X-ERIGON-HEALTHCHECK: min_peer_count1' \
 --header 'X-ERIGON-HEALTHCHECK: synced' \
@@ -139,7 +137,7 @@ curl --location --request GET 'http://localhost:8545/health' \
 
 Example Response
 
-```
+```json
 {
     "check_block":"DISABLED",
     "max_seconds_behind":"HEALTHY",
@@ -326,7 +324,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getPayloadV1                        | Yes     |                                      |
 | engine_getPayloadV2                        | Yes     |                                      |
 | engine_getPayloadV3                        | Yes     |                                      |
-| engine_exchangeTransitionConfigurationV1   | Yes     |                                      |
 |                                            |         |                                      |
 | debug_accountRange                         | Yes     | Private Erigon debug module          |
 | debug_accountAt                            | Yes     | Private Erigon debug module          |

@@ -18,9 +18,7 @@ package diagnostics
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"runtime/pprof"
 
 	diaglib "github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/sysutils"
@@ -50,19 +48,6 @@ func SetupSysInfoAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClien
 		w.Header().Set("Content-Type", "application/json")
 		writeMemoryInfo(w)
 	})
-
-	metricsMux.HandleFunc("/heap-profile", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "aplication/profile")
-		writeHeapProfile(w)
-	})
-}
-
-func writeHeapProfile(w http.ResponseWriter) {
-	err := pprof.Lookup("heap").WriteTo(w, 0)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to write profile: %v", err), http.StatusInternalServerError)
-		return
-	}
 }
 
 func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {

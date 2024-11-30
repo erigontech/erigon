@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dir"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv"
@@ -52,8 +53,6 @@ var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,
 		ProhibitNewDownloadsLock,
-		SqueezeCommitmentFiles,
-		RecompressCommitmentFiles,
 		ProhibitNewDownloadsLock2,
 		ClearBorTables,
 	},
@@ -218,6 +217,7 @@ func (m *Migrator) Apply(db kv.RwDB, dataDir, chaindata string, logger log.Logge
 		}
 
 		dirs.Tmp = filepath.Join(dirs.DataDir, "migrations", v.Name)
+		dir.MustExist(dirs.Tmp)
 		if err := v.Up(db, dirs, progress, func(tx kv.RwTx, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {

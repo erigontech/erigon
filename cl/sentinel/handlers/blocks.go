@@ -107,7 +107,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	}
 
 	if len(blockRoots) == 0 {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
 	if err != nil {

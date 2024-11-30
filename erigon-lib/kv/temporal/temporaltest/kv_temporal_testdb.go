@@ -36,13 +36,13 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (db kv.RwDB, agg *state.Aggrega
 	}
 
 	if tb != nil {
-		db = memdb.NewTestDB(tb)
+		db = memdb.NewTestDB(tb, kv.ChainDB)
 	} else {
-		db = memdb.New(dirs.DataDir)
+		db = memdb.New(dirs.DataDir, kv.ChainDB)
 	}
 
 	var err error
-	agg, err = state.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, db, nil, log.New())
+	agg, err = state.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, db, log.New())
 	if err != nil {
 		panic(err)
 	}

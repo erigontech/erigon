@@ -64,13 +64,14 @@ func testEntityFetcher_FetchAllEntities(t *testing.T, count uint64, fetchEntitie
 	libcommon.SliceShuffle(servedEntities)
 	fetchEntitiesPage := makeFetchEntitiesPage(servedEntities)
 
-	fetcher := newEntityFetcher[*Checkpoint](
+	fetcher := NewEntityFetcher[*Checkpoint](
 		"fetcher",
 		nil,
 		nil,
 		nil,
 		fetchEntitiesPage,
 		fetchEntitiesPageLimit,
+		1,
 		logger,
 	)
 
@@ -80,13 +81,11 @@ func testEntityFetcher_FetchAllEntities(t *testing.T, count uint64, fetchEntitie
 }
 
 type entityFetcherFetchEntitiesRangeTest struct {
-	fetcher entityFetcher[*Checkpoint]
-
+	fetcher          *EntityFetcher[*Checkpoint]
 	testRange        ClosedRange
 	expectedEntities []*Checkpoint
-
-	ctx    context.Context
-	logger log.Logger
+	ctx              context.Context
+	logger           log.Logger
 }
 
 func newEntityFetcherFetchEntitiesRangeTest(count uint64, withPaging bool, testRange *ClosedRange) entityFetcherFetchEntitiesRangeTest {
@@ -107,13 +106,14 @@ func newEntityFetcherFetchEntitiesRangeTest(count uint64, withPaging bool, testR
 		fetchEntitiesPage = nil
 	}
 
-	fetcher := newEntityFetcher[*Checkpoint](
+	fetcher := NewEntityFetcher[*Checkpoint](
 		"fetcher",
 		nil,
 		nil,
 		fetchEntity,
 		fetchEntitiesPage,
 		entityFetcherBatchFetchThreshold,
+		1,
 		logger,
 	)
 

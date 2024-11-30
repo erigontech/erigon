@@ -126,7 +126,7 @@ AccountsHistory and StorageHistory - indices designed to serve next 2 type of re
 1. what is smallest block number >= X where account A changed
 2. get last shard of A - to append there new block numbers
 
-Task 1. is part of "get historical state" operation (see `core/state:GetAsOf`):
+Task 1. is part of "get historical state" operation (see `core/state:DomainGetAsOf`):
 If `db.seekInFiles(A+bigEndian(X))` returns non-last shard -
 
 	then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)
@@ -331,7 +331,6 @@ const (
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
 	// BOR
-	BorReceipts             = "BorReceipt"
 	BorFinality             = "BorFinality"
 	BorTxLookup             = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
 	BorSeparate             = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
@@ -352,29 +351,30 @@ const (
 	// Domains/History/InvertedIndices
 	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
 	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
-	TblAccountKeys        = "AccountKeys"
 	TblAccountVals        = "AccountVals"
 	TblAccountHistoryKeys = "AccountHistoryKeys"
 	TblAccountHistoryVals = "AccountHistoryVals"
 	TblAccountIdx         = "AccountIdx"
 
-	TblStorageKeys        = "StorageKeys"
 	TblStorageVals        = "StorageVals"
 	TblStorageHistoryKeys = "StorageHistoryKeys"
 	TblStorageHistoryVals = "StorageHistoryVals"
 	TblStorageIdx         = "StorageIdx"
 
-	TblCodeKeys        = "CodeKeys"
 	TblCodeVals        = "CodeVals"
 	TblCodeHistoryKeys = "CodeHistoryKeys"
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
-	TblCommitmentKeys        = "CommitmentKeys"
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
 	TblCommitmentIdx         = "CommitmentIdx"
+
+	TblReceiptVals        = "ReceiptVals"
+	TblReceiptHistoryKeys = "ReceiptHistoryKeys"
+	TblReceiptHistoryVals = "ReceiptHistoryVals"
+	TblReceiptIdx         = "ReceiptIdx"
 
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
@@ -402,7 +402,7 @@ const (
 
 	// Erigon-CL Objects
 
-	// [slot] => [signature + block without execution payload]
+	// [slot + block root] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
 
 	EffectiveBalancesDump = "EffectiveBalancesDump"
@@ -484,7 +484,6 @@ var (
 	PlainStateVersion = []byte("PlainStateVersion")
 
 	HighestFinalizedKey = []byte("HighestFinalized")
-	LastNewBlockSeen    = []byte("LastNewBlockSeen") // last seen block hash
 
 	StatesProcessingKey          = []byte("StatesProcessing")
 	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
@@ -506,8 +505,6 @@ var ChaindataTables = []string{
 	ConfigTable,
 	DatabaseInfo,
 	IncarnationMap,
-	CliqueSeparate,
-	CliqueLastSnapshot,
 	SyncStageProgress,
 	PlainState,
 	PlainContractCode,
@@ -536,7 +533,6 @@ var ChaindataTables = []string{
 	HeaderTD,
 	Epoch,
 	PendingEpoch,
-	BorReceipts,
 	BorFinality,
 	BorTxLookup,
 	BorSeparate,
@@ -549,29 +545,30 @@ var ChaindataTables = []string{
 	BorCheckpoints,
 	BorCheckpointEnds,
 	BorProducerSelections,
-	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
 	TblAccountIdx,
 
-	TblStorageKeys,
 	TblStorageVals,
 	TblStorageHistoryKeys,
 	TblStorageHistoryVals,
 	TblStorageIdx,
 
-	TblCodeKeys,
 	TblCodeVals,
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
 
-	TblCommitmentKeys,
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
+
+	TblReceiptVals,
+	TblReceiptHistoryKeys,
+	TblReceiptHistoryVals,
+	TblReceiptIdx,
 
 	TblLogAddressKeys,
 	TblLogAddressIdx,
@@ -643,7 +640,18 @@ var TxPoolTables = []string{
 	PoolTransaction,
 	PoolInfo,
 }
-var SentryTables = []string{}
+var SentryTables = []string{
+	Inodes,
+	NodeRecords,
+}
+var ConsensusTables = append([]string{
+	CliqueSeparate,
+	CliqueLastSnapshot,
+},
+	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
+)
+var HeimdallTables = []string{}
+var PolygonBridgeTables = []string{}
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
@@ -717,24 +725,24 @@ var ChaindataTablesCfg = TableCfg{
 	},
 	CallTraceSet: {Flags: DupSort},
 
-	TblAccountKeys:           {Flags: DupSort},
 	TblAccountVals:           {Flags: DupSort},
 	TblAccountHistoryKeys:    {Flags: DupSort},
 	TblAccountHistoryVals:    {Flags: DupSort},
 	TblAccountIdx:            {Flags: DupSort},
-	TblStorageKeys:           {Flags: DupSort},
 	TblStorageVals:           {Flags: DupSort},
 	TblStorageHistoryKeys:    {Flags: DupSort},
 	TblStorageHistoryVals:    {Flags: DupSort},
 	TblStorageIdx:            {Flags: DupSort},
-	TblCodeKeys:              {Flags: DupSort},
 	TblCodeHistoryKeys:       {Flags: DupSort},
 	TblCodeIdx:               {Flags: DupSort},
-	TblCommitmentKeys:        {Flags: DupSort},
 	TblCommitmentVals:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
+	TblReceiptVals:           {Flags: DupSort},
+	TblReceiptHistoryKeys:    {Flags: DupSort},
+	TblReceiptHistoryVals:    {Flags: DupSort},
+	TblReceiptIdx:            {Flags: DupSort},
 	TblLogAddressKeys:        {Flags: DupSort},
 	TblLogAddressIdx:         {Flags: DupSort},
 	TblLogTopicsKeys:         {Flags: DupSort},
@@ -747,7 +755,6 @@ var ChaindataTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorReceipts:             {Flags: DupSort},
 	BorFinality:             {Flags: DupSort},
 	BorTxLookup:             {Flags: DupSort},
 	BorEvents:               {Flags: DupSort},
@@ -763,8 +770,11 @@ var BorTablesCfg = TableCfg{
 
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
+var ConsensusTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
+var HeimdallTablesCfg = TableCfg{}
+var PolygonBridgeTablesCfg = TableCfg{}
 var ReconTablesCfg = TableCfg{
 	PlainStateD:    {Flags: DupSort},
 	CodeD:          {Flags: DupSort},
@@ -773,7 +783,7 @@ var ReconTablesCfg = TableCfg{
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case ChainDB:
+	case ChainDB, TemporaryDB, CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case TxPoolDB:
 		return TxpoolTablesCfg
@@ -783,6 +793,12 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return DownloaderTablesCfg
 	case DiagnosticsDB:
 		return DiagnosticsTablesCfg
+	case HeimdallDB:
+		return HeimdallTablesCfg
+	case PolygonBridgeDB:
+		return PolygonBridgeTablesCfg
+	case ConsensusDB:
+		return ConsensusTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
@@ -831,6 +847,13 @@ func reinit() {
 		}
 	}
 
+	for _, name := range ConsensusTables {
+		_, ok := ConsensusTablesCfg[name]
+		if !ok {
+			ConsensusTablesCfg[name] = TableCfgItem{}
+		}
+	}
+
 	for _, name := range DownloaderTables {
 		_, ok := DownloaderTablesCfg[name]
 		if !ok {
@@ -851,6 +874,19 @@ func reinit() {
 			DiagnosticsTablesCfg[name] = TableCfgItem{}
 		}
 	}
+
+	for _, name := range HeimdallTables {
+		_, ok := HeimdallTablesCfg[name]
+		if !ok {
+			HeimdallTablesCfg[name] = TableCfgItem{}
+		}
+	}
+	for _, name := range PolygonBridgeTables {
+		_, ok := PolygonBridgeTablesCfg[name]
+		if !ok {
+			PolygonBridgeTablesCfg[name] = TableCfgItem{}
+		}
+	}
 }
 
 // Temporal
@@ -860,14 +896,8 @@ const (
 	StorageDomain    Domain = 1
 	CodeDomain       Domain = 2
 	CommitmentDomain Domain = 3
-	DomainLen        Domain = 4
-)
-
-const (
-	AccountsHistory   History = "AccountsHistory"
-	StorageHistory    History = "StorageHistory"
-	CodeHistory       History = "CodeHistory"
-	CommitmentHistory History = "CommitmentHistory"
+	ReceiptDomain    Domain = 4
+	DomainLen        Domain = 5
 )
 
 const (
@@ -875,6 +905,7 @@ const (
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
 	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
+	ReceiptHistoryIdx    InvertedIdx = "ReceiptHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
@@ -889,9 +920,8 @@ const (
 )
 
 const (
-	//ReceiptsAppendable Appendable = 0
-	//AppendableLen      Appendable = 1
-	AppendableLen Appendable = 0
+	ReceiptsAppendable Appendable = 0
+	AppendableLen      Appendable = 0
 )
 
 func (iip InvertedIdxPos) String() string {
@@ -919,6 +949,8 @@ func (d Domain) String() string {
 		return "code"
 	case CommitmentDomain:
 		return "commitment"
+	case ReceiptDomain:
+		return "receipt"
 	default:
 		return "unknown domain"
 	}
@@ -934,6 +966,8 @@ func String2Domain(in string) (Domain, error) {
 		return CodeDomain, nil
 	case "commitment":
 		return CommitmentDomain, nil
+	case "receipt":
+		return ReceiptDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown history name: %s", in)
 	}
@@ -943,9 +977,18 @@ const MaxUint16 uint16 = 1<<16 - 1
 
 func (iip Appendable) String() string {
 	switch iip {
-	//case ReceiptsAppendable:
-	//	return "receipts"
+	case ReceiptsAppendable:
+		return "receipts"
 	default:
 		return "unknown Appendable"
+	}
+}
+
+func String2Appendable(in string) (Appendable, error) {
+	switch in {
+	case "receipts":
+		return ReceiptsAppendable, nil
+	default:
+		return Appendable(MaxUint16), fmt.Errorf("unknown Appendable name: %s", in)
 	}
 }

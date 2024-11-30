@@ -27,12 +27,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
 	ethereum "github.com/erigontech/erigon"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/event"
 )
 

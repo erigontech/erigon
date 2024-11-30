@@ -28,8 +28,6 @@ import (
 )
 
 func TestTransaction(t *testing.T) {
-	//t.Parallel()
-
 	txt := new(testMatcher)
 
 	// We don't allow more than uint64 in gas amount
@@ -38,6 +36,7 @@ func TestTransaction(t *testing.T) {
 	txt.skipLoad("^ttGasLimit/TransactionWithGasLimitxPriceOverflow.json")
 
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
+		t.Parallel()
 		cfg := params.MainnetChainConfig
 		if err := txt.checkFailure(t, test.Run(cfg.ChainID)); err != nil {
 			t.Error(err)

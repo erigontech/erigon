@@ -23,6 +23,7 @@ import (
 type MockKVClient struct {
 	ctrl     *gomock.Controller
 	recorder *MockKVClientMockRecorder
+	isgomock struct{}
 }
 
 // MockKVClientMockRecorder is the mock recorder for MockKVClient.
@@ -42,99 +43,55 @@ func (m *MockKVClient) EXPECT() *MockKVClientMockRecorder {
 	return m.recorder
 }
 
-// DomainGet mocks base method.
-func (m *MockKVClient) DomainGet(arg0 context.Context, arg1 *DomainGetReq, arg2 ...grpc.CallOption) (*DomainGetReply, error) {
+// GetLatest mocks base method.
+func (m *MockKVClient) GetLatest(ctx context.Context, in *GetLatestReq, opts ...grpc.CallOption) (*GetLatestReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
-	ret := m.ctrl.Call(m, "DomainGet", varargs...)
-	ret0, _ := ret[0].(*DomainGetReply)
+	ret := m.ctrl.Call(m, "GetLatest", varargs...)
+	ret0, _ := ret[0].(*GetLatestReply)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// DomainGet indicates an expected call of DomainGet.
-func (mr *MockKVClientMockRecorder) DomainGet(arg0, arg1 any, arg2 ...any) *MockKVClientDomainGetCall {
+// GetLatest indicates an expected call of GetLatest.
+func (mr *MockKVClientMockRecorder) GetLatest(ctx, in any, opts ...any) *MockKVClientGetLatestCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DomainGet", reflect.TypeOf((*MockKVClient)(nil).DomainGet), varargs...)
-	return &MockKVClientDomainGetCall{Call: call}
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLatest", reflect.TypeOf((*MockKVClient)(nil).GetLatest), varargs...)
+	return &MockKVClientGetLatestCall{Call: call}
 }
 
-// MockKVClientDomainGetCall wrap *gomock.Call
-type MockKVClientDomainGetCall struct {
+// MockKVClientGetLatestCall wrap *gomock.Call
+type MockKVClientGetLatestCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockKVClientDomainGetCall) Return(arg0 *DomainGetReply, arg1 error) *MockKVClientDomainGetCall {
+func (c *MockKVClientGetLatestCall) Return(arg0 *GetLatestReply, arg1 error) *MockKVClientGetLatestCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockKVClientDomainGetCall) Do(f func(context.Context, *DomainGetReq, ...grpc.CallOption) (*DomainGetReply, error)) *MockKVClientDomainGetCall {
+func (c *MockKVClientGetLatestCall) Do(f func(context.Context, *GetLatestReq, ...grpc.CallOption) (*GetLatestReply, error)) *MockKVClientGetLatestCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKVClientDomainGetCall) DoAndReturn(f func(context.Context, *DomainGetReq, ...grpc.CallOption) (*DomainGetReply, error)) *MockKVClientDomainGetCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// DomainRange mocks base method.
-func (m *MockKVClient) DomainRange(arg0 context.Context, arg1 *DomainRangeReq, arg2 ...grpc.CallOption) (*Pairs, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "DomainRange", varargs...)
-	ret0, _ := ret[0].(*Pairs)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// DomainRange indicates an expected call of DomainRange.
-func (mr *MockKVClientMockRecorder) DomainRange(arg0, arg1 any, arg2 ...any) *MockKVClientDomainRangeCall {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DomainRange", reflect.TypeOf((*MockKVClient)(nil).DomainRange), varargs...)
-	return &MockKVClientDomainRangeCall{Call: call}
-}
-
-// MockKVClientDomainRangeCall wrap *gomock.Call
-type MockKVClientDomainRangeCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockKVClientDomainRangeCall) Return(arg0 *Pairs, arg1 error) *MockKVClientDomainRangeCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockKVClientDomainRangeCall) Do(f func(context.Context, *DomainRangeReq, ...grpc.CallOption) (*Pairs, error)) *MockKVClientDomainRangeCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKVClientDomainRangeCall) DoAndReturn(f func(context.Context, *DomainRangeReq, ...grpc.CallOption) (*Pairs, error)) *MockKVClientDomainRangeCall {
+func (c *MockKVClientGetLatestCall) DoAndReturn(f func(context.Context, *GetLatestReq, ...grpc.CallOption) (*GetLatestReply, error)) *MockKVClientGetLatestCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // HistoryRange mocks base method.
-func (m *MockKVClient) HistoryRange(arg0 context.Context, arg1 *HistoryRangeReq, arg2 ...grpc.CallOption) (*Pairs, error) {
+func (m *MockKVClient) HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "HistoryRange", varargs...)
@@ -144,9 +101,9 @@ func (m *MockKVClient) HistoryRange(arg0 context.Context, arg1 *HistoryRangeReq,
 }
 
 // HistoryRange indicates an expected call of HistoryRange.
-func (mr *MockKVClientMockRecorder) HistoryRange(arg0, arg1 any, arg2 ...any) *MockKVClientHistoryRangeCall {
+func (mr *MockKVClientMockRecorder) HistoryRange(ctx, in any, opts ...any) *MockKVClientHistoryRangeCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HistoryRange", reflect.TypeOf((*MockKVClient)(nil).HistoryRange), varargs...)
 	return &MockKVClientHistoryRangeCall{Call: call}
 }
@@ -175,10 +132,10 @@ func (c *MockKVClientHistoryRangeCall) DoAndReturn(f func(context.Context, *Hist
 }
 
 // HistorySeek mocks base method.
-func (m *MockKVClient) HistorySeek(arg0 context.Context, arg1 *HistorySeekReq, arg2 ...grpc.CallOption) (*HistorySeekReply, error) {
+func (m *MockKVClient) HistorySeek(ctx context.Context, in *HistorySeekReq, opts ...grpc.CallOption) (*HistorySeekReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "HistorySeek", varargs...)
@@ -188,9 +145,9 @@ func (m *MockKVClient) HistorySeek(arg0 context.Context, arg1 *HistorySeekReq, a
 }
 
 // HistorySeek indicates an expected call of HistorySeek.
-func (mr *MockKVClientMockRecorder) HistorySeek(arg0, arg1 any, arg2 ...any) *MockKVClientHistorySeekCall {
+func (mr *MockKVClientMockRecorder) HistorySeek(ctx, in any, opts ...any) *MockKVClientHistorySeekCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HistorySeek", reflect.TypeOf((*MockKVClient)(nil).HistorySeek), varargs...)
 	return &MockKVClientHistorySeekCall{Call: call}
 }
@@ -219,10 +176,10 @@ func (c *MockKVClientHistorySeekCall) DoAndReturn(f func(context.Context, *Histo
 }
 
 // IndexRange mocks base method.
-func (m *MockKVClient) IndexRange(arg0 context.Context, arg1 *IndexRangeReq, arg2 ...grpc.CallOption) (*IndexRangeReply, error) {
+func (m *MockKVClient) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "IndexRange", varargs...)
@@ -232,9 +189,9 @@ func (m *MockKVClient) IndexRange(arg0 context.Context, arg1 *IndexRangeReq, arg
 }
 
 // IndexRange indicates an expected call of IndexRange.
-func (mr *MockKVClientMockRecorder) IndexRange(arg0, arg1 any, arg2 ...any) *MockKVClientIndexRangeCall {
+func (mr *MockKVClientMockRecorder) IndexRange(ctx, in any, opts ...any) *MockKVClientIndexRangeCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IndexRange", reflect.TypeOf((*MockKVClient)(nil).IndexRange), varargs...)
 	return &MockKVClientIndexRangeCall{Call: call}
 }
@@ -263,10 +220,10 @@ func (c *MockKVClientIndexRangeCall) DoAndReturn(f func(context.Context, *IndexR
 }
 
 // Range mocks base method.
-func (m *MockKVClient) Range(arg0 context.Context, arg1 *RangeReq, arg2 ...grpc.CallOption) (*Pairs, error) {
+func (m *MockKVClient) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Range", varargs...)
@@ -276,9 +233,9 @@ func (m *MockKVClient) Range(arg0 context.Context, arg1 *RangeReq, arg2 ...grpc.
 }
 
 // Range indicates an expected call of Range.
-func (mr *MockKVClientMockRecorder) Range(arg0, arg1 any, arg2 ...any) *MockKVClientRangeCall {
+func (mr *MockKVClientMockRecorder) Range(ctx, in any, opts ...any) *MockKVClientRangeCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Range", reflect.TypeOf((*MockKVClient)(nil).Range), varargs...)
 	return &MockKVClientRangeCall{Call: call}
 }
@@ -306,11 +263,55 @@ func (c *MockKVClientRangeCall) DoAndReturn(f func(context.Context, *RangeReq, .
 	return c
 }
 
-// Snapshots mocks base method.
-func (m *MockKVClient) Snapshots(arg0 context.Context, arg1 *SnapshotsRequest, arg2 ...grpc.CallOption) (*SnapshotsReply, error) {
+// RangeAsOf mocks base method.
+func (m *MockKVClient) RangeAsOf(ctx context.Context, in *RangeAsOfReq, opts ...grpc.CallOption) (*Pairs, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "RangeAsOf", varargs...)
+	ret0, _ := ret[0].(*Pairs)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RangeAsOf indicates an expected call of RangeAsOf.
+func (mr *MockKVClientMockRecorder) RangeAsOf(ctx, in any, opts ...any) *MockKVClientRangeAsOfCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RangeAsOf", reflect.TypeOf((*MockKVClient)(nil).RangeAsOf), varargs...)
+	return &MockKVClientRangeAsOfCall{Call: call}
+}
+
+// MockKVClientRangeAsOfCall wrap *gomock.Call
+type MockKVClientRangeAsOfCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockKVClientRangeAsOfCall) Return(arg0 *Pairs, arg1 error) *MockKVClientRangeAsOfCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockKVClientRangeAsOfCall) Do(f func(context.Context, *RangeAsOfReq, ...grpc.CallOption) (*Pairs, error)) *MockKVClientRangeAsOfCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockKVClientRangeAsOfCall) DoAndReturn(f func(context.Context, *RangeAsOfReq, ...grpc.CallOption) (*Pairs, error)) *MockKVClientRangeAsOfCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// Snapshots mocks base method.
+func (m *MockKVClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Snapshots", varargs...)
@@ -320,9 +321,9 @@ func (m *MockKVClient) Snapshots(arg0 context.Context, arg1 *SnapshotsRequest, a
 }
 
 // Snapshots indicates an expected call of Snapshots.
-func (mr *MockKVClientMockRecorder) Snapshots(arg0, arg1 any, arg2 ...any) *MockKVClientSnapshotsCall {
+func (mr *MockKVClientMockRecorder) Snapshots(ctx, in any, opts ...any) *MockKVClientSnapshotsCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Snapshots", reflect.TypeOf((*MockKVClient)(nil).Snapshots), varargs...)
 	return &MockKVClientSnapshotsCall{Call: call}
 }
@@ -351,10 +352,10 @@ func (c *MockKVClientSnapshotsCall) DoAndReturn(f func(context.Context, *Snapsho
 }
 
 // StateChanges mocks base method.
-func (m *MockKVClient) StateChanges(arg0 context.Context, arg1 *StateChangeRequest, arg2 ...grpc.CallOption) (KV_StateChangesClient, error) {
+func (m *MockKVClient) StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "StateChanges", varargs...)
@@ -364,9 +365,9 @@ func (m *MockKVClient) StateChanges(arg0 context.Context, arg1 *StateChangeReque
 }
 
 // StateChanges indicates an expected call of StateChanges.
-func (mr *MockKVClientMockRecorder) StateChanges(arg0, arg1 any, arg2 ...any) *MockKVClientStateChangesCall {
+func (mr *MockKVClientMockRecorder) StateChanges(ctx, in any, opts ...any) *MockKVClientStateChangesCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateChanges", reflect.TypeOf((*MockKVClient)(nil).StateChanges), varargs...)
 	return &MockKVClientStateChangesCall{Call: call}
 }
@@ -395,10 +396,10 @@ func (c *MockKVClientStateChangesCall) DoAndReturn(f func(context.Context, *Stat
 }
 
 // Tx mocks base method.
-func (m *MockKVClient) Tx(arg0 context.Context, arg1 ...grpc.CallOption) (KV_TxClient, error) {
+func (m *MockKVClient) Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0}
-	for _, a := range arg1 {
+	varargs := []any{ctx}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Tx", varargs...)
@@ -408,9 +409,9 @@ func (m *MockKVClient) Tx(arg0 context.Context, arg1 ...grpc.CallOption) (KV_TxC
 }
 
 // Tx indicates an expected call of Tx.
-func (mr *MockKVClientMockRecorder) Tx(arg0 any, arg1 ...any) *MockKVClientTxCall {
+func (mr *MockKVClientMockRecorder) Tx(ctx any, opts ...any) *MockKVClientTxCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0}, arg1...)
+	varargs := append([]any{ctx}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Tx", reflect.TypeOf((*MockKVClient)(nil).Tx), varargs...)
 	return &MockKVClientTxCall{Call: call}
 }
@@ -439,10 +440,10 @@ func (c *MockKVClientTxCall) DoAndReturn(f func(context.Context, ...grpc.CallOpt
 }
 
 // Version mocks base method.
-func (m *MockKVClient) Version(arg0 context.Context, arg1 *emptypb.Empty, arg2 ...grpc.CallOption) (*typesproto.VersionReply, error) {
+func (m *MockKVClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.VersionReply, error) {
 	m.ctrl.T.Helper()
-	varargs := []any{arg0, arg1}
-	for _, a := range arg2 {
+	varargs := []any{ctx, in}
+	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
 	ret := m.ctrl.Call(m, "Version", varargs...)
@@ -452,9 +453,9 @@ func (m *MockKVClient) Version(arg0 context.Context, arg1 *emptypb.Empty, arg2 .
 }
 
 // Version indicates an expected call of Version.
-func (mr *MockKVClientMockRecorder) Version(arg0, arg1 any, arg2 ...any) *MockKVClientVersionCall {
+func (mr *MockKVClientMockRecorder) Version(ctx, in any, opts ...any) *MockKVClientVersionCall {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{arg0, arg1}, arg2...)
+	varargs := append([]any{ctx, in}, opts...)
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Version", reflect.TypeOf((*MockKVClient)(nil).Version), varargs...)
 	return &MockKVClientVersionCall{Call: call}
 }

@@ -14,15 +14,17 @@ cd "$SCRIPT_DIR" || exit
 #export DOCKER_UID=1000
 #export DOCKER_GID=1000
 
-# set GITHUB_SHA
+# set SHORT_SHA
 if [ -z "$GITHUB_SHA" ]; then
-    export GITHUB_SHA=local
+    export SHORT_SHA=latest
+else 
+    export SHORT_SHA=${GITHUB_SHA::7}
 fi
-echo "GITHUB_SHA=$GITHUB_SHA"
+echo "SHORT_SHA=$SHORT_SHA"
 
 # set ERIGON_TAG
 if [ -z "$ERIGON_TAG" ]; then
-    export ERIGON_TAG=ci-$GITHUB_SHA
+    export ERIGON_TAG=main-$SHORT_SHA
 fi
 echo "ERIGON_TAG=$ERIGON_TAG"
 
@@ -34,7 +36,7 @@ echo "BUILD_ERIGON=$BUILD_ERIGON"
 
 if [ "$BUILD_ERIGON" = 1 ] ; then
     echo "building erigon..."
-    cd ../../ && DOCKER_TAG=thorax/erigon:$ERIGON_TAG  DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+    cd ../../ && DOCKER_TAG=erigontech/erigon:$ERIGON_TAG  DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
 fi
 
 # move back to the script directory

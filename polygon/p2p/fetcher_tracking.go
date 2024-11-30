@@ -23,24 +23,26 @@ import (
 	"github.com/erigontech/erigon/core/types"
 )
 
-func NewTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) Fetcher {
-	return newTrackingFetcher(fetcher, peerTracker)
-}
-
-func newTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) *trackingFetcher {
-	return &trackingFetcher{
+func NewTrackingFetcher(fetcher Fetcher, peerTracker *PeerTracker) *TrackingFetcher {
+	return &TrackingFetcher{
 		Fetcher:     fetcher,
 		peerTracker: peerTracker,
 	}
 }
 
-type trackingFetcher struct {
+type TrackingFetcher struct {
 	Fetcher
-	peerTracker PeerTracker
+	peerTracker *PeerTracker
 }
 
-func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
-	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
+func (tf *TrackingFetcher) FetchHeaders(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Header], error) {
+	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
 	if err != nil {
 		var errIncompleteHeaders *ErrIncompleteHeaders
 		if errors.As(err, &errIncompleteHeaders) {
@@ -56,8 +58,13 @@ func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end u
 	return res, nil
 }
 
-func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error) {
-	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId)
+func (tf *TrackingFetcher) FetchBodies(
+	ctx context.Context,
+	headers []*types.Header,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Body], error) {
+	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId, opts...)
 	if err != nil {
 		var errMissingBodies *ErrMissingBodies
 		if errors.As(err, &errMissingBodies) {

@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"maps"
 	"math"
 	"sort"
 
@@ -54,16 +55,7 @@ type StateDiffDomain struct {
 }
 
 func (d *StateDiffDomain) Copy() *StateDiffDomain {
-	res := &StateDiffDomain{}
-	res.keys = make(map[string][]byte)
-	res.prevValues = make(map[string][]byte)
-	for k, v := range d.keys {
-		res.keys[k] = v
-	}
-	for k, v := range d.prevValues {
-		res.prevValues[k] = v
-	}
-	return res
+	return &StateDiffDomain{keys: maps.Clone(d.keys), prevValues: maps.Clone(d.prevValues)}
 }
 
 // RecordDelta records a state change.
@@ -77,20 +69,24 @@ func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, 
 	prevStepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(prevStepBytes, ^prevStep)
 
-	key := append(common.Copy(key1), key2...)
+	key := make([]byte, len(key1)+len(key2))
+	copy(key, key1)
+	copy(key[len(key1):], key2)
 
-	if _, ok := d.keys[string(key)]; !ok {
-		d.keys[string(key)] = prevStepBytes
+	keyS := toStringZeroCopy(key)
+	if _, ok := d.keys[keyS]; !ok {
+		d.keys[keyS] = prevStepBytes
 	}
 
-	prevValue = common.Copy(prevValue)
-
-	valsKey := string(append(common.Copy(key), stepBytes...))
-	if _, ok := d.prevValues[valsKey]; !ok {
+	valsKey := make([]byte, len(key)+len(stepBytes))
+	copy(valsKey, key)
+	copy(valsKey[len(key):], stepBytes)
+	valsKeyS := toStringZeroCopy(valsKey)
+	if _, ok := d.prevValues[valsKeyS]; !ok {
 		if bytes.Equal(stepBytes, prevStepBytes) {
-			d.prevValues[valsKey] = prevValue
+			d.prevValues[valsKeyS] = common.Copy(prevValue)
 		} else {
-			d.prevValues[valsKey] = []byte{} // We need to delete the current step but restore the previous one
+			d.prevValues[valsKeyS] = []byte{} // We need to delete the current step but restore the previous one
 		}
 		d.prevValsSlice = nil
 	}
@@ -109,7 +105,7 @@ func (d *StateDiffDomain) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		})
 	}
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return string(d.prevValsSlice[i].Key) < string(d.prevValsSlice[j].Key)
+		return bytes.Compare(d.prevValsSlice[i].Key, d.prevValsSlice[j].Key) < 0
 	})
 
 	return d.prevValsSlice
@@ -121,10 +117,11 @@ func SerializeDiffSet(diffSet []DomainEntryDiff, out []byte) []byte {
 	dict := make(map[string]byte)
 	id := byte(0x00)
 	for _, diff := range diffSet {
-		if _, ok := dict[string(diff.PrevStepBytes)]; ok {
+		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
+		if _, ok := dict[prevStepS]; ok {
 			continue
 		}
-		dict[string(diff.PrevStepBytes)] = id
+		dict[prevStepS] = id
 		id++
 	}
 	// Write the dictionary
@@ -145,7 +142,7 @@ func SerializeDiffSet(diffSet []DomainEntryDiff, out []byte) []byte {
 		binary.BigEndian.PutUint32(tmp, uint32(len(diff.Value)))
 		ret = append(ret, tmp...)
 		ret = append(ret, diff.Value...)
-		ret = append(ret, dict[string(diff.PrevStepBytes)])
+		ret = append(ret, dict[toStringZeroCopy(diff.PrevStepBytes)])
 	}
 	return ret
 }
@@ -155,10 +152,11 @@ func SerializeDiffSetBufLen(diffSet []DomainEntryDiff) int {
 	dict := make(map[string]byte)
 	id := byte(0x00)
 	for _, diff := range diffSet {
-		if _, ok := dict[string(diff.PrevStepBytes)]; ok {
+		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
+		if _, ok := dict[prevStepS]; ok {
 			continue
 		}
-		dict[string(diff.PrevStepBytes)] = id
+		dict[prevStepS] = id
 		id++
 	}
 	// Write the dictionary
@@ -247,6 +245,7 @@ func (d *StateChangeSet) SerializeKeys(out []byte) []byte {
 	ret := out
 	tmp := make([]byte, 4)
 	for i := range d.Diffs {
+
 		diffSet := d.Diffs[i].GetDiffSet()
 		binary.BigEndian.PutUint32(tmp, uint32(SerializeDiffSetBufLen(diffSet)))
 		ret = append(ret, tmp...)
@@ -266,6 +265,7 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]DomainEntryDiff {
 	return ret
 }
 
+const diffChunkKeyLen = 48
 const diffChunkLen = 4*1024 - 32
 
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
@@ -280,7 +280,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 		return err
 	}
 
-	key := make([]byte, 48)
+	key := make([]byte, diffChunkKeyLen)
 	for i := 0; i < chunkCount; i++ {
 		start := i * diffChunkLen
 		end := (i + 1) * diffChunkLen

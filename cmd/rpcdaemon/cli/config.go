@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	grpcHealth "google.golang.org/grpc/health"
@@ -55,7 +56,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
-
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
@@ -65,7 +65,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/consensus/aura"
 	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -74,6 +76,10 @@ import (
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/polygon/bor"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	"github.com/erigontech/erigon/polygon/bor/valset"
+	"github.com/erigontech/erigon/polygon/bridge"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -94,7 +100,19 @@ var rootCmd = &cobra.Command{
 
 var (
 	stateCacheStr string
+	polygonSync   bool
 )
+
+type HeimdallReader interface {
+	Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error)
+	Close()
+}
+
+type BridgeReader interface {
+	Events(ctx context.Context, blockNum uint64) ([]*types.Message, error)
+	EventTxnLookup(ctx context.Context, borTxHash libcommon.Hash) (uint64, bool, error)
+	Close()
+}
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
@@ -105,6 +123,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.GraphQLEnabled, "graphql", false, "enables graphql endpoint (disabled by default)")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50_000_000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
+	rootCmd.PersistentFlags().BoolVar(&polygonSync, "polygon.sync", false, "Enable if Erigon has been synced using the new polygon sync component")
 
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, utils.RpcAccessListFlag.Name, "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, utils.RpcBatchConcurrencyFlag.Name, 2, utils.RpcBatchConcurrencyFlag.Usage)
@@ -320,32 +339,38 @@ func EmbeddedServices(ctx context.Context,
 func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
-	ff *rpchelper.Filters, err error) {
+	ff *rpchelper.Filters, bridgeReader BridgeReader, heimdallReader HeimdallReader, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
-		return nil, nil, nil, nil, nil, nil, nil, ff, errors.New("either remote db or local db must be specified")
+		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("either remote db or local db must be specified")
 	}
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("open tls cert: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("open tls cert: %w", err)
 	}
 	conn, err := grpcutil.Connect(creds, cfg.PrivateApiAddr)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to execution service privateApi: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
 	}
 
 	remoteBackendClient := remote.NewETHBACKENDClient(conn)
+	remoteBridgeClient := remote.NewBridgeBackendClient(conn)
+	remoteHeimdallClient := remote.NewHeimdallBackendClient(conn)
 	remoteKvClient := remote.NewKVClient(conn)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKvClient).Open()
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to remoteKv: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
 	// Configure DB first
 	var allSnapshots *freezeblocks.RoSnapshots
-	var allBorSnapshots *freezeblocks.BorRoSnapshots
+	var allBorSnapshots *heimdall.RoSnapshots
 	onNewSnapshot := func() {}
+	roTxLimit := int64(cfg.DBReadConcurrency)
 
 	var cc *chain.Config
+
+	var bridgeStore bridge.Store
+	var heimdallStore heimdall.Store
 
 	if cfg.WithDatadir {
 		// Opening all databases in Accede and non-Readonly modes. Here is the motivation:
@@ -359,13 +384,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		//    Accede mode will check db existence (may wait with retries). It's ok to fail in this case - some supervisor will restart us.
 		var rwKv kv.RwDB
 		logger.Warn("Opening chain db", "path", cfg.Dirs.Chaindata)
-		limiter := semaphore.NewWeighted(int64(cfg.DBReadConcurrency))
-		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede().Open(ctx)
+		limiter := semaphore.NewWeighted(roTxLimit)
+		rwKv, err = kv2.New(kv.ChainDB, logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Accede(true).Open(ctx)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, err
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 		if compatErr := checkDbCompatibility(ctx, rwKv); compatErr != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, compatErr
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, compatErr
 		}
 		db = rwKv
 
@@ -380,59 +405,81 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}
 			return nil
 		}); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, err
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
 		}
 		if cc == nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, errors.New("chain config not found in db. Need start erigon at least once on this db")
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
 
 		// Configure sapshots
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
-		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
-		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
-		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-		allSnapshots.OptimisticReopenWithDB(db)
-		allBorSnapshots.OptimisticalyReopenWithDB(db)
-		allSnapshots.LogStat("remote")
-		allBorSnapshots.LogStat("bor:remote")
-		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+		allBorSnapshots = heimdall.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, 0, logger)
+
+		if polygonSync {
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, roTxLimit), allBorSnapshots)
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
+		} else {
+			bridgeStore = bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, cc.Bor)
+			heimdallStore = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
+		}
+
+		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
 
-		cr := rawdb.NewCanonicalReader(txNumsReader)
-		agg, err := libstate.NewAggregator(ctx, cfg.Dirs, config3.HistoryV3AggregationStep, db, cr, logger)
+		agg, err := libstate.NewAggregator(ctx, cfg.Dirs, config3.HistoryV3AggregationStep, db, logger)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("create aggregator: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
-		_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
+		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 
-		db.View(context.Background(), func(tx kv.Tx) error {
-			aggTx := agg.BeginFilesRo()
-			defer aggTx.Close()
-			aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
-				_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
-				return histBlockNumProgress, err
+		//TODO - its probably better to use:  <-blockReader.Ready() here - but it depends how
+		//this is called at a process level
+		allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(rwKv)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
+		if allSegmentsDownloadComplete {
+			allSnapshots.OptimisticalyOpenFolder()
+			allBorSnapshots.OptimisticalyOpenFolder()
+
+			allSnapshots.LogStat("remote")
+			allBorSnapshots.LogStat("bor:remote")
+			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+
+			db.View(context.Background(), func(tx kv.Tx) error {
+				aggTx := agg.BeginFilesRo()
+				defer aggTx.Close()
+				aggTx.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
+					_, histBlockNumProgress, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+					return histBlockNumProgress, err
+				})
+				return nil
 			})
-			return nil
-		})
+		} else {
+			logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
+		}
+
+		wg := errgroup.Group{}
+		wg.SetLimit(1)
 		onNewSnapshot = func() {
-			go func() { // don't block events processing by network communication
+			wg.Go(func() error { // don't block events processing by network communication
 				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 				if err != nil {
 					logger.Warn("[snapshots] reopen", "err", err)
-					return
+					return nil
 				}
-				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+				if err := allSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					allSnapshots.LogStat("reopen")
 				}
-				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+				if err := allBorSnapshots.OpenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[bor snapshots] reopen", "err", err)
 				} else {
 					allBorSnapshots.LogStat("bor:reopen")
 				}
 
-				//if err = agg.openList(reply.HistoryFiles, true); err != nil {
 				if err = agg.OpenFolder(); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
@@ -446,13 +493,14 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 						return nil
 					})
 				}
-			}()
+				return nil
+			})
 		}
 		onNewSnapshot()
 
 		db, err = temporal.New(rwKv, agg)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 		stateCache = kvcache.NewDummy()
 	}
@@ -476,7 +524,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	if cfg.TxPoolApiAddr != cfg.PrivateApiAddr {
 		txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to txpool api: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
 		}
 	}
 
@@ -494,31 +542,75 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	eth = remoteEth
 
 	var remoteCE *remoteConsensusEngine
+	var remoteBridgeReader *bridge.RemoteReader
+	var remoteHeimdallReader *heimdall.RemoteReader
 
 	if cfg.WithDatadir {
-		switch {
-		case cc != nil:
-			switch {
-			case cc.Bor != nil:
-				var borKv kv.RoDB
+		if cc != nil && cc.Bor != nil {
+			if polygonSync {
+				stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
 
-				// bor (consensus) specific db
-				borDbPath := filepath.Join(cfg.DataDir, "bor")
-				logger.Warn("[rpc] Opening Bor db", "path", borDbPath)
-				borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Accede().Open(ctx)
-				if err != nil {
-					return nil, nil, nil, nil, nil, nil, nil, ff, err
+				bridgeConfig := bridge.ReaderConfig{
+					Store:                        bridgeStore,
+					Logger:                       logger,
+					StateReceiverContractAddress: stateReceiverContractAddress,
+					RoTxLimit:                    roTxLimit,
 				}
-				// Skip the compatibility check, until we have a schema in erigon-lib
-				engine = bor.NewRo(cc, borKv, blockReader, logger)
-			default:
-				engine = ethash.NewFaker()
+				bridgeReader, err = bridge.AssembleReader(ctx, bridgeConfig)
+				if err != nil {
+					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+				}
+
+				heimdallConfig := heimdall.ReaderConfig{
+					Store:     heimdallStore,
+					BorConfig: cc.Bor.(*borcfg.BorConfig),
+					Logger:    logger,
+				}
+				heimdallReader, err = heimdall.AssembleReader(ctx, heimdallConfig)
+				if err != nil {
+					return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+				}
 			}
 
-		default:
+			// NOTE: bor_* RPCs are not fully supported when using polygon.sync (https://github.com/erigontech/erigon/issues/11171)
+			var borKv kv.RoDB
+
+			// bor (consensus) specific db
+			borDbPath := filepath.Join(cfg.DataDir, "bor")
+			logger.Warn("[rpc] Opening Bor db", "path", borDbPath)
+			borKv, err = kv2.New(kv.ConsensusDB, logger).Path(borDbPath).Accede(true).Open(ctx)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+			// Skip the compatibility check, until we have a schema in erigon-lib
+			engine = bor.NewRo(cc, borKv, blockReader, logger)
+		} else if cc != nil && cc.Aura != nil {
+			consensusDB, err := kv2.New(kv.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+			engine, err = aura.NewAuRa(cc.Aura, consensusDB)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
+			}
+			if cc.TerminalTotalDifficulty != nil {
+				engine = merge.New(engine.(consensus.Engine)) // the Merge
+			}
+		} else {
 			engine = ethash.NewFaker()
+			if cc.TerminalTotalDifficulty != nil {
+				engine = merge.New(engine.(consensus.Engine)) // the Merge
+			}
 		}
 	} else {
+		if polygonSync {
+			remoteBridgeReader = bridge.NewRemoteReader(remoteBridgeClient)
+			bridgeReader = remoteBridgeReader
+
+			remoteHeimdallReader = heimdall.NewRemoteReader(remoteHeimdallClient)
+			heimdallReader = remoteHeimdallReader
+		}
+
 		remoteCE = &remoteConsensusEngine{}
 		engine = remoteCE
 	}
@@ -536,6 +628,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if !txPoolService.EnsureVersionCompatibility() {
 			rootCancel()
 		}
+		if remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
+			rootCancel()
+		}
+		if remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
+			rootCancel()
+		}
 		if remoteCE != nil {
 			if !remoteCE.init(db, blockReader, remoteKvClient, logger) {
 				rootCancel()
@@ -544,7 +642,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	}()
 
 	ff = rpchelper.New(ctx, cfg.RpcFiltersConfig, eth, txPool, mining, onNewSnapshot, logger)
-	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, err
+	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err
 }
 
 func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
@@ -1013,7 +1111,7 @@ func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.
 	panic("remoteConsensusEngine.Prepare not supported")
 }
 
-func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.Requests, error) {
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, types.FlatRequests, error) {
 	panic("remoteConsensusEngine.Finalize not supported")
 }
 

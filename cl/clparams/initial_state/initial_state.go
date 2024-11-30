@@ -50,6 +50,9 @@ var sepoliaStateSSZ []byte
 //go:embed gnosis.state.ssz
 var gnosisStateSSZ []byte
 
+//go:embed chiado.state.ssz
+var chiadoStateSSZ []byte
+
 // Return genesis state
 func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
 	_, config := clparams.GetConfigsByNetwork(network)
@@ -68,6 +71,10 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err := returnState.DecodeSSZ(gnosisStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
+	case clparams.ChiadoNetwork:
+		if err := returnState.DecodeSSZ(chiadoStateSSZ, int(clparams.Phase0Version)); err != nil {
+			return nil, err
+		}
 	case clparams.HoleskyNetwork:
 		// Download genesis state by wget the url
 		encodedState, err := downloadGenesisState("https://github.com/eth-clients/holesky/raw/main/metadata/genesis.ssz")
@@ -84,5 +91,5 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 }
 
 func IsGenesisStateSupported(network clparams.NetworkType) bool {
-	return network == clparams.MainnetNetwork || network == clparams.SepoliaNetwork || network == clparams.GnosisNetwork || network == clparams.HoleskyNetwork
+	return network == clparams.MainnetNetwork || network == clparams.SepoliaNetwork || network == clparams.GnosisNetwork || network == clparams.ChiadoNetwork || network == clparams.HoleskyNetwork
 }

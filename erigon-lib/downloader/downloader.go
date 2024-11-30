@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -58,7 +57,9 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -97,8 +98,15 @@ type Downloader struct {
 
 	stuckFileDetailedLogs bool
 
-	logPrefix string
-	startTime time.Time
+	logPrefix         string
+	startTime         time.Time
+	onTorrentComplete func(name string, hash *prototypes.H160)
+	completedTorrents map[string]completedTorrentInfo
+}
+
+type completedTorrentInfo struct {
+	path string
+	hash *prototypes.H160
 }
 
 type downloadInfo struct {
@@ -166,7 +174,7 @@ func insertCloudflareHeaders(req *http.Request) {
 // It also tries to parse Retry-After response header when a http.StatusTooManyRequests
 // (HTTP Code 429) is found in the resp parameter. Hence it will return the number of
 // seconds the server states it may be ready to process more requests from this client.
-func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
+func calcBackoff(_min, _max time.Duration, attemptNum int, resp *http.Response) time.Duration {
 	if resp != nil {
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 			if s, ok := resp.Header["Retry-After"]; ok {
@@ -177,10 +185,10 @@ func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) ti
 		}
 	}
 
-	mult := math.Pow(2, float64(attemptNum)) * float64(min)
+	mult := math.Pow(2, float64(attemptNum)) * float64(_min)
 	sleep := time.Duration(mult)
-	if float64(sleep) != mult || sleep > max {
-		sleep = max
+	if float64(sleep) != mult || sleep > _max {
+		sleep = _max
 	}
 
 	return sleep
@@ -345,6 +353,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		downloading:         map[string]*downloadInfo{},
 		webseedsDiscover:    discover,
 		logPrefix:           "",
+		completedTorrents:   make(map[string]completedTorrentInfo),
 	}
 	d.webseeds.SetTorrent(d.torrentFS, snapLock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
@@ -716,23 +725,10 @@ func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB,
 
 	if db != nil {
 		err := db.View(ctx, func(tx kv.Tx) (err error) {
-			infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileInfo.Name()))
-
+			hashBytes, err = downloaderrawdb.ReadTorrentInfoHash(tx, fileInfo.Name())
 			if err != nil {
 				return err
 			}
-
-			if len(infoBytes) == 20 {
-				hashBytes = infoBytes
-				return nil
-			}
-
-			var info torrentInfo
-
-			if err = json.Unmarshal(infoBytes, &info); err == nil {
-				hashBytes = info.Hash
-			}
-
 			return nil
 		})
 
@@ -852,7 +848,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 					}
-
 					t.AddWebSeeds(urls)
 				}
 			}
@@ -877,7 +872,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 	go func() {
 		defer d.wg.Done()
 
-		complete := map[string]struct{}{}
 		checking := map[string]struct{}{}
 		failed := map[string]struct{}{}
 		waiting := map[string]struct{}{}
@@ -904,7 +898,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			var dlist []string
 
 			for _, t := range torrents {
-				if _, ok := complete[t.Name()]; ok {
+				if _, ok := d.completedTorrents[t.Name()]; ok {
 					clist = append(clist, t.Name())
 					continue
 				}
@@ -958,7 +952,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 							} else {
 								clist = append(clist, t.Name())
-								complete[t.Name()] = struct{}{}
+								d.torrentCompleted(t.Name(), t.InfoHash())
 								continue
 							}
 						}
@@ -1023,8 +1017,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 					d.lock.Lock()
 					delete(d.downloading, t.Name())
 					d.lock.Unlock()
-					complete[t.Name()] = struct{}{}
 					clist = append(clist, t.Name())
+					d.torrentCompleted(t.Name(), t.InfoHash())
+
 					continue
 				}
 
@@ -1091,10 +1086,12 @@ func (d *Downloader) mainLoop(silent bool) error {
 						d.logger.Warn("[snapshots] Failed to update file info", "file", status.name, "err", err)
 					}
 
-					complete[status.name] = struct{}{}
+					d.torrentCompleted(status.name, status.infoHash)
 					continue
 				} else {
-					delete(complete, status.name)
+					d.lock.Lock()
+					delete(d.completedTorrents, status.name)
+					d.lock.Unlock()
 				}
 
 			default:
@@ -1488,22 +1485,18 @@ func logSeedHashMismatches(torrentHash infohash.T, name string, seedHashMismatch
 			webseeds += strings.TrimSuffix(entry.url.String(), "/") + "#" + entry.hash.HexString()
 		}
 
-		logger.Warn("Webseed hash mismatch for torrent", "name", name, "hash", torrentHash.HexString(), "webseeds", webseeds)
+		logger.Debug("Webseed hash mismatch for torrent", "name", name, "hash", torrentHash.HexString(), "webseeds", webseeds)
 	}
 }
 
-func (d *Downloader) checkComplete(name string) (bool, int64, *time.Time) {
-	if info, err := d.torrentInfo(name); err == nil {
-		if info.Completed != nil && info.Completed.Before(time.Now()) {
-			if info.Length != nil {
-				if fi, err := os.Stat(filepath.Join(d.SnapDir(), name)); err == nil {
-					return fi.Size() == *info.Length && fi.ModTime().Equal(*info.Completed), *info.Length, info.Completed
-				}
-			}
-		}
+func (d *Downloader) checkComplete(name string) (complete bool, fileLen int64, completedAt *time.Time) {
+	if err := d.db.View(d.ctx, func(tx kv.Tx) error {
+		complete, fileLen, completedAt = downloaderrawdb.CheckFileComplete(tx, name, d.SnapDir())
+		return nil
+	}); err != nil {
+		return false, 0, nil
 	}
-
-	return false, 0, nil
+	return
 }
 
 func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []*seedHash, error) {
@@ -1923,28 +1916,19 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, download
 
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
-func (d *Downloader) torrentInfo(name string) (*torrentInfo, error) {
-	var info torrentInfo
-
+func (d *Downloader) torrentInfo(name string) (*downloaderrawdb.TorrentInfo, error) {
+	var info *downloaderrawdb.TorrentInfo
 	err := d.db.View(d.ctx, func(tx kv.Tx) (err error) {
-		infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(name))
-
+		info, err = downloaderrawdb.ReadTorrentInfo(tx, name)
 		if err != nil {
 			return err
 		}
-
-		if err = json.Unmarshal(infoBytes, &info); err != nil {
-			return err
-		}
-
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
-
-	return &info, nil
+	return info, nil
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
@@ -2591,7 +2575,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if err != nil {
 		return err
 	}
-
 	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
 		return err
@@ -2660,14 +2643,21 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	var l4 []string
+	var l4, l5 []string
 	if all {
 		l4, err = seedableStateFilesBySubDir(dirs.Snap, "accessor", all)
 		if err != nil {
 			return nil, err
 		}
 	}
-	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
+	// check if dirs.SnapCaplin exists
+	if _, err := os.Stat(dirs.SnapCaplin); !os.IsNotExist(err) {
+		l5, err = seedableSegmentFiles(dirs.SnapCaplin, chainName, all)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
 	return files, nil
 }
 
@@ -2762,6 +2752,7 @@ func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, 
 	_, err := BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFS, chain, ignore, false)
 	return err
 }
+
 func (d *Downloader) Stats() AggStats {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
@@ -2804,12 +2795,11 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
 func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool, logger log.Logger) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
-	dbCfg := mdbx.NewMDBX(log.New()).
-		Label(kv.DownloaderDB).
+	dbCfg := mdbx.New(kv.DownloaderDB, log.New()).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
-		PageSize(uint64(4 * datasize.KB)).
+		PageSize(4 * datasize.KB).
 		RoTxsLimiter(semaphore.NewWeighted(9_000)).
 		Path(dbDir).
 		WriteMap(writeMap)
@@ -2944,5 +2934,36 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 func (d *Downloader) Completed() bool {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
 	return d.stats.Completed
+}
+
+// Store completed torrents in order to notify GrpcServer subscribers when they subscribe and there is already downloaded files
+func (d *Downloader) torrentCompleted(tName string, tHash metainfo.Hash) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	hash := InfoHashes2Proto(tHash)
+
+	//check is torrent already completed cause some funcs may call this method multiple times
+	if _, ok := d.completedTorrents[tName]; !ok {
+		d.notifyCompleted(tName, hash)
+	}
+
+	d.completedTorrents[tName] = completedTorrentInfo{
+		path: tName,
+		hash: hash,
+	}
+}
+
+// Notify GrpcServer subscribers about completed torrent
+func (d *Downloader) notifyCompleted(tName string, tHash *prototypes.H160) {
+	d.onTorrentComplete(tName, tHash)
+}
+
+func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+
+	return d.completedTorrents
 }

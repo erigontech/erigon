@@ -282,7 +282,7 @@ Loop:
 			return minBlockErr
 		}
 		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
-		if cfg.hd != nil && errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
+		if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(minBlockErr, consensus.ErrInvalidBlock) {
 			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
 		}
 

@@ -17,6 +17,7 @@
 package snapcfg
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"path/filepath"
@@ -88,8 +89,18 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 
 	for _, p := range p {
+		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
+
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
+			continue
+		}
+
+		if strings.HasPrefix(p.Name, "caplin") {
+			bestVersions.Set(p.Name, p)
 			continue
 		}
 
@@ -118,6 +129,9 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
 		include := false
+		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
+			typeName = "transactions"
+		}
 
 		for _, typ := range types {
 			if typeName == typ.Name() {
@@ -241,7 +255,7 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 }
 
 func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
-	max := uint64(0)
+	_max := uint64(0)
 	for _, p := range p {
 		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
@@ -257,16 +271,16 @@ func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
 			return 0, err
 		}
 
-		if max < to {
-			max = to
+		if _max < to {
+			_max = to
 		}
 
 	}
-	if max == 0 { // to prevent underflow
+	if _max == 0 { // to prevent underflow
 		return 0, nil
 	}
 
-	return max*1_000 - 1, nil
+	return _max*1_000 - 1, nil
 }
 
 var errWrongVersion = errors.New("wrong version")
@@ -359,13 +373,24 @@ func newCfg(networkName string, preverified Preverified) *Cfg {
 	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
 }
 
+func NewNonSeededCfg(networkName string) *Cfg {
+	return newCfg(networkName, Preverified{})
+}
+
 type Cfg struct {
 	ExpectBlocks uint64
 	Preverified  Preverified
 	networkName  string
 }
 
+// Seedable - can seed it over Bittorrent network to other nodes
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
+	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
+	return info.To-info.From == mergeLimit
+}
+
+// IsFrozen - can't be merged to bigger files
+func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
 	return info.To-info.From == mergeLimit
 }
@@ -376,6 +401,9 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	for _, p := range c.Preverified {
 		info, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
+			continue
+		}
+		if strings.Contains(p.Name, "caplin") {
 			continue
 		}
 
@@ -404,7 +432,10 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	// not the same as other snapshots which follow a block based sharding scheme
 	// TODO: If we add any more sharding schemes (we currently have blocks, state & beacon block schemes)
 	// - we may need to add some kind of sharding scheme identifier to snaptype.Type
-	if hasType || snaptype.IsCaplinType(t) {
+	if snaptype.IsCaplinType(t) {
+		return snaptype.CaplinMergeLimit
+	}
+	if hasType {
 		return snaptype.Erigon2MergeLimit
 	}
 
@@ -412,13 +443,13 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 }
 
 var knownPreverified = map[string]Preverified{
-	networkname.MainnetChainName:    Mainnet,
-	networkname.HoleskyChainName:    Holesky,
-	networkname.SepoliaChainName:    Sepolia,
-	networkname.AmoyChainName:       Amoy,
-	networkname.BorMainnetChainName: BorMainnet,
-	networkname.GnosisChainName:     Gnosis,
-	networkname.ChiadoChainName:     Chiado,
+	networkname.Mainnet:    Mainnet,
+	networkname.Holesky:    Holesky,
+	networkname.Sepolia:    Sepolia,
+	networkname.Amoy:       Amoy,
+	networkname.BorMainnet: BorMainnet,
+	networkname.Gnosis:     Gnosis,
+	networkname.Chiado:     Chiado,
 }
 
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
@@ -434,22 +465,29 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 	return KnownCfg(networkName).Seedable(info)
 }
 
+func IsFrozen(networkName string, info snaptype.FileInfo) bool {
+	if networkName == "" {
+		return false
+	}
+	return KnownCfg(networkName).IsFrozen(info)
+}
+
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
 	return cfg.MergeLimit(snapType, fromBlock)
 }
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
-	var max uint64
+	var _max uint64
 
 	if list, err := snaptype.Segments(dir); err == nil {
 		for _, info := range list {
-			if Seedable(chain, info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > max {
-				max = info.To
+			if Seedable(chain, info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > _max {
+				_max = info.To
 			}
 		}
 	}
 
-	return max
+	return _max
 }
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
@@ -473,24 +511,24 @@ func KnownCfg(networkName string) *Cfg {
 	return newCfg(networkName, c.Typed(knownTypes[networkName]))
 }
 
-func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.Version) *Cfg {
+func VersionedCfg(networkName string, preferred snaptype.Version, _min snaptype.Version) *Cfg {
 	c, ok := knownPreverified[networkName]
 
 	if !ok {
 		return newCfg(networkName, Preverified{})
 	}
 
-	return newCfg(networkName, c.Versioned(preferred, min))
+	return newCfg(networkName, c.Versioned(preferred, _min))
 }
 
 var KnownWebseeds = map[string][]string{
-	networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
-	networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
-	networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
-	networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
-	networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
-	networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
-	networkname.HoleskyChainName:    webseedsParse(webseed.Holesky),
+	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
+	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
+	networkname.Amoy:       webseedsParse(webseed.Amoy),
+	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
+	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
+	networkname.Chiado:     webseedsParse(webseed.Chiado),
+	networkname.Holesky:    webseedsParse(webseed.Holesky),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -505,8 +543,11 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
-func LoadRemotePreverified() bool {
-	couldFetch := snapshothashes.LoadSnapshots()
+func LoadRemotePreverified(ctx context.Context) (loaded bool, err error) {
+	loaded, err = snapshothashes.LoadSnapshots(ctx)
+	if err != nil {
+		return false, err
+	}
 
 	// Re-load the preverified hashes
 	Mainnet = fromToml(snapshothashes.Mainnet)
@@ -518,25 +559,25 @@ func LoadRemotePreverified() bool {
 	Chiado = fromToml(snapshothashes.Chiado)
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
-		networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
-		networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
-		networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
-		networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
-		networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),
-		networkname.ChiadoChainName:     webseedsParse(webseed.Chiado),
-		networkname.HoleskyChainName:    webseedsParse(webseed.Holesky),
+		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
+		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
+		networkname.Amoy:       webseedsParse(webseed.Amoy),
+		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
+		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
+		networkname.Chiado:     webseedsParse(webseed.Chiado),
+		networkname.Holesky:    webseedsParse(webseed.Holesky),
 	}
 
 	knownPreverified = map[string]Preverified{
-		networkname.MainnetChainName:    Mainnet,
-		networkname.HoleskyChainName:    Holesky,
-		networkname.SepoliaChainName:    Sepolia,
-		networkname.AmoyChainName:       Amoy,
-		networkname.BorMainnetChainName: BorMainnet,
-		networkname.GnosisChainName:     Gnosis,
-		networkname.ChiadoChainName:     Chiado,
+		networkname.Mainnet:    Mainnet,
+		networkname.Holesky:    Holesky,
+		networkname.Sepolia:    Sepolia,
+		networkname.Amoy:       Amoy,
+		networkname.BorMainnet: BorMainnet,
+		networkname.Gnosis:     Gnosis,
+		networkname.Chiado:     Chiado,
 	}
-	return couldFetch
+	return loaded, nil
 }
 
 func SetToml(networkName string, toml []byte) {
@@ -548,19 +589,19 @@ func SetToml(networkName string, toml []byte) {
 
 func GetToml(networkName string) []byte {
 	switch networkName {
-	case networkname.MainnetChainName:
+	case networkname.Mainnet:
 		return snapshothashes.Mainnet
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		return snapshothashes.Holesky
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		return snapshothashes.Sepolia
-	case networkname.AmoyChainName:
+	case networkname.Amoy:
 		return snapshothashes.Amoy
-	case networkname.BorMainnetChainName:
+	case networkname.BorMainnet:
 		return snapshothashes.BorMainnet
-	case networkname.GnosisChainName:
+	case networkname.Gnosis:
 		return snapshothashes.Gnosis
-	case networkname.ChiadoChainName:
+	case networkname.Chiado:
 		return snapshothashes.Chiado
 	default:
 		return nil

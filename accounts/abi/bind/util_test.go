@@ -28,12 +28,12 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 )
 

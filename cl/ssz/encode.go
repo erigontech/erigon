@@ -19,6 +19,7 @@ package ssz2
 import (
 	"encoding/binary"
 	"fmt"
+	"runtime/debug"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
 )
@@ -70,6 +71,7 @@ It handles both static (fixed size) and dynamic (variable size) objects, includi
 func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 	defer func() {
 		if err2 := recover(); err2 != nil {
+			debug.PrintStack()
 			err = fmt.Errorf("panic while encoding: %v", err2)
 		}
 	}()

@@ -36,7 +36,7 @@ var LightClientBeaconBlockBodyExecutionMerkleProof = spectest.HandlerFunc(func(t
 	var proof [][32]byte
 	switch c.CaseName {
 	case "execution_merkle_proof":
-		beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig)
+		beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 		require.NoError(t, spectest.ReadSsz(root, c.Version(), spectest.ObjectSSZ, beaconBody))
 		proof, err = beaconBody.ExecutionPayloadMerkleProof()
 		require.NoError(t, err)

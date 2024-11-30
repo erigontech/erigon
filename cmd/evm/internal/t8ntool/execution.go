@@ -27,10 +27,11 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	state3 "github.com/erigontech/erigon-lib/state"
+
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -66,8 +67,7 @@ type stEnv struct {
 	UncleHash        libcommon.Hash                         `json:"uncleHash,omitempty"`
 	Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
 	WithdrawalsHash  *libcommon.Hash                        `json:"withdrawalsRoot,omitempty"`
-	Requests         types.Requests                         `json:"requests,omitempty"`
-	RequestsRoot     *libcommon.Hash                        `json:"requestsRoot,omitempty"`
+	RequestsHash     *libcommon.Hash                        `json:"requestsHash,omitempty"`
 }
 
 type stEnvMarshaling struct {

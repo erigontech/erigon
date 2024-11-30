@@ -22,8 +22,9 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/config3"
 
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -84,11 +85,11 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Avaiable values: "archive","full","minimal".
-				Archive: Keep the entire indexed database, aka. no pruning. (Pruning is flexible),
-				Full: Keep only blocks and latest state (Pruning is not flexible)
-				Minimal: Keep only latest state (Pruning is not flexible)`,
-		Value: "archive",
+		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal".
+				Full: Keep only blocks and latest state,
+				Archive: Keep the entire indexed database, aka. no pruning,
+				Minimal: Keep only latest state`,
+		Value: "full",
 	}
 	PruneDistanceFlag = cli.Uint64Flag{
 		Name:  "prune.distance",
@@ -135,12 +136,6 @@ var (
 		Name:  "sync.loop.throttle",
 		Usage: "Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)",
 		Value: "",
-	}
-
-	SyncLoopPruneLimitFlag = cli.UintFlag{
-		Name:  "sync.loop.prune.limit",
-		Usage: "Sets the maximum number of block to prune per loop iteration",
-		Value: 100,
 	}
 
 	SyncLoopBreakAfterFlag = cli.StringFlag{
@@ -303,12 +298,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	// Full mode prunes all but the latest state
 	if ctx.String(PruneModeFlag.Name) == "full" {
 		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(0)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	}
 	// Minimal mode prunes all but the latest state including blocks
 	if ctx.String(PruneModeFlag.Name) == "minimal" {
-		mode.Blocks = prune.Distance(2048) // 2048 is just some blocks to allow reorgs
-		mode.History = prune.Distance(0)
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	}
 
 	if err != nil {
@@ -346,10 +341,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
 		}
 		cfg.Sync.LoopThrottle = syncLoopThrottle
-	}
-
-	if limit := ctx.Uint(SyncLoopPruneLimitFlag.Name); limit > 0 {
-		cfg.Sync.PruneLimit = int(limit)
 	}
 
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
@@ -397,6 +388,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if ctx.Bool(utils.DisableIPV4.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv4 = true
 	}
+
+	if ctx.Bool(utils.ChaosMonkeyFlag.Name) {
+		cfg.ChaosMonkey = true
+	}
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
@@ -405,9 +400,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	pruneDistance := f.Uint64(PruneDistanceFlag.Name, PruneDistanceFlag.Value, PruneDistanceFlag.Usage)
 
 	chainId := cfg.NetworkID
-	if *pruneMode != "archive" && (pruneBlockDistance != nil || pruneDistance != nil) {
-		utils.Fatalf("error: --prune.distance and --prune.distance.blocks are only allowed with --prune.mode=archive")
-	}
+
 	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
 	if pruneBlockDistance != nil {
 		blockDistance = *pruneBlockDistance
@@ -434,13 +427,16 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	case "archive":
 	case "full":
 		mode.Blocks = prune.Distance(math.MaxUint64)
-		mode.History = prune.Distance(0)
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	case "minimal":
-		mode.Blocks = prune.Distance(2048) // 2048 is just some blocks to allow reorgs
-		mode.History = prune.Distance(0)
+		mode.Blocks = prune.Distance(config3.DefaultPruneDistance) // 2048 is just some blocks to allow reorgs and data for rpc
+		mode.History = prune.Distance(config3.DefaultPruneDistance)
 	default:
 		utils.Fatalf("error: --prune.mode must be one of archive, full, minimal")
 	}
+	mode.Blocks = prune.Distance(blockDistance)
+	mode.History = prune.Distance(distance)
+
 	cfg.Prune = mode
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
@@ -462,6 +458,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	cfg.StateStream = true
 	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
 		cfg.StateStream = false
+	}
+
+	if v := f.Bool(utils.ChaosMonkeyFlag.Name, true, utils.ChaosMonkeyFlag.Usage); v != nil {
+		cfg.ChaosMonkey = true
 	}
 }
 

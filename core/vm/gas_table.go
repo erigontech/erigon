@@ -21,6 +21,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -297,11 +298,11 @@ func gasCreate2(_ *EVM, contract *Contract, stack *stack.Stack, mem *Memory, mem
 	if err != nil {
 		return 0, err
 	}
-	len, overflow := stack.Back(2).Uint64WithOverflow()
+	size, overflow := stack.Back(2).Uint64WithOverflow()
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	numWords := ToWordSize(len)
+	numWords := ToWordSize(size)
 	wordGas, overflow := math.SafeMul(numWords, params.Keccak256WordGas)
 	if overflow {
 		return 0, ErrGasUintOverflow
@@ -318,11 +319,14 @@ func gasCreateEip3860(_ *EVM, contract *Contract, stack *stack.Stack, mem *Memor
 	if err != nil {
 		return 0, err
 	}
-	len, overflow := stack.Back(2).Uint64WithOverflow()
-	if overflow || len > params.MaxInitCodeSize {
+	size, overflow := stack.Back(2).Uint64WithOverflow()
+	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	numWords := ToWordSize(len)
+	if size > params.MaxInitCodeSize {
+		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	}
+	numWords := ToWordSize(size)
 	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
 	wordGas := params.InitCodeWordGas * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)
@@ -337,11 +341,14 @@ func gasCreate2Eip3860(_ *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	if err != nil {
 		return 0, err
 	}
-	len, overflow := stack.Back(2).Uint64WithOverflow()
-	if overflow || len > params.MaxInitCodeSize {
+	size, overflow := stack.Back(2).Uint64WithOverflow()
+	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	numWords := ToWordSize(len)
+	if size > params.MaxInitCodeSize {
+		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	}
+	numWords := ToWordSize(size)
 	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
 	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)

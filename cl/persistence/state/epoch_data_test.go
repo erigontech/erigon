@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
@@ -30,9 +29,9 @@ func TestEpochData(t *testing.T) {
 	e := &EpochData{
 		TotalActiveBalance:          123,
 		JustificationBits:           &cltypes.JustificationBits{true},
-		CurrentJustifiedCheckpoint:  solid.NewCheckpointFromParameters(libcommon.Hash{}, 123),
-		PreviousJustifiedCheckpoint: solid.NewCheckpointFromParameters(libcommon.Hash{}, 123),
-		FinalizedCheckpoint:         solid.NewCheckpointFromParameters(libcommon.Hash{}, 123),
+		CurrentJustifiedCheckpoint:  solid.Checkpoint{Epoch: 123},
+		PreviousJustifiedCheckpoint: solid.Checkpoint{Epoch: 123},
+		FinalizedCheckpoint:         solid.Checkpoint{Epoch: 123},
 		HistoricalSummariesLength:   235,
 		HistoricalRootsLength:       345,
 	}

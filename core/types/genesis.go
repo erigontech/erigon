@@ -30,14 +30,15 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 
 	common2 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/params"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
+//go:generate gencodec -type AuRaSeal -out gen_aura_seal.go
 
 var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
@@ -54,8 +55,7 @@ type Genesis struct {
 	Coinbase   common.Address `json:"coinbase"`
 	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
 
-	AuRaStep uint64 `json:"auRaStep"`
-	AuRaSeal []byte `json:"auRaSeal"`
+	AuRaSeal *AuRaSeal `json:"seal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
@@ -68,7 +68,21 @@ type Genesis struct {
 	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
 	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
-	RequestsRoot          *common.Hash `json:"requestsRoot"`          // EIP-7685
+	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
+}
+
+type AuRaSeal struct {
+	AuthorityRound struct {
+		Step      math.HexOrDecimal64 `json:"step"`
+		Signature hexutility.Bytes    `json:"signature"`
+	} `json:"authorityRound"`
+}
+
+func NewAuraSeal(step uint64, signature []byte) *AuRaSeal {
+	a := AuRaSeal{}
+	a.AuthorityRound.Step = math.HexOrDecimal64(step)
+	a.AuthorityRound.Signature = append([]byte{}, signature...)
+	return &a
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.

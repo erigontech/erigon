@@ -99,7 +99,16 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.Full
 
 	return nil
 }
-func ResetBorHeimdall(ctx context.Context, tx kv.RwTx) error {
+func ResetBorHeimdall(ctx context.Context, tx kv.RwTx, db kv.RwDB) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 	if err := tx.ClearBucket(kv.BorEventNums); err != nil {
 		return err
 	}
@@ -109,7 +118,13 @@ func ResetBorHeimdall(ctx context.Context, tx kv.RwTx) error {
 	if err := tx.ClearBucket(kv.BorSpans); err != nil {
 		return err
 	}
-	return clearStageProgress(tx, stages.BorHeimdall)
+	if err := clearStageProgress(tx, stages.BorHeimdall); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		return tx.Commit()
+	}
+	return nil
 }
 
 func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
@@ -187,12 +202,14 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 var Tables = map[stages.SyncStage][]string{
-	stages.CustomTrace: {},
-	stages.Finish:      {},
+	stages.CustomTrace: {
+		kv.TblReceiptVals, kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
+	},
+	stages.Finish: {},
 }
 var stateBuckets = []string{
-	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
-	kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
+	kv.Epoch, kv.PendingEpoch, kv.Code,
+	kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
 	kv.Receipts,
@@ -207,9 +224,9 @@ var stateHistoryV3Buckets = []string{
 	kv.TblTracesToKeys, kv.TblTracesToIdx,
 }
 var stateV3Buckets = []string{
-	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys,
-	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals,
+	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals, kv.TblReceiptVals,
 	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
+	kv.TblReceiptHistoryKeys, kv.TblReceiptHistoryVals, kv.TblReceiptIdx,
 	kv.TblPruningProgress,
 	kv.ChangeSets3,
 }

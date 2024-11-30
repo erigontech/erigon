@@ -40,3 +40,11 @@ func (m *mockFuncs) BlsVerify(pubkey, message, signature []byte) (bool, error) {
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
+
+func (m *mockFuncs) BlsVerifyMultipleSignatures(pubkey, message, signature [][]byte) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BlsVerifyMultipleSignatures", pubkey, message, signature)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}

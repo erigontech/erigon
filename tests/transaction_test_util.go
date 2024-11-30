@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 )

@@ -99,7 +99,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 			return nil, nil
 		}
 
-		idxSlot := seg.Index()
+		idxSlot := seg.Src().Index()
 
 		if idxSlot == nil {
 			return nil, nil
@@ -109,7 +109,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 		}
 		blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
-		gg := seg.MakeGetter()
+		gg := seg.Src().MakeGetter()
 		gg.Reset(blockOffset)
 		if !gg.HasNext() {
 			return nil, nil
@@ -142,6 +142,9 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 
 	var buf []byte
 	if slot > r.sn.BlocksAvailable() {
+		if tx == nil {
+			return nil, fmt.Errorf("no mdbx transaction provided for slot %d", slot)
+		}
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 		if err != nil {
 			return nil, err
@@ -159,7 +162,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 			return nil, nil
 		}
 
-		idxSlot := seg.Index()
+		idxSlot := seg.Src().Index()
 
 		if idxSlot == nil {
 			return nil, nil
@@ -169,7 +172,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 		}
 		blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
-		gg := seg.MakeGetter()
+		gg := seg.Src().MakeGetter()
 		gg.Reset(blockOffset)
 		if !gg.HasNext() {
 			return nil, nil
@@ -240,7 +243,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 			return nil, nil
 		}
 
-		idxSlot := seg.Index()
+		idxSlot := seg.Src().Index()
 
 		if idxSlot == nil {
 			return nil, nil
@@ -250,7 +253,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		}
 		blockOffset := idxSlot.OrdinalLookup(*slot - idxSlot.BaseDataID())
 
-		gg := seg.MakeGetter()
+		gg := seg.Src().MakeGetter()
 		gg.Reset(blockOffset)
 		if !gg.HasNext() {
 			return nil, nil

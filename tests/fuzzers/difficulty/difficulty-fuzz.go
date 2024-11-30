@@ -45,11 +45,11 @@ func (f *fuzzer) read(size int) []byte {
 	return out
 }
 
-func (f *fuzzer) readSlice(min, max int) []byte {
+func (f *fuzzer) readSlice(_min, _max int) []byte {
 	var a uint16
 	//nolint:errcheck
 	binary.Read(f.input, binary.LittleEndian, &a)
-	size := min + int(a)%(max-min)
+	size := _min + int(a)%(_max-_min)
 	out := make([]byte, size)
 	if _, err := f.input.Read(out); err != nil {
 		f.exhausted = true
@@ -57,15 +57,15 @@ func (f *fuzzer) readSlice(min, max int) []byte {
 	return out
 }
 
-func (f *fuzzer) readUint64(min, max uint64) uint64 {
-	if min == max {
-		return min
+func (f *fuzzer) readUint64(_min, _max uint64) uint64 {
+	if _min == _max {
+		return _min
 	}
 	var a uint64
 	if err := binary.Read(f.input, binary.LittleEndian, &a); err != nil {
 		f.exhausted = true
 	}
-	a = min + a%(max-min)
+	a = _min + a%(_max-_min)
 	return a
 }
 func (f *fuzzer) readBool() bool {

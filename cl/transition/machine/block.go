@@ -17,11 +17,15 @@
 package machine
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/Giulio2002/bls"
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/pkg/errors"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -44,7 +48,6 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	if block.Version() != version {
 		return fmt.Errorf("processBlindedBlock: wrong state version for block at slot %d", block.GetSlot())
 	}
-	h := metrics.NewHistTimer("beacon_process_blinded_block")
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {
 		return errors.WithMessagef(err, "processBlindedBlock: failed to hash block body")
@@ -72,19 +75,39 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
 		}
 	}
+	var signatures, messages, publicKeys [][]byte
 
-	// Process RANDAO reveal.
-	if err := impl.ProcessRandao(s, body.GetRandaoReveal(), block.GetProposerIndex()); err != nil {
-		return fmt.Errorf("processBlock: failed to process RANDAO reveal: %v", err)
+	// Process each proposer slashing
+	sigs, msgs, pubKeys, err := processRandao(impl, s, body, block)
+	if err != nil {
+		return err
 	}
+	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
+
 	// Process Eth1 data.
 	if err := impl.ProcessEth1Data(s, body.GetEth1Data()); err != nil {
 		return fmt.Errorf("processBlock: failed to process Eth1 data: %v", err)
 	}
+
 	// Process block body operations.
-	if err := ProcessOperations(impl, s, body); err != nil {
+	sigs, msgs, pubKeys, err = ProcessOperations(impl, s, body)
+	if err != nil {
 		return fmt.Errorf("processBlock: failed to process block body operations: %v", err)
+
 	}
+	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
+
+	// process signature validation
+	if len(signatures) != 0 {
+		valid, err := bls.VerifyMultipleSignatures(signatures, messages, publicKeys)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return errors.New("block signature validation failed")
+		}
+	}
+
 	// Process sync aggregate in case of Altair version.
 	if version >= clparams.AltairVersion {
 		if err := impl.ProcessSyncAggregate(s, body.GetSyncAggregate()); err != nil {
@@ -92,25 +115,21 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		}
 	}
 
-	h.PutSince()
 	return nil
 }
 
-// ProcessOperations is called by ProcessBlock and prcesses the block body operations
-func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) error {
+// ProcessOperations is called by ProcessBlock and processes the block body operations
+func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (signatures [][]byte, messages [][]byte, publicKeys [][]byte, err error) {
 	if blockBody.GetDeposits().Len() != int(maximumDeposits(s)) {
-		return errors.New("outstanding deposits do not match maximum deposits")
+		return nil, nil, nil, errors.New("outstanding deposits do not match maximum deposits")
 	}
+
 	// Process each proposer slashing
-	var err error
-	if err := solid.RangeErr[*cltypes.ProposerSlashing](blockBody.GetProposerSlashings(), func(index int, slashing *cltypes.ProposerSlashing, length int) error {
-		if err = impl.ProcessProposerSlashing(s, slashing); err != nil {
-			return fmt.Errorf("ProcessProposerSlashing: %s", err)
-		}
-		return nil
-	}); err != nil {
-		return err
+	sigs, msgs, pubKeys, err := processProposerSlashings(impl, s, blockBody)
+	if err != nil {
+		return
 	}
+	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
 	if err := solid.RangeErr[*cltypes.AttesterSlashing](blockBody.GetAttesterSlashings(), func(index int, slashing *cltypes.AttesterSlashing, length int) error {
 		if err = impl.ProcessAttesterSlashing(s, slashing); err != nil {
@@ -118,12 +137,12 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 		}
 		return nil
 	}); err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
 	// Process each attestations
 	if err := impl.ProcessAttestations(s, blockBody.GetAttestations()); err != nil {
-		return fmt.Errorf("ProcessAttestation: %s", err)
+		return nil, nil, nil, fmt.Errorf("ProcessAttestation: %s", err)
 	}
 
 	// Process each deposit
@@ -133,31 +152,176 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 		}
 		return nil
 	}); err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 
 	// Process each voluntary exit.
-	if err := solid.RangeErr[*cltypes.SignedVoluntaryExit](blockBody.GetVoluntaryExits(), func(index int, exit *cltypes.SignedVoluntaryExit, length int) error {
+	sigs, msgs, pubKeys, err = processVoluntaryExits(impl, s, blockBody)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
+
+	if s.Version() < clparams.CapellaVersion {
+		return
+	}
+
+	// Process each execution change. this will only have entries after the capella fork.
+	sigs, msgs, pubKeys, err = processBlsToExecutionChanges(impl, s, blockBody)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
+
+	return
+}
+
+func processRandao(impl BlockProcessor, s abstract.BeaconState, body cltypes.GenericBeaconBody, block cltypes.GenericBeaconBlock) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
+	// Process RANDAO reveal.
+	proposerIndex := block.GetProposerIndex()
+	randao := body.GetRandaoReveal()
+	epoch := state.Epoch(s)
+	proposer, err := s.ValidatorForValidatorIndex(int(proposerIndex))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if impl.FullValidate() {
+		domain, err := s.GetDomain(s.BeaconConfig().DomainRandao, epoch)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessRandao: unable to get domain: %v", err)
+		}
+		// compute signing root epoch
+		b := make([]byte, 32)
+		binary.LittleEndian.PutUint64(b, epoch)
+		signingRoot := utils.Sha256(b, domain)
+
+		pk := proposer.PublicKey()
+		sigs, msgs, pubKeys = append(sigs, randao[:]), append(msgs, signingRoot[:]), append(pubKeys, pk[:])
+	}
+	if err = impl.ProcessRandao(s, randao, proposerIndex); err != nil {
+		return nil, nil, nil, fmt.Errorf("processBlock: failed to process RANDAO reveal: %v", err)
+	}
+	return
+}
+
+func processProposerSlashings(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
+	// Process each proposer slashing
+	err = solid.RangeErr[*cltypes.ProposerSlashing](blockBody.GetProposerSlashings(), func(index int, propSlashing *cltypes.ProposerSlashing, length int) error {
+		for _, signedHeader := range []*cltypes.SignedBeaconBlockHeader{propSlashing.Header1, propSlashing.Header2} {
+			proposer, err := s.ValidatorForValidatorIndex(int(propSlashing.Header1.Header.ProposerIndex))
+			if err != nil {
+				return err
+			}
+
+			domain, err := s.GetDomain(
+				s.BeaconConfig().DomainBeaconProposer,
+				state.GetEpochAtSlot(s.BeaconConfig(), signedHeader.Header.Slot),
+			)
+			if err != nil {
+				return fmt.Errorf("unable to get domain: %v", err)
+			}
+			signingRoot, err := fork.ComputeSigningRoot(signedHeader.Header, domain)
+			if err != nil {
+				return fmt.Errorf("unable to compute signing root: %v", err)
+			}
+			pk := proposer.PublicKey()
+			sigs, msgs, pubKeys = append(sigs, signedHeader.Signature[:]), append(msgs, signingRoot[:]), append(pubKeys, pk[:])
+		}
+
+		if err = impl.ProcessProposerSlashing(s, propSlashing); err != nil {
+			return fmt.Errorf("ProcessProposerSlashing: %s", err)
+		}
+		return nil
+	})
+
+	return
+}
+
+func processVoluntaryExits(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
+	// Process each voluntary exit.
+	err = solid.RangeErr[*cltypes.SignedVoluntaryExit](blockBody.GetVoluntaryExits(), func(index int, exit *cltypes.SignedVoluntaryExit, length int) error {
+		voluntaryExit := exit.VoluntaryExit
+		validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+		if err != nil {
+			return err
+		}
+
+		// We can skip it in some instances if we want to optimistically sync up.
+		if impl.FullValidate() {
+			var domain []byte
+			if s.Version() < clparams.DenebVersion {
+				domain, err = s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+			} else if s.Version() >= clparams.DenebVersion {
+				domain, err = fork.ComputeDomain(s.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().CapellaForkVersion)), s.GenesisValidatorsRoot())
+			}
+			if err != nil {
+				return err
+			}
+			signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
+			if err != nil {
+				return err
+			}
+			pk := validator.PublicKey()
+			sigs, msgs, pubKeys = append(sigs, exit.Signature[:]), append(msgs, signingRoot[:]), append(pubKeys, pk[:])
+		}
+
 		if err = impl.ProcessVoluntaryExit(s, exit); err != nil {
 			return fmt.Errorf("ProcessVoluntaryExit: %s", err)
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	if s.Version() < clparams.CapellaVersion {
-		return nil
-	}
+	})
+
+	return
+}
+
+func processBlsToExecutionChanges(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
 	// Process each execution change. this will only have entries after the capella fork.
-	if err := solid.RangeErr[*cltypes.SignedBLSToExecutionChange](blockBody.GetExecutionChanges(), func(index int, addressChange *cltypes.SignedBLSToExecutionChange, length int) error {
+	err = solid.RangeErr[*cltypes.SignedBLSToExecutionChange](blockBody.GetExecutionChanges(), func(index int, addressChange *cltypes.SignedBLSToExecutionChange, length int) error {
+		change := addressChange.Message
+
+		beaconConfig := s.BeaconConfig()
+		validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
+		if err != nil {
+			return err
+		}
+
+		// Perform full validation if requested.
+		wc := validator.WithdrawalCredentials()
+		if impl.FullValidate() {
+			// Check the validator's withdrawal credentials prefix.
+			if wc[0] != byte(beaconConfig.BLSWithdrawalPrefixByte) {
+				return errors.New("invalid withdrawal credentials prefix")
+			}
+
+			// Check the validator's withdrawal credentials against the provided message.
+			hashedFrom := utils.Sha256(change.From[:])
+			if !bytes.Equal(hashedFrom[1:], wc[1:]) {
+				return errors.New("invalid withdrawal credentials")
+			}
+
+			// Compute the signing domain and verify the message signature.
+			domain, err := fork.ComputeDomain(
+				beaconConfig.DomainBLSToExecutionChange[:],
+				utils.Uint32ToBytes4(uint32(beaconConfig.GenesisForkVersion)),
+				s.GenesisValidatorsRoot(),
+			)
+			if err != nil {
+				return err
+			}
+			signedRoot, err := fork.ComputeSigningRoot(change, domain)
+			if err != nil {
+				return err
+			}
+			sigs, msgs, pubKeys = append(sigs, addressChange.Signature[:]), append(msgs, signedRoot[:]), append(pubKeys, change.From[:])
+		}
+
 		if err := impl.ProcessBlsToExecutionChange(s, addressChange); err != nil {
 			return fmt.Errorf("ProcessBlsToExecutionChange: %s", err)
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
+
+	return
 }
 
 func maximumDeposits(s abstract.BeaconState) (maxDeposits uint64) {

@@ -22,9 +22,9 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 )
 
 const BorTxKeyPrefix string = "matic-bor-receipt-"

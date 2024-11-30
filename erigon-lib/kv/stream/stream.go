@@ -17,9 +17,12 @@
 package stream
 
 import (
+	"cmp"
+	"fmt"
 	"slices"
 
 	"github.com/erigontech/erigon-lib/kv/order"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"golang.org/x/exp/constraints"
 )
 
@@ -66,9 +69,6 @@ func (it *ArrStream[V]) NextBatch() ([]V, error) {
 }
 
 func Range[T constraints.Integer](from, to T) *RangeIter[T] {
-	if from == to {
-		to++
-	}
 	return &RangeIter[T]{i: from, to: to}
 }
 
@@ -85,7 +85,7 @@ func (it *RangeIter[T]) Next() (T, error) {
 }
 
 // UnionUno
-type UnionUno[T constraints.Ordered] struct {
+type UnionUno[T cmp.Ordered] struct {
 	x, y           Uno[T]
 	asc            bool
 	xHas, yHas     bool
@@ -94,7 +94,7 @@ type UnionUno[T constraints.Ordered] struct {
 	limit          int
 }
 
-func Union[T constraints.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
+func Union[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if x == nil && y == nil {
 		return &Empty[T]{}
 	}
@@ -181,7 +181,7 @@ func (m *UnionUno[T]) Close() {
 }
 
 // Intersected
-type Intersected[T constraints.Ordered] struct {
+type Intersected[T cmp.Ordered] struct {
 	x, y               Uno[T]
 	xHasNext, yHasNext bool
 	xNextK, yNextK     T
@@ -189,7 +189,7 @@ type Intersected[T constraints.Ordered] struct {
 	err                error
 }
 
-func Intersect[T constraints.Ordered](x, y Uno[T], limit int) Uno[T] {
+func Intersect[T cmp.Ordered](x, y Uno[T], limit int) Uno[T] {
 	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
 		return &Empty[T]{}
 	}
@@ -448,4 +448,63 @@ func (it *PaginatedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v = it.keys[it.i], it.values[it.i]
 	it.i++
 	return k, v, nil
+}
+
+// ---- tracing ----
+
+// Traced - does `log.Warn` every .Next() call
+type Traced[T any] struct {
+	it     Uno[T]
+	logger log.Logger
+	prefix string
+}
+
+func Trace[T any](it Uno[T], logger log.Logger, prefix string) *Traced[T] {
+	return &Traced[T]{it: it, logger: logger, prefix: prefix}
+}
+func (m *Traced[T]) HasNext() bool {
+	res := m.it.HasNext()
+	log.Warn(m.prefix, "hasNext", res)
+	return res
+}
+func (m *Traced[T]) Next() (k T, err error) {
+	k, err = m.it.Next()
+	log.Warn(m.prefix, "next", k)
+	return k, err
+}
+func (m *Traced[T]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
+}
+
+// TracedDuo - does `log.Warn` every .Next() call
+type TracedDuo[K, V any] struct {
+	it     Duo[K, V]
+	logger log.Logger
+	prefix string
+}
+
+func TraceDuo[K, V any](it Duo[K, V], logger log.Logger, prefix string) *TracedDuo[K, V] {
+	return &TracedDuo[K, V]{it: it, logger: logger, prefix: prefix}
+}
+func (m *TracedDuo[K, V]) HasNext() bool {
+	res := m.it.HasNext()
+	log.Warn(m.prefix, "hasNext", res)
+	return res
+}
+func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
+	k, v, err = m.it.Next()
+	switch typedK := any(k).(type) {
+	case []byte:
+		log.Warn(m.prefix, "next", fmt.Sprintf("%x", typedK))
+	default:
+		log.Warn(m.prefix, "next", typedK)
+	}
+	return k, v, err
+}
+func (m *TracedDuo[K, V]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
 }

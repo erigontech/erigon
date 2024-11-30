@@ -33,7 +33,7 @@ import (
 )
 
 func setupStore(t *testing.T) (freezeblocks.BeaconSnapshotReader, kv.RwDB) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	return tests.NewMockBlockReader(), db
 }
 
@@ -42,7 +42,7 @@ func populateDatabaseWithBlocks(t *testing.T, store *tests.MockBlockReader, tx k
 	blocks := make([]*cltypes.SignedBeaconBlock, 0, count)
 	for i := uint64(0); i <= count; i++ {
 		slot := startSlot + i
-		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 		block.Block.Slot = slot
 		block.Block.StateRoot = libcommon.Hash{byte(i)}
 		block.Block.ParentRoot = mockParentRoot

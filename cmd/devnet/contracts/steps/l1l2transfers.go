@@ -52,7 +52,7 @@ func init() {
 
 func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
 	sender := accounts.GetAccount(senderName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.Dev)
 
 	auth, err := contracts.TransactOpts(ctx, sender.Address)
 
@@ -170,7 +170,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 
 func DeployRootChainSender(ctx context.Context, deployerName string) (context.Context, error) {
 	deployer := accounts.GetAccount(deployerName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.Dev)
 
 	auth, backend, err := contracts.DeploymentTransactor(ctx, deployer.Address)
 
@@ -197,7 +197,7 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("RootSender deployed", "chain", networkname.DevChainName, "block", block.Number, "addr", address)
+	devnet.Logger(ctx).Info("RootSender deployed", "chain", networkname.Dev, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "rootSenderAddress", address).
 		WithParam("rootSender", contract), nil
@@ -205,7 +205,7 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 
 func DeployChildChainReceiver(ctx context.Context, deployerName string) (context.Context, error) {
 	deployer := accounts.GetAccount(deployerName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.BorDevnet)
 
 	waiter, cancel := blocks.BlockWaiter(ctx, contracts.DeploymentChecker)
 	defer cancel()
@@ -222,7 +222,7 @@ func DeployChildChainReceiver(ctx context.Context, deployerName string) (context
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("ChildReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
+	devnet.Logger(ctx).Info("ChildReceiver deployed", "chain", networkname.BorDevnet, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "childReceiverAddress", address).
 		WithParam("childReceiver", contract), nil
@@ -230,7 +230,7 @@ func DeployChildChainReceiver(ctx context.Context, deployerName string) (context
 
 func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
 	source := accounts.GetAccount(sourceName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.Dev)
 
 	auth, err := contracts.TransactOpts(ctx, source.Address)
 
@@ -380,7 +380,7 @@ func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransf
 
 func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches int, transfersPerBatch, minTransfer int, maxTransfer int) error {
 	source := accounts.GetAccount(sourceName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.Dev)
 
 	auth, err := contracts.TransactOpts(ctx, source.Address)
 

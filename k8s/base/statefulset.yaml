@@ -22,7 +22,7 @@ spec:
           command:
             - erigon
           env: []
-          image: thorax/erigon
+          image: erigontech/erigon
           name: erigon
           ports:
             - containerPort: 9090

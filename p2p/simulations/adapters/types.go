@@ -27,15 +27,15 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/gorilla/websocket"
+
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/rpc"
-
-	"github.com/gorilla/websocket"
 )
 
 // Node represents a node in a simulation network which is created by a

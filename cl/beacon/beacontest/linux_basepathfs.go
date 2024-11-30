@@ -233,7 +233,7 @@ func (b *BasePathFs) ReadlinkIfPossible(name string) (string, error) {
 	return "", &os.PathError{Op: "readlink", Path: name, Err: afero.ErrNoReadlink}
 }
 
-// the readDirFile helper is requried
+// the readDirFile helper is required
 
 // readDirFile provides adapter from afero.File to fs.ReadDirFile needed for correct Open
 type readDirFile struct {

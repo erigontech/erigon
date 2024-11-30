@@ -37,10 +37,10 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/common/debug"
-	cmath "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -143,7 +143,7 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, nil, nil, err
 	}
-	suffix, err := cmath.RandInt64()
+	suffix, err := math.RandInt64()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to get random integer: %v", err)
 	}

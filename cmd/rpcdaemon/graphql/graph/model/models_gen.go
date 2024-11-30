@@ -34,7 +34,6 @@ type Block struct {
 	LogsBloom         string         `json:"logsBloom"`
 	MixHash           string         `json:"mixHash"`
 	Difficulty        string         `json:"difficulty"`
-	TotalDifficulty   string         `json:"totalDifficulty"`
 	OmmerCount        *int           `json:"ommerCount,omitempty"`
 	Ommers            []*Block       `json:"ommers,omitempty"`
 	OmmerAt           *Block         `json:"ommerAt,omitempty"`

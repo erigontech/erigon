@@ -326,7 +326,6 @@ type OtsFullBlock struct {
 	StateRoot    string      `json:"stateRoot"`
 	Timestamp    string      `json:"timestamp"`
 
-	TotalDifficulty  hexutil.Big      `json:"totalDifficulty"`
 	TransactionCount uint64           `json:"transactionCount"`
 	Transactions     []OtsTransaction `json:"transactions"`
 	TxRoot           libcommon.Hash   `json:"transactionsRoot"`

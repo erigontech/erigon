@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/erigontech/erigon/turbo/services"
@@ -222,7 +222,6 @@ func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uin
 func saveHeader(db kv.RwTx, header *types.Header, hash libcommon.Hash) error {
 	blockHeight := header.Number.Uint64()
 	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
-
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil || parentTd == nil {
 		return fmt.Errorf("[saveHeader] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", header.ParentHash, blockHeight-1, hash, blockHeight, err)
@@ -235,7 +234,7 @@ func saveHeader(db kv.RwTx, header *types.Header, hash libcommon.Hash) error {
 		return fmt.Errorf("[saveHeader] failed to WriteTd: %w", err)
 	}
 	if err = rawdb.WriteCanonicalHash(db, hash, blockHeight); err != nil {
-		return fmt.Errorf("[saveHeader] failed to canonical hash: %w", err)
+		return fmt.Errorf("[saveHeader] failed to save canonical hash: %w", err)
 	}
 	return nil
 }
@@ -294,7 +293,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx k
 		if body == nil {
 			return fmt.Errorf("missing body at block=%d", number)
 		}
-		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.Requests))
+		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals))
 		if number%uint64(blockWrittenLogSize) == 0 {
 			e.logger.Info("[insertHeadersAndBodies] Written blocks", "progress", number, "to", toBlock)
 		}

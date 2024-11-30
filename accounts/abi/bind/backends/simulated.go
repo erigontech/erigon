@@ -30,18 +30,16 @@ import (
 
 	"github.com/holiman/uint256"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	types2 "github.com/erigontech/erigon-lib/types"
-
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"
@@ -317,9 +315,12 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	if !ok {
 		return nil, false, ethereum.NotFound
 	}
-	blockHash, err := b.BlockReader().CanonicalHash(ctx, tx, blockNumber)
+	blockHash, ok, err := b.BlockReader().CanonicalHash(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, false, err
+	}
+	if !ok {
+		return nil, false, ethereum.NotFound
 	}
 	body, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 	if err != nil {
@@ -647,7 +648,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 		}
 	}
 	gasCap = hi
-	b.pendingState.SetTxContext(libcommon.Hash{}, len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(len(b.pendingBlock.Transactions()))
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *evmtypes.ExecutionResult, error) {
@@ -756,7 +757,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", txn.GetNonce(), nonce)
 	}
 
-	b.pendingState.SetTxContext(txn.Hash(), len(b.pendingBlock.Transactions()))
+	b.pendingState.SetTxContext(len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, _, err := core.ApplyTransaction(
 		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
@@ -843,7 +844,7 @@ func (m callMsg) Tip() *uint256.Int                     { return m.CallMsg.Tip }
 func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
-func (m callMsg) AccessList() types2.AccessList         { return m.CallMsg.AccessList }
+func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
 func (m callMsg) IsFree() bool                          { return false }
 

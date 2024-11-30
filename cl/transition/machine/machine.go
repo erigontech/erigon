@@ -60,4 +60,5 @@ type BlockOperationProcessor interface {
 	ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error
 	ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error
 	ProcessBlsToExecutionChange(state abstract.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error
+	FullValidate() bool
 }

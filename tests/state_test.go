@@ -44,7 +44,6 @@ func TestState(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
-	//t.Parallel()
 
 	st := new(testMatcher)
 

@@ -56,24 +56,59 @@ func TestVerifyCheckpointHeaders(t *testing.T) {
 }
 
 func TestVerifyMilestoneHeaders(t *testing.T) {
-	header := &types.Header{
-		Root: common.HexToHash("0x01"),
+	header1 := &types.Header{
+		Number:   big.NewInt(1),
+		GasLimit: 123,
+		Root:     common.HexToHash("0x01"),
+	}
+	header2 := &types.Header{
+		Number:     big.NewInt(2),
+		GasLimit:   456,
+		Root:       common.HexToHash("0x02"),
+		ParentHash: header1.Hash(),
 	}
 	milestone := &heimdall.Milestone{
 		Fields: heimdall.WaypointFields{
-			RootHash: header.Hash(),
+			RootHash:   header2.Hash(),
+			StartBlock: big.NewInt(1),
+			EndBlock:   big.NewInt(2),
 		},
 	}
 
-	err := VerifyMilestoneHeaders(milestone, []*types.Header{header})
+	err := VerifyMilestoneHeaders(milestone, []*types.Header{header1, header2})
 	require.NoError(t, err)
 
-	diffHeader := &types.Header{
-		Root: common.HexToHash("0x02"),
+	header2DiffHash := &types.Header{
+		Number:     big.NewInt(2),
+		GasLimit:   999,
+		Root:       common.HexToHash("0x02-diff"),
+		ParentHash: header1.Hash(),
 	}
-	err = VerifyMilestoneHeaders(milestone, []*types.Header{diffHeader})
+	err = VerifyMilestoneHeaders(milestone, []*types.Header{header1, header2DiffHash})
 	require.ErrorIs(t, err, ErrBadHeadersRootHash)
 
-	err = VerifyMilestoneHeaders(milestone, []*types.Header{})
-	require.ErrorIs(t, err, ErrBadHeadersRootHash)
+	header3DisconnectedNums := &types.Header{
+		Number:     big.NewInt(3),
+		GasLimit:   456,
+		Root:       common.HexToHash("0x02"),
+		ParentHash: header1.Hash(),
+	}
+	err = VerifyMilestoneHeaders(milestone, []*types.Header{header1, header3DisconnectedNums})
+	require.ErrorIs(t, err, ErrDisconnectedHeaders)
+
+	header0 := types.Header{Number: big.NewInt(0)}
+	header3DisconnectedHashes := &types.Header{
+		Number:     big.NewInt(2),
+		GasLimit:   456,
+		Root:       common.HexToHash("0x02"),
+		ParentHash: header0.Hash(),
+	}
+	err = VerifyMilestoneHeaders(milestone, []*types.Header{header1, header3DisconnectedHashes})
+	require.ErrorIs(t, err, ErrDisconnectedHeaders)
+
+	err = VerifyMilestoneHeaders(milestone, []*types.Header{header1})
+	require.ErrorIs(t, err, ErrIncorrectHeadersLength)
+
+	err = VerifyMilestoneHeaders(milestone, nil)
+	require.ErrorIs(t, err, ErrIncorrectHeadersLength)
 }

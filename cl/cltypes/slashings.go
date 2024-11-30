@@ -17,6 +17,7 @@
 package cltypes
 
 import (
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
@@ -49,10 +50,10 @@ type AttesterSlashing struct {
 	Attestation_2 *IndexedAttestation `json:"attestation_2"`
 }
 
-func NewAttesterSlashing() *AttesterSlashing {
+func NewAttesterSlashing(version clparams.StateVersion) *AttesterSlashing {
 	return &AttesterSlashing{
-		Attestation_1: NewIndexedAttestation(),
-		Attestation_2: NewIndexedAttestation(),
+		Attestation_1: NewIndexedAttestation(version),
+		Attestation_2: NewIndexedAttestation(version),
 	}
 }
 

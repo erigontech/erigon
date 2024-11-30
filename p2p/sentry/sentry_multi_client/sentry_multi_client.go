@@ -28,6 +28,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
@@ -42,12 +43,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
@@ -77,8 +78,8 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[direct.ETH66][eth.GetBlockBodiesMsg],
-		eth.ToProto[direct.ETH66][eth.GetReceiptsMsg],
+		eth.ToProto[direct.ETH67][eth.GetBlockBodiesMsg],
+		eth.ToProto[direct.ETH67][eth.GetReceiptsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -93,7 +94,7 @@ func (cs *MultiClient) RecvUploadHeadersMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[direct.ETH66][eth.GetBlockHeadersMsg],
+		eth.ToProto[direct.ETH67][eth.GetBlockHeadersMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -108,10 +109,10 @@ func (cs *MultiClient) RecvMessageLoop(
 	wg *sync.WaitGroup,
 ) {
 	ids := []proto_sentry.MessageId{
-		eth.ToProto[direct.ETH66][eth.BlockHeadersMsg],
-		eth.ToProto[direct.ETH66][eth.BlockBodiesMsg],
-		eth.ToProto[direct.ETH66][eth.NewBlockHashesMsg],
-		eth.ToProto[direct.ETH66][eth.NewBlockMsg],
+		eth.ToProto[direct.ETH67][eth.BlockHeadersMsg],
+		eth.ToProto[direct.ETH67][eth.BlockBodiesMsg],
+		eth.ToProto[direct.ETH67][eth.NewBlockHashesMsg],
+		eth.ToProto[direct.ETH67][eth.NewBlockMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry proto_sentry.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -201,8 +202,7 @@ func NewMultiClient(
 	if !disableBlockDownload {
 		bd = bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			_, _, _, _, err := bd.UpdateFromDb(tx)
-			return err
+			return bd.UpdateFromDb(tx)
 		}); err != nil {
 			return nil, err
 		}
@@ -225,7 +225,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receipts.NewGenerator(32, blockReader, engine),
+		ethApiWrapper:                     receipts.NewGenerator(blockReader, engine),
 	}
 
 	return cs, nil
@@ -408,7 +408,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	if err := request.SanityCheck(); err != nil {
 		return fmt.Errorf("newBlock66: %w", err)
 	}
-	if err := request.Block.HashCheck(); err != nil {
+	if err := request.Block.HashCheck(true); err != nil {
 		return fmt.Errorf("newBlock66: %w", err)
 	}
 
@@ -469,12 +469,12 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
-	txs, uncles, withdrawals, requests := request.BlockRawBodiesPacket.Unpack()
-	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 && len(requests) == 0 {
+	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
+	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
 		// No point processing empty response
 		return nil
 	}
-	cs.Bd.DeliverBodies(txs, uncles, withdrawals, requests, uint64(len(inreq.Data)), sentry.ConvertH512ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(txs, uncles, withdrawals, uint64(len(inreq.Data)), sentry.ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 
@@ -575,26 +575,35 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 	if !EnableP2PReceipts {
 		return nil
 	}
-
-	err := cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
-	if err != nil {
-		return err
-	}
-	defer cs.getReceiptsActiveGoroutineNumber.Release(1)
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
 	}
-
-	tx, err := cs.db.BeginRo(ctx)
+	cachedReceipts, needMore, err := eth.AnswerGetReceiptsQueryCacheOnly(ctx, cs.ethApiWrapper, query.GetReceiptsPacket)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	receiptsList := []rlp.RawValue{}
+	if cachedReceipts != nil {
+		receiptsList = cachedReceipts.EncodedReceipts
+	}
+	if needMore {
+		err = cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
+		if err != nil {
+			return err
+		}
+		defer cs.getReceiptsActiveGoroutineNumber.Release(1)
 
-	receiptsList, err := eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket)
-	if err != nil {
-		return err
+		tx, err := cs.db.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		receiptsList, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket, cachedReceipts)
+		if err != nil {
+			return err
+		}
+
 	}
 	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
 		RequestId:         query.RequestId,

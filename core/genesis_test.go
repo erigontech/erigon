@@ -30,19 +30,18 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/turbo/rpchelper"
-	"github.com/erigontech/erigon/turbo/stages/mock"
-
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/rpchelper"
+	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
@@ -113,7 +112,7 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	genesis := core.GenesisBlockByChainName(networkname.MainnetChainName)
+	genesis := core.GenesisBlockByChainName(networkname.Mainnet)
 	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)

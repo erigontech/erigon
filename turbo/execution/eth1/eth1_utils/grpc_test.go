@@ -24,9 +24,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
+
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -83,7 +84,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 			Amount:    uint64(10 * i),
 		}
 	}
-	return types.NewBlock(header, txs, uncles, receipts, withdrawals, nil) // TODO(racytech): add requests
+	return types.NewBlock(header, txs, uncles, receipts, withdrawals)
 }
 
 func TestBlockRpcConversion(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"

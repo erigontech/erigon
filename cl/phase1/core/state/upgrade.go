@@ -40,12 +40,17 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	b.SetVersion(clparams.AltairVersion)
 	// Fill in previous epoch participation from the pre state's pending attestations
 	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
-		attestationData := pa.AttestantionData()
-		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay(), false)
+		attestationData := pa.Data
+		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay, false)
 		if err != nil {
 			return err
 		}
-		indices, err := b.GetAttestingIndicies(attestationData, pa.AggregationBits(), false)
+		attestation := &solid.Attestation{
+			AggregationBits: pa.AggregationBits,
+			Data:            attestationData,
+			// don't care signature and committee_bits here
+		}
+		indices, err := b.GetAttestingIndicies(attestation, false)
 		if err != nil {
 			return err
 		}
@@ -128,5 +133,25 @@ func (b *CachingBeaconState) UpgradeToDeneb() error {
 	b.SetLatestExecutionPayloadHeader(header)
 	// Update the state root cache
 	b.SetVersion(clparams.DenebVersion)
+	return nil
+}
+
+func (b *CachingBeaconState) UpgradeToElectra() error {
+	b.previousStateRoot = libcommon.Hash{}
+	epoch := Epoch(b.BeaconState)
+	// update version
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().ElectraForkVersion))
+	b.SetFork(fork)
+
+	// Update the payload header.
+	//header := b.LatestExecutionPayloadHeader()
+	// header.Electra()
+	//b.SetLatestExecutionPayloadHeader(header)
+
+	// Update the state root cache
+	b.SetVersion(clparams.ElectraVersion)
 	return nil
 }

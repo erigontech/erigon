@@ -28,8 +28,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon-lib/crypto"
 )
 
 // MakeTopics converts a filter query argument list into a filter topic set.

@@ -31,7 +31,7 @@ var (
 
 func TestNewDynamicListSSZ(t *testing.T) {
 	limit := 10
-	dynamicList := NewDynamicListSSZ[Checkpoint](limit)
+	dynamicList := NewDynamicListSSZ[Validator](limit)
 
 	assert.Equal(t, 0, dynamicList.Len())
 	assert.Equal(t, false, dynamicList.Static())
@@ -40,7 +40,7 @@ func TestNewDynamicListSSZ(t *testing.T) {
 func TestNewStaticListSSZ(t *testing.T) {
 	limit := 10
 	bytesPerElement := 40
-	staticList := NewStaticListSSZ[Checkpoint](limit, bytesPerElement)
+	staticList := NewStaticListSSZ[Validator](limit, bytesPerElement)
 
 	assert.Equal(t, 0, staticList.Len())
 	assert.Equal(t, false, staticList.Static())
@@ -48,11 +48,10 @@ func TestNewStaticListSSZ(t *testing.T) {
 
 func TestListSSZAppendAndClear(t *testing.T) {
 	limit := 10
-	list := NewDynamicListSSZ[Checkpoint](limit)
+	list := NewDynamicListSSZ[Validator](limit)
 
 	// create a new checkpoint
-	checkpoint := NewCheckpointFromParameters(mockRoot, mockEpoch)
-	list.Append(checkpoint)
+	list.Append(NewValidator())
 
 	assert.Equal(t, 1, list.Len())
 
@@ -62,28 +61,28 @@ func TestListSSZAppendAndClear(t *testing.T) {
 
 func TestListSSZClone(t *testing.T) {
 	limit := 10
-	list := NewDynamicListSSZ[Checkpoint](limit)
+	list := NewDynamicListSSZ[Validator](limit)
 
 	// create a new checkpoint
-	checkpoint := NewCheckpointFromParameters(mockRoot, mockEpoch)
+	checkpoint := NewValidator()
 	list.Append(checkpoint)
 
-	clone := list.Clone().(*ListSSZ[Checkpoint])
+	clone := list.Clone().(*ListSSZ[Validator])
 	assert.NotEqual(t, list.Len(), clone.Len())
 }
 
 func TestListSSZEncodeDecodeSSZ(t *testing.T) {
 	limit := 10
-	list := NewDynamicListSSZ[Checkpoint](limit)
+	list := NewDynamicListSSZ[Validator](limit)
 
 	// create a new checkpoint
-	checkpoint := NewCheckpointFromParameters(mockRoot, mockEpoch)
+	checkpoint := NewValidator()
 	list.Append(checkpoint)
 
 	encoded, err := list.EncodeSSZ(nil)
 	assert.NoError(t, err)
 
-	decodedList := NewDynamicListSSZ[Checkpoint](limit)
+	decodedList := NewDynamicListSSZ[Validator](limit)
 	err = decodedList.DecodeSSZ(encoded, 0)
 	assert.NoError(t, err)
 

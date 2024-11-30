@@ -114,6 +114,7 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 			err = fmt.Errorf("failed to read signed header: %w", err)
 			return
 		}
+
 		// Process the block
 		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
 			// Return an error if block processing fails
@@ -121,10 +122,10 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 			return
 		}
 
-		if !hasSignedHeaderInDB {
+		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 			// Perform post-processing on the block
 			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
-			if err == nil && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 && st != nil {
+			if err == nil && st != nil {
 				// Dump the beacon state on disk if conditions are met
 				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
 					// Return an error if dumping the state fails
@@ -170,7 +171,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	)
 
 	// Initialize the slot to download from the finalized checkpoint
-	currentSlot.Store(finalizedCheckpoint.Epoch() * cfg.beaconCfg.SlotsPerEpoch)
+	currentSlot.Store(finalizedCheckpoint.Epoch * cfg.beaconCfg.SlotsPerEpoch)
 
 	// Always start from the current finalized checkpoint
 	downloader.SetHighestProcessedSlot(currentSlot.Load())

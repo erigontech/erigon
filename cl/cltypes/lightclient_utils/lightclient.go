@@ -105,11 +105,11 @@ func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.Sig
 			if err != nil {
 				return nil, err
 			}
-			if finalizedBeaconRoot != attestedFinalizedCheckpoint.BlockRoot() {
-				return nil, fmt.Errorf("finalized beacon root %x is not equal to attested finalized checkpoint root %x", finalizedBeaconRoot, attestedFinalizedCheckpoint.BlockRoot())
+			if finalizedBeaconRoot != attestedFinalizedCheckpoint.Root {
+				return nil, fmt.Errorf("finalized beacon root %x is not equal to attested finalized checkpoint root %x", finalizedBeaconRoot, attestedFinalizedCheckpoint.Root)
 			}
-		} else if attestedFinalizedCheckpoint.BlockRoot() != (libcommon.Hash{}) {
-			return nil, fmt.Errorf("attested finalized checkpoint root %x is not equal to zero hash", attestedFinalizedCheckpoint.BlockRoot())
+		} else if attestedFinalizedCheckpoint.Root != (libcommon.Hash{}) {
+			return nil, fmt.Errorf("attested finalized checkpoint root %x is not equal to zero hash", attestedFinalizedCheckpoint.Root)
 		}
 		update.FinalityBranch = attestedFinalityBranch
 	}

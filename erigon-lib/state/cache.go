@@ -18,24 +18,25 @@ type u128 struct{ hi, lo uint64 }      //nolint
 type u192 struct{ hi, lo, ext uint64 } //nolint
 
 type DomainGetFromFileCache struct {
-	*freelru.LRU[u128, domainGetFromFileCacheItem]
+	*freelru.LRU[uint64, domainGetFromFileCacheItem]
 	enabled, trace bool
 }
 
 // nolint
 type domainGetFromFileCacheItem struct {
-	lvl uint8
-	v   []byte // pointer to `mmap` - if .kv file is not compressed
+	lvl    uint8
+	exists bool
+	offset uint64
 }
 
 var (
-	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 4096))
+	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 10_000))
 	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
 )
 
 func NewDomainGetFromFileCache() *DomainGetFromFileCache {
-	c, err := freelru.New[u128, domainGetFromFileCacheItem](domainGetFromFileCacheLimit, u128noHash)
+	c, err := freelru.New[uint64, domainGetFromFileCacheItem](domainGetFromFileCacheLimit, u64noHash)
 	if err != nil {
 		panic(err)
 	}
@@ -58,25 +59,11 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 		files:  files,
 		caches: &sync.Pool{New: NewDomainGetFromFileCacheAny},
 	}
-	// Not on hot-path: better pre-alloc here
-	d.preAlloc()
 	return d
-}
-func (v *domainVisible) preAlloc() {
-	var preAlloc [10]any
-	for i := 0; i < len(preAlloc); i++ {
-		preAlloc[i] = v.caches.Get()
-	}
-	for i := 0; i < len(preAlloc); i++ {
-		v.caches.Put(preAlloc[i])
-	}
 }
 
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
 	if !domainGetFromFileCacheEnabled {
-		return nil
-	}
-	if v.name == kv.CommitmentDomain {
 		return nil
 	}
 	return v.caches.Get().(*DomainGetFromFileCache)
@@ -90,12 +77,13 @@ func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 }
 
 var (
-	iiGetFromFileCacheLimit = uint32(dbg.EnvInt("II_LRU", 4096))
-	iiGetFromFileCacheTrace = dbg.EnvBool("II_LRU_TRACE", false)
+	iiGetFromFileCacheLimit   = uint32(dbg.EnvInt("II_LRU", 4096))
+	iiGetFromFileCacheTrace   = dbg.EnvBool("II_LRU_TRACE", false)
+	iiGetFromFileCacheEnabled = dbg.EnvBool("II_LRU_ENABLED", true)
 )
 
 type IISeekInFilesCache struct {
-	*freelru.LRU[u128, iiSeekInFilesCacheItem]
+	*freelru.LRU[uint64, iiSeekInFilesCacheItem]
 	hit, total int
 	trace      bool
 }
@@ -104,7 +92,10 @@ type iiSeekInFilesCacheItem struct {
 }
 
 func NewIISeekInFilesCache() *IISeekInFilesCache {
-	c, err := freelru.New[u128, iiSeekInFilesCacheItem](iiGetFromFileCacheLimit, u128noHash)
+	if !iiGetFromFileCacheEnabled {
+		return nil
+	}
+	c, err := freelru.New[uint64, iiSeekInFilesCacheItem](iiGetFromFileCacheLimit, u64noHash)
 	if err != nil {
 		panic(err)
 	}

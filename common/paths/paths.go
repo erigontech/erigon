@@ -96,21 +96,21 @@ func DataDirForNetwork(datadir string, network string) string {
 	}
 
 	switch network {
-	case networkname.DevChainName:
+	case networkname.Dev:
 		return "" // unless explicitly requested, use memory databases
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		return networkDataDirCheckingLegacy(datadir, "holesky")
-	case networkname.AmoyChainName:
+	case networkname.Amoy:
 		return networkDataDirCheckingLegacy(datadir, "amoy")
-	case networkname.BorMainnetChainName:
+	case networkname.BorMainnet:
 		return networkDataDirCheckingLegacy(datadir, "bor-mainnet")
-	case networkname.BorDevnetChainName:
+	case networkname.BorDevnet:
 		return networkDataDirCheckingLegacy(datadir, "bor-devnet")
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		return networkDataDirCheckingLegacy(datadir, "sepolia")
-	case networkname.GnosisChainName:
+	case networkname.Gnosis:
 		return networkDataDirCheckingLegacy(datadir, "gnosis")
-	case networkname.ChiadoChainName:
+	case networkname.Chiado:
 		return networkDataDirCheckingLegacy(datadir, "chiado")
 
 	default:

@@ -93,6 +93,8 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
 	require.NoError(b, err)
 
+	b.ResetTimer()
+
 	original := common.Copy(enc)
 	for i := 0; i < b.N; i++ {
 		target := make([]byte, 0, len(enc))

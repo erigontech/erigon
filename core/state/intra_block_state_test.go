@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	stateLib "github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 )
@@ -242,8 +241,7 @@ func (test *snapshotTest) run() bool {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		test.err = err
 		return false
@@ -359,9 +357,9 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		return fmt.Errorf("got GetRefund() == %d, want GetRefund() == %d",
 			state.GetRefund(), checkstate.GetRefund())
 	}
-	if !reflect.DeepEqual(state.GetLogs(libcommon.Hash{}, 0, libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{}, 0, libcommon.Hash{})) {
-		return fmt.Errorf("got GetLogs(libcommon.Hash{}) == %v, want GetLogs(libcommon.Hash{}) == %v",
-			state.GetLogs(libcommon.Hash{}, 0, libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{}, 0, libcommon.Hash{}))
+	if !reflect.DeepEqual(state.GetRawLogs(0), checkstate.GetRawLogs(0)) {
+		return fmt.Errorf("got GetRawLogs(libcommon.Hash{}) == %v, want GetRawLogs(libcommon.Hash{}) == %v",
+			state.GetRawLogs(0), checkstate.GetRawLogs(0))
 	}
 	return nil
 }

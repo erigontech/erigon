@@ -26,12 +26,14 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
@@ -41,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // BlockGen creates blocks for testing.
@@ -125,7 +127,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uin
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.SetTxContext(txn.Hash(), len(b.txs))
+	b.ibs.SetTxContext(len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
@@ -141,7 +143,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, numb
 	if b.gasPool == nil {
 		b.SetCoinbase(libcommon.Address{})
 	}
-	b.ibs.SetTxContext(txn.Hash(), len(b.txs))
+	b.ibs.SetTxContext(len(b.txs))
 	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, txn)
@@ -368,7 +370,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		txNumIncrement()
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, nil, logger); err != nil {
+			if _, _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -392,7 +394,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			b.header.Root = libcommon.BytesToHash(stateRoot)
 
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil /*requests*/)
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
 			return block, b.receipts, nil
 		}
 		return nil, nil, errors.New("no engine to generate blocks")
@@ -467,7 +469,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
 
-	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+	it, err := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -492,7 +494,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		}
 	}
 
-	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+	it, err = tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx).RangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -515,7 +517,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	if trace {
 		if GenerateTrace {
 			fmt.Printf("State after %d================\n", header.Number)
-			it, err := tx.Range(kv.HashedAccounts, nil, nil)
+			it, err := tx.Range(kv.HashedAccounts, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				return hashRoot, err
 			}
@@ -527,7 +529,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 				fmt.Printf("%x: %x\n", k, v)
 			}
 			fmt.Printf("..................\n")
-			it, err = tx.Range(kv.HashedStorage, nil, nil)
+			it, err = tx.Range(kv.HashedStorage, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				return hashRoot, err
 			}
@@ -644,7 +646,7 @@ func (cr *FakeChainReader) FrozenBorBlocks() uint64                             
 func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
-func (cr *FakeChainReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
+func (cr *FakeChainReader) BorStartEventId(hash libcommon.Hash, number uint64) uint64 {
 	return 0
 }
-func (cr *FakeChainReader) BorSpan(spanId uint64) []byte { return nil }
+func (cr *FakeChainReader) BorSpan(spanId uint64) *heimdall.Span { return nil }

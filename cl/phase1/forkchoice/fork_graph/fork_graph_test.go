@@ -41,8 +41,9 @@ var block2 []byte
 var anchor []byte
 
 func TestForkGraphInDisk(t *testing.T) {
-	blockA, blockB, blockC := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig),
-		cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig), cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+	blockA, blockB, blockC := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion),
+		cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion),
+		cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(blockA, block1, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(blockB, block2, int(clparams.Phase0Version)))

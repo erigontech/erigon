@@ -265,9 +265,6 @@ Object - An object of type Block defined as:
    * - ``QUANTITY``
      - ``difficulty``
      - Integer of the difficulty for this block
-   * - ``QUANTITY``
-     - ``totalDifficulty``
-     - Integer of the total difficulty of the chain until this block
    * - ``DATA``
      - ``extraData``
      - The extra data field of this block

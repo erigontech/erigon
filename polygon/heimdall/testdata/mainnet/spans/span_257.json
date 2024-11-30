@@ -1,0 +1,102 @@
+{
+  "span_id": 257,
+  "start_block": 1638656,
+  "end_block": 1645055,
+  "validator_set": {
+    "validators": [
+      {
+        "ID": 6,
+        "signer": "0x0375b2fc7140977c9c76d45421564e354ed42277",
+        "power": 74813746,
+        "accum": 319297249
+      },
+      {
+        "ID": 7,
+        "signer": "0x42eefcda06ead475cde3731b8eb138e88cd0bac3",
+        "power": 51595167,
+        "accum": 131417864
+      },
+      {
+        "ID": 1,
+        "signer": "0x5973918275c01f50555d44e92c9d9b353cadad54",
+        "power": 146380111,
+        "accum": 174834907
+      },
+      {
+        "ID": 5,
+        "signer": "0x7fcd58c2d53d980b247f1612fdba93e9a76193e6",
+        "power": 72839034,
+        "accum": -203367704
+      },
+      {
+        "ID": 4,
+        "signer": "0xb702f1c9154ac9c08da247a8e30ee6f2f3373f41",
+        "power": 42453953,
+        "accum": -103218981
+      },
+      {
+        "ID": 2,
+        "signer": "0xb8bb158b93c94ed35c1970d610d1e2b34e26652c",
+        "power": 73523511,
+        "accum": -154528650
+      },
+      {
+        "ID": 3,
+        "signer": "0xf84c74dea96df0ec22e11e7c33996c73fcc2d822",
+        "power": 63925770,
+        "accum": -164434685
+      }
+    ],
+    "proposer": {
+      "ID": 5,
+      "signer": "0x7fcd58c2d53d980b247f1612fdba93e9a76193e6",
+      "power": 72839034,
+      "accum": -203367704
+    }
+  },
+  "selected_producers": [
+    {
+      "ID": 6,
+      "signer": "0x0375b2fc7140977c9c76d45421564e354ed42277",
+      "power": 74813746,
+      "accum": -60000
+    },
+    {
+      "ID": 7,
+      "signer": "0x42eefcda06ead475cde3731b8eb138e88cd0bac3",
+      "power": 51595167,
+      "accum": 10000
+    },
+    {
+      "ID": 1,
+      "signer": "0x5973918275c01f50555d44e92c9d9b353cadad54",
+      "power": 146380111,
+      "accum": 10000
+    },
+    {
+      "ID": 5,
+      "signer": "0x7fcd58c2d53d980b247f1612fdba93e9a76193e6",
+      "power": 72839034,
+      "accum": 10000
+    },
+    {
+      "ID": 4,
+      "signer": "0xb702f1c9154ac9c08da247a8e30ee6f2f3373f41",
+      "power": 42453953,
+      "accum": 10000
+    },
+    {
+      "ID": 2,
+      "signer": "0xb8bb158b93c94ed35c1970d610d1e2b34e26652c",
+      "power": 73523511,
+      "accum": 10000
+    },
+    {
+      "ID": 3,
+      "signer": "0xf84c74dea96df0ec22e11e7c33996c73fcc2d822",
+      "power": 63925770,
+      "accum": 10000
+    }
+  ],
+  "bor_chain_id": "137"
+}

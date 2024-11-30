@@ -27,20 +27,20 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
@@ -167,9 +167,9 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
+		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
+		if err != nil || !ok {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
 		return hash
 	}
@@ -185,7 +185,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		statedb.SetTxContext(txn.Hash(), idx)
+		statedb.SetTxContext(idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
@@ -202,7 +202,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	creationTx := block.Transactions()[transactionIndex]
-	statedb.SetTxContext(creationTx.Hash(), transactionIndex)
+	statedb.SetTxContext(transactionIndex)
 
 	// CREATE2: keep original message so we match the existing contract address, code will be replaced later
 	msg, err := creationTx.AsMessage(*signer, block.BaseFee(), rules)
@@ -443,9 +443,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
-		hash, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true)
+		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
+		if err != nil || !ok {
+			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
 		}
 		return hash
 	}
@@ -511,7 +511,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			}
 		}
 
-		statedb.SetTxContext(txn.Hash(), idx)
+		statedb.SetTxContext(idx)
 		txCtx = core.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
@@ -539,7 +539,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
 		} else {
 			//append logs only if txn has not reverted
-			txLogs := statedb.GetLogs(txn.Hash(), blockNum, header.Hash())
+			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)
 		}

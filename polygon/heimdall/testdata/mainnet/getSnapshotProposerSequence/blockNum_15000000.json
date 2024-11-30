@@ -1,0 +1,74 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "Signers": [
+      {
+        "Signer": "0x7b5000af8ab69fd59eb0d4f5762bff57c9c04385",
+        "Difficulty": 16
+      },
+      {
+        "Signer": "0x7c7379531b2aee82e4ca06d4175d13b9cbeafd49",
+        "Difficulty": 15
+      },
+      {
+        "Signer": "0xb79fad4ca981472442f53d16365fdf0305ffd8e9",
+        "Difficulty": 14
+      },
+      {
+        "Signer": "0xbc6044f4a1688d8b8596a9f7d4659e09985eebe6",
+        "Difficulty": 13
+      },
+      {
+        "Signer": "0xbdbd4347b082d9d6bdf2da4555a37ce52a2e2120",
+        "Difficulty": 12
+      },
+      {
+        "Signer": "0xc6869257205e20c2a43cb31345db534aecb49f6e",
+        "Difficulty": 11
+      },
+      {
+        "Signer": "0xe4cd4c302befddf3d544301369ae3ed1481652fd",
+        "Difficulty": 10
+      },
+      {
+        "Signer": "0xe77bbfd8ed65720f187efdd109e38d75eaca7385",
+        "Difficulty": 9
+      },
+      {
+        "Signer": "0xe7e2cb8c81c10ff191a73fe266788c9ce62ec754",
+        "Difficulty": 8
+      },
+      {
+        "Signer": "0x1a578699956c2174b4762de95316b3ad09ba34e9",
+        "Difficulty": 7
+      },
+      {
+        "Signer": "0x1ca971963bdb4ba2bf337c90660674acff5beb3f",
+        "Difficulty": 6
+      },
+      {
+        "Signer": "0x30dd252c7c150f26a3a06e4eada9e706db3fa58c",
+        "Difficulty": 5
+      },
+      {
+        "Signer": "0x448aa1665fe1fae6d1a00a9209ea62d7dcd81a4b",
+        "Difficulty": 4
+      },
+      {
+        "Signer": "0x4f856f79f54592a48c8a1a1fafa1b0a3ac053f99",
+        "Difficulty": 3
+      },
+      {
+        "Signer": "0x5973918275c01f50555d44e92c9d9b353cadad54",
+        "Difficulty": 2
+      },
+      {
+        "Signer": "0x5e1f84c7f7d19a8d6d918ad2b5f714a6e5d1c552",
+        "Difficulty": 1
+      }
+    ],
+    "Diff": 16,
+    "Author": "0x7b5000af8ab69fd59eb0d4f5762bff57c9c04385"
+  }
+}

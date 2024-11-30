@@ -26,6 +26,7 @@ const (
 	Downloader_Verify_FullMethodName               = "/downloader.Downloader/Verify"
 	Downloader_SetLogPrefix_FullMethodName         = "/downloader.Downloader/SetLogPrefix"
 	Downloader_Completed_FullMethodName            = "/downloader.Downloader/Completed"
+	Downloader_TorrentCompleted_FullMethodName     = "/downloader.Downloader/TorrentCompleted"
 )
 
 // DownloaderClient is the client API for Downloader service.
@@ -46,6 +47,7 @@ type DownloaderClient interface {
 	SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(ctx context.Context, in *CompletedRequest, opts ...grpc.CallOption) (*CompletedReply, error)
+	TorrentCompleted(ctx context.Context, in *TorrentCompletedRequest, opts ...grpc.CallOption) (Downloader_TorrentCompletedClient, error)
 }
 
 type downloaderClient struct {
@@ -116,6 +118,39 @@ func (c *downloaderClient) Completed(ctx context.Context, in *CompletedRequest, 
 	return out, nil
 }
 
+func (c *downloaderClient) TorrentCompleted(ctx context.Context, in *TorrentCompletedRequest, opts ...grpc.CallOption) (Downloader_TorrentCompletedClient, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Downloader_ServiceDesc.Streams[0], Downloader_TorrentCompleted_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &downloaderTorrentCompletedClient{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Downloader_TorrentCompletedClient interface {
+	Recv() (*TorrentCompletedReply, error)
+	grpc.ClientStream
+}
+
+type downloaderTorrentCompletedClient struct {
+	grpc.ClientStream
+}
+
+func (x *downloaderTorrentCompletedClient) Recv() (*TorrentCompletedReply, error) {
+	m := new(TorrentCompletedReply)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // DownloaderServer is the server API for Downloader service.
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility
@@ -134,6 +169,7 @@ type DownloaderServer interface {
 	SetLogPrefix(context.Context, *SetLogPrefixRequest) (*emptypb.Empty, error)
 	// Get is download completed
 	Completed(context.Context, *CompletedRequest) (*CompletedReply, error)
+	TorrentCompleted(*TorrentCompletedRequest, Downloader_TorrentCompletedServer) error
 	mustEmbedUnimplementedDownloaderServer()
 }
 
@@ -158,6 +194,9 @@ func (UnimplementedDownloaderServer) SetLogPrefix(context.Context, *SetLogPrefix
 }
 func (UnimplementedDownloaderServer) Completed(context.Context, *CompletedRequest) (*CompletedReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Completed not implemented")
+}
+func (UnimplementedDownloaderServer) TorrentCompleted(*TorrentCompletedRequest, Downloader_TorrentCompletedServer) error {
+	return status.Errorf(codes.Unimplemented, "method TorrentCompleted not implemented")
 }
 func (UnimplementedDownloaderServer) mustEmbedUnimplementedDownloaderServer() {}
 
@@ -280,6 +319,27 @@ func _Downloader_Completed_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Downloader_TorrentCompleted_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(TorrentCompletedRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DownloaderServer).TorrentCompleted(m, &downloaderTorrentCompletedServer{ServerStream: stream})
+}
+
+type Downloader_TorrentCompletedServer interface {
+	Send(*TorrentCompletedReply) error
+	grpc.ServerStream
+}
+
+type downloaderTorrentCompletedServer struct {
+	grpc.ServerStream
+}
+
+func (x *downloaderTorrentCompletedServer) Send(m *TorrentCompletedReply) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Downloader_ServiceDesc is the grpc.ServiceDesc for Downloader service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -312,6 +372,12 @@ var Downloader_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Downloader_Completed_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "TorrentCompleted",
+			Handler:       _Downloader_TorrentCompleted_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "downloader/downloader.proto",
 }

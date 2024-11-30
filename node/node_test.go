@@ -29,9 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 )
@@ -156,14 +156,14 @@ func TestNodeCloseClosesDB(t *testing.T) {
 		t.Fatal("can't open DB:", err)
 	}
 	if err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.HashedAccounts, []byte("testK"), []byte{})
+		return tx.Put(kv.Inodes, []byte("testK"), []byte{})
 	}); err != nil {
 		t.Fatal("can't Put on open DB:", err)
 	}
 
 	stack.Close()
 	//if err = db.Update(context.Background(), func(tx kv.RwTx) error {
-	//	return tx.Put(kv.HashedAccounts, []byte("testK"), []byte{})
+	//	return tx.Put(kv.Inodes, []byte("testK"), []byte{})
 	//}); err == nil {
 	//	t.Fatal("Put succeeded after node is closed")
 	//}

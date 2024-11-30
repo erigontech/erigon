@@ -100,10 +100,10 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 			require.NoError(t, err)
 			require.EqualValues(t, expectedRoot, haveRoot)
 		}
-		if _, ok := object.(solid.Checkpoint); ok {
+		if _, ok := object.(*solid.Checkpoint); ok {
 			return nil
 		}
-		if _, ok := object.(solid.AttestationData); ok {
+		if _, ok := object.(*solid.AttestationData); ok {
 			return nil
 		}
 		if _, ok := object.(solid.Validator); ok {

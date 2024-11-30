@@ -56,7 +56,7 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		if isNotFound(nfw.code) || nfw.code == 0 {
 			start := time.Now()
 			beaconHandler.ArchiveApi.ServeHTTP(w, r)
-			log.Debug("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
+			log.Trace("[Beacon API] Request", "uri", r.URL.String(), "path", r.URL.Path, "time", time.Since(start))
 		} else {
 			log.Warn("[Beacon API] Request to unavailable endpoint, check --beacon.api flag", "uri", r.URL.String(), "path", r.URL.Path)
 		}

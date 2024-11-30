@@ -124,38 +124,53 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			}
 		}
 	}
+	if strings.Contains(fileName, "caplin/") {
+		return res, isStateFile, true
+	}
 	return res, isStateFile, isStateFile
 }
 
 func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
-	parts := strings.Split(onlyName, "-")
+	parts := strings.SplitN(onlyName, "-", 4)
 	res = FileInfo{Path: filepath.Join(dir, fileName), name: fileName, Ext: ext}
-	if len(parts) < 4 {
+
+	if len(parts) < 2 {
+		return res, ok
+	}
+
+	res.Type, ok = ParseFileType(parts[len(parts)-1])
+
+	if !ok {
+		res.Type, ok = ParseFileType(parts[0])
+	}
+
+	if ok {
+		res.TypeString = res.Type.Name()
+	}
+
+	if len(parts) < 3 {
 		return res, ok
 	}
 
 	var err error
 	res.Version, err = ParseVersion(parts[0])
 	if err != nil {
-		return
+		return res, false
 	}
 
 	from, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
-		return
+		return res, false
 	}
 	res.From = from * 1_000
 	to, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
-		return
+		return res, false
 	}
 	res.To = to * 1_000
-	res.Type, ok = ParseFileType(parts[3])
-	if !ok {
-		return res, ok
-	}
+
 	return res, ok
 }
 
@@ -206,7 +221,7 @@ func AllV2Extensions() []string {
 }
 
 func SeedableV3Extensions() []string {
-	return []string{".kv", ".v", ".ef"}
+	return []string{".kv", ".v", ".ef", ".ap"}
 }
 
 func AllV3Extensions() []string {
@@ -214,7 +229,7 @@ func AllV3Extensions() []string {
 }
 
 func IsSeedableExtension(name string) bool {
-	for _, ext := range append(SeedableV2Extensions(), SeedableV3Extensions()...) {
+	for _, ext := range append(AllV2Extensions(), AllV3Extensions()...) {
 		if strings.HasSuffix(name, ext) {
 			return true
 		}
@@ -232,6 +247,7 @@ const Erigon3SeedableSteps = 64
 //     less files - means small files will be removed after merge (no peers for this files).
 const Erigon2OldMergeLimit = 500_000
 const Erigon2MergeLimit = 100_000
+const CaplinMergeLimit = 10_000
 const Erigon2MinSegmentSize = 1_000
 
 var MergeSteps = []uint64{100_000, 10_000}
@@ -242,6 +258,7 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
+	TypeString      string // This is for giulio's generic snapshots
 }
 
 func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Path + ".torrent") }
@@ -249,6 +266,9 @@ func (f FileInfo) TorrentFileExists() (bool, error) { return dir.FileExist(f.Pat
 func (f FileInfo) Name() string { return f.name }
 func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }
 func (f FileInfo) Len() uint64  { return f.To - f.From }
+
+func (f FileInfo) GetRange() (from, to uint64) { return f.From, f.To }
+func (f FileInfo) GetType() Type               { return f.Type }
 
 func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.From, o.From); res != 0 {
@@ -259,8 +279,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 		return res
 	}
 
-	// this is a lexical comparison (don't use enum)
-	return strings.Compare(f.Type.Name(), o.Type.Name())
+	return strings.Compare(f.name, o.name)
 }
 
 func (f FileInfo) As(t Type) FileInfo {

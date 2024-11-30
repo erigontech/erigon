@@ -19,10 +19,12 @@ package statechange
 import (
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/monitor"
 )
 
 // ProcessEffectiveBalanceUpdates updates the effective balance of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#effective-balances-updates
 func ProcessEffectiveBalanceUpdates(state abstract.BeaconState) error {
+	defer monitor.ObserveElaspedTime(monitor.ProcessEffectiveBalanceUpdatesTime).End()
 	beaconConfig := state.BeaconConfig()
 	// Define non-changing constants to avoid recomputation.
 	histeresisIncrement := beaconConfig.EffectiveBalanceIncrement / beaconConfig.HysteresisQuotient

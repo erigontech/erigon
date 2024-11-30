@@ -46,7 +46,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
-	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
@@ -55,8 +55,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: dirs, db: db}
-	ii, err := NewInvertedIndex(cfg, aggStep, "inv", keysTable, indexTable, nil, logger)
+	cfg := iiCfg{salt: &salt, dirs: dirs, db: db, aggregationStep: aggStep, filenameBase: "inv", keysTable: keysTable, valuesTable: indexTable}
+	ii, err := NewInvertedIndex(cfg, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
 	tb.Cleanup(ii.Close)
@@ -64,6 +64,8 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 }
 
 func TestInvIndexPruningCorrectness(t *testing.T) {
+	t.Parallel()
+
 	db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
 	defer ii.Close()
 
@@ -84,7 +86,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 	binary.BigEndian.PutUint64(from[:], uint64(0))
 	binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
 
-	icc, err := rwTx.CursorDupSort(ii.indexKeysTable)
+	icc, err := rwTx.CursorDupSort(ii.keysTable)
 	require.NoError(t, err)
 
 	count := 0
@@ -130,7 +132,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 	it.Close()
 
 	// straight from pruned - not empty
-	icc, err = rwTx.CursorDupSort(ii.indexKeysTable)
+	icc, err = rwTx.CursorDupSort(ii.keysTable)
 	require.NoError(t, err)
 	txn, _, err := icc.Seek(from[:])
 	require.NoError(t, err)
@@ -140,7 +142,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 	icc.Close()
 
 	// check second table
-	icc, err = rwTx.CursorDupSort(ii.indexTable)
+	icc, err = rwTx.CursorDupSort(ii.valuesTable)
 	require.NoError(t, err)
 	key, txn, err := icc.First()
 	t.Logf("key: %x, txn: %x", key, txn)
@@ -152,6 +154,8 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -228,6 +232,8 @@ func TestInvIndexCollationBuild(t *testing.T) {
 }
 
 func TestInvIndexAfterPrune(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -297,7 +303,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	for _, table := range []string{ii.indexKeysTable, ii.indexTable} {
+	for _, table := range []string{ii.keysTable, ii.valuesTable} {
 		var cur kv.Cursor
 		cur, err = tx.Cursor(table)
 		require.NoError(t, err)
@@ -500,6 +506,8 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 }
 
 func TestInvIndexRanges(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -543,10 +551,12 @@ func TestInvIndexScanFiles(t *testing.T) {
 	db, ii, txs := filledInvIndex(t, logger)
 
 	// Recreate InvertedIndex to scan the files
-	var err error
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: ii.dirs, db: db}
-	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil, logger)
+	cfg := ii.iiCfg
+	cfg.salt = &salt
+
+	var err error
+	ii, err = NewInvertedIndex(cfg, logger)
 	require.NoError(err)
 	defer ii.Close()
 	err = ii.openFolder()
@@ -557,6 +567,8 @@ func TestInvIndexScanFiles(t *testing.T) {
 }
 
 func TestChangedKeysIterator(t *testing.T) {
+	t.Parallel()
+
 	logger := log.New()
 	db, ii, txs := filledInvIndex(t, logger)
 	ctx := context.Background()
@@ -619,6 +631,8 @@ func TestChangedKeysIterator(t *testing.T) {
 }
 
 func TestScanStaticFiles(t *testing.T) {
+	t.Parallel()
+
 	ii := emptyTestInvertedIndex(1)
 	files := []string{
 		"v1-test.0-1.ef",
@@ -633,7 +647,7 @@ func TestScanStaticFiles(t *testing.T) {
 
 	//integrity extension case
 	ii.dirtyFiles.Clear()
-	ii.integrityCheck = func(fromStep, toStep uint64) bool { return false }
+	ii.integrity = func(fromStep, toStep uint64) bool { return false }
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 0, ii.dirtyFiles.Len())
 }
@@ -685,6 +699,8 @@ func TestCtxFiles(t *testing.T) {
 }
 
 func TestIsSubset(t *testing.T) {
+	t.Parallel()
+
 	assert := assert.New(t)
 	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
 	assert.True((&filesItem{startTxNum: 1, endTxNum: 2}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
@@ -696,6 +712,8 @@ func TestIsSubset(t *testing.T) {
 }
 
 func TestIsBefore(t *testing.T) {
+	t.Parallel()
+
 	assert := assert.New(t)
 	assert.False((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
 	assert.False((&filesItem{startTxNum: 1, endTxNum: 2}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
@@ -709,6 +727,8 @@ func TestIsBefore(t *testing.T) {
 }
 
 func TestInvIndex_OpenFolder(t *testing.T) {
+	t.Parallel()
+
 	db, ii, txs := filledInvIndex(t, log.New())
 
 	mergeInverted(t, db, ii, txs)

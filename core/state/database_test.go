@@ -32,10 +32,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state3 "github.com/erigontech/erigon-lib/state"
-
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
 	"github.com/erigontech/erigon/common"
@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/core/state/contracts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )

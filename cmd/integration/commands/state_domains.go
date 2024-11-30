@@ -105,7 +105,7 @@ var readDomains = &cobra.Command{
 		}
 		defer chainDb.Close()
 
-		stateDb, err := kv2.NewMDBX(log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
+		stateDb, err := kv2.New(kv.ChainDB, log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
 		if err != nil {
 			return
 		}
@@ -121,7 +121,7 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	sn, bsn, agg, _ := allSnapshots(ctx, chainDb, logger)
+	sn, bsn, agg, _, _, _ := allSnapshots(ctx, chainDb, logger)
 	defer sn.Close()
 	defer bsn.Close()
 	defer agg.Close()

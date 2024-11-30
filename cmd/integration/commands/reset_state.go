@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
@@ -54,7 +55,7 @@ var cmdResetState = &cobra.Command{
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, borSn, agg, _ := allSnapshots(ctx, db, logger)
+		sn, borSn, agg, _, _, _ := allSnapshots(ctx, db, logger)
 		defer sn.Close()
 		defer borSn.Close()
 		defer agg.Close()
@@ -113,7 +114,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblocks.BorRoSnapshots, agg *state.Aggregator) error {
+func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots, agg *state.Aggregator) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)

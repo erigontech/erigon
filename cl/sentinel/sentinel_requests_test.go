@@ -50,12 +50,12 @@ import (
 
 func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, reader *tests.MockBlockReader) {
 	blocks, preState, postState = tests.GetPhase0Random()
-	db = memdb.NewTestDB(t)
+	db = memdb.NewTestDB(t, kv.ChainDB)
 	reader = tests.LoadChain(blocks, postState, db, t)
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true, false, nil)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, nil, reader, log.New(), true, true, false, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	return
 }
@@ -143,7 +143,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		require.NoError(t, err)
 
-		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig)
+		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
 
 		require.NoError(t, responseChunk.DecodeSSZ(raw, int(version)))
 
@@ -251,7 +251,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		require.NoError(t, err)
 
-		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig)
+		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
 
 		require.NoError(t, responseChunk.DecodeSSZ(raw, int(version)))
 

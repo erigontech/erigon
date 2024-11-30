@@ -125,7 +125,7 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash libcommo
 		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, body.Requests)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
 }
 
 func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint64) *types.Block {
@@ -154,7 +154,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, body.Requests)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash libcommon.Hash) *types.Header {

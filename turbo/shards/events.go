@@ -18,9 +18,12 @@ package shards
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -156,6 +159,122 @@ func (e *Events) OnLogs(logs []*remote.SubscribeLogsReply) {
 
 type Notifications struct {
 	Events               *Events
-	Accumulator          *Accumulator
+	Accumulator          *Accumulator // StateAccumulator
 	StateChangesConsumer StateChangeConsumer
+	RecentLogs           *RecentLogs
+	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+}
+
+func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
+	n.LastNewBlockSeen.Store(blockNum)
+}
+
+func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
+	return &Notifications{
+		Events:               NewEvents(),
+		Accumulator:          NewAccumulator(),
+		RecentLogs:           NewRecentLogs(512),
+		StateChangesConsumer: StateChangesConsumer,
+	}
+}
+
+// Requirements:
+// - Erigon3 doesn't store logs in db (yet)
+// - need support unwind of receipts
+// - need send notification after `rwtx.Commit` (or user will recv notification, but can't request new data by RPC)
+type RecentLogs struct {
+	receipts map[uint64]types.Receipts
+	limit    uint64
+	mu       sync.Mutex
+}
+
+func NewRecentLogs(limit uint64) *RecentLogs {
+	return &RecentLogs{receipts: make(map[uint64]types.Receipts, limit), limit: limit}
+}
+
+// [from,to)
+func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
+	if !n.HasLogSubsriptions() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for bn, receipts := range r.receipts {
+		if bn+r.limit < from { //evict old
+			delete(r.receipts, bn)
+			continue
+		}
+		if bn < from || bn >= to {
+			continue
+		}
+
+		var blockNum uint64
+		reply := make([]*remote.SubscribeLogsReply, 0, len(receipts))
+		for _, receipt := range receipts {
+			if receipt == nil {
+				continue
+			}
+
+			blockNum = receipt.BlockNumber.Uint64()
+			//txIndex++
+			//// bor transactions are at the end of the bodies transactions (added manually but not actually part of the block)
+			//if txIndex == uint64(len(block.Transactions())) {
+			//	txHash = bortypes.ComputeBorTxHash(blockNum, block.Hash())
+			//} else {
+			//	txHash = block.Transactions()[txIndex].Hash()
+			//}
+
+			for _, l := range receipt.Logs {
+				res := &remote.SubscribeLogsReply{
+					Address:          gointerfaces.ConvertAddressToH160(receipt.ContractAddress),
+					BlockHash:        gointerfaces.ConvertHashToH256(receipt.BlockHash),
+					BlockNumber:      blockNum,
+					Data:             l.Data,
+					LogIndex:         uint64(l.Index),
+					Topics:           make([]*types2.H256, 0, len(l.Topics)),
+					TransactionHash:  gointerfaces.ConvertHashToH256(receipt.TxHash),
+					TransactionIndex: uint64(l.TxIndex),
+					Removed:          isUnwind,
+				}
+				for _, topic := range l.Topics {
+					res.Topics = append(res.Topics, gointerfaces.ConvertHashToH256(topic))
+				}
+				reply = append(reply, res)
+			}
+		}
+
+		n.OnLogs(reply)
+	}
+}
+
+func (r *RecentLogs) Add(receipts types.Receipts) {
+	if len(receipts) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var blockNum uint64
+	var ok bool
+	// find non-nil receipt
+	for _, receipt := range receipts {
+		if receipt != nil {
+			ok = true
+			blockNum = receipt.BlockNumber.Uint64()
+			break
+		}
+	}
+	if !ok {
+		return
+	}
+	r.receipts[blockNum] = receipts
+
+	//enforce `limit`: drop all items older than `limit` blocks
+	if len(r.receipts) <= int(r.limit) {
+		return
+	}
+	for bn := range r.receipts {
+		if bn+r.limit < blockNum {
+			delete(r.receipts, bn)
+		}
+	}
 }

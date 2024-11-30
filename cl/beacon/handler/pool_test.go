@@ -23,27 +23,38 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 )
 
 func TestPoolAttesterSlashings(t *testing.T) {
 	attesterSlashing := &cltypes.AttesterSlashing{
 		Attestation_1: &cltypes.IndexedAttestation{
 			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 3, 4, 5, 6}),
-			Data:             solid.NewAttestationData(),
+			Data:             &solid.AttestationData{},
 		},
 		Attestation_2: &cltypes.IndexedAttestation{
 			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 3, 4, 1, 6}),
-			Data:             solid.NewAttestationData(),
+			Data:             &solid.AttestationData{},
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
+	mockBeaconState.SetVersion(clparams.DenebVersion)
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -66,7 +77,7 @@ func TestPoolAttesterSlashings(t *testing.T) {
 		Data []*cltypes.AttesterSlashing `json:"data"`
 	}{
 		Data: []*cltypes.AttesterSlashing{
-			cltypes.NewAttesterSlashing(),
+			cltypes.NewAttesterSlashing(clparams.DenebVersion),
 		},
 	}
 
@@ -93,8 +104,13 @@ func TestPoolProposerSlashings(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
-
+	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
+	mockBeaconState.SetVersion(clparams.DenebVersion)
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
@@ -134,8 +150,13 @@ func TestPoolVoluntaryExits(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
-
+	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
+	mockBeaconState.SetVersion(clparams.DenebVersion)
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
@@ -181,7 +202,13 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
+	mockBeaconState.SetVersion(clparams.DenebVersion)
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -218,19 +245,34 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	msg := []*cltypes.SignedAggregateAndProof{
 		{
 			Message: &cltypes.AggregateAndProof{
-				Aggregate: solid.NewAttestionFromParameters([]byte{1, 2}, solid.NewAttestationData(), libcommon.Bytes96{3, 45, 6}),
+				Aggregate: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{1, 2}, 2048),
+					Data:            &solid.AttestationData{},
+					Signature:       libcommon.Bytes96{3, 45, 6},
+				},
 			},
 			Signature: libcommon.Bytes96{2},
 		},
 		{
 			Message: &cltypes.AggregateAndProof{
-				Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), libcommon.Bytes96{3, 0, 6}),
+				//Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), libcommon.Bytes96{3, 0, 6}),
+				Aggregate: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{1, 2, 5, 6}, 2048),
+					Data:            &solid.AttestationData{},
+					Signature:       libcommon.Bytes96{3, 0, 6},
+				},
 			},
 			Signature: libcommon.Bytes96{2, 3, 5},
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
+	mockBeaconState.SetVersion(clparams.DenebVersion)
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -271,7 +313,7 @@ func TestPoolSyncCommittees(t *testing.T) {
 			ValidatorIndex:  3,
 		},
 	}
-	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root())
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	sd.OnHeadState(s)
 	server := httptest.NewServer(handler.mux)
@@ -320,7 +362,7 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 			},
 		},
 	}
-	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root())
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	sd.OnHeadState(s)
 	server := httptest.NewServer(handler.mux)

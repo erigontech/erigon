@@ -190,20 +190,20 @@ func computeMaxMinPriorityDiff(vals *ValidatorSet) int64 {
 		panic("empty validator set")
 	}
 
-	max := int64(math.MinInt64)
-	min := int64(math.MaxInt64)
+	_max := int64(math.MinInt64)
+	_min := int64(math.MaxInt64)
 
 	for _, v := range vals.Validators {
-		if v.ProposerPriority < min {
-			min = v.ProposerPriority
+		if v.ProposerPriority < _min {
+			_min = v.ProposerPriority
 		}
 
-		if v.ProposerPriority > max {
-			max = v.ProposerPriority
+		if v.ProposerPriority > _max {
+			_max = v.ProposerPriority
 		}
 	}
 
-	diff := max - min
+	diff := _max - _min
 
 	if diff < 0 {
 		return -1 * diff
@@ -679,6 +679,20 @@ func (vals *ValidatorSet) Difficulty(signer libcommon.Address) (uint64, error) {
 	}
 
 	return uint64(len(vals.Validators) - indexDiff), nil
+}
+
+// SafeDifficulty returns the difficulty for a particular signer at the current snapshot number if available,
+// otherwise it returns 1 for empty signer and 0 if it is not in the validator set.
+func (vals *ValidatorSet) SafeDifficulty(signer libcommon.Address) uint64 {
+	if bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+		return 1
+	}
+
+	if d, err := vals.Difficulty(signer); err == nil {
+		return d
+	} else {
+		return 0
+	}
 }
 
 // GetSignerSuccessionNumber returns the relative position of signer in terms of the in-turn proposer

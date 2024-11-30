@@ -28,25 +28,20 @@ import (
 	"math/big"
 	"testing"
 
-	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/rlp"
-
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	libchain "github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
+	protosentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
-	types2 "github.com/erigontech/erigon-lib/types"
-
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
@@ -54,8 +49,9 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/ethdb/prune"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -103,7 +99,7 @@ func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, t
 	// Assert the chains have the same header/block at #i
 	var hash1, hash2 libcommon.Hash
 	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		if hash1, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
+		if hash1, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
 		if block1, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, hash1, uint64(i)); block1 == nil {
@@ -114,7 +110,7 @@ func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, t
 	require.NoError(t, err)
 
 	canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
-		if hash2, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
+		if hash2, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
 		if block2, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, hash2, uint64(i)); block2 == nil {
@@ -589,7 +585,7 @@ func readReceipt(db kv.Tx, txHash libcommon.Hash, m *mock.MockSentry) (*types.Re
 	if blockNumber == nil {
 		return nil, libcommon.Hash{}, 0, 0, nil
 	}
-	blockHash, err := m.BlockReader.CanonicalHash(context.Background(), db, *blockNumber)
+	blockHash, _, err := m.BlockReader.CanonicalHash(context.Background(), db, *blockNumber)
 	if err != nil {
 		return nil, libcommon.Hash{}, 0, 0, err
 	}
@@ -633,7 +629,7 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 
 	for _, block := range chain.Blocks {
 		// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
-		ch, err := m.BlockReader.CanonicalHash(m.Ctx, tx, block.NumberU64())
+		ch, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, block.NumberU64())
 		require.NoError(t, err)
 		if err != nil {
 			panic(err)
@@ -2070,7 +2066,7 @@ func TestEIP2718Transition(t *testing.T) {
 				},
 				GasPrice: gasPrice,
 			},
-			AccessList: types2.AccessList{{
+			AccessList: types.AccessList{{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}},
@@ -2157,7 +2153,7 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 		if i == 500 {
 			// One transaction to 0xAAAA
-			accesses := types2.AccessList{types2.AccessTuple{
+			accesses := types.AccessList{types.AccessTuple{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}}

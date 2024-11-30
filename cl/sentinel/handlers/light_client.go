@@ -34,7 +34,7 @@ func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream)
 	}
 	lc := c.forkChoiceReader.NewestLightClientUpdate()
 	if lc == nil {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 	version := lc.AttestedHeader.Version()
 	// Read the fork digest
@@ -59,7 +59,7 @@ func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) e
 	}
 	lc := c.forkChoiceReader.NewestLightClientUpdate()
 	if lc == nil {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
 	forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(lc.AttestedHeader.Version())))
@@ -90,7 +90,7 @@ func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error 
 
 	lc, has := c.forkChoiceReader.GetLightClientBootstrap(root.Root)
 	if !has {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
 	forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(lc.Header.Version())))

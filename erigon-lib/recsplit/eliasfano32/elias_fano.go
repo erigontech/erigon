@@ -405,7 +405,11 @@ func (efi *EliasFanoIter) Seek(n uint64) {
 
 		// fields of next value
 		efi.lowerIdx -= efi.itemsIterated * efi.l
-		efi.upperMask = 1 << (sel - 1)
+		if sel > 0 {
+			efi.upperMask = 1 << (sel - 1)
+		} else {
+			efi.upperMask = 0
+		}
 	} else {
 		efi.itemsIterated = nextI
 

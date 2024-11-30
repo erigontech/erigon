@@ -21,48 +21,93 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/core/types"
 )
 
-func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer PeerPenalizer) Fetcher {
-	return newPenalizingFetcher(logger, fetcher, peerPenalizer)
-}
+func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer *PeerPenalizer) *PenalizingFetcher {
+	fetchHeadersPenalizeErrs := []error{
+		&ErrTooManyHeaders{},
+		&ErrNonSequentialHeaderNumbers{},
+		&ErrNonSequentialHeaderHashes{},
+	}
 
-func newPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer PeerPenalizer) *penalizingFetcher {
-	return &penalizingFetcher{
-		Fetcher:       fetcher,
-		logger:        logger,
-		peerPenalizer: peerPenalizer,
+	fetchBodiesPenalizeErrs := []error{
+		&ErrTooManyBodies{},
+		&ErrMissingBodies{},
+	}
+
+	fetchBlocksBackwardsByHashPenalizeErrs := append([]error{}, fetchHeadersPenalizeErrs...)
+	fetchBlocksBackwardsByHashPenalizeErrs = append(fetchBlocksBackwardsByHashPenalizeErrs, &ErrUnexpectedHeaderHash{})
+	fetchBlocksBackwardsByHashPenalizeErrs = append(fetchBlocksBackwardsByHashPenalizeErrs, fetchBodiesPenalizeErrs...)
+
+	return &PenalizingFetcher{
+		Fetcher:                                fetcher,
+		logger:                                 logger,
+		peerPenalizer:                          peerPenalizer,
+		fetchHeadersPenalizeErrs:               fetchHeadersPenalizeErrs,
+		fetchBodiesPenalizeErrs:                fetchBodiesPenalizeErrs,
+		fetchBlocksBackwardsByHashPenalizeErrs: fetchBlocksBackwardsByHashPenalizeErrs,
 	}
 }
 
-type penalizingFetcher struct {
+type PenalizingFetcher struct {
 	Fetcher
-	logger        log.Logger
-	peerPenalizer PeerPenalizer
+	logger                                 log.Logger
+	peerPenalizer                          *PeerPenalizer
+	fetchHeadersPenalizeErrs               []error
+	fetchBodiesPenalizeErrs                []error
+	fetchBlocksBackwardsByHashPenalizeErrs []error
 }
 
-func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) (FetcherResponse[[]*types.Header], error) {
-	headers, err := pf.Fetcher.FetchHeaders(ctx, start, end, peerId)
+func (pf *PenalizingFetcher) FetchHeaders(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Header], error) {
+	headers, err := pf.Fetcher.FetchHeaders(ctx, start, end, peerId, opts...)
 	if err != nil {
-		return FetcherResponse[[]*types.Header]{}, pf.maybePenalize(ctx, peerId, err, &ErrTooManyHeaders{}, &ErrNonSequentialHeaderNumbers{})
+		return FetcherResponse[[]*types.Header]{}, pf.maybePenalize(ctx, peerId, err, pf.fetchHeadersPenalizeErrs...)
 	}
 
 	return headers, nil
 }
 
-func (pf *penalizingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) (FetcherResponse[[]*types.Body], error) {
-	bodies, err := pf.Fetcher.FetchBodies(ctx, headers, peerId)
+func (pf *PenalizingFetcher) FetchBodies(
+	ctx context.Context,
+	headers []*types.Header,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Body], error) {
+	bodies, err := pf.Fetcher.FetchBodies(ctx, headers, peerId, opts...)
 	if err != nil {
-		return FetcherResponse[[]*types.Body]{}, pf.maybePenalize(ctx, peerId, err, &ErrTooManyBodies{})
+		return FetcherResponse[[]*types.Body]{}, pf.maybePenalize(ctx, peerId, err, pf.fetchBodiesPenalizeErrs...)
 	}
 
 	return bodies, nil
 }
 
-func (pf *penalizingFetcher) maybePenalize(ctx context.Context, peerId *PeerId, err error, penalizeErrs ...error) error {
+func (pf *PenalizingFetcher) FetchBlocksBackwardsByHash(
+	ctx context.Context,
+	hash common.Hash,
+	amount uint64,
+	peerId *PeerId,
+	opts ...FetcherOption,
+) (FetcherResponse[[]*types.Block], error) {
+	blocks, err := pf.Fetcher.FetchBlocksBackwardsByHash(ctx, hash, amount, peerId, opts...)
+	if err != nil {
+		err = pf.maybePenalize(ctx, peerId, err, pf.fetchBlocksBackwardsByHashPenalizeErrs...)
+		return FetcherResponse[[]*types.Block]{}, err
+	}
+
+	return blocks, nil
+}
+
+func (pf *PenalizingFetcher) maybePenalize(ctx context.Context, peerId *PeerId, err error, penalizeErrs ...error) error {
 	var shouldPenalize bool
 	for _, penalizeErr := range penalizeErrs {
 		if errors.Is(err, penalizeErr) {

@@ -13,6 +13,7 @@ integration print_stages
 integration stage_senders
 integration stage_exec
 integration stage_exec --block=1_000_000 # stop at 1M block
+integration stage_exec --sync.mode.chaintip # every block: `ComputeCommitment`, `rwtx.Commit()`, write diffs/changesets
 integration stage_hash_state
 integration stage_trie
 integration stage_history

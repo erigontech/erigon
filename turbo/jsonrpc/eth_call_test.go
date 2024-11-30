@@ -23,28 +23,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
 	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/turbo/testlog"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -567,6 +566,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 
 func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	ctx := context.Background()
+	logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
 	assert.NoError(t, err)
 
@@ -578,10 +578,10 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSet, "", pruneTo, logEvery, ctx)
 	assert.NoError(t, err)
 
-	err = rawdb.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32)
+	err = rawdb.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
 	assert.NoError(t, err)
 
-	err = rawdb.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32)
+	err = rawdb.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
 	assert.NoError(t, err)
 
 	err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, "", pruneTo, logEvery, ctx)

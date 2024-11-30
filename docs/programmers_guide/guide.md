@@ -65,16 +65,16 @@ Accounts are identified by their addresses. Address is a 20-byte binary string, 
 contract and non-contract accounts.
 
 For non-contract accounts, the address is derived from the public key, by hashing it and taking lowest 20 bytes of the
-32-byte hash value, as shown in the function `PubkeyToAddress` in the file [crypto/crypto.go](../../crypto/crypto.go)
+32-byte hash value, as shown in the function `PubkeyToAddress` in the file [crypto/crypto.go](../../erigon-lib/crypto/crypto.go)
 
 For smart contract accounts created by a transaction without destination, or by `CREATE` opcode, the address is derived
 from the address and the nonce of the creator, as shown in the function `CreateAddress` in the
-file [crypto/crypto.go](../../crypto/crypto.go)
+file [crypto/crypto.go](../../erigon-lib/crypto/crypto.go)
 
 For smart contract accounts created by `CREATE2` opcode, the address is derived from the creator's address, salt (
 256-bit argument supplied to the `CREATE2` invocation), and the code hash of the initialisation code (code that is
 executed to output the actual, deployed code of the new contract), as shown in the function `CreateAddress2` in the
-file [crypto/crypto.go](../../crypto/crypto.go)
+file [crypto/crypto.go](../../erigon-lib/crypto/crypto.go)
 
 In many places in the code, sets of accounts are represented by mappings from account addresses to the objects
 representing the accounts themselves, for example, field `stateObjects` in the
@@ -429,7 +429,7 @@ efficiently, the set of keys being resolved will be converted into a sorted list
 processes a key, it maintains references to two consecutive keys from that sorted list - one "LTE" (Less Than or Equal
 to the currently processed key), and another "GT" (Greater Than the currently processed key). If max common prefix is
 also prefix of either LTE or GT, then `BRANCH` opcode is emitted, otherwise, `BRANCHHASH` opcode is emitted. This is
-implemented by the type `ResolveSet` in [turbo/trie/resolve_set.go](../../turbo/trie/resolve_set.go)
+implemented by the type `RetainList` in [turbo/trie/retain_list.go](../../turbo/trie/retain_list.go)
 
 ### Extension of the structure to support contracts with contract storage
 

@@ -33,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -146,7 +145,12 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 	engine := api.engine()
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, txNumsReader, tx, int(txIndex))
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, txNumsReader, tx, int(txIndex))
+	if err != nil {
+		return nil, err
+	}
+
+	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -269,16 +273,11 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 }
 
 func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
-	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
-	if err != nil {
-		return nil, err
-	}
 	additionalFields := make(map[string]interface{})
 	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["totalDifficulty"] = (*hexutil2.Big)(td)
 	response["transactionCount"] = b.Transactions().Len()
 
 	if err == nil && number == rpc.PendingBlockNumber {

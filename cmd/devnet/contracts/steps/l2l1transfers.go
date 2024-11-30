@@ -47,7 +47,7 @@ func init() {
 
 func DeployChildChainSender(ctx context.Context, deployerName string) (context.Context, error) {
 	deployer := accounts.GetAccount(deployerName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.BorDevnet)
 
 	auth, backend, err := contracts.DeploymentTransactor(ctx, deployer.Address)
 
@@ -72,7 +72,7 @@ func DeployChildChainSender(ctx context.Context, deployerName string) (context.C
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("ChildSender deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
+	devnet.Logger(ctx).Info("ChildSender deployed", "chain", networkname.BorDevnet, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "childSenderAddress", address).
 		WithParam("childSender", contract), nil
@@ -80,7 +80,7 @@ func DeployChildChainSender(ctx context.Context, deployerName string) (context.C
 
 func DeployRootChainReceiver(ctx context.Context, deployerName string) (context.Context, error) {
 	deployer := accounts.GetAccount(deployerName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.Dev)
 
 	auth, backend, err := contracts.DeploymentTransactor(ctx, deployer.Address)
 
@@ -105,7 +105,7 @@ func DeployRootChainReceiver(ctx context.Context, deployerName string) (context.
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("RootReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
+	devnet.Logger(ctx).Info("RootReceiver deployed", "chain", networkname.BorDevnet, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "rootReceiverAddress", address).
 		WithParam("rootReceiver", contract), nil
@@ -113,7 +113,7 @@ func DeployRootChainReceiver(ctx context.Context, deployerName string) (context.
 
 func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
 	source := accounts.GetAccount(sourceName)
-	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
+	ctx = devnet.WithCurrentNetwork(ctx, networkname.Dev)
 
 	auth, err := contracts.TransactOpts(ctx, source.Address)
 

@@ -42,9 +42,9 @@ func strip0x(str string) string {
 
 // EncodeTs encodes a TimeStamp (BlockNumber or TxNumber or other uin64) as big endian
 func EncodeTs(number uint64) []byte {
-	enc := make([]byte, 8)
-	binary.BigEndian.PutUint64(enc, number)
-	return enc
+	var enc [8]byte
+	binary.BigEndian.PutUint64(enc[:], number)
+	return enc[:]
 }
 
 // Encode encodes b as a hex string with 0x prefix.

@@ -44,8 +44,8 @@ func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []u
 	})
 	return &cltypes.IndexedAttestation{
 		AttestingIndices: solid.NewRawUint64List(2048, attestingIndicies),
-		Data:             attestation.AttestantionData(),
-		Signature:        attestation.Signature(),
+		Data:             attestation.Data,
+		Signature:        attestation.Signature,
 	}
 }
 

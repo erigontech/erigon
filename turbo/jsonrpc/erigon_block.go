@@ -103,6 +103,9 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	uintTimestamp := timeStamp.TurnIntoUint64()
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
+	if currentHeader == nil {
+		return nil, errors.New("current header not found")
+	}
 	currentHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 
@@ -197,13 +200,6 @@ func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.
 	}
 
 	additionalFields := make(map[string]interface{})
-	td, err := rawdb.ReadTd(db, header.Hash(), header.Number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-	if td != nil {
-		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
 
@@ -235,8 +231,15 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		return nil, err
 	}
 
-	minTxNum, _ := txNumsReader.Min(tx, blockNumber)
-	it, err := tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(minTxNum), -1, order.Asc, -1)
+	minTxNum, err := txNumsReader.Min(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	maxTxNum, err := txNumsReader.Max(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	it, err := tx.(kv.TemporalTx).HistoryRange(kv.AccountsDomain, int(minTxNum), int(maxTxNum+1), order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}

@@ -69,7 +69,7 @@ func testCtx() *vmContext {
 }
 
 func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, contractCode []byte) (json.RawMessage, error) {
-	c := vm.NewJumpDestCache(false)
+	c := vm.NewJumpDestCache()
 	var (
 		env             = vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, chaincfg, vm.Config{Debug: true, Tracer: tracer})
 		gasLimit uint64 = 31000
@@ -161,6 +161,9 @@ func TestTracer(t *testing.T) {
 			want:     "",
 			fail:     "tracer reached limit for padding memory slice: end 1049600, memorySize 32 at step (<eval>:1:83(23))    in server-side tracer function 'step'",
 			contract: []byte{byte(vm.PUSH1), byte(0xff), byte(vm.PUSH1), byte(0x00), byte(vm.MSTORE8), byte(vm.STOP)},
+		}, { // tests ctx.coinbase
+			code: "{lengths: [], step: function(log) { }, fault: function() {}, result: function(ctx) { var coinbase = ctx.coinbase; return toAddress(coinbase); }}",
+			want: `{"0":0,"1":0,"2":0,"3":0,"4":0,"5":0,"6":0,"7":0,"8":0,"9":0,"10":0,"11":0,"12":0,"13":0,"14":0,"15":0,"16":0,"17":0,"18":0,"19":0}`,
 		},
 	} {
 		if have, err := execTracer(tt.code, tt.contract); tt.want != string(have) || tt.fail != err {
@@ -185,7 +188,7 @@ func TestHalt(t *testing.T) {
 }
 
 func TestHaltBetweenSteps(t *testing.T) {
-	c := vm.NewJumpDestCache(false)
+	c := vm.NewJumpDestCache()
 	tracer, err := newJsTracer("{step: function() {}, fault: function() {}, result: function() { return null; }}", nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +273,7 @@ func TestIsPrecompile(t *testing.T) {
 }
 
 func TestEnterExit(t *testing.T) {
-	c := vm.NewJumpDestCache(false)
+	c := vm.NewJumpDestCache()
 	// test that either both or none of enter() and exit() are defined
 	if _, err := newJsTracer("{step: function() {}, fault: function() {}, result: function() { return null; }, enter: function() {}}", new(tracers.Context), nil); err == nil {
 		t.Fatal("tracer creation should've failed without exit() definition")

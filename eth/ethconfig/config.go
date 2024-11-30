@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
@@ -44,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
@@ -73,13 +73,12 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		ExecWorkerCount:            estimate.ReconstituteState.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
-		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
+		ExecWorkerCount:            estimate.BlocksExecution.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
-		PruneLimit:            100,
 		ParallelStateFlushing: true,
+		ChaosMonkey:           false,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -142,6 +141,7 @@ type BlocksFreezing struct {
 	NoDownloader   bool // possible to use snapshots without calling Downloader
 	Verify         bool // verify snapshots on startup
 	DownloaderAddr string
+	ChainName      string
 }
 
 func (s BlocksFreezing) String() string {
@@ -161,8 +161,8 @@ var (
 	FlagSnapStateStop  = "snap.state.stop"
 )
 
-func NewSnapCfg(keepBlocks, produceE2, produceE3 bool) BlocksFreezing {
-	return BlocksFreezing{KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3}
+func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksFreezing {
+	return BlocksFreezing{KeepBlocks: keepBlocks, ProduceE2: produceE2, ProduceE3: produceE3, ChainName: chainName}
 }
 
 // Config contains configuration options for ETH protocol.
@@ -269,7 +269,6 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
-	PruneLimit                 int //the maximum records to delete from the DB during pruning
 	BreakAfterStage            string
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
@@ -277,4 +276,7 @@ type Sync struct {
 	UploadLocation   string
 	UploadFrom       rpc.BlockNumber
 	FrozenBlockLimit uint64
+
+	ChaosMonkey              bool
+	AlwaysGenerateChangesets bool
 }

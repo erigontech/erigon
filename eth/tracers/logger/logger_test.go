@@ -58,7 +58,7 @@ type dummyStatedb struct {
 func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
 func TestStoreCapture(t *testing.T) {
-	c := vm.NewJumpDestCache(false)
+	c := vm.NewJumpDestCache()
 	var (
 		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{})
 		logger   = NewStructLogger(nil)

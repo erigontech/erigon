@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/txpool/txpoolcfg"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // DeprecatedTxPoolConfig are the configuration parameters of the transaction pool.

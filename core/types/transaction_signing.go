@@ -31,9 +31,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/crypto"
 )
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
@@ -364,7 +363,7 @@ func recoverPlain(context *secp256k1.Context, sighash libcommon.Hash, R, S, Vb *
 		return libcommon.Address{}, ErrInvalidSig
 	}
 	V := byte(Vb.Uint64() - 27)
-	if !crypto.ValidateSignatureValues(V, R, S, homestead) {
+	if !crypto.TransactionSignatureIsValid(V, R, S, !homestead) {
 		return libcommon.Address{}, ErrInvalidSig
 	}
 	// encode the signature in uncompressed format

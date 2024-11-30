@@ -98,9 +98,9 @@ type ConsensusHandlers struct {
 }
 
 const (
-	SuccessfulResponsePrefix = 0x00
-	RateLimitedPrefix        = 0x01
-	ResourceUnavaiablePrefix = 0x02
+	SuccessfulResponsePrefix  = 0x00
+	RateLimitedPrefix         = 0x01
+	ResourceUnavailablePrefix = 0x02
 )
 
 func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotReader, indiciesDB kv.RoDB, host host.Host,

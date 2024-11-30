@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
@@ -38,11 +39,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	stateLib "github.com/erigontech/erigon-lib/state"
-
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
 )
 
 var toAddr = common.BytesToAddress
@@ -121,8 +119,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, cr, log.New())
+	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -379,8 +376,7 @@ func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, cr, log.New())
+	agg, err := state.NewAggregator(context.Background(), datadir.New(tb.TempDir()), 16, db, log.New())
 	if err != nil {
 		tb.Fatal(err)
 	}
