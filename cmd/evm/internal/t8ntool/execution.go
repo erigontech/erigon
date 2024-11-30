@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	state3 "github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"

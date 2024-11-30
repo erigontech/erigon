@@ -32,7 +32,7 @@ import (
 
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/rpc"
 )
 

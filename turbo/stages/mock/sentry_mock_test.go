@@ -29,8 +29,8 @@ import (
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/wrap"
 
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"

@@ -104,7 +104,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 }
 
 func (g *Generator) addToCache(header *types.Header, receipts types.Receipts) {
-	g.receiptsCache.Add(header.Hash(), receipts.Copy())
+	g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
 }
 
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, index int, txNum uint64) (*types.Receipt, error) {

@@ -28,13 +28,13 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/aura/auraabi"
 	"github.com/erigontech/erigon/consensus/aura/aurainterfaces"
