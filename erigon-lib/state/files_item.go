@@ -336,7 +336,7 @@ func (files visibleFiles) LatestMergedRange() MergeRange {
 		return MergeRange{}
 	}
 	for i := len(files) - 1; i >= 0; i-- {
-		shardSize := (files[i].endTxNum - files[i].startTxNum) / config3.HistoryV3AggregationStep
+		shardSize := (files[i].endTxNum - files[i].startTxNum) / config3.DefaultStepSize
 		if shardSize > 2 {
 			return MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
 		}

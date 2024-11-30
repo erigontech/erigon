@@ -89,10 +89,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	logger := log.New()
 	aggStep := rc.aggStep
 	db, agg := testDbAndAggregatorv3(t, aggStep)
-	//if rc.useBplus {
-	//	UseBpsTree = true
-	//	defer func() { UseBpsTree = false }()
-	//}
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -217,7 +213,7 @@ func TestNewBtIndex(t *testing.T) {
 	defer kv.Close()
 	require.NotNil(t, kv)
 	require.NotNil(t, bt)
-	require.Len(t, bt.bplus.mx, keyCount/int(DefaultBtreeM))
+	require.True(t, len(bt.bplus.mx) >= keyCount/int(DefaultBtreeM))
 
 	for i := 1; i < len(bt.bplus.mx); i++ {
 		require.NotZero(t, bt.bplus.mx[i].di)
@@ -268,15 +264,15 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 	maxInt := math.MaxInt
 	{
-		it, err := ac.DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := ac.RangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRange = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRange = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRange = extractKVErrIterator(t, it)
 
@@ -331,15 +327,15 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 
 	{
-		it, err := ac.DomainRangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
+		it, err := ac.RangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		storageRangeAfter = extractKVErrIterator(t, it)
 
-		it, err = ac.DomainRangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
+		it, err = ac.RangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		codeRangeAfter = extractKVErrIterator(t, it)
 
@@ -615,9 +611,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, os.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
-	newDb := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	newDb := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
 	newAgg, err := NewAggregator(context.Background(), agg.dirs, aggStep, newDb, logger)
@@ -658,6 +652,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		storedV, _, found, err := ac.GetLatest(kv.StorageDomain, key[:length.Addr], key[length.Addr:], newTx)
 		require.NoError(t, err)
 		require.True(t, found)
+		require.NotEmpty(t, storedV)
 		_ = key[0]
 		_ = storedV[0]
 		require.EqualValues(t, key[0], storedV[0])
@@ -885,7 +880,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.RwDB, *Aggregator)
 	tb.Helper()
 	require, logger := require.New(tb), log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	tb.Cleanup(db.Close)

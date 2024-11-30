@@ -74,7 +74,7 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
 	cfg := &clparams.MainnetBeaconConfig
-	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true, 0)
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	p := pool.OperationsPool{}
 	p.AttestationsPool = pool.NewOperationPool[libcommon.Bytes96, *solid.Attestation](100, "test")

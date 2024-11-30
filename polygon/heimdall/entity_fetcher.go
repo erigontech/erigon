@@ -94,8 +94,23 @@ func (f *EntityFetcher[TEntity]) FetchEntitiesRange(ctx context.Context, idRange
 }
 
 func (f *EntityFetcher[TEntity]) FetchEntitiesRangeSequentially(ctx context.Context, idRange ClosedRange) ([]TEntity, error) {
+	progressLogTicker := time.NewTicker(30 * time.Second)
+	defer progressLogTicker.Stop()
+
 	entities := make([]TEntity, 0, idRange.Len())
 	for id := idRange.Start; id <= idRange.End; id++ {
+		select {
+		case <-progressLogTicker.C:
+			f.logger.Info(
+				heimdallLogPrefix(f.name+" fetch entities sequentially periodic progress"),
+				"current", id,
+				"start", idRange.Start,
+				"end", idRange.End,
+			)
+		default:
+			// carry-on
+		}
+
 		entity, err := f.fetchEntity(ctx, int64(id))
 		if err != nil {
 			// return fetched entities up to this point in case of transient errors
@@ -134,8 +149,8 @@ func (f *EntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntit
 
 		select {
 		case <-progressLogTicker.C:
-			f.logger.Debug(
-				heimdallLogPrefix(f.name+" progress"),
+			f.logger.Info(
+				heimdallLogPrefix(f.name+" fetch all entities periodic progress"),
 				"page", page,
 				"len", len(entities),
 			)
@@ -155,7 +170,7 @@ func (f *EntityFetcher[TEntity]) FetchAllEntities(ctx context.Context) ([]TEntit
 	}
 
 	f.logger.Debug(
-		heimdallLogPrefix(f.name+" done"),
+		heimdallLogPrefix(f.name+" fetch all entities done"),
 		"len", len(entities),
 		"duration", time.Since(fetchStartTime),
 	)

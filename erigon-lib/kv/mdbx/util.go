@@ -22,5 +22,5 @@ import (
 )
 
 func MustOpen(path string) kv.RwDB {
-	return NewMDBX(log.New()).Path(path).MustOpen()
+	return New(kv.ChainDB, log.New()).Path(path).MustOpen()
 }
