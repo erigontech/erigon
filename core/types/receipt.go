@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"slices"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -275,10 +276,6 @@ func (r *Receipt) Copy() *Receipt {
 	if r == nil {
 		return nil
 	}
-	postState := make([]byte, len(r.PostState))
-	copy(postState, r.PostState)
-
-	bloom := BytesToBloom(r.Bloom.Bytes())
 
 	var logs Logs
 	if r.Logs != nil {
@@ -295,10 +292,10 @@ func (r *Receipt) Copy() *Receipt {
 
 	return &Receipt{
 		Type:              r.Type,
-		PostState:         postState,
+		PostState:         slices.Clone(r.PostState),
 		Status:            r.Status,
 		CumulativeGasUsed: r.CumulativeGasUsed,
-		Bloom:             bloom,
+		Bloom:             BytesToBloom(r.Bloom.Bytes()),
 		Logs:              logs,
 		TxHash:            txHash,
 		ContractAddress:   contractAddress,
