@@ -277,14 +277,6 @@ func (r *Receipt) Copy() *Receipt {
 		return nil
 	}
 
-	var logs Logs
-	if r.Logs != nil {
-		logs = make(Logs, 0, len(r.Logs))
-		for _, log := range r.Logs {
-			logs = append(logs, log.Copy())
-		}
-	}
-
 	txHash := libcommon.BytesToHash(r.TxHash.Bytes())
 	contractAddress := libcommon.BytesToAddress(r.ContractAddress.Bytes())
 	blockHash := libcommon.BytesToHash(r.BlockHash.Bytes())
@@ -296,7 +288,7 @@ func (r *Receipt) Copy() *Receipt {
 		Status:            r.Status,
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		Bloom:             BytesToBloom(r.Bloom.Bytes()),
-		Logs:              logs,
+		Logs:              r.Logs.Copy(),
 		TxHash:            txHash,
 		ContractAddress:   contractAddress,
 		GasUsed:           r.GasUsed,

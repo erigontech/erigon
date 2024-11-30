@@ -80,6 +80,17 @@ type ErigonLogs []*ErigonLog
 
 type Logs []*Log
 
+func (logs Logs) Copy() Logs {
+	if logs == nil {
+		return nil
+	}
+	logsCopy := make(Logs, 0, len(logs))
+	for _, log := range logs {
+		logsCopy = append(logsCopy, log.Copy())
+	}
+	return logsCopy
+}
+
 func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libcommon.Hash, maxLogs uint64) Logs {
 	topicMap := make(map[int]map[libcommon.Hash]struct{}, 7)
 
