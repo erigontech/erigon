@@ -135,7 +135,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
 
-			if txTask.TxIndex > 0 && receipt != nil &&
+			if txTask.TxIndex > 0 && receipt != nil && txTask.BlockReceipts[txTask.TxIndex-1] != nil &&
 				txTask.BlockReceipts[txTask.TxIndex-1].CumulativeGasUsed == receipt.CumulativeGasUsed {
 				msg := fmt.Sprintf("bad receipts accert stack %s receipt %+v", dbg.Stack(), txTask.BlockReceipts[txTask.TxIndex])
 				panic(msg)
