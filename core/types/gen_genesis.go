@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
-	common0 "github.com/erigontech/erigon/common"
+	common0 "github.com/erigontech/erigon-lib/common"
 )
 
 var _ = (*genesisSpecMarshaling)(nil)

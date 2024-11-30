@@ -32,10 +32,10 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/common/mclock"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"

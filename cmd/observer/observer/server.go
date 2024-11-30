@@ -26,8 +26,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common/debug"
 	"github.com/erigontech/erigon/core/forkid"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p"

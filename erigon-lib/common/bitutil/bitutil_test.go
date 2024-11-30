@@ -118,6 +118,7 @@ func BenchmarkFastXOR2KB(b *testing.B) { benchmarkFastXOR(b, 2048) }
 func BenchmarkFastXOR4KB(b *testing.B) { benchmarkFastXOR(b, 4096) }
 
 func benchmarkFastXOR(b *testing.B, size int) {
+	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
 	for i := 0; i < b.N; i++ {
@@ -131,6 +132,7 @@ func BenchmarkBaseXOR2KB(b *testing.B) { benchmarkBaseXOR(b, 2048) }
 func BenchmarkBaseXOR4KB(b *testing.B) { benchmarkBaseXOR(b, 4096) }
 
 func benchmarkBaseXOR(b *testing.B, size int) {
+	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
 	for i := 0; i < b.N; i++ {
@@ -144,6 +146,7 @@ func BenchmarkFastAND2KB(b *testing.B) { benchmarkFastAND(b, 2048) }
 func BenchmarkFastAND4KB(b *testing.B) { benchmarkFastAND(b, 4096) }
 
 func benchmarkFastAND(b *testing.B, size int) {
+	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
 	for i := 0; i < b.N; i++ {
@@ -157,6 +160,7 @@ func BenchmarkBaseAND2KB(b *testing.B) { benchmarkBaseAND(b, 2048) }
 func BenchmarkBaseAND4KB(b *testing.B) { benchmarkBaseAND(b, 4096) }
 
 func benchmarkBaseAND(b *testing.B, size int) {
+	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
 	for i := 0; i < b.N; i++ {
@@ -170,6 +174,7 @@ func BenchmarkFastOR2KB(b *testing.B) { benchmarkFastOR(b, 2048) }
 func BenchmarkFastOR4KB(b *testing.B) { benchmarkFastOR(b, 4096) }
 
 func benchmarkFastOR(b *testing.B, size int) {
+	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
 	for i := 0; i < b.N; i++ {
@@ -183,6 +188,7 @@ func BenchmarkBaseOR2KB(b *testing.B) { benchmarkBaseOR(b, 2048) }
 func BenchmarkBaseOR4KB(b *testing.B) { benchmarkBaseOR(b, 4096) }
 
 func benchmarkBaseOR(b *testing.B, size int) {
+	b.Helper()
 	p, q := make([]byte, size), make([]byte, size)
 
 	for i := 0; i < b.N; i++ {
@@ -198,6 +204,7 @@ func BenchmarkFastTest2KB(b *testing.B) { benchmarkFastTest(b, 2048) }
 func BenchmarkFastTest4KB(b *testing.B) { benchmarkFastTest(b, 4096) }
 
 func benchmarkFastTest(b *testing.B, size int) {
+	b.Helper()
 	p := make([]byte, size)
 	a := false
 	for i := 0; i < b.N; i++ {
@@ -212,6 +219,7 @@ func BenchmarkBaseTest2KB(b *testing.B) { benchmarkBaseTest(b, 2048) }
 func BenchmarkBaseTest4KB(b *testing.B) { benchmarkBaseTest(b, 4096) }
 
 func benchmarkBaseTest(b *testing.B, size int) {
+	b.Helper()
 	p := make([]byte, size)
 	a := false
 	for i := 0; i < b.N; i++ {

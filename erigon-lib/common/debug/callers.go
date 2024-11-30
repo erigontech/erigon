@@ -14,36 +14,28 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build windows
-
 package debug
 
 import (
-	"io"
-	"os"
-	"os/signal"
-
-	_debug "github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"runtime"
 )
 
-func ListenSignals(stack io.Closer, logger log.Logger) {
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, os.Interrupt)
-	_debug.GetSigC(&sigc)
-	defer signal.Stop(sigc)
+// Callers returns given number of callers with packages
+func Callers(show int) []string {
+	fpcs := make([]uintptr, show)
+	n := runtime.Callers(2, fpcs)
+	if n == 0 {
+		return nil
+	}
 
-	<-sigc
-	logger.Info("Got interrupt, shutting down...")
-	if stack != nil {
-		go stack.Close()
-	}
-	for i := 10; i > 0; i-- {
-		<-sigc
-		if i > 1 {
-			logger.Warn("Already shutting down, interrupt more to panic.", "times", i-1)
+	callers := make([]string, 0, len(fpcs))
+	for _, p := range fpcs {
+		caller := runtime.FuncForPC(p - 1)
+		if caller == nil {
+			continue
 		}
+		callers = append(callers, caller.Name())
 	}
-	Exit() // ensure trace and CPU profile data is flushed.
-	LoudPanic("boom")
+
+	return callers
 }
