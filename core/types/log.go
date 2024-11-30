@@ -270,8 +270,7 @@ func (l *Log) Copy() *Log {
 	if l.Topics != nil {
 		topics = make([]libcommon.Hash, 0, len(l.Topics))
 		for _, topic := range l.Topics {
-			topicCopy := libcommon.BytesToHash(topic.Bytes())
-			topics = append(topics, topicCopy)
+			topics = append(topics, libcommon.BytesToHash(topic.Bytes()))
 		}
 	}
 
