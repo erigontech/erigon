@@ -629,7 +629,7 @@ Loop:
 				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 				return errors.New("wrong trie root")
 			}
-			
+
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
 			executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
