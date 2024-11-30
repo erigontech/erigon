@@ -255,7 +255,7 @@ func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
 }
 func (ch nonceChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(*ch.account)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	obj.setNonce(ch.prev)
@@ -268,7 +268,7 @@ func (ch nonceChange) dirtied() *libcommon.Address {
 
 func (ch codeChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(*ch.account)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	obj.setCode(ch.prevhash, ch.prevcode)
@@ -281,7 +281,7 @@ func (ch codeChange) dirtied() *libcommon.Address {
 
 func (ch storageChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(*ch.account)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	obj.setState(&ch.key, ch.prevalue)
@@ -294,7 +294,7 @@ func (ch storageChange) dirtied() *libcommon.Address {
 
 func (ch fakeStorageChange) revert(s *IntraBlockState) error {
 	obj, err := s.getStateObject(*ch.account)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	obj.fakeStorage[ch.key] = ch.prevalue

@@ -75,8 +75,8 @@ func VerifyDAOHeaderExtraData(config *chain.Config, header *types.Header) error 
 // contract.
 func ApplyDAOHardFork(statedb *state.IntraBlockState) error {
 	// Retrieve the contract to refund balances into
-	exist, err :=  statedb.Exist(params.DAORefundContract)
-	if err!=nil {
+	exist, err := statedb.Exist(params.DAORefundContract)
+	if err != nil {
 		return err
 	}
 	if !exist {
@@ -86,7 +86,7 @@ func ApplyDAOHardFork(statedb *state.IntraBlockState) error {
 	// Move every DAO account and extra-balance account funds into the refund contract
 	for _, addr := range params.DAODrainList() {
 		balance, err := statedb.GetBalance(addr)
-		if err!=nil {
+		if err != nil {
 			return err
 		}
 		statedb.AddBalance(params.DAORefundContract, balance, tracing.BalanceIncreaseDaoContract)
