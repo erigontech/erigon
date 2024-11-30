@@ -345,9 +345,9 @@ func (rs Receipts) Copy() Receipts {
 	if rs == nil {
 		return nil
 	}
-	rsCopy := make(Receipts, 0, rs.Len())
-	for _, r := range rs {
-		rsCopy = append(rsCopy, r.Copy())
+	rsCopy := make(Receipts, rs.Len())
+	for i, r := range rs {
+		rsCopy[i] = r.Copy()
 	}
 	return rsCopy
 }

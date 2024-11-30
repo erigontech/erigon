@@ -84,9 +84,9 @@ func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	logsCopy := make(Logs, 0, len(logs))
-	for _, log := range logs {
-		logsCopy = append(logsCopy, log.Copy())
+	logsCopy := make(Logs, len(logs))
+	for i, log := range logs {
+		logsCopy[i] = log.Copy()
 	}
 	return logsCopy
 }
