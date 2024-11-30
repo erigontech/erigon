@@ -251,6 +251,9 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 
 // Copy creates a deep copy of the Log.
 func (l *Log) Copy() *Log {
+	if l == nil {
+		return nil
+	}
 	topics := make([]libcommon.Hash, 0, len(l.Topics))
 	for _, topic := range l.Topics {
 		topicCopy := libcommon.BytesToHash(topic.Bytes())
