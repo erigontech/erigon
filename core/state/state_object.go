@@ -333,7 +333,7 @@ func (so *stateObject) Code() []byte {
 	if so.data.CodeHash == emptyCodeHashH {
 		return nil
 	}
-	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, so.data.CodeHash)
+	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation)
 	if err != nil {
 		so.setError(fmt.Errorf("can't load code hash %x: %w", so.data.CodeHash, err))
 	}
