@@ -232,6 +232,15 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 		},
 	}
 	validationPassed = true
+
+	arr := idx.ExtractOffsetsArray()
+	slices.Sort(arr)
+	ef := eliasfano32.NewEliasFano(uint64(len(arr)), arr[len(arr)-1])
+	for _, n := range arr {
+		ef.AddOffset(n)
+	}
+	ef.Build()
+	fmt.Printf("dbg: ef %d\n", ef.SerializedSizeInBytes())
 	return idx, nil
 }
 
@@ -358,19 +367,11 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	//rs.offsetBuffer[j] = offsets[i]
 
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
-	arr := idx.ExtractOffsetsArray()
-	slices.Sort(arr)
-	ef := eliasfano32.NewEliasFano(uint64(len(arr)), arr[len(arr)-1])
-	for _, n := range arr {
-		ef.AddOffset(n)
-	}
-	ef.Build()
-	fmt.Printf("dbg: ef %d\n", ef.SerializedSizeInBytes())
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
-	fmt.Printf("[dbg] lookup: bkt=%d\n", remap16(remix(fingerprint+idx.startSeed[level]+b), m))
-	fmt.Printf("[dbg] lookup: %d, %d, %d, %d, %d, %d, %d\n", b, fingerprint, cumKeys, rec, remix(fingerprint+idx.startSeed[level]+b), remap16(remix(fingerprint+idx.startSeed[level]+b), m), found)
-	fmt.Printf("[dbg] all offsets: %d\n", idx.ExtractOffsetsArray())
+	//fmt.Printf("[dbg] lookup: bkt=%d\n", remap16(remix(fingerprint+idx.startSeed[level]+b), m))
+	//fmt.Printf("[dbg] lookup: %d, %d, %d, %d, %d, %d, %d\n", b, fingerprint, cumKeys, rec, remix(fingerprint+idx.startSeed[level]+b), remap16(remix(fingerprint+idx.startSeed[level]+b), m), found)
+	//fmt.Printf("[dbg] all offsets: %d\n", idx.ExtractOffsetsArray())
 	if idx.lessFalsePositives {
 		return found, idx.existence[found] == byte(bucketHash)
 	}
