@@ -1028,15 +1028,13 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 		}
 		return sd.updateAccountCode(k1, val, prevVal, prevStep)
 	case kv.CommitmentDomain:
-		composite := append(k1, k2...)
-		sd.put(domain, *(*string)(unsafe.Pointer(&composite)), val)
+		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
 		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
-		composite := append(k1, k2...)
-		sd.put(domain, *(*string)(unsafe.Pointer(&composite)), val)
+		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
 		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	}
 }
