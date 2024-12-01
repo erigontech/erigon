@@ -1127,7 +1127,7 @@ func updatedNibs(num uint16) string {
 const DepthWithoutNodeHashes = 35 //nolint
 
 func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, depth int) func(nibble int, skip bool) (*cell, error) {
-	hashBeforeBuf := make([]byte, 32)
+	hashBefore := make([]byte, 32) // buffer re-used between calls
 	return func(nibble int, skip bool) (*cell, error) {
 		if skip {
 			if _, err := hph.keccak2.Write(b); err != nil {
@@ -1149,8 +1149,8 @@ func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, 
 		}
 
 		loadedBefore := cell.loaded
-		copy(hashBeforeBuf, cell.stateHash[:cell.stateHashLen])
-		hashBefore := hashBeforeBuf[:cell.stateHashLen]
+		copy(hashBefore, cell.stateHash[:cell.stateHashLen])
+		hashBefore = hashBefore[:cell.stateHashLen]
 
 		cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
 		if err != nil {
