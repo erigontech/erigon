@@ -1913,7 +1913,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !exist {
+				if exist {
 					t.Fatalf("block %d, expected %x to not exist, it did", blockNum, aa)
 				}
 			}
