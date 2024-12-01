@@ -125,11 +125,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	println("let's look around")
 	for i := range 60 {
-		cumGasUsed1, _, firstLogIndex1, err := rawtemporaldb.ReceiptAsOf(tx, txNum+i-30)
+		cumGasUsed1, _, firstLogIndex1, err := rawtemporaldb.ReceiptAsOf(tx, txNum+uint64(i)-30)
 		if err != nil {
 			return nil, err
 		}
-		println("cum gas used", cumGasUsed1, "first log index", firstLogIndex1, "txNum", txNum+i-30)
+		println("cum gas used", cumGasUsed1, "first log index", firstLogIndex1, "txNum", txNum+uint64(i)-30)
 	}
 
 	receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, block.Transactions()[index], genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
