@@ -233,14 +233,16 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	}
 	validationPassed = true
 
-	arr := idx.ExtractOffsetsArray()
-	slices.Sort(arr)
-	ef := eliasfano32.NewEliasFano(uint64(len(arr)), arr[len(arr)-1])
-	for _, n := range arr {
-		ef.AddOffset(n)
+	if idx.lessFalsePositives {
+		arr := idx.ExtractOffsetsArray()
+		ef := eliasfano32.NewEliasFano(uint64(len(arr)), slices.Max(arr))
+		for _, n := range arr {
+			ef.AddOffset(n)
+		}
+		ef.Build()
+		fmt.Printf("[dbg]: ef %s, %d -> %d\n", idx.fileName, int(idx.bytesPerRec)*int(idx.keyCount), ef.SerializedSizeInBytes())
 	}
-	ef.Build()
-	fmt.Printf("dbg: ef %d\n", ef.SerializedSizeInBytes())
+
 	return idx, nil
 }
 
