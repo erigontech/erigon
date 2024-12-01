@@ -1237,7 +1237,8 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 		return nil, err
 	}
 
-	u = &commitment.Update{CodeHash: commitment.EmptyCodeHashArray}
+	u = new(commitment.Update)
+	u.Reset()
 
 	if len(encAccount) > 0 {
 		nonce, balance, chash := types.DecodeAccountBytesV3(encAccount)
@@ -1268,7 +1269,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 		sdc.keccak.Read(u.CodeHash[:])
 		u.Flags |= commitment.CodeUpdate
 	} else {
-		u.CodeHash = commitment.EmptyCodeHashArray
+		copy(u.CodeHash[:], commitment.EmptyCodeHashArray[:])
 	}
 
 	if len(encAccount) == 0 && len(code) == 0 {
