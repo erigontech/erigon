@@ -291,6 +291,9 @@ func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) int {
 	if stateObject.code != nil {
 		return len(stateObject.code)
 	}
+	if stateObject.data.CodeHash == emptyCodeHashH {
+		return 0
+	}
 	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
