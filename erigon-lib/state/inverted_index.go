@@ -577,7 +577,9 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		}
 	}
 
+	println("in hist files")
 	for i := 0; i < len(iit.files); i++ {
+		println("start txnum:", iit.files[i].startTxNum, "end txnum:", iit.files[i].endTxNum)
 		if iit.files[i].endTxNum <= txNum {
 			continue
 		}
