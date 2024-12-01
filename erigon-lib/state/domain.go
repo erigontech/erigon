@@ -1626,6 +1626,7 @@ func (dt *DomainRoTx) GetAsOfFile(key []byte, txNum uint64) ([]byte, bool, error
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
+	println(fmt.Sprintf("history seek %+v", v), hOk, err)
 	if err != nil {
 		return nil, false, err
 	}
