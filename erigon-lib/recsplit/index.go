@@ -25,6 +25,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -353,9 +354,23 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	}
 	b := gr.ReadNext(idx.golombParam(m))
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
+	//j := remap16(remix(bucket[i]+salt), m)
+	//rs.offsetBuffer[j] = offsets[i]
+
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
+	arr := idx.ExtractOffsetsArray()
+	slices.Sort(arr)
+	ef := eliasfano32.NewEliasFano(uint64(len(arr)), arr[len(arr)-1])
+	for _, n := range arr {
+		ef.AddOffset(n)
+	}
+	ef.Build()
+	fmt.Printf("dbg: ef %d\n", ef.SerializedSizeInBytes())
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
+	fmt.Printf("[dbg] lookup: bkt=%d\n", remap16(remix(fingerprint+idx.startSeed[level]+b), m))
+	fmt.Printf("[dbg] lookup: %d, %d, %d, %d, %d, %d, %d\n", b, fingerprint, cumKeys, rec, remix(fingerprint+idx.startSeed[level]+b), remap16(remix(fingerprint+idx.startSeed[level]+b), m), found)
+	fmt.Printf("[dbg] all offsets: %d\n", idx.ExtractOffsetsArray())
 	if idx.lessFalsePositives {
 		return found, idx.existence[found] == byte(bucketHash)
 	}
@@ -385,6 +400,24 @@ func (idx *Index) ExtractOffsets() map[uint64]uint64 {
 		pos += idx.bytesPerRec
 	}
 	return m
+}
+func (idx *Index) ExtractOffsetsArray() (offsets []uint64) {
+	pos := 1 + 8 + idx.bytesPerRec
+	for rec := uint64(0); rec < idx.keyCount; rec++ {
+		offset := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
+		offsets = append(offsets, offset)
+		pos += idx.bytesPerRec
+	}
+	return offsets
+}
+func (idx *Index) ExtractOffsetsArrayU32() (offsets []uint32) {
+	pos := 1 + 8 + idx.bytesPerRec
+	for rec := uint64(0); rec < idx.keyCount; rec++ {
+		offset := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
+		offsets = append(offsets, uint32(offset))
+		pos += idx.bytesPerRec
+	}
+	return offsets
 }
 
 func (idx *Index) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error {

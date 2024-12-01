@@ -70,6 +70,7 @@ type RecSplit struct {
 	indexW          *bufio.Writer
 	indexF          *os.File
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
+	enumEf          *eliasfano32.EliasFano // Elias Fano instance for encoding 1-st layer of `Enum=true`
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
 
 	existenceF *os.File
@@ -368,6 +369,7 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 			return err
 		}
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+		fmt.Printf("[dbg] bucketCollector.Collect %d, %d, key=%s, value=%d\n", remap(hi, rs.bucketCount), rs.keysAdded, key, offset)
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
@@ -378,6 +380,7 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 			}
 		}
 	} else {
+		fmt.Printf("[dbg] bucketCollector.Collect %d, %d, key=%s, value=%d\n", remap(hi, rs.bucketCount), rs.keysAdded, key, offset)
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
@@ -475,6 +478,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			}
 			salt++
 		}
+
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
@@ -631,12 +635,15 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.bytesPerRec, len(b), rs.keysAdded, rs.bytesPerRec, rs.indexFile))
 		}
 	}
+
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] write", "file", rs.indexFileName)
 	}
 	if rs.enums && rs.keysAdded > 0 {
+		fmt.Printf("[dbg] build rs.maxOffset=%d\n", rs.maxOffset)
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
 		defer rs.offsetCollector.Close()
+
 		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
 			return err
 		}
