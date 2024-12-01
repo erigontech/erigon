@@ -26,6 +26,7 @@ import (
 	"math"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -91,7 +92,7 @@ type SharedDomains struct {
 	blockNum atomic.Uint64
 	estSize  int
 	trace    bool //nolint
-	//muMaps   sync.RWMutex
+	muMaps   sync.RWMutex
 	//walLock sync.RWMutex
 
 	domains [kv.DomainLen]map[string]dataWithPrevStep
@@ -371,8 +372,8 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	//sd.muMaps.Lock()
-	//defer sd.muMaps.Unlock()
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
 	for i := range sd.domains {
 		sd.domains[i] = map[string]dataWithPrevStep{}
 	}
@@ -386,8 +387,8 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 }
 
 func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
-	// disable mutex - because work on parallel execution postponed after E3 release.
-	//sd.muMaps.Lock()
+	sd.muMaps.Lock()
+	defer sd.muMaps.Unlock()
 	valWithPrevStep := dataWithPrevStep{data: val, prevStep: sd.txNum / sd.aggTx.a.StepSize()}
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Set(key, valWithPrevStep); ok {
@@ -404,12 +405,12 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 		sd.estSize += len(key) + len(val)
 	}
 	sd.domains[domain][key] = valWithPrevStep
-	//sd.muMaps.Unlock()
 }
 
 // get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep uint64, ok bool) {
-	//sd.muMaps.RLock()
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 	keyS := *(*string)(unsafe.Pointer(&key))
 	var dataWithPrevStep dataWithPrevStep
 	//keyS := string(key)
@@ -420,12 +421,11 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep ui
 	}
 	dataWithPrevStep, ok = sd.domains[table][keyS]
 	return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
-	//sd.muMaps.RUnlock()
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
-	//sd.muMaps.RLock()
-	//defer sd.muMaps.RUnlock()
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
@@ -553,8 +553,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 const CodeSizeTableFake = "CodeSize"
 
 func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
-	//sd.muMaps.RLock()
-	//defer sd.muMaps.RUnlock()
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
 
 	for table, list := range readLists {
 		switch table {
@@ -724,6 +724,7 @@ func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
 
 func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
+	fmt.Println("SDB", blockNum)
 	sd.blockNum.Store(blockNum)
 }
 

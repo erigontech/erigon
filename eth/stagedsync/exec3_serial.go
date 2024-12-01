@@ -127,15 +127,17 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			return false, err
 		}
 
+		se.doms.SetTxNum(txTask.TxNum)
+		se.doms.SetBlockNum(txTask.BlockNum)
 		se.outputTxNum.Add(1)
 	}
 
 	return true, nil
 }
 
-func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uint64, useExternalTx bool) (t2 time.Duration, err error) {
+func (se *serialExecutor) commit(ctx context.Context, txNum uint64, useExternalTx bool) (t2 time.Duration, err error) {
 	se.doms.Close()
-	if err = se.execStage.Update(se.applyTx, blockNum); err != nil {
+	if err = se.execStage.Update(se.applyTx, se.outputBlockNum.GetValueUint64()); err != nil {
 		return 0, err
 	}
 
