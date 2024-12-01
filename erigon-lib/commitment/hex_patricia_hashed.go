@@ -1127,6 +1127,7 @@ func updatedNibs(num uint16) string {
 const DepthWithoutNodeHashes = 35 //nolint
 
 func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, depth int) func(nibble int, skip bool) (*cell, error) {
+	hashBeforeBuf := make([]byte, 32)
 	return func(nibble int, skip bool) (*cell, error) {
 		if skip {
 			if _, err := hph.keccak2.Write(b); err != nil {
@@ -1148,7 +1149,8 @@ func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, 
 		}
 
 		loadedBefore := cell.loaded
-		hashBefore := common.Copy(cell.stateHash[:cell.stateHashLen])
+		copy(hashBeforeBuf, cell.stateHash[:cell.stateHashLen])
+		hashBefore := hashBeforeBuf[:cell.stateHashLen]
 
 		cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
 		if err != nil {
@@ -1229,6 +1231,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		fmt.Printf("fold: (row=%d, {%s}, depth=%d) prefix [%x] touchMap: %016b afterMap: %016b \n",
 			row, updatedNibs(hph.touchMap[row]&hph.afterMap[row]), depth, hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
 	}
+
 	switch partsCount {
 	case 0: // Everything deleted
 		if hph.touchMap[row] != 0 {
@@ -1304,6 +1307,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			hph.touchMap[row] |= hph.afterMap[row]
 			bitmap |= hph.afterMap[row]
 		}
+
 		// Calculate total length of all hashes
 		totalBranchLen := 17 - partsCount // For every empty cell, one byte
 		for bitset, j := hph.afterMap[row], 0; bitset != 0; j++ {
