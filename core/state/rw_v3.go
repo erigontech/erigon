@@ -629,9 +629,10 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 }
 
 func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	//if codeHash == emptyCodeHashH { // TODO: how often do we have this case on mainnet/bor-mainnet?
-	//	return nil, nil
-	//}
+	if codeHash == emptyCodeHashH {
+		panic(1)
+		//return nil, nil
+	}
 	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -643,6 +644,10 @@ func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, c
 }
 
 func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	if codeHash == emptyCodeHashH {
+		panic(1)
+		//return nil, nil
+	}
 	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return 0, err
