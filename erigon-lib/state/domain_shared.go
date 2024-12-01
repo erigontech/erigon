@@ -1189,18 +1189,54 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 
-func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
-	var encAccount []byte
-	if sdc.limitReadAsOfTxNum == 0 {
-		encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey, nil)
-		if err != nil {
-			return nil, fmt.Errorf("GetAccount failed: %w", err)
-		}
-	} else {
+func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAccount []byte, err error) {
+	if sdc.limitReadAsOfTxNum > 0 {
 		encAccount, _, err = sdc.sharedDomains.getAsOfFile(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
 		if err != nil {
 			return nil, fmt.Errorf("GetAccount failed: %w", err)
 		}
+		return encAccount, nil
+	}
+	encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("GetAccount failed: %w", err)
+	}
+	return encAccount, nil
+}
+
+func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
+	if sdc.limitReadAsOfTxNum > 0 {
+		code, _, err = sdc.sharedDomains.getAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		if err != nil {
+			return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		}
+		return code, nil
+	}
+	code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+	}
+	return code, nil
+}
+func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
+	if sdc.limitReadAsOfTxNum > 0 {
+		enc, _, err = sdc.sharedDomains.getAsOfFile(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		if err != nil {
+			return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		}
+		return enc, nil
+	}
+	enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+	}
+	return enc, nil
+}
+
+func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
+	encAccount, err := sdc.readAccount(plainKey)
+	if err != nil {
+		return nil, err
 	}
 
 	u = &commitment.Update{CodeHash: commitment.EmptyCodeHashArray}
@@ -1223,14 +1259,9 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 		return u, nil
 	}
 
-	var code []byte
-	if sdc.limitReadAsOfTxNum == 0 {
-		code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey, nil)
-	} else {
-		code, _, err = sdc.sharedDomains.getAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
-	}
+	code, err := sdc.readCode(plainKey)
 	if err != nil {
-		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		return nil, err
 	}
 
 	if len(code) > 0 {
@@ -1250,12 +1281,7 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitme
 
 func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
 	// Look in the summary table first
-	var enc []byte
-	if sdc.limitReadAsOfTxNum == 0 {
-		enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey, nil)
-	} else {
-		enc, _, err = sdc.sharedDomains.getAsOfFile(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
-	}
+	enc, err := sdc.readStorage(plainKey)
 	if err != nil {
 		return nil, err
 	}
