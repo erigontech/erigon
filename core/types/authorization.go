@@ -11,9 +11,9 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 type Authorization struct {

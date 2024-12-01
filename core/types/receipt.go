@@ -26,12 +26,13 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"slices"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 //(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
@@ -272,33 +273,21 @@ func (r *Receipt) statusEncoding() []byte {
 
 // Copy creates a deep copy of the Receipt.
 func (r *Receipt) Copy() *Receipt {
-	postState := make([]byte, len(r.PostState))
-	copy(postState, r.PostState)
-
-	bloom := BytesToBloom(r.Bloom.Bytes())
-
-	logs := make(Logs, 0, len(r.Logs))
-	for _, log := range r.Logs {
-		logs = append(logs, log.Copy())
+	if r == nil {
+		return nil
 	}
-
-	txHash := libcommon.BytesToHash(r.TxHash.Bytes())
-	contractAddress := libcommon.BytesToAddress(r.ContractAddress.Bytes())
-	blockHash := libcommon.BytesToHash(r.BlockHash.Bytes())
-	blockNumber := big.NewInt(0).Set(r.BlockNumber)
-
 	return &Receipt{
 		Type:              r.Type,
-		PostState:         postState,
+		PostState:         slices.Clone(r.PostState),
 		Status:            r.Status,
 		CumulativeGasUsed: r.CumulativeGasUsed,
-		Bloom:             bloom,
-		Logs:              logs,
-		TxHash:            txHash,
-		ContractAddress:   contractAddress,
+		Bloom:             BytesToBloom(r.Bloom.Bytes()),
+		Logs:              r.Logs.Copy(),
+		TxHash:            libcommon.BytesToHash(r.TxHash.Bytes()),
+		ContractAddress:   libcommon.BytesToAddress(r.ContractAddress.Bytes()),
 		GasUsed:           r.GasUsed,
-		BlockHash:         blockHash,
-		BlockNumber:       blockNumber,
+		BlockHash:         libcommon.BytesToHash(r.BlockHash.Bytes()),
+		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,
 	}
 }
@@ -353,9 +342,12 @@ type Receipts []*Receipt
 func (rs Receipts) Len() int { return len(rs) }
 
 func (rs Receipts) Copy() Receipts {
-	rsCopy := make(Receipts, 0, rs.Len())
-	for _, r := range rs {
-		rsCopy = append(rsCopy, r.Copy())
+	if rs == nil {
+		return nil
+	}
+	rsCopy := make(Receipts, rs.Len())
+	for i, r := range rs {
+		rsCopy[i] = r.Copy()
 	}
 	return rsCopy
 }
