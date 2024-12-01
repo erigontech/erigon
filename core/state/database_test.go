@@ -1275,7 +1275,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	sd.SetBlockNum(1)
 
 	oldCodeHash := libcommon.BytesToHash(crypto.Keccak256(oldCode))
-	trieCode, tcErr := r.ReadAccountCode(contract, 1, oldCodeHash)
+	trieCode, tcErr := r.ReadAccountCode(contract, 1)
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
@@ -1287,7 +1287,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	}
 
 	newCodeHash := libcommon.BytesToHash(crypto.Keccak256(newCode))
-	trieCode, tcErr = r.ReadAccountCode(contract, 1, newCodeHash)
+	trieCode, tcErr = r.ReadAccountCode(contract, 1)
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
@@ -1325,11 +1325,11 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	}
 
 	codeHash := libcommon.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
+	codeSize, err := r.ReadAccountCodeSize(contract, 1)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
-	code2, err := r.ReadAccountCode(contract, 1, codeHash)
+	code2, err := r.ReadAccountCode(contract, 1)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
 }
@@ -1368,13 +1368,13 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.EqualValues(t, root, libcommon.CastToHash(r2))
 
 	codeHash := libcommon.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
+	codeSize, err := r.ReadAccountCodeSize(contract, 1)
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
 	assert.NoError(t, tx.Delete(kv.Code, codeHash[:]), nil)
 
-	codeSize2, err := r.ReadAccountCodeSize(contract, 1, codeHash)
+	codeSize2, err := r.ReadAccountCodeSize(contract, 1)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 

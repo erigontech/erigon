@@ -171,7 +171,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case "code":
 		for _, addr := range addrs {
-			code, err := r.ReadAccountCode(libcommon.BytesToAddress(addr), 0, libcommon.Hash{})
+			code, err := r.ReadAccountCode(libcommon.BytesToAddress(addr), 0)
 			if err != nil {
 				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue
