@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"math"
 	"path/filepath"
 	"sync"
@@ -1153,7 +1152,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
 	ok, histTxNum, err := ht.iit.seekInFiles(key, txNum)
-	println(fmt.Sprintf("history seek %d", histTxNum), ok, err, dbg.Stack())
+	println(fmt.Sprintf("history seek histTxNum %d txNum %d", histTxNum, txNum))
 	if err != nil {
 		return nil, false, err
 	}
