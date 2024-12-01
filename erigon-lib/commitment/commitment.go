@@ -1215,7 +1215,7 @@ func (u *Update) Reset() {
 	u.Balance.Clear()
 	u.Nonce = 0
 	u.StorageLen = 0
-	copy(u.CodeHash[:], EmptyCodeHash)
+	u.CodeHash = EmptyCodeHashArray
 }
 
 func (u *Update) Merge(b *Update) {
