@@ -17,8 +17,6 @@
 package state
 
 import (
-	"bytes"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -84,9 +82,6 @@ func (r *CachedReader3) ReadAccountStorage(address common.Address, incarnation u
 }
 
 func (r *CachedReader3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if bytes.Equal(codeHash.Bytes(), emptyCodeHash) {
-		return nil, nil
-	}
 	code, err := r.cache.GetCode(address[:])
 	if len(code) == 0 {
 		return nil, nil
