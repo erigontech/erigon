@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	rlp "github.com/erigontech/erigon-lib/rlp2"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 

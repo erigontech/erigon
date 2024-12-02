@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 )
 
@@ -140,7 +140,7 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	//}
 	return receipt
 }
-func (t *TxTask) Reset() {
+func (t *TxTask) Reset() *TxTask {
 	t.BalanceIncreaseSet = nil
 	returnReadList(t.ReadLists)
 	t.ReadLists = nil
@@ -149,6 +149,9 @@ func (t *TxTask) Reset() {
 	t.Logs = nil
 	t.TraceFroms = nil
 	t.TraceTos = nil
+	t.Error = nil
+	t.Failed = false
+	return t
 }
 
 // TxTaskQueue non-thread-safe priority-queue

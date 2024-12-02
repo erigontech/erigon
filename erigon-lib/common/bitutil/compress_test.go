@@ -21,6 +21,7 @@ package bitutil
 
 import (
 	"bytes"
+	"errors"
 	"math/rand"
 	"testing"
 
@@ -107,7 +108,7 @@ func TestDecodingCycle(t *testing.T) {
 		data := hexutil.MustDecode(tt.input)
 
 		orig, err := bitsetDecodeBytes(data, tt.size)
-		if err != tt.fail {
+		if !errors.Is(err, tt.fail) {
 			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.fail)
 		}
 		if err != nil {
@@ -143,7 +144,7 @@ func TestCompression(t *testing.T) {
 		t.Errorf("decoding mismatch for dense data: have %x, want %x, error %v", data, in, err)
 	}
 	// Check that decompressing a longer input than the target fails
-	if _, err := DecompressBytes([]byte{0xc0, 0x01, 0x01}, 2); err != errExceededTarget {
+	if _, err := DecompressBytes([]byte{0xc0, 0x01, 0x01}, 2); !errors.Is(err, errExceededTarget) {
 		t.Errorf("decoding error mismatch for long data: have %v, want %v", err, errExceededTarget)
 	}
 }
@@ -166,6 +167,7 @@ func BenchmarkEncoding2KBSaturated(b *testing.B) { benchmarkEncoding(b, 2048, 0.
 func BenchmarkEncoding4KBSaturated(b *testing.B) { benchmarkEncoding(b, 4096, 0.5) }
 
 func benchmarkEncoding(b *testing.B, bytes int, fill float64) {
+	b.Helper()
 	// Generate a random slice of bytes to compress
 	random := rand.NewSource(0) // reproducible and comparable
 

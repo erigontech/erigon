@@ -264,34 +264,29 @@ func (be *BranchEncoder) CollectUpdate(
 	return lastNibble, nil
 }
 
+func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
+	n := binary.PutUvarint(be.bitmapBuf[:], size)
+	if _, err := be.buf.Write(be.bitmapBuf[:n]); err != nil {
+		return err
+	}
+	if _, err := be.buf.Write(val); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
-	if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {
+	var encoded [2]byte
+	binary.BigEndian.PutUint16(encoded[:], touchMap)
+	if _, err := be.buf.Write(encoded[:]); err != nil {
 		return nil, 0, err
 	}
-	if err := binary.Write(be.buf, binary.BigEndian, afterMap); err != nil {
+	binary.BigEndian.PutUint16(encoded[:], afterMap)
+	if _, err := be.buf.Write(encoded[:]); err != nil {
 		return nil, 0, err
-	}
-
-	putUvarAndVal := func(size uint64, val []byte) error {
-		n := binary.PutUvarint(be.bitmapBuf[:], size)
-		wn, err := be.buf.Write(be.bitmapBuf[:n])
-		if err != nil {
-			return err
-		}
-		if n != wn {
-			return errors.New("n != wn size")
-		}
-		wn, err = be.buf.Write(val)
-		if err != nil {
-			return err
-		}
-		if len(val) != wn {
-			return errors.New("wn != value size")
-		}
-		return nil
 	}
 
 	var lastNibble int
@@ -331,27 +326,27 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				return nil, 0, err
 			}
 			if fields&fieldExtension != 0 {
-				if err := putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fields&fieldAccountAddr != 0 {
-				if err := putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fields&fieldStorageAddr != 0 {
-				if err := putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fields&fieldHash != 0 {
-				if err := putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fields&fieldStateHash != 0 {
-				if err := putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
 					return nil, 0, err
 				}
 			}

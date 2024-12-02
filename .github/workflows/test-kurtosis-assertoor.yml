@@ -25,10 +25,18 @@ jobs:
         run: |
           docker build -t test/erigon:current .
 
-      - name: Run Kurtosis + assertoor tests
+      - name: Run regular Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-            enclave_name: "kurtosis-run-${{ github.run_id }}"
-            ethereum_package_args: ".github/workflows/kurtosis/config.properties"
+            enclave_name: "kurtosis-run1-${{ github.run_id }}"
+            ethereum_package_args: ".github/workflows/kurtosis/regular-assertoor.io"
+            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            persistent_logs: "true"
+
+      - name: Run Pectra Kurtosis + assertoor tests
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        with:
+            enclave_name: "kurtosis-run2-${{ github.run_id }}"
+            ethereum_package_args: ".github/workflows/kurtosis/pectra.io"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
