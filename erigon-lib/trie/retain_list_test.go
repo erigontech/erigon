@@ -40,6 +40,7 @@ func FakePreimage(hash libcommon.Hash) libcommon.Hash {
 // especially useful for tests which want to manually manipulate the hash
 // databases without worrying about generating and tracking pre-images.
 func NewManualProofRetainer(t *testing.T, acc *accounts.Account, rl *RetainList, keys [][]byte) *ProofRetainer {
+	t.Helper()
 	var accHexKey []byte
 	var storageKeys []libcommon.Hash
 	var storageHexKeys [][]byte
