@@ -65,25 +65,20 @@ func (d *StateDiffDomain) Copy() *StateDiffDomain {
 func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, prevStep uint64) {
 	if d.keys == nil {
 		d.keys = make(map[string][]byte, 16)
-	}
-	if d.prevValues == nil {
 		d.prevValues = make(map[string][]byte, 16)
-	}
-	if d.prevStepBuf == nil {
 		d.prevStepBuf = make([]byte, 8)
 	}
 	binary.BigEndian.PutUint64(d.prevStepBuf, ^prevStep)
 
-	d.keyBuf = append(append(d.keyBuf[:0], key1...), key2...)
-	if _, ok := d.keys[toStringZeroCopy(d.keyBuf)]; !ok {
-		keyCopy := toStringZeroCopy(common.Copy(d.keyBuf))
-		d.keys[keyCopy] = common.Copy(d.prevStepBuf)
+	d.keyBuf = append(append(append(d.keyBuf[:0], key1...), key2...), stepBytes...)
+	key := toStringZeroCopy(d.keyBuf[:len(key1)+len(key2)])
+	if _, ok := d.keys[key]; !ok {
+		d.keys[strings.Clone(key)] = common.Copy(d.prevStepBuf)
 	}
 
-	d.valBuf = append(append(d.valBuf[:0], d.keyBuf...), stepBytes...)
-	valsKeyS := toStringZeroCopy(d.valBuf)
-	if _, ok := d.prevValues[valsKeyS]; !ok {
-		valsKeySCopy := toStringZeroCopy(common.Copy(d.valBuf))
+	valsKey := toStringZeroCopy(d.keyBuf)
+	if _, ok := d.prevValues[valsKey]; !ok {
+		valsKeySCopy := strings.Clone(valsKey)
 		if bytes.Equal(stepBytes, d.prevStepBuf) {
 			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
 		} else {
