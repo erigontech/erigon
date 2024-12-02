@@ -263,9 +263,19 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]DomainEntryDiff {
 const diffChunkKeyLen = 48
 const diffChunkLen = 4*1024 - 32
 
+type threadSafeBuf struct {
+	b []byte
+	sync.Mutex
+}
+
+var writeDiffsetBuf = &threadSafeBuf{}
+
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
-	// Write the diffSet to the database
-	keys := diffSet.SerializeKeys(nil)
+	writeDiffsetBuf.Lock()
+	defer writeDiffsetBuf.Unlock()
+	writeDiffsetBuf.b = diffSet.SerializeKeys(writeDiffsetBuf.b[:0])
+	keys := writeDiffsetBuf.b
+
 	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
