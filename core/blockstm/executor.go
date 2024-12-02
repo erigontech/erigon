@@ -20,7 +20,7 @@ type ExecResult struct {
 }
 
 type ExecTask interface {
-	Execute(mvh *MVHashMap, incarnation int, logger log.Logger) error
+	Execute(mvh *VersionedMap, incarnation int, logger log.Logger) error
 	MVReadList() []ReadDescriptor
 	MVWriteList() []WriteDescriptor
 	MVFullWriteList() []WriteDescriptor
@@ -33,7 +33,7 @@ type ExecTask interface {
 type ExecVersionView struct {
 	ver    Version
 	et     ExecTask
-	mvh    *MVHashMap
+	mvh    *VersionedMap
 	sender common.Address
 }
 
@@ -213,8 +213,8 @@ type ParallelExecutor struct {
 
 	diagExecSuccess, diagExecAbort []int
 
-	// Multi-version hash map
-	mvh *MVHashMap
+	// Multi-version map
+	mvh *VersionedMap
 
 	// Stores the inputs and outputs of the last incardanotion of all transactions
 	lastTxIO *TxnInputOutput
@@ -274,7 +274,7 @@ func NewParallelExecutor(tasks []ExecTask, profile bool, metadata bool) *Paralle
 		validateTasks:      makeStatusManager(0),
 		diagExecSuccess:    make([]int, numTasks),
 		diagExecAbort:      make([]int, numTasks),
-		mvh:                MakeMVHashMap(),
+		mvh:                &VersionedMap{},
 		lastTxIO:           MakeTxnInputOutput(numTasks),
 		txIncarnations:     make([]int, numTasks),
 		estimateDeps:       make(map[int][]int),
@@ -291,23 +291,14 @@ func (pe *ParallelExecutor) Prepare(logger log.Logger) error {
 	prevSenderTx := make(map[common.Address]int)
 
 	for i, t := range pe.tasks {
-		clearPendingFlag := false
-
 		pe.skipCheck[i] = false
 		pe.estimateDeps[i] = make([]int, 0)
 
 		if len(t.Dependencies()) > 0 {
 			for _, val := range t.Dependencies() {
-				clearPendingFlag = true
-
 				pe.execTasks.addDependencies(val, i)
 			}
-
-			if clearPendingFlag {
-				pe.execTasks.clearPending(i)
-
-				clearPendingFlag = false
-			}
+			pe.execTasks.clearPending(i)
 		} else {
 			if tx, ok := prevSenderTx[t.Sender()]; ok {
 				pe.execTasks.addDependencies(tx, i)

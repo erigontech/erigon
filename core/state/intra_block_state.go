@@ -100,7 +100,7 @@ type IntraBlockState struct {
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 
 	// Block-stm related fields
-	mvHashmap   *blockstm.MVHashMap
+	mvHashmap   *blockstm.VersionedMap
 	incarnation int
 	readMap     map[blockstm.Key]blockstm.ReadDescriptor
 	writeMap    map[blockstm.Key]blockstm.WriteDescriptor
@@ -134,19 +134,19 @@ func (ibs *IntraBlockState) GetStateReader() StateReader {
 	return ibs.stateReader
 }
 
-func NewWithMVHashmap(stateReader StateReader, mvhm *blockstm.MVHashMap) *IntraBlockState {
+func NewWithMVHashmap(stateReader StateReader, mvhm *blockstm.VersionedMap) *IntraBlockState {
 	ibs := New(stateReader)
 	ibs.mvHashmap = mvhm
 	ibs.dep = -1
 	return ibs
 }
 
-func (ibs *IntraBlockState) SetMVHashmap(mvhm *blockstm.MVHashMap) {
+func (ibs *IntraBlockState) SetMVHashmap(mvhm *blockstm.VersionedMap) {
 	ibs.mvHashmap = mvhm
 	ibs.dep = -1
 }
 
-func (ibs *IntraBlockState) GetMVHashmap() *blockstm.MVHashMap {
+func (ibs *IntraBlockState) GetMVHashmap() *blockstm.VersionedMap {
 	return ibs.mvHashmap
 }
 

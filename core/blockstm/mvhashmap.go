@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/emirpasic/gods/maps/treemap"
+	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -73,13 +73,9 @@ func NewSubpathKey(addr common.Address, subpath byte) Key {
 	return newKey(addr, common.Hash{}, subpath, subpathType)
 }
 
-type MVHashMap struct {
+type VersionedMap struct {
 	m sync.Map
 	s sync.Map
-}
-
-func MakeMVHashMap() *MVHashMap {
-	return &MVHashMap{}
 }
 
 type WriteCell struct {
@@ -90,7 +86,7 @@ type WriteCell struct {
 
 type TxnIndexCells struct {
 	rw sync.RWMutex
-	tm *treemap.Map
+	tm *btree.Map[int, *WriteCell]
 }
 
 type Version struct {
@@ -98,8 +94,8 @@ type Version struct {
 	Incarnation int
 }
 
-func (mv *MVHashMap) getKeyCells(k Key, fNoKey func(kenc Key) *TxnIndexCells) (cells *TxnIndexCells) {
-	val, ok := mv.m.Load(k)
+func (vm *VersionedMap) getKeyCells(k Key, fNoKey func(kenc Key) *TxnIndexCells) (cells *TxnIndexCells) {
+	val, ok := vm.m.Load(k)
 
 	if !ok {
 		cells = fNoKey(k)
@@ -110,14 +106,14 @@ func (mv *MVHashMap) getKeyCells(k Key, fNoKey func(kenc Key) *TxnIndexCells) (c
 	return
 }
 
-func (mv *MVHashMap) Write(k Key, v Version, data interface{}) {
-	cells := mv.getKeyCells(k, func(kenc Key) (cells *TxnIndexCells) {
+func (vm *VersionedMap) Write(k Key, v Version, data interface{}) {
+	cells := vm.getKeyCells(k, func(kenc Key) (cells *TxnIndexCells) {
 		n := &TxnIndexCells{
 			rw: sync.RWMutex{},
-			tm: treemap.NewWithIntComparator(),
+			tm: &btree.Map[int, *WriteCell]{},
 		}
 		cells = n
-		val, _ := mv.m.LoadOrStore(kenc, n)
+		val, _ := vm.m.LoadOrStore(kenc, n)
 		cells = val.(*TxnIndexCells)
 		return
 	})
@@ -127,45 +123,45 @@ func (mv *MVHashMap) Write(k Key, v Version, data interface{}) {
 	cells.rw.RUnlock()
 
 	if ok {
-		if ci.(*WriteCell).incarnation > v.Incarnation {
+		if ci.incarnation > v.Incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %v, %v",
 				k, v.TxnIndex))
 		}
 
-		ci.(*WriteCell).flag = FlagDone
-		ci.(*WriteCell).incarnation = v.Incarnation
-		ci.(*WriteCell).data = data
+		ci.flag = FlagDone
+		ci.incarnation = v.Incarnation
+		ci.data = data
 	} else {
 		func() {
 			cells.rw.Lock()
 			defer cells.rw.Unlock()
 			if ci, ok = cells.tm.Get(v.TxnIndex); !ok {
-				cells.tm.Put(v.TxnIndex, &WriteCell{
+				cells.tm.Set(v.TxnIndex, &WriteCell{
 					flag:        FlagDone,
 					incarnation: v.Incarnation,
 					data:        data,
 				})
 			} else {
-				ci.(*WriteCell).flag = FlagDone
-				ci.(*WriteCell).incarnation = v.Incarnation
-				ci.(*WriteCell).data = data
+				ci.flag = FlagDone
+				ci.incarnation = v.Incarnation
+				ci.data = data
 			}
 		}()
 	}
 }
 
-func (mv *MVHashMap) ReadStorage(k Key, fallBack func() any) any {
-	data, ok := mv.s.Load(string(k[:]))
+func (vm *VersionedMap) ReadStorage(k Key, fallBack func() any) any {
+	data, ok := vm.s.Load(string(k[:]))
 	if !ok {
 		data = fallBack()
-		data, _ = mv.s.LoadOrStore(string(k[:]), data)
+		data, _ = vm.s.LoadOrStore(string(k[:]), data)
 	}
 
 	return data
 }
 
-func (mv *MVHashMap) MarkEstimate(k Key, txIdx int) {
-	cells := mv.getKeyCells(k, func(_ Key) *TxnIndexCells {
+func (vm *VersionedMap) MarkEstimate(k Key, txIdx int) {
+	cells := vm.getKeyCells(k, func(_ Key) *TxnIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
 
@@ -174,18 +170,18 @@ func (mv *MVHashMap) MarkEstimate(k Key, txIdx int) {
 	if ci, ok := cells.tm.Get(txIdx); !ok {
 		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIdx: %v, path, %x, cells keys: %v", txIdx, k, cells.tm.Keys()))
 	} else {
-		ci.(*WriteCell).flag = FlagEstimate
+		ci.flag = FlagEstimate
 	}
 }
 
-func (mv *MVHashMap) Delete(k Key, txIdx int) {
-	cells := mv.getKeyCells(k, func(_ Key) *TxnIndexCells {
+func (vm *VersionedMap) Delete(k Key, txIdx int) {
+	cells := vm.getKeyCells(k, func(_ Key) *TxnIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
 
 	cells.rw.Lock()
 	defer cells.rw.Unlock()
-	cells.tm.Remove(txIdx)
+	cells.tm.Delete(txIdx)
 }
 
 const (
@@ -224,30 +220,40 @@ func (mvr MVReadResult) Status() int {
 	return MVReadResultNone
 }
 
-func (mv *MVHashMap) Read(k Key, txIdx int) (res MVReadResult) {
+func (vm *VersionedMap) Read(k Key, txIdx int) (res MVReadResult) {
 	res.depIdx = -1
 	res.incarnation = -1
 
-	cells := mv.getKeyCells(k, func(_ Key) *TxnIndexCells {
+	cells := vm.getKeyCells(k, func(_ Key) *TxnIndexCells {
 		return nil
 	})
 	if cells == nil {
 		return
 	}
 
+	var floor = func(i int) (key int, val *WriteCell) {
+		key = -1
+		cells.tm.Descend(i, func(k int, v *WriteCell) bool {
+			key = k
+			val = v
+			return false
+		})
+		return key, val
+	}
+
 	cells.rw.RLock()
-	fk, fv := cells.tm.Floor(txIdx - 1)
+	fk, fv := floor(txIdx - 1)
 	cells.rw.RUnlock()
 
-	if fk != nil && fv != nil {
-		c := fv.(*WriteCell)
+	if fk != -1 && fv != nil {
+		c := fv
 		switch c.flag {
 		case FlagEstimate:
-			res.depIdx = fk.(int)
+			res.depIdx = fk
 			res.value = c.data
 		case FlagDone:
 			{
-				res.depIdx = fk.(int)
+				res.depIdx = fk
 				res.incarnation = c.incarnation
 				res.value = c.data
 			}
@@ -259,20 +265,20 @@ func (mv *MVHashMap) Read(k Key, txIdx int) (res MVReadResult) {
 	return
 }
 
-func (mv *MVHashMap) FlushMVWriteSet(writes []WriteDescriptor) {
+func (vm *VersionedMap) FlushMVWriteSet(writes []WriteDescriptor) {
 	for _, v := range writes {
-		mv.Write(v.Path, v.V, v.Val)
+		vm.Write(v.Path, v.V, v.Val)
 	}
 }
 
-func ValidateVersion(txIdx int, lastInputOutput *TxnInputOutput, versionedData *MVHashMap) (valid bool) {
+func ValidateVersion(txIdx int, lastInputOutput *TxnInputOutput, versionedData *VersionedMap) (valid bool) {
 	valid = true
 
 	for _, rd := range lastInputOutput.ReadSet(txIdx) {
 		mvResult := versionedData.Read(rd.Path, txIdx)
 		switch mvResult.Status() {
 		case MVReadResultDone:
-			// Having a write record for a path in MVHashmap doesn't necessarily mean there is a conflict, because MVHashmap
+			// Having a write record for a path in VersionedMap doesn't necessarily mean there is a conflict, because VersionedMap
 			// is a superset of the actual write set.
 			// Check if the write record is actually in write set. If not, skip the key.
 			// if mvResult.depIdx >= 0 && !lastInputOutput.HasWritten(mvResult.depIdx, rd.Path) {
@@ -288,7 +294,7 @@ func ValidateVersion(txIdx int, lastInputOutput *TxnInputOutput, versionedData *
 		case MVReadResultNone:
 			valid = rd.Kind == ReadKindStorage // feels like an assertion?
 		default:
-			panic(fmt.Errorf("should not happen - undefined mv read status: %ver", mvResult.Status()))
+			panic(fmt.Errorf("should not happen - undefined vm read status: %ver", mvResult.Status()))
 		}
 
 		if !valid {

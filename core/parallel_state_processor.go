@@ -74,7 +74,7 @@ type ExecutionTask struct {
 	ctx         context.Context
 }
 
-func (task *ExecutionTask) Execute(mvh *blockstm.MVHashMap, incarnation int, logger log.Logger) (err error) {
+func (task *ExecutionTask) Execute(mvh *blockstm.VersionedMap, incarnation int, logger log.Logger) (err error) {
 	if task.dbtx == nil {
 		task.dbtx, err = task.db.BeginRo(task.ctx)
 		if err != nil {
