@@ -646,7 +646,6 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	br, bw := blocksIO(db, logger)
 	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
-	chainConfig, _ := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
@@ -701,7 +700,6 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer agg.Close()
 	br, bw := blocksIO(db, logger)
 	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
-	chainConfig, _ := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
 	if integritySlow {
 		if err := db.View(ctx, func(tx kv.Tx) error {
