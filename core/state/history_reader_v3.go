@@ -87,20 +87,17 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnatio
 	return enc, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if codeHash == emptyCodeHashH {
-		return nil, nil
-	}
+func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, code)
 	}
 	return code, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
 	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
 	return len(enc), err
 }
