@@ -51,7 +51,7 @@ func ResetState(db kv.RwDB, agg *state.Aggregator, ctx context.Context, chain st
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -144,7 +144,7 @@ func ResetPolygonSync(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services
 		}
 	}
 
-	if err := ResetBlocks(tx, db, agg, br, bw, dirs, cc, logger); err != nil {
+	if err := ResetBlocks(tx, db, agg, br, bw, dirs, logger); err != nil {
 		return err
 	}
 

@@ -655,7 +655,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 			}
 		}
 		dirs := datadir.New(datadirCli)
-		if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
+		if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, logger); err != nil {
 			return fmt.Errorf("resetting blocks: %w", err)
 		}
 		ac := agg.BeginFilesRo()
@@ -721,7 +721,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
-			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, *chainConfig, logger); err != nil {
+			if err := reset2.ResetBlocks(tx, db, agg, br, bw, dirs, logger); err != nil {
 				return err
 			}
 			return nil
