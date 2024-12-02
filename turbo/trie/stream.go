@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlphacks"
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
 // StreamItem is an enum type for values that help distinguish different
