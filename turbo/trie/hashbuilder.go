@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/rlphacks"
 	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding

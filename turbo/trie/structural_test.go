@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon-lib/rlphacks"
 )
 
 func TestV2HashBuilding(t *testing.T) {
