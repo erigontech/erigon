@@ -118,6 +118,8 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 			op = &OperatorCode{}
 		case OpBranch:
 			op = &OperatorBranch{}
+		case OpSMTLeaf:
+			op = &OperatorSMTLeafValue{}
 		case OpEmptyRoot:
 			op = &OperatorEmptyRoot{}
 		case OpExtension:
@@ -173,81 +175,98 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 			op = w.Operators[i]
 		}
 		if i >= len(w2.Operators) {
-			fmt.Fprintf(output, "unexpected o1[%d] = %T %v; o2[%d] = nil\n", i, op, op, i)
+			fmt.Fprintf(output, "missing in o2: o1[%d] = %T %v;\n", i, op, op)
 			continue
 		}
+		op2 := w2.Operators[i]
 		switch o1 := op.(type) {
 		case *OperatorBranch:
-			o2, ok := w2.Operators[i].(*OperatorBranch)
+			o2, ok := op2.(*OperatorBranch)
 			if !ok {
-				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
-			}
-			if o1.Mask != o2.Mask {
-				fmt.Fprintf(output, "o1[%d].Mask = %v; o2[%d].Mask = %v", i, o1.Mask, i, o2.Mask)
+				fmt.Fprintf(output, "OperatorBranch: o1[%d] = %T; o2[%d] = %T\n", i, o1, i, op2)
+			} else if o1.Mask != o2.Mask {
+				fmt.Fprintf(output, "OperatorBranch: o1[%d].Mask = %v; o2[%d].Mask = %v", i, o1.Mask, i, o2.Mask)
 			}
 		case *OperatorHash:
-			o2, ok := w2.Operators[i].(*OperatorHash)
+			o2, ok := op2.(*OperatorHash)
 			if !ok {
-				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
-			}
-			if !bytes.Equal(o1.Hash.Bytes(), o2.Hash.Bytes()) {
-				fmt.Fprintf(output, "o1[%d].Hash = %s; o2[%d].Hash = %s\n", i, o1.Hash.Hex(), i, o2.Hash.Hex())
+				fmt.Fprintf(output, "OperatorHash: o1[%d] = %T; o2[%d] = %T\n", i, o1, i, op2)
+			} else if !bytes.Equal(o1.Hash.Bytes(), o2.Hash.Bytes()) {
+				fmt.Fprintf(output, "OperatorHash: o1[%d].Hash = %s; o2[%d].Hash = %s\n", i, o1.Hash.Hex(), i, o2.Hash.Hex())
 			}
 		case *OperatorCode:
-			o2, ok := w2.Operators[i].(*OperatorCode)
+			o2, ok := op2.(*OperatorCode)
 			if !ok {
-				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
-			}
-			if !bytes.Equal(o1.Code, o2.Code) {
-				fmt.Fprintf(output, "o1[%d].Code = %x; o2[%d].Code = %x\n", i, o1.Code, i, o2.Code)
+				fmt.Fprintf(output, "OperatorCode: o1[%d] = %T; o2[%d] = %T\n", i, o1, i, op2)
+			} else if !bytes.Equal(o1.Code, o2.Code) {
+				fmt.Fprintf(output, "OperatorCode: o1[%d].Code = %x; o2[%d].Code = %x\n", i, o1.Code, i, o2.Code)
 			}
 		case *OperatorEmptyRoot:
-			o2, ok := w2.Operators[i].(*OperatorEmptyRoot)
+			_, ok := op2.(*OperatorEmptyRoot)
 			if !ok {
-				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
+				fmt.Fprintf(output, "OperatorEmptyRoot: o1[%d] = %T; o2[%d] = %T\n", i, o1, i, op2)
 			}
 		case *OperatorExtension:
-			o2, ok := w2.Operators[i].(*OperatorExtension)
+			o2, ok := op2.(*OperatorExtension)
 			if !ok {
-				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
-			}
-			if !bytes.Equal(o1.Key, o2.Key) {
-				fmt.Fprintf(output, "extension o1[%d].Key = %x; o2[%d].Key = %x\n", i, o1.Key, i, o2.Key)
+				fmt.Fprintf(output, "OperatorExtension: o1[%d] = %T; o2[%d] = %T\n", i, o1, i, op2)
+			} else if !bytes.Equal(o1.Key, o2.Key) {
+				fmt.Fprintf(output, "OperatorExtension: o1[%d].Key = %x; o2[%d].Key = %x\n", i, o1.Key, i, o2.Key)
 			}
 		case *OperatorLeafAccount:
-			o2, ok := w2.Operators[i].(*OperatorLeafAccount)
+			o2, ok := op2.(*OperatorLeafAccount)
 			if !ok {
-				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
-			}
-			if !bytes.Equal(o1.Key, o2.Key) {
-				fmt.Fprintf(output, "leafAcc o1[%d].Key = %x; o2[%d].Key = %x\n", i, o1.Key, i, o2.Key)
-			}
-			if o1.Nonce != o2.Nonce {
-				fmt.Fprintf(output, "leafAcc o1[%d].Nonce = %v; o2[%d].Nonce = %v\n", i, o1.Nonce, i, o2.Nonce)
-			}
-			if o1.Balance.String() != o2.Balance.String() {
-				fmt.Fprintf(output, "leafAcc o1[%d].Balance = %v; o2[%d].Balance = %v\n", i, o1.Balance.String(), i, o2.Balance.String())
-			}
-			if o1.HasCode != o2.HasCode {
-				fmt.Fprintf(output, "leafAcc o1[%d].HasCode = %v; o2[%d].HasCode = %v\n", i, o1.HasCode, i, o2.HasCode)
-			}
-			if o1.HasStorage != o2.HasStorage {
-				fmt.Fprintf(output, "leafAcc o1[%d].HasStorage = %v; o2[%d].HasStorage = %v\n", i, o1.HasStorage, i, o2.HasStorage)
+				fmt.Fprintf(output, "OperatorLeafAccount: o1[%d] = %T; o2[%d] = %T\n", i, o1, i, op2)
+			} else {
+				if !bytes.Equal(o1.Key, o2.Key) {
+					fmt.Fprintf(output, "OperatorLeafAccount: o1[%d].Key = %x; o2[%d].Key = %x\n", i, o1.Key, i, o2.Key)
+				}
+				if o1.Nonce != o2.Nonce {
+					fmt.Fprintf(output, "OperatorLeafAccount: o1[%d].Nonce = %v; o2[%d].Nonce = %v\n", i, o1.Nonce, i, o2.Nonce)
+				}
+				if o1.Balance.String() != o2.Balance.String() {
+					fmt.Fprintf(output, "OperatorLeafAccount: o1[%d].Balance = %v; o2[%d].Balance = %v\n", i, o1.Balance.String(), i, o2.Balance.String())
+				}
+				if o1.HasCode != o2.HasCode {
+					fmt.Fprintf(output, "OperatorLeafAccount: o1[%d].HasCode = %v; o2[%d].HasCode = %v\n", i, o1.HasCode, i, o2.HasCode)
+				}
+				if o1.HasStorage != o2.HasStorage {
+					fmt.Fprintf(output, "OperatorLeafAccount: o1[%d].HasStorage = %v; o2[%d].HasStorage = %v\n", i, o1.HasStorage, i, o2.HasStorage)
+				}
 			}
 		case *OperatorLeafValue:
-			o2, ok := w2.Operators[i].(*OperatorLeafValue)
+			o2, ok := op2.(*OperatorLeafValue)
 			if !ok {
-				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
+				fmt.Fprintf(output, "OperatorLeafValue: o1[%d] = %T; o2[%d] = %T\n", i, o1, i, op2)
+			} else {
+				if !bytes.Equal(o1.Key, o2.Key) {
+					fmt.Fprintf(output, "OperatorLeafValue: o1[%d].Key = %x; o2[%d].Key = %x\n", i, o1.Key, i, o2.Key)
+				}
+				if !bytes.Equal(o1.Value, o2.Value) {
+					fmt.Fprintf(output, "OperatorLeafValue: o1[%d].Value = %x; o2[%d].Value = %x\n", i, o1.Value, i, o2.Value)
+				}
 			}
-			if !bytes.Equal(o1.Key, o2.Key) {
-				fmt.Fprintf(output, "leafVal o1[%d].Key = %x; o2[%d].Key = %x\n", i, o1.Key, i, o2.Key)
+		case *OperatorSMTLeafValue:
+			o2, ok := op2.(*OperatorSMTLeafValue)
+			if !ok {
+				fmt.Fprintf(output, "OperatorSMTLeafValue: o1[%d] = %T; o2[%d] = %T\n", i, o1, i, op2)
+			} else {
+				if !bytes.Equal(o1.Address, o2.Address) {
+					fmt.Fprintf(output, "OperatorSMTLeafValue: o1[%d].Address = %x; o2[%d].Address = %x\n", i, o1.Address, i, o2.Address)
+				}
+				if !bytes.Equal(o1.StorageKey, o2.StorageKey) {
+					fmt.Fprintf(output, "OperatorSMTLeafValue: o1[%d].StorageKey = %x; o2[%d].StorageKey = %x\n", i, o1.StorageKey, i, o2.StorageKey)
+				}
+				if !bytes.Equal(o1.Value, o2.Value) {
+					fmt.Fprintf(output, "OperatorSMTLeafValue: o1[%d].Value = %x; o2[%d].Value = %x\n", i, o1.Value, i, o2.Value)
+				}
+				if o1.NodeType != o2.NodeType {
+					fmt.Fprintf(output, "OperatorSMTLeafValue: o1[%d].NodeType = %d; o2[%d].NodeType = %d\n", i, o1.NodeType, i, o2.NodeType)
+				}
 			}
-			if !bytes.Equal(o1.Value, o2.Value) {
-				fmt.Fprintf(output, "leafVal o1[%d].Value = %x; o2[%d].Value = %x\n", i, o1.Value, i, o2.Value)
-			}
+
 		default:
-			o2 := w2.Operators[i]
-			fmt.Fprintf(output, "unexpected o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
+			fmt.Fprintf(output, "unexpected operator: o1[%d] = %T; o2[%d] = %T\n", i, o1, i, op2)
 		}
 	}
 }

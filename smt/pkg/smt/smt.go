@@ -718,7 +718,6 @@ func (s *RoSMT) traverse(ctx context.Context, node *big.Int, action TraverseActi
 		childPrefix[len(prefix)] = byte(i)
 		err := s.traverse(ctx, child.ToBigInt(), action, childPrefix)
 		if err != nil {
-			fmt.Println(err)
 			return err
 		}
 	}

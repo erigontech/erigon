@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -251,4 +252,30 @@ func ReadReceipts_zkEvm(db kv.Tx, block *types.Block, senders []libcommon.Addres
 		return nil
 	}
 	return receipts
+}
+
+func ReadHeaderByNumber_zkevm(db kv.Getter, number uint64) (header *types.Header, err error) {
+	hash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("ReadCanonicalHash: %w", err)
+	}
+	if hash == (common.Hash{}) {
+		return nil, nil
+	}
+
+	return ReadHeader_zkevm(db, hash, number)
+}
+
+// ReadHeader retrieves the block header corresponding to the hash.
+func ReadHeader_zkevm(db kv.Getter, hash common.Hash, number uint64) (header *types.Header, err error) {
+	data := ReadHeaderRLP(db, hash, number)
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	header = new(types.Header)
+	if err := rlp.Decode(bytes.NewReader(data), header); err != nil {
+		return nil, fmt.Errorf("invalid block header RLP hash: %v, err: %w", hash, err)
+	}
+	return header, nil
 }

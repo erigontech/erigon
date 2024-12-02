@@ -740,7 +740,7 @@ type TrieStateWriter struct {
 	tds *TrieDbState
 }
 
-func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
+func (tds *TrieDbState) NewTrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
 }
 

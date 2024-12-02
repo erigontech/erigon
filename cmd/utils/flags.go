@@ -773,6 +773,16 @@ var (
 		Usage: "Mock the witness generation",
 		Value: false,
 	}
+	WitnessCacheEnable = cli.BoolFlag{
+		Name:  "zkevm.witness-cache-enable",
+		Usage: "Enable witness cache",
+		Value: false,
+	}
+	WitnessCacheLimit = cli.UintFlag{
+		Name:  "zkevm.witness-cache-limit",
+		Usage: "Amount of blocks behind the last executed one to keep witnesses for. Needs a lot of HDD space. Default value 10 000.",
+		Value: 10000,
+	}
 	WitnessContractInclusion = cli.StringFlag{
 		Name:  "zkevm.witness-contract-inclusion",
 		Usage: "Contracts that will have all of their storage added to the witness every time",

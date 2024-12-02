@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/smt/pkg/db"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/status-im/keycard-go/hexutils"
 )
 
 // BuildWitness creates a witness from the SMT
-func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Witness, error) {
+func (s *RoSMT) BuildWitness(rd trie.RetainDecider, ctx context.Context) (*trie.Witness, error) {
 	operands := make([]trie.WitnessOperator, 0)
 
-	root, err := s.Db.GetLastRoot()
+	root, err := s.DbRo.GetLastRoot()
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +48,7 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 			}
 
 			if !retain {
-				h := libcommon.BigToHash(k.ToBigInt())
+				h := common.BigToHash(k.ToBigInt())
 				hNode := trie.OperatorHash{Hash: h}
 				operands = append(operands, &hNode)
 				return false, nil
@@ -55,12 +56,17 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 		}
 
 		if v.IsFinalNode() {
-			actualK, err := s.Db.GetHashKey(k)
-			if err != nil {
+			actualK, err := s.DbRo.GetHashKey(k)
+			if err == db.ErrNotFound {
+				h := common.BigToHash(k.ToBigInt())
+				hNode := trie.OperatorHash{Hash: h}
+				operands = append(operands, &hNode)
+				return false, nil
+			} else if err != nil {
 				return false, err
 			}
 
-			keySource, err := s.Db.GetKeySource(actualK)
+			keySource, err := s.DbRo.GetKeySource(actualK)
 			if err != nil {
 				return false, err
 			}
@@ -71,14 +77,14 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 			}
 
 			valHash := v.Get4to8()
-			v, err := s.Db.Get(*valHash)
+			v, err := s.DbRo.Get(*valHash)
 			if err != nil {
 				return false, err
 			}
 
 			vInBytes := utils.ArrayBigToScalar(utils.BigIntArrayFromNodeValue8(v.GetNodeValue8())).Bytes()
 			if t == utils.SC_CODE {
-				code, err := s.Db.GetCode(vInBytes)
+				code, err := s.DbRo.GetCode(vInBytes)
 				if err != nil {
 					return false, err
 				}
@@ -86,11 +92,15 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 				operands = append(operands, &trie.OperatorCode{Code: code})
 			}
 
+			storageKeyBytes := storage.Bytes()
+			if t != utils.SC_STORAGE {
+				storageKeyBytes = []byte{}
+			}
 			// fmt.Printf("Node hash: %s, Node type: %d, address %x, storage %x, value %x\n", utils.ConvertBigIntToHex(k.ToBigInt()), t, addr, storage, utils.ArrayBigToScalar(value8).Bytes())
 			operands = append(operands, &trie.OperatorSMTLeafValue{
 				NodeType:   uint8(t),
 				Address:    addr.Bytes(),
-				StorageKey: storage.Bytes(),
+				StorageKey: storageKeyBytes,
 				Value:      vInBytes,
 			})
 			return false, nil
@@ -118,10 +128,18 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 }
 
 // BuildSMTfromWitness builds SMT from witness
-func BuildSMTfromWitness(w *trie.Witness) (*SMT, error) {
+func BuildSMTFromWitness(w *trie.Witness) (*SMT, error) {
 	// using memdb
 	s := NewSMT(nil, false)
 
+	if err := AddWitnessToSMT(s, w); err != nil {
+		return nil, fmt.Errorf("AddWitnessToSMT: %w", err)
+	}
+
+	return s, nil
+}
+
+func AddWitnessToSMT(s *SMT, w *trie.Witness) error {
 	balanceMap := make(map[string]*big.Int)
 	nonceMap := make(map[string]*big.Int)
 	contractMap := make(map[string]string)
@@ -135,7 +153,7 @@ func BuildSMTfromWitness(w *trie.Witness) (*SMT, error) {
 
 	type nodeHash struct {
 		path []int
-		hash libcommon.Hash
+		hash common.Hash
 	}
 
 	nodeHashes := make([]nodeHash, 0)
@@ -144,8 +162,7 @@ func BuildSMTfromWitness(w *trie.Witness) (*SMT, error) {
 		switch op := operator.(type) {
 		case *trie.OperatorSMTLeafValue:
 			valScaler := big.NewInt(0).SetBytes(op.Value)
-			addr := libcommon.BytesToAddress(op.Address)
-
+			addr := common.BytesToAddress(op.Address)
 			switch op.NodeType {
 			case utils.KEY_BALANCE:
 				balanceMap[addr.String()] = valScaler
@@ -165,7 +182,6 @@ func BuildSMTfromWitness(w *trie.Witness) (*SMT, error) {
 
 				storageMap[addr.String()][stKey] = valScaler.String()
 			}
-
 			path = path[:len(path)-1]
 			NodeChildCountMap[intArrayToString(path)] += 1
 
@@ -177,12 +193,12 @@ func BuildSMTfromWitness(w *trie.Witness) (*SMT, error) {
 			}
 
 		case *trie.OperatorCode:
-			addr := libcommon.BytesToAddress(w.Operators[i+1].(*trie.OperatorSMTLeafValue).Address)
+			addr := common.BytesToAddress(w.Operators[i+1].(*trie.OperatorSMTLeafValue).Address)
 
 			code := hexutils.BytesToHex(op.Code)
 			if len(code) > 0 {
 				if err := s.Db.AddCode(hexutils.HexToBytes(code)); err != nil {
-					return nil, err
+					return err
 				}
 				code = fmt.Sprintf("0x%s", code)
 			}
@@ -212,7 +228,6 @@ func BuildSMTfromWitness(w *trie.Witness) (*SMT, error) {
 			pathCopy := make([]int, len(path))
 			copy(pathCopy, path)
 			nodeHashes = append(nodeHashes, nodeHash{path: pathCopy, hash: op.Hash})
-
 			path = path[:len(path)-1]
 			NodeChildCountMap[intArrayToString(path)] += 1
 
@@ -225,57 +240,52 @@ func BuildSMTfromWitness(w *trie.Witness) (*SMT, error) {
 
 		default:
 			// Unsupported operator type
-			return nil, fmt.Errorf("unsupported operator type: %T", op)
+			return fmt.Errorf("unsupported operator type: %T", op)
 		}
 	}
 
 	for _, nodeHash := range nodeHashes {
-		_, err := s.InsertHashNode(nodeHash.path, nodeHash.hash.Big())
+		// should not replace with hash node if there are nodes under it on the current smt
+		// we would lose needed data i we replace it with a hash node
+		node, err := s.GetNodeAtPath(nodeHash.path)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("GetNodeAtPath: %w", err)
+		}
+		if node != nil {
+			continue
+		}
+		if _, err := s.InsertHashNode(nodeHash.path, nodeHash.hash.Big()); err != nil {
+			return fmt.Errorf("InsertHashNode: %w", err)
 		}
 
-		_, err = s.Db.GetLastRoot()
-		if err != nil {
-			return nil, err
+		if _, err = s.Db.GetLastRoot(); err != nil {
+			return fmt.Errorf("GetLastRoot: %w", err)
 		}
 	}
 
 	for addr, balance := range balanceMap {
-		_, err := s.SetAccountBalance(addr, balance)
-		if err != nil {
-			return nil, err
+		if _, err := s.SetAccountBalance(addr, balance); err != nil {
+			return fmt.Errorf("SetAccountBalance: %w", err)
 		}
 	}
 
 	for addr, nonce := range nonceMap {
-		_, err := s.SetAccountNonce(addr, nonce)
-		if err != nil {
-			return nil, err
+		if _, err := s.SetAccountNonce(addr, nonce); err != nil {
+			return fmt.Errorf("SetAccountNonce: %w", err)
 		}
 	}
 
 	for addr, code := range contractMap {
-		err := s.SetContractBytecode(addr, code)
-		if err != nil {
-			return nil, err
+		if err := s.SetContractBytecode(addr, code); err != nil {
+			return fmt.Errorf("SetContractBytecode: %w", err)
 		}
 	}
 
 	for addr, storage := range storageMap {
-		_, err := s.SetContractStorage(addr, storage, nil)
-		if err != nil {
-			fmt.Println("error : unable to set contract storage", err)
+		if _, err := s.SetContractStorage(addr, storage, nil); err != nil {
+			return fmt.Errorf("SetContractStorage: %w", err)
 		}
 	}
 
-	return s, nil
-}
-
-func intArrayToString(a []int) string {
-	s := ""
-	for _, v := range a {
-		s += fmt.Sprintf("%d", v)
-	}
-	return s
+	return nil
 }

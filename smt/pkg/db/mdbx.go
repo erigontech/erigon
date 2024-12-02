@@ -252,7 +252,7 @@ func (m *EriRoDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
 	}
 
 	if data == nil {
-		return nil, fmt.Errorf("key %x not found", keyConc.Bytes())
+		return nil, ErrNotFound
 	}
 
 	return data, nil

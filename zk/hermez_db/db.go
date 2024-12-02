@@ -51,7 +51,8 @@ const FORK_HISTORY = "fork_history"                                     // index
 const JUST_UNWOUND = "just_unwound"                                     // batch number -> true
 const PLAIN_STATE_VERSION = "plain_state_version"                       // batch number -> true
 const ERIGON_VERSIONS = "erigon_versions"                               // erigon version -> timestamp of startup
-const BATCH_ENDS = "batch_ends"                                         //
+const BATCH_ENDS = "batch_ends"                                         // batch number -> true
+const WITNESS_CACHE = "witness_cache"                                   // block number -> witness for 1 block
 
 var HermezDbTables = []string{
 	L1VERIFICATIONS,
@@ -88,6 +89,7 @@ var HermezDbTables = []string{
 	PLAIN_STATE_VERSION,
 	ERIGON_VERSIONS,
 	BATCH_ENDS,
+	WITNESS_CACHE,
 }
 
 type HermezDb struct {
@@ -1886,4 +1888,21 @@ func (db *HermezDbReader) getForkIntervals(forkIdFilter *uint64) ([]types.ForkIn
 	})
 
 	return forkIntervals, nil
+}
+
+func (db *HermezDb) WriteWitnessCache(blockNo uint64, witnessBytes []byte) error {
+	key := Uint64ToBytes(blockNo)
+	return db.tx.Put(WITNESS_CACHE, key, witnessBytes)
+}
+
+func (db *HermezDbReader) GetWitnessCache(blockNo uint64) ([]byte, error) {
+	v, err := db.tx.GetOne(WITNESS_CACHE, Uint64ToBytes(blockNo))
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (db *HermezDb) DeleteWitnessCaches(from, to uint64) error {
+	return db.deleteFromBucketWithUintKeysRange(WITNESS_CACHE, from, to)
 }

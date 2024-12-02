@@ -9,6 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 )
 
+var (
+	ErrNotFound = fmt.Errorf("key not found")
+)
+
 type MemDb struct {
 	Db          map[string][]string
 	DbAccVal    map[string][]string
@@ -184,7 +188,7 @@ func (m *MemDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
 	s, ok := m.DbKeySource[keyConc.String()]
 
 	if !ok {
-		return nil, fmt.Errorf("key not found")
+		return nil, ErrNotFound
 	}
 
 	return s, nil
@@ -224,7 +228,7 @@ func (m *MemDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 	s, ok := m.DbHashKey[k]
 
 	if !ok {
-		return utils.NodeKey{}, fmt.Errorf("key not found")
+		return utils.NodeKey{}, ErrNotFound
 	}
 
 	nv := big.NewInt(0).SetBytes(s)
@@ -243,7 +247,7 @@ func (m *MemDb) GetCode(codeHash []byte) ([]byte, error) {
 	s, ok := m.DbCode["0x"+hex.EncodeToString(codeHash)]
 
 	if !ok {
-		return nil, fmt.Errorf("key not found")
+		return nil, ErrNotFound
 	}
 
 	return s, nil
