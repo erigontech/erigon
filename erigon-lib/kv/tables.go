@@ -77,36 +77,6 @@ const PlainState = "PlainState"
 // value - code hash
 const PlainContractCode = "PlainCodeHash"
 
-/*
-AccountChangeSet and StorageChangeSet - of block N store values of state before block N changed them.
-Because values "after" change stored in PlainState.
-Logical format:
-
-	key - blockNum_u64 + key_in_plain_state
-	value - value_in_plain_state_before_blockNum_changes
-
-Example: If block N changed account A from value X to Y. Then:
-
-	AccountChangeSet has record: bigEndian(N) + A -> X
-	PlainState has record: A -> Y
-
-See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
-
-As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
-MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
-Both buckets are DupSort-ed and have physical format:
-AccountChangeSet:
-
-	key - blockNum_u64
-	value - address + account(encoded)
-
-StorageChangeSet:
-
-	key - blockNum_u64 + address + incarnation_u64
-	value - plain_storage_key + value
-*/
-const AccountChangeSet = "AccountChangeSet"
-const StorageChangeSet = "StorageChangeSet"
 const ChangeSets3 = "ChangeSets3"
 
 const (

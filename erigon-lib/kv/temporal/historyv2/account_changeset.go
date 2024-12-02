@@ -23,9 +23,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 )
 
-type Encoder func(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
-type Decoder func(dbKey, dbValue []byte) (blockN uint64, k, v []byte, err error)
-
 func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte, error) {
 	blockN := binary.BigEndian.Uint64(dbKey)
 	if len(dbValue) < length.Addr {
