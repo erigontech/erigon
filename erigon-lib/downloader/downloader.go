@@ -2473,35 +2473,34 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		}()
 	}
 
-	{
-		g, ctx := errgroup.WithContext(ctx)
-		// torrent lib internally limiting amount of hashers per file
-		// set limit here just to make load predictable, not to control Disk/CPU consumption
-		g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
-		for _, t := range toVerify {
-			t := t
-			g.Go(func() error {
-				defer completedFiles.Add(1)
-				if failFast {
-					return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
+	g, context := errgroup.WithContext(ctx)
+	// torrent lib internally limiting amount of hashers per file
+	// set limit here just to make load predictable, not to control Disk/CPU consumption
+	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+	for _, t := range toVerify {
+		t := t
+		g.Go(func() error {
+			defer completedFiles.Add(1)
+			if failFast {
+				return VerifyFileFailFast(context, t, d.SnapDir(), completedPieces)
+			}
+
+			err := ScheduleVerifyFile(context, t, completedPieces)
+
+			if err != nil || !t.Complete.Bool() {
+				if err := d.db.Update(context, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
+					return fmt.Errorf("verify data: %s: reset failed: %w", t.Name(), err)
 				}
+			}
 
-				err := ScheduleVerifyFile(ctx, t, completedPieces)
-
-				if err != nil || !t.Complete.Bool() {
-					if err := d.db.Update(ctx, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
-						return fmt.Errorf("verify data: %s: reset failed: %w", t.Name(), err)
-					}
-				}
-
-				return err
-			})
-		}
-
-		if err := g.Wait(); err != nil {
 			return err
-		}
+		})
 	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
