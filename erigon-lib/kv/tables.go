@@ -356,8 +356,6 @@ var ChaindataTables = []string{
 	EthTx,
 	TrieOfAccounts,
 	TrieOfStorage,
-	HashedAccountsDeprecated,
-	HashedStorageDeprecated,
 	HeaderCanonical,
 	Headers,
 	HeaderTD,
@@ -457,6 +455,11 @@ var ChaindataTables = []string{
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
+
+	AccountChangeSetDeprecated,
+	StorageChangeSetDeprecated,
+	HashedAccountsDeprecated,
+	HashedStorageDeprecated,
 }
 
 const (
