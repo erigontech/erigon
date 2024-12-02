@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 

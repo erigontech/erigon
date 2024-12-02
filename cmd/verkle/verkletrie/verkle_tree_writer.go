@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/turbo/trie/vtree"
 )
 
