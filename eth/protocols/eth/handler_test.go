@@ -31,13 +31,13 @@ import (
 	"github.com/erigontech/erigon-lib/direct"
 	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -91,7 +91,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	}
 	// Assemble the test environment
 	m := mockWithGenerator(t, 4, generator)
-	receiptsGetter := receipts.NewGenerator(32, m.BlockReader, m.Engine)
+	receiptsGetter := receipts.NewGenerator(m.BlockReader, m.Engine)
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []libcommon.Hash

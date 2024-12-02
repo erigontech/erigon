@@ -25,16 +25,16 @@ import (
 	"net"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/forkid"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/rlpx"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // https://github.com/ethereum/devp2p/blob/master/rlpx.md#p2p-capability

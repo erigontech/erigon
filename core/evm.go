@@ -138,6 +138,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uin
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr libcommon.Address, amount *uint256.Int) bool {
-	return !db.GetBalance(addr).Lt(amount)
+func CanTransfer(db evmtypes.IntraBlockState, addr libcommon.Address, amount *uint256.Int) (bool, error) {
+	balance, err := db.GetBalance(addr)
+	if err != nil {
+		return false, err
+	}
+	return !balance.Lt(amount), nil
 }

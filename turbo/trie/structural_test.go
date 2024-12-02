@@ -35,8 +35,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlphacks"
 )
 
 func TestV2HashBuilding(t *testing.T) {
@@ -335,8 +335,8 @@ func TestAccountsOnly(t *testing.T) {
 		{k: common.FromHex("10002a312d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: common.FromHex("01")},
 		{k: common.FromHex("10002a412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: common.FromHex("01")},
 		{k: common.FromHex("10002b412d2809e00f42a7f8cb0e659bddf0b4f201d24eb1b2946493cbae334c"), v: common.FromHex("01")},
-		{k: common.FromHex("10009384w46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: common.FromHex("01")},
-		{k: common.FromHex("10009484w46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: common.FromHex("01")},
+		{k: common.FromHex("10009384e46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: common.FromHex("01")},
+		{k: common.FromHex("10009484e46519cbc71a22098063e5608768276f2dc212e71fd2c6c643c726c4"), v: common.FromHex("01")},
 		{k: common.FromHex("1000a9e493fff57a9c96dc0a7efb356613eafd5c89ea9f2be54d8ecf96ce0d28"), v: common.FromHex("01")},
 		{k: common.FromHex("110006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},
 		{k: common.FromHex("120006a1510692d70d47860a1bbd432c801d1860bfbbe6856756ad4c062ba601"), v: common.FromHex("01")},

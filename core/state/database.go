@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 const (
@@ -37,9 +37,10 @@ const (
 
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
+	ReadAccountDataForDebug(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
-	ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error)
-	ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error)
+	ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error)
+	ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error)
 	ReadAccountIncarnation(address common.Address) (uint64, error)
 }
 

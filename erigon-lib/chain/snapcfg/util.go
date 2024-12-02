@@ -89,6 +89,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 
 	for _, p := range p {
+		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
+
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
 			continue

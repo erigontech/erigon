@@ -27,8 +27,8 @@ import (
 
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
+	"github.com/erigontech/erigon-lib/common/mclock"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 

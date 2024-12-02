@@ -32,7 +32,7 @@ import (
 
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -111,7 +111,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 	if acc == nil || err != nil {
 		return hexutility.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(address, acc.Incarnation, acc.CodeHash)
+	res, _ := reader.ReadAccountCode(address, acc.Incarnation)
 	if res == nil {
 		return hexutility.Bytes(""), nil
 	}

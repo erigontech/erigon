@@ -43,13 +43,13 @@ import (
 	"github.com/erigontech/erigon/dataflow"
 	"github.com/erigontech/erigon/turbo/services"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 const POSPandaBanner = `

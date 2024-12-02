@@ -31,7 +31,7 @@ import (
 )
 
 // InvertedIdxStreamFiles allows iteration over range of txn numbers
-// Iteration is not implmented via callback function, because there is often
+// Iteration is not implemented via callback function, because there is often
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)
 // InvertedIdxStreamFiles must be closed after use to prevent leaking of resources like cursor
 type InvertedIdxStreamFiles struct {
@@ -162,7 +162,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 }
 
 // RecentInvertedIdxIter allows iteration over range of txn numbers
-// Iteration is not implmented via callback function, because there is often
+// Iteration is not implemented via callback function, because there is often
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)
 type RecentInvertedIdxIter struct {
 	key                  []byte

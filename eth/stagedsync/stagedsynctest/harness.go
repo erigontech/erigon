@@ -63,7 +63,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	m := mock.MockWithGenesis(t, genesisInit.genesis, genesisInit.genesisAllocPrivateKey, false)
 	chainDataDB := m.DB
 	blockReader := m.BlockReader
-	borConsensusDB := memdb.NewTestDB(t)
+	borConsensusDB := memdb.NewTestDB(t, kv.ChainDB)
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockClient(ctrl)
 	miningState := stagedsync.NewMiningState(&ethconfig.Defaults.Miner)
@@ -93,6 +93,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 		logger,
+		stages.ModeApplyingBlocks,
 	)
 	miningSyncStages := stagedsync.MiningStages(
 		ctx,
@@ -109,6 +110,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
 		logger,
+		stages.ModeBlockProduction,
 	)
 	validatorKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -527,7 +529,7 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 		return borConsensusEng
 	}
 
-	t.Fatalf("unimplmented consensus engine init for cfg %v", cfg.ChainConfig)
+	t.Fatalf("unimplemented consensus engine init for cfg %v", cfg.ChainConfig)
 	return nil
 }
 

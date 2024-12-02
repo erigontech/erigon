@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 // HistoryReaderV3 Implements StateReader and StateWriter
@@ -72,6 +72,12 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 	return &a, nil
 }
 
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (hr *HistoryReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return hr.ReadAccountData(address)
+}
+
 func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	k := append(address[:], key.Bytes()...)
 	enc, _, err := hr.ttx.GetAsOf(kv.StorageDomain, k, nil, hr.txNum)
@@ -81,20 +87,17 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnatio
 	return enc, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if codeHash == emptyCodeHashH {
-		return nil, nil
-	}
+func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
 	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, code)
 	}
 	return code, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
 	enc, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address[:], nil, hr.txNum)
 	return len(enc), err
 }

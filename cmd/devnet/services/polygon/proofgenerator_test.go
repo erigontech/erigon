@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/cmd/devnet/blocks"
 	"github.com/erigontech/erigon/cmd/devnet/requests"
@@ -49,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 	"github.com/erigontech/erigon/turbo/services"
@@ -67,7 +67,7 @@ type requestGenerator struct {
 }
 
 func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*requestGenerator, error) {
-	db := memdb.New("")
+	db := memdb.New("", kv.ChainDB)
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		if err := rawdb.WriteHeader(tx, chain.TopBlock.Header()); err != nil {
 			return err

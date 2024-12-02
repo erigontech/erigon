@@ -26,6 +26,7 @@ on:
         description: 'The branch to checkout and build artifacts from (in case of manual run). Default is "" .'
 
 jobs:
+
   Build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -207,13 +208,3 @@ jobs:
               #fi
               echo "Done."
             done
-
-  ## run only for 'main' branch and workflow executed by push event:
-  run-kurtosis-assertoor:
-    if: github.ref_name == 'main'
-    needs: [ Build]
-    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
-    with:
-      checkout_ref: ${{ github.sha }}
-      os: ubuntu-latest
-      docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}
