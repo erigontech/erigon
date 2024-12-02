@@ -2258,12 +2258,48 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 
 type ParallelPatriciaHashed struct {
 	root   *HexPatriciaHashed
+	rootMu sync.Mutex
 	mounts [16]*HexPatriciaHashed
 	ctx    PatriciaContext
 }
 
 func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.root
+}
+
+func (p *ParallelPatriciaHashed) foldNibble(nib int) error {
+	// prevbyte - can we avoid it?
+	c, d, err := p.mounts[nib].foldMounted(int(nib))
+	if err != nil {
+		return err
+	}
+	_ = d
+	// etl.TransformArgs{Quit: ctx.Done()}
+	if err := p.mounts[nib].branchEncoder.Load(p.ctx, etl.TransformArgs{}); err != nil {
+		return err
+	}
+
+	p.rootMu.Lock()
+	defer p.rootMu.Unlock()
+
+	// fmt.Printf("mounted %02x => %s\n", prevByte, c.String())
+	c.extLen = 0
+	c.hashedExtLen = 0
+
+	p.root.grid[0][nib] = c
+	p.mounts[nib].Reset()
+	p.mounts[nib].currentKeyLen = 0
+	if p.mounts[nib].activeRows >= 0 {
+		p.mounts[nib].depths[0] = 0
+		p.mounts[nib].activeRows = 0
+		p.mounts[nib].touchMap[0] = 0
+		p.mounts[nib].afterMap[0] = 0
+	}
+
+	p.root.touchMap[0] |= uint16(1) << nib
+	p.root.afterMap[0] |= uint16(1) << nib
+	p.root.depths[0] = 1
+	return nil
 }
 
 func (p *ParallelPatriciaHashed) unfoldRoot() error {
@@ -2350,41 +2386,6 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 		return errors.New("sortPerNibble disabled")
 	}
 
-	mainLock := new(sync.Mutex)
-	foldAndFlush := func(prevByte byte) error {
-		// prevbyte - can we avoid it?
-		c, d, err := pph.mounts[prevByte].foldMounted(int(prevByte))
-		if err != nil {
-			return err
-		}
-		_ = d
-		if err := pph.mounts[prevByte].branchEncoder.Load(pph.ctx, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-			return err
-		}
-
-		mainLock.Lock()
-		defer mainLock.Unlock()
-
-		// fmt.Printf("mounted %02x => %s\n", prevByte, c.String())
-		c.extLen = 0
-		c.hashedExtLen = 0
-
-		pph.root.grid[0][prevByte] = c
-		pph.mounts[prevByte].Reset()
-		pph.mounts[prevByte].currentKeyLen = 0
-		if pph.mounts[prevByte].activeRows >= 0 {
-			pph.mounts[prevByte].depths[0] = 0
-			pph.mounts[prevByte].activeRows = 0
-			pph.mounts[prevByte].touchMap[0] = 0
-			pph.mounts[prevByte].afterMap[0] = 0
-		}
-
-		pph.root.touchMap[0] |= uint16(1) << prevByte
-		pph.root.afterMap[0] |= uint16(1) << prevByte
-		pph.root.depths[0] = 1
-		return nil
-	}
-
 	//g, ctx := errgroup.WithContext(ctx)
 	//g.SetLimit(16)
 
@@ -2408,7 +2409,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ParallelPatriciaHas
 			return err
 		}
 		if cnt > 0 {
-			if err = foldAndFlush(byte(n)); err != nil {
+			if err = pph.foldNibble(n); err != nil {
 				return err
 			}
 		}
