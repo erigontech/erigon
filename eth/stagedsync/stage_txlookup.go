@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -24,6 +25,7 @@ import (
 type TxLookupCfg struct {
 	db          kv.RwDB
 	prune       prune.Mode
+	syncConfig  ethconfig.Sync
 	tmpdir      string
 	borConfig   *borcfg.BorConfig
 	blockReader services.FullBlockReader
@@ -32,6 +34,7 @@ type TxLookupCfg struct {
 func StageTxLookupCfg(
 	db kv.RwDB,
 	prune prune.Mode,
+	syncConfig ethconfig.Sync,
 	tmpdir string,
 	borConfigInterface chain.BorConfig,
 	blockReader services.FullBlockReader,
@@ -44,6 +47,7 @@ func StageTxLookupCfg(
 	return TxLookupCfg{
 		db:          db,
 		prune:       prune,
+		syncConfig:  syncConfig,
 		tmpdir:      tmpdir,
 		borConfig:   borConfig,
 		blockReader: blockReader,
@@ -238,7 +242,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 	// can't prune much here: because tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of deletes
-	blockTo = cmp.Min(blockTo, blockFrom+10)
+	blockTo = cmp.Min(blockTo, blockFrom+uint64(cfg.syncConfig.PruneLimit))
 
 	if blockFrom < blockTo {
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg, logger); err != nil {
