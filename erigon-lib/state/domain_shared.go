@@ -1065,7 +1065,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 	case kv.CommitmentDomain:
 		return sd.updateCommitmentData(toStringZeroCopy(k1), nil, prevVal, prevStep)
 	default:
-		sd.put(domain, string(append(k1, k2...)), nil)
+		sd.put(domain, toStringZeroCopy(append(k1, k2...)), nil)
 		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, prevVal, prevStep)
 	}
 }
@@ -1152,8 +1152,7 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	prefixS := string(pref)
-	cached, ok := sdc.branches[prefixS]
+	cached, ok := sdc.branches[toStringZeroCopy(pref)]
 	if ok {
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
@@ -1162,14 +1161,14 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
 	if err != nil {
-		return nil, 0, fmt.Errorf("Branch failed: %w", err)
+		return nil, 0, fmt.Errorf("branch failed: %w", err)
 	}
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] Branch: %x: %x\n", pref, v)
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
-	sdc.branches[prefixS] = cachedBranch{data: v, step: step}
+	sdc.branches[string(pref)] = cachedBranch{data: v, step: step}
 
 	if len(v) == 0 {
 		return nil, 0, nil
@@ -1370,7 +1369,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[commitment] store txn %d block %d rootHash %x\n", sdc.sharedDomains.txNum, blockNum, rootHash)
 	}
-	sdc.sharedDomains.put(kv.CommitmentDomain, string(keyCommitmentState), encodedState)
+	sdc.sharedDomains.put(kv.CommitmentDomain, keyCommitmentStateS, encodedState)
 	return sdc.sharedDomains.domainWriters[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
@@ -1397,7 +1396,9 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 }
 
 // by that key stored latest root hash and tree state
-var keyCommitmentState = []byte("state")
+const keyCommitmentStateS = "state"
+
+var keyCommitmentState = []byte(keyCommitmentStateS)
 
 func (sd *SharedDomains) LatestCommitmentState(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, state []byte, err error) {
 	return sd.sdCtx.LatestCommitmentState()
