@@ -450,6 +450,10 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
+func (d *Domain) Tables() []string {
+	return append([]string{d.keysTable, d.valuesTable}, d.History.Tables()...)
+}
+
 func (d *Domain) Close() {
 	if d == nil {
 		return
