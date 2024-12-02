@@ -31,11 +31,11 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
