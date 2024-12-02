@@ -291,7 +291,7 @@ func (idx *Index) KeyCount() uint64 {
 	return idx.keyCount
 }
 
-func (idx *Index) touch(pos uint64) byte { return idx.data[pos] | idx.data[pos+7] }
+func (idx *Index) touch(pos int) byte { return idx.data[pos] | idx.data[pos+7] }
 
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
