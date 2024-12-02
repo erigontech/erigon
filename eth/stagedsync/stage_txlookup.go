@@ -242,7 +242,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 	// chain-tip has limited time to prune: but tx_lookup index has crypto-hashed-keys, and 1 block producing hundreds of random deletes
-	if !initialCycle {
+	if !initialCycle { //on non-chain-tip prune as much as we can
 		blockTo = cmp.Min(blockTo, blockFrom+uint64(cfg.syncConfig.PruneLimit))
 	}
 
