@@ -946,11 +946,6 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 		}
 	}
 
-	hc := h.BeginFilesRo()
-	defer hc.Close()
-	err = hc.iit.BuildOptionalMissedIndices(ctx, background.NewProgressSet())
-	require.NoError(err)
-
 	err = tx.Commit()
 	require.NoError(err)
 }
