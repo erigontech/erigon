@@ -23,6 +23,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -263,9 +264,19 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]DomainEntryDiff {
 const diffChunkKeyLen = 48
 const diffChunkLen = 4*1024 - 32
 
+type threadSafeBuf struct {
+	B []byte
+	sync.Mutex
+}
+
+var writeDiffsetBuf = &threadSafeBuf{}
+
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
-	// Write the diffSet to the database
-	keys := diffSet.SerializeKeys(nil)
+	writeDiffsetBuf.Lock()
+	defer writeDiffsetBuf.Unlock()
+	writeDiffsetBuf.B = diffSet.SerializeKeys(writeDiffsetBuf.B)
+	keys := writeDiffsetBuf.B
+
 	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
