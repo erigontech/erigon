@@ -45,8 +45,8 @@ SHELL ["/bin/bash", "-c"]
 
 RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${APPLICATION} \
     echo Installing on ${TARGETOS} with variant ${TARGETVARIANT} && \
-    adduser --group ${GROUP} && \
-    adduser --system --uid ${UID_ERIGON} --gid ${GID_ERIGON} --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
+    addgroup --gid {GID_ERIGON} ${GROUP} && \
+    adduser --system --uid ${UID_ERIGON} --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
     apt update -y && \
     apt install -y --no-install-recommends ca-certificates && \
     apt clean && \
