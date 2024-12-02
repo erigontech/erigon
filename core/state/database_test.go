@@ -1274,7 +1274,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	sd.SetTxNum(2)
 	sd.SetBlockNum(1)
 
-	oldCodeHash := libcommon.BytesToHash(crypto.Keccak256(oldCode))
 	trieCode, tcErr := r.ReadAccountCode(contract, 1)
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
@@ -1286,7 +1285,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	newCodeHash := libcommon.BytesToHash(crypto.Keccak256(newCode))
 	trieCode, tcErr = r.ReadAccountCode(contract, 1)
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
@@ -1324,7 +1322,6 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	codeHash := libcommon.BytesToHash(crypto.Keccak256(code))
 	codeSize, err := r.ReadAccountCodeSize(contract, 1)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
