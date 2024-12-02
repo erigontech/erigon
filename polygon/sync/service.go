@@ -22,7 +22,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -52,6 +55,12 @@ func NewService(
 	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData)
 	execution := newExecutionClient(executionClient)
+
+	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
+	if err != nil {
+		panic(err)
+	}
+
 	store := NewStore(logger, execution, bridgeService)
 	blockDownloader := NewBlockDownloader(
 		logger,
@@ -63,7 +72,7 @@ func NewService(
 		store,
 		blockLimit,
 	)
-	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService)
+	ccBuilderFactory := NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache)
 	events := NewTipEvents(logger, p2pService, heimdallService)
 	sync := NewSync(
 		logger,
@@ -78,8 +87,10 @@ func NewService(
 		bridgeService,
 		events.Events(),
 		notifications,
+		NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
 	)
 	return &Service{
+		logger:          logger,
 		sync:            sync,
 		p2pService:      p2pService,
 		store:           store,
@@ -90,6 +101,7 @@ func NewService(
 }
 
 type Service struct {
+	logger          log.Logger
 	sync            *Sync
 	p2pService      *p2p.Service
 	store           Store
@@ -99,8 +111,9 @@ type Service struct {
 }
 
 func (s *Service) Run(parentCtx context.Context) error {
-	group, ctx := errgroup.WithContext(parentCtx)
+	s.logger.Info(syncLogPrefix("running sync service component"))
 
+	group, ctx := errgroup.WithContext(parentCtx)
 	group.Go(func() error {
 		if err := s.p2pService.Run(ctx); err != nil {
 			return fmt.Errorf("pos sync p2p failed: %w", err)

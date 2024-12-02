@@ -67,18 +67,14 @@ func (db *Database) open(ctx context.Context) error {
 	}
 
 	var err error
-	opts := mdbx.New(db.label, db.logger).
+	db.db, err = mdbx.New(db.label, db.logger).
 		Path(dbPath).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return db.tableCfg }).
 		MapSize(16 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
-		RoTxsLimiter(txLimiter)
-
-	if db.accede {
-		opts = opts.Accede()
-	}
-
-	db.db, err = opts.Open(ctx)
+		RoTxsLimiter(txLimiter).
+		Accede(db.accede).
+		Open(ctx)
 	return err
 }
 

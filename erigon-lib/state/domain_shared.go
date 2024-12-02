@@ -155,17 +155,17 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 	if sd.pastChangesAccumulator == nil {
 		sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
 	}
-	var key [40]byte
+	key := make([]byte, 40)
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
-	sd.pastChangesAccumulator[string(key[:])] = acc
+	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
 }
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]DomainEntryDiff, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
-	if changeset, ok := sd.pastChangesAccumulator[string(key[:])]; ok {
+	if changeset, ok := sd.pastChangesAccumulator[toStringZeroCopy(key[:])]; ok {
 		return [kv.DomainLen][]DomainEntryDiff{
 			changeset.Diffs[kv.AccountsDomain].GetDiffSet(),
 			changeset.Diffs[kv.StorageDomain].GetDiffSet(),
@@ -410,9 +410,8 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 // get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep uint64, ok bool) {
 	//sd.muMaps.RLock()
-	keyS := *(*string)(unsafe.Pointer(&key))
+	keyS := toStringZeroCopy(key)
 	var dataWithPrevStep dataWithPrevStep
-	//keyS := string(key)
 	if table == kv.StorageDomain {
 		dataWithPrevStep, ok = sd.storage.Get(keyS)
 		return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
@@ -619,9 +618,9 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep
 	return sd.domainWriters[kv.CodeDomain].PutWithPrev(addr, nil, code, prevCode, prevStep)
 }
 
-func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte, prevStep uint64) error {
-	sd.put(kv.CommitmentDomain, string(prefix), data)
-	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(prefix, nil, data, prev, prevStep)
+func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, prevStep uint64) error {
+	sd.put(kv.CommitmentDomain, prefix, data)
+	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, prev, prevStep)
 }
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
@@ -772,7 +771,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	roTx := sd.roTx
-	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valsTable)
+	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valuesTable)
 	if err != nil {
 		return err
 	}
@@ -819,7 +818,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 			switch ci1.t {
 			case RAM_CURSOR:
 				if ci1.iter.Next() {
-					k = []byte(ci1.iter.Key())
+					k = toBytesZeroCopy(ci1.iter.Key())
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value().data)
@@ -827,15 +826,19 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				if UseBtree || UseBpsTree {
+				indexList := sd.aggTx.d[kv.StorageDomain].d.indexList
+				if indexList&withBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
 							ci1.val = ci1.btCursor.Value()
 							heap.Push(cpPtr, ci1)
 						}
+					} else {
+						ci1.btCursor.Close()
 					}
-				} else {
+				}
+				if indexList&withHashMap != 0 {
 					ci1.dg.Reset(ci1.latestOffset)
 					if !ci1.dg.HasNext() {
 						break
@@ -845,6 +848,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 						ci1.key = key
 						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
 						heap.Push(cpPtr, ci1)
+					} else {
+						ci1.dg = nil
 					}
 				}
 			case DB_CURSOR:
@@ -858,12 +863,15 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					step := ^binary.BigEndian.Uint64(v[:8])
 					endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					if haveRamUpdates && endTxNum >= sd.txNum {
+						ci1.cDup.Close()
 						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 					}
 					ci1.endTxNum = endTxNum
 					ci1.val = common.Copy(v[8:])
 					ci1.step = step
 					heap.Push(cpPtr, ci1)
+				} else {
+					ci1.cDup.Close()
 				}
 			}
 		}
@@ -898,8 +906,8 @@ func (sd *SharedDomains) Close() {
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	for key, changeset := range sd.pastChangesAccumulator {
-		blockNum := binary.BigEndian.Uint64([]byte(key[:8]))
-		blockHash := common.BytesToHash([]byte(key[8:]))
+		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
+		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
 		if err := WriteDiffSet(tx, blockNum, blockHash, changeset); err != nil {
 			return err
 		}
@@ -972,7 +980,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, st
 	return v, step, nil
 }
 
-// getAsOfFile returns value from domain with respect to limit ofMaxTxnum
+// GetAsOfFile returns value from domain with respect to limit ofMaxTxnum
 func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
@@ -1055,7 +1063,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 		}
 		return sd.updateAccountCode(k1, nil, prevVal, prevStep)
 	case kv.CommitmentDomain:
-		return sd.updateCommitmentData(k1, nil, prevVal, prevStep)
+		return sd.updateCommitmentData(toStringZeroCopy(k1), nil, prevVal, prevStep)
 	default:
 		sd.put(domain, string(append(k1, k2...)), nil)
 		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, prevVal, prevStep)
@@ -1144,7 +1152,8 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	cached, ok := sdc.branches[string(pref)]
+	prefixS := string(pref)
+	cached, ok := sdc.branches[prefixS]
 	if ok {
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
@@ -1160,7 +1169,7 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
-	sdc.branches[string(pref)] = cachedBranch{data: v, step: step}
+	sdc.branches[prefixS] = cachedBranch{data: v, step: step}
 
 	if len(v) == 0 {
 		return nil, 0, nil
@@ -1169,12 +1178,13 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 }
 
 func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+	prefixS := toStringZeroCopy(prefix)
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	sdc.branches[string(prefix)] = cachedBranch{data: data, step: prevStep}
+	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
 
-	return sdc.sharedDomains.updateCommitmentData(prefix, data, prevData, prevStep)
+	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 
 func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
@@ -1281,6 +1291,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		return
 	}
 	ks := []byte(key)
+
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchAccount)
@@ -1456,3 +1467,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	}
 	return cs.blockNum, cs.txNum, nil
 }
+
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
+func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

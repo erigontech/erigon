@@ -104,14 +104,14 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	opts := mdbx.New(kv.TxPoolDB, logger).Path(cfg.DBDir).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
 		WriteMergeThreshold(3 * 8192).
-		PageSize(uint64(16 * datasize.KB)).
+		PageSize(16 * datasize.KB).
 		GrowthStep(16 * datasize.MB).
 		DirtySpace(uint64(128 * datasize.MB)).
 		MapSize(1 * datasize.TB).
 		WriteMap(cfg.MdbxWriteMap)
 
-	if cfg.MdbxPageSize.Bytes() > 0 {
-		opts = opts.PageSize(cfg.MdbxPageSize.Bytes())
+	if cfg.MdbxPageSize > 0 {
+		opts = opts.PageSize(cfg.MdbxPageSize)
 	}
 	if cfg.MdbxDBSizeLimit > 0 {
 		opts = opts.MapSize(cfg.MdbxDBSizeLimit)
@@ -145,8 +145,21 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 		pragueTime = cfg.OverridePragueTime
 	}
 
-	txPool, err := txpool.New(newTxns, chainDB, cfg, cache, *chainID, shanghaiTime, agraBlock, cancunTime, pragueTime,
-		maxBlobsPerBlock, feeCalculator, logger)
+	txPool, err := txpool.New(
+		newTxns,
+		txPoolDB,
+		chainDB,
+		cfg,
+		cache,
+		*chainID,
+		shanghaiTime,
+		agraBlock,
+		cancunTime,
+		pragueTime,
+		maxBlobsPerBlock,
+		feeCalculator,
+		logger,
+	)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

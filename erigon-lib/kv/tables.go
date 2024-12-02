@@ -402,7 +402,7 @@ const (
 
 	// Erigon-CL Objects
 
-	// [slot] => [signature + block without execution payload]
+	// [slot + block root] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
 
 	EffectiveBalancesDump = "EffectiveBalancesDump"
@@ -644,10 +644,12 @@ var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = []string{
+var ConsensusTables = append([]string{
 	CliqueSeparate,
 	CliqueLastSnapshot,
-}
+},
+	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
+)
 var HeimdallTables = []string{}
 var PolygonBridgeTables = []string{}
 var DownloaderTables = []string{

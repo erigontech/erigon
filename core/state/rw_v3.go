@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
@@ -34,7 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/state"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -209,9 +210,6 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 }
 
 func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedDomains) error {
-	if dbg.DiscardHistory() {
-		return nil
-	}
 	shouldPruneNonEssentials := txTask.PruneNonEssentials && txTask.Config != nil
 
 	for addr := range txTask.TraceFroms {
@@ -302,13 +300,13 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 
 	accountDiffs := changeset[kv.AccountsDomain]
 	for _, kv := range accountDiffs {
-		if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
+		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key)[:length.Addr], kv.Value); err != nil {
 			return err
 		}
 	}
 	storageDiffs := changeset[kv.StorageDomain]
 	for _, kv := range storageDiffs {
-		if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
+		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
 			return err
 		}
 	}
@@ -611,6 +609,10 @@ func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, e
 	return &acc, nil
 }
 
+func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(address)
+}
+
 func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
 	enc, _, err := r.tx.GetLatest(kv.StorageDomain, r.composite, nil)
@@ -691,6 +693,30 @@ func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Ac
 	if !r.discardReadList {
 		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
 		r.readLists[kv.AccountsDomain.String()].Push(string(address[:]), enc)
+	}
+	if len(enc) == 0 {
+		if r.trace {
+			fmt.Printf("ReadAccountData [%x] => [empty], txNum: %d\n", address, r.txNum)
+		}
+		return nil, nil
+	}
+
+	var acc accounts.Account
+	if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+		return nil, err
+	}
+	if r.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+	}
+	return &acc, nil
+}
+
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, address[:], nil)
+	if err != nil {
+		return nil, err
 	}
 	if len(enc) == 0 {
 		if r.trace {
@@ -824,3 +850,6 @@ func returnReadList(v map[string]*libstate.KvList) {
 	//}
 	readListPool.Put(v)
 }
+
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
+func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

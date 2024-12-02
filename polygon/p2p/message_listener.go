@@ -27,9 +27,9 @@ import (
 
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/polygon/polygoncommon"
-	"github.com/erigontech/erigon/rlp"
 )
 
 type DecodedInboundMessage[TPacket any] struct {
@@ -73,7 +73,7 @@ type MessageListener struct {
 }
 
 func (ml *MessageListener) Run(ctx context.Context) error {
-	ml.logger.Debug(messageListenerLogPrefix("running p2p message listener component"))
+	ml.logger.Info(messageListenerLogPrefix("running p2p message listener component"))
 
 	backgroundLoops := []func(ctx context.Context){
 		ml.listenInboundMessages,
