@@ -141,10 +141,8 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	}
 
 	res.Type, ok = ParseFileType(parts[len(parts)-1])
-
-	if !ok {
-		res.Type, ok = ParseFileType(parts[0])
-	}
+	// This is a caplin hack - it is because with caplin state snapshots ok is always false
+	res.TypeString = parts[len(parts)-1]
 
 	if ok {
 		res.TypeString = res.Type.Name()

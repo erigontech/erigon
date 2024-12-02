@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 

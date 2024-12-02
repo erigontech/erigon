@@ -72,9 +72,8 @@ type Aggregator struct {
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
-	buildingFiles           atomic.Bool
-	mergingFiles            atomic.Bool
-	buildingOptionalIndices atomic.Bool
+	buildingFiles atomic.Bool
+	mergingFiles  atomic.Bool
 
 	//warmupWorking          atomic.Bool
 	ctx       context.Context
@@ -485,54 +484,6 @@ func (a *Aggregator) LS() {
 	}
 }
 
-func (a *Aggregator) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
-	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
-		return
-	}
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		defer a.buildingOptionalIndices.Store(false)
-		aggTx := a.BeginFilesRo()
-		defer aggTx.Close()
-		if err := aggTx.buildOptionalMissedIndices(ctx, workers); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
-				return
-			}
-			a.logger.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
-		}
-	}()
-}
-
-func (a *Aggregator) BuildOptionalMissedIndices(ctx context.Context, workers int) error {
-	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
-		return nil
-	}
-	defer a.buildingOptionalIndices.Store(false)
-	filesTx := a.BeginFilesRo()
-	defer filesTx.Close()
-	if err := filesTx.buildOptionalMissedIndices(ctx, workers); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-func (ac *AggregatorRoTx) buildOptionalMissedIndices(ctx context.Context, workers int) error {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(workers)
-	ps := background.NewProgressSet()
-	for _, d := range ac.d {
-		d := d
-		if d != nil {
-			g.Go(func() error { return d.BuildOptionalMissedIndices(ctx, ps) })
-		}
-	}
-	return g.Wait()
-}
-
 func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error {
 	startIndexingTime := time.Now()
 	{
@@ -778,7 +729,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
 	finished := a.BuildFilesInBackground(toTxNum)
-	if !(a.buildingFiles.Load() || a.mergingFiles.Load() || a.buildingOptionalIndices.Load()) {
+	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
 	}
 
@@ -793,7 +744,7 @@ Loop:
 			fmt.Println("BuildFiles finished")
 			break Loop
 		case <-logEvery.C:
-			if !(a.buildingFiles.Load() || a.mergingFiles.Load() || a.buildingOptionalIndices.Load()) {
+			if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 				break Loop
 			}
 			if a.HasBackgroundFilesBuild() {
@@ -1748,7 +1699,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				break
 			}
 		}
-		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
 		if dbg.NoMerge() {
 			close(fin)
@@ -1772,8 +1722,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
-
-			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 		}()
 	}()
 	return fin
