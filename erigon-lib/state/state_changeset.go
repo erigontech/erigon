@@ -274,7 +274,7 @@ var writeDiffsetBuf = &threadSafeBuf{}
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
 	writeDiffsetBuf.Lock()
 	defer writeDiffsetBuf.Unlock()
-	writeDiffsetBuf.b = diffSet.SerializeKeys(writeDiffsetBuf.b)
+	writeDiffsetBuf.b = diffSet.SerializeKeys(writeDiffsetBuf.b[:0])
 	keys := writeDiffsetBuf.b
 
 	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
