@@ -153,7 +153,7 @@ var (
 	SyncLoopPruneLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.prune.limit",
 		Usage: "Sets the maximum number of block to prune per loop iteration",
-		Value: 10,
+		Value: uint(ethconfig.Defaults.Sync.PruneLimit),
 	}
 
 	SyncLoopBreakAfterFlag = cli.StringFlag{
