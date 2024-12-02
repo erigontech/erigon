@@ -117,8 +117,8 @@ const (
 	// Contains Storage:
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
-	HashedAccounts = "HashedAccount"
-	HashedStorage  = "HashedStorage"
+	HashedAccountsDeprecated = "HashedAccount"
+	HashedStorageDeprecated  = "HashedStorage"
 )
 
 /*
@@ -524,8 +524,8 @@ var ChaindataTables = []string{
 	EthTx,
 	TrieOfAccounts,
 	TrieOfStorage,
-	HashedAccounts,
-	HashedStorage,
+	HashedAccountsDeprecated,
+	HashedStorageDeprecated,
 	HeaderCanonical,
 	Headers,
 	HeaderTD,
@@ -707,7 +707,7 @@ type TableCfgItem struct {
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorage: {
+	HashedStorageDeprecated: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                72,

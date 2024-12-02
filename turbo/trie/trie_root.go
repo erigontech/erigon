@@ -205,7 +205,7 @@ func (l *FlatDBTrieLoader) SetProofRetainer(pr *ProofRetainer) {
 //		}
 func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcommon.Hash, error) {
 
-	accC, err := tx.Cursor(kv.HashedAccounts)
+	accC, err := tx.Cursor(kv.HashedAccountsDeprecated)
 	if err != nil {
 		return EmptyRoot, err
 	}
@@ -229,7 +229,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 	accTrie := AccTrie(canUse, l.hc, trieAccC, quit)
 	storageTrie := StorageTrie(canUse, l.shc, trieStorageC, quit)
 
-	ss, err := tx.CursorDupSort(kv.HashedStorage)
+	ss, err := tx.CursorDupSort(kv.HashedStorageDeprecated)
 	if err != nil {
 		return EmptyRoot, err
 	}
