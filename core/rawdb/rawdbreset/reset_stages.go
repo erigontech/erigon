@@ -45,7 +45,7 @@ func ResetState(db kv.RwDB, agg *state.Aggregator, ctx context.Context, chain st
 		return err
 	}
 
-	if err := ResetExec(ctx, db, chain, tmpDir, logger); err != nil {
+	if err := ResetExec(ctx, db, agg, chain, tmpDir, logger); err != nil {
 		return err
 	}
 	return nil
