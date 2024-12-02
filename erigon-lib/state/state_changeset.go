@@ -265,7 +265,7 @@ const diffChunkKeyLen = 48
 const diffChunkLen = 4*1024 - 32
 
 type threadSafeBuf struct {
-	B []byte
+	b []byte
 	sync.Mutex
 }
 
@@ -274,8 +274,8 @@ var writeDiffsetBuf = &threadSafeBuf{}
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
 	writeDiffsetBuf.Lock()
 	defer writeDiffsetBuf.Unlock()
-	writeDiffsetBuf.B = diffSet.SerializeKeys(writeDiffsetBuf.B)
-	keys := writeDiffsetBuf.B
+	writeDiffsetBuf.b = diffSet.SerializeKeys(writeDiffsetBuf.b)
+	keys := writeDiffsetBuf.b
 
 	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
 	// Data Format
