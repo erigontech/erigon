@@ -22,6 +22,7 @@ import (
 	"maps"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -41,7 +42,7 @@ func (s *StateChangeSet) Copy() *StateChangeSet {
 }
 
 type DomainEntryDiff struct {
-	Key           []byte
+	Key           string
 	Value         []byte
 	PrevStepBytes []byte
 }
@@ -96,16 +97,16 @@ func (d *StateDiffDomain) GetDiffSet() (keysToValue []DomainEntryDiff) {
 	if len(d.prevValsSlice) != 0 {
 		return d.prevValsSlice
 	}
-	d.prevValsSlice = make([]DomainEntryDiff, 0, len(d.prevValues))
+	d.prevValsSlice = make([]DomainEntryDiff, len(d.prevValues))
+	i := 0
 	for k, v := range d.prevValues {
-		d.prevValsSlice = append(d.prevValsSlice, DomainEntryDiff{
-			Key:           []byte(k),
-			Value:         v,
-			PrevStepBytes: d.keys[k[:len(k)-8]],
-		})
+		d.prevValsSlice[i].Key = k
+		d.prevValsSlice[i].Value = v
+		d.prevValsSlice[i].PrevStepBytes = d.keys[k[:len(k)-8]]
+		i++
 	}
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return bytes.Compare(d.prevValsSlice[i].Key, d.prevValsSlice[j].Key) < 0
+		return d.prevValsSlice[i].Key < d.prevValsSlice[j].Key
 	})
 	return d.prevValsSlice
 }
@@ -196,7 +197,7 @@ func DeserializeDiffSet(in []byte) []DomainEntryDiff {
 		prevStepBytes := dict[in[0]]
 		in = in[1:]
 		diffSet[i] = DomainEntryDiff{
-			Key:           key,
+			Key:           toStringZeroCopy(key),
 			Value:         value,
 			PrevStepBytes: prevStepBytes,
 		}
@@ -215,7 +216,7 @@ func MergeDiffSets(newer, older []DomainEntryDiff) []DomainEntryDiff {
 	var result []DomainEntryDiff
 	i, j := 0, 0
 	for i < len(newer) && j < len(older) {
-		cmp := bytes.Compare(older[j].Key, newer[i].Key)
+		cmp := strings.Compare(older[j].Key, newer[i].Key)
 		if cmp < 0 {
 			result = append(result, older[j])
 			j++

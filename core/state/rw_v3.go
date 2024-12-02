@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
@@ -299,13 +300,13 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 
 	accountDiffs := changeset[kv.AccountsDomain]
 	for _, kv := range accountDiffs {
-		if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
+		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key)[:length.Addr], kv.Value); err != nil {
 			return err
 		}
 	}
 	storageDiffs := changeset[kv.StorageDomain]
 	for _, kv := range storageDiffs {
-		if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
+		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
 			return err
 		}
 	}
@@ -846,3 +847,6 @@ func returnReadList(v map[string]*libstate.KvList) {
 	//}
 	readListPool.Put(v)
 }
+
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
+func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

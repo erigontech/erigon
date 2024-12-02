@@ -1471,7 +1471,8 @@ func (dt *DomainRoTx) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	defer valsCursor.Close()
 	// First revert keys
 	for i := range domainDiffs {
-		key, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
+		keyStr, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
+		key := toBytesZeroCopy(keyStr)
 		if dt.d.largeValues {
 			if len(value) == 0 {
 				if !bytes.Equal(key[len(key)-8:], prevStepBytes) {
