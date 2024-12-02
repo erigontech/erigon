@@ -58,11 +58,6 @@ const (
 	//key - addressHash+incarnation
 	//value - code hash
 	ContractCode = "HashedCodeHash"
-
-	// IncarnationMap for deleted accounts
-	//key - address
-	//value - incarnation of account when it was last deleted
-	IncarnationMap = "IncarnationMap"
 )
 
 // Mapping [block number] => [Verkle Root]
@@ -992,4 +987,9 @@ const (
 	*/
 	TrieOfAccounts = "TrieAccount"
 	TrieOfStorage  = "TrieStorage"
+
+	// IncarnationMap for deleted accounts
+	//key - address
+	//value - incarnation of account when it was last deleted
+	IncarnationMap = "IncarnationMap"
 )
