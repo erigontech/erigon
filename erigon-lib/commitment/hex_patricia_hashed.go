@@ -2260,7 +2260,7 @@ type ParallelPatriciaHashed struct {
 	root   *HexPatriciaHashed
 	rootMu sync.Mutex
 	mounts [16]*HexPatriciaHashed
-	ctx    PatriciaContext
+	ctx    [16]PatriciaContext
 }
 
 func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
@@ -2275,7 +2275,7 @@ func (p *ParallelPatriciaHashed) foldNibble(nib int) error {
 	}
 	_ = d
 	// etl.TransformArgs{Quit: ctx.Done()}
-	if err := p.mounts[nib].branchEncoder.Load(p.ctx, etl.TransformArgs{}); err != nil {
+	if err := p.mounts[nib].branchEncoder.Load(p.ctx[nib], etl.TransformArgs{}); err != nil {
 		return err
 	}
 
@@ -2303,11 +2303,6 @@ func (p *ParallelPatriciaHashed) foldNibble(nib int) error {
 }
 
 func (p *ParallelPatriciaHashed) unfoldRoot() error {
-	// Now unfold until we step on an empty cell
-	//rs, err := p.root.EncodeCurrentState(nil)
-	//if err != nil {
-	//	return fmt.Errorf("encode current state: %w", err)
-	//}
 	if p.root.trace {
 		fmt.Printf("=============ROOT unfold============\n")
 	}
@@ -2326,21 +2321,7 @@ func (p *ParallelPatriciaHashed) unfoldRoot() error {
 			panic(fmt.Sprintf("nibble %x is nil", i))
 		}
 		p.mounts[i].mountTo(p.root, i)
-
-		// hph := p.mounts[i]
-		//hph.Reset()
-		//if err = hph.SetState(rs); err != nil {
-		//	return fmt.Errorf("set state %x: %w", i, err)
-		//}
-		//
-		//hph.mounted = true
-		//hph.mountedNib = i
-		//for unfolding := hph.needUnfolding(zero); unfolding > 0; unfolding = hph.needUnfolding(zero) {
-		//	if err := hph.unfold(zero, unfolding); err != nil {
-		//		return fmt.Errorf("unfold: %w", err)
-		//	}
-		//}
-		// p.mounts[i] = hph
+		p.mounts[i].ctx = p.ctx[i]
 	}
 	return nil
 }
@@ -2353,6 +2334,7 @@ func NewParallelPatriciaHashed(root *HexPatriciaHashed, ctx PatriciaContext, tmp
 		hph.mountedNib = i
 		hph.mounted = true
 		p.mounts[i] = hph
+		p.ctx[i] = ctx
 	}
 	return p
 }
@@ -2451,7 +2433,7 @@ func (p *ParallelPatriciaHashed) Process(ctx context.Context, updates *Updates, 
 		fmt.Printf("======= folding root done =========\n")
 	}
 
-	err = p.root.branchEncoder.Load(p.ctx, etl.TransformArgs{Quit: ctx.Done()})
+	err = p.root.branchEncoder.Load(p.root.ctx, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, fmt.Errorf("branch update failed: %w", err)
 	}
