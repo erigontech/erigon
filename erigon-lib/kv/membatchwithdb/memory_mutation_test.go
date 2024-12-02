@@ -406,10 +406,10 @@ func TestIncReadSequence(t *testing.T) {
 }
 
 func initializeDbDupSort(rwTx kv.RwTx) {
-	rwTx.Put(kv.AccountChangeSetDeprecated, []byte("key1"), []byte("value1.1"))
-	rwTx.Put(kv.AccountChangeSetDeprecated, []byte("key3"), []byte("value3.1"))
-	rwTx.Put(kv.AccountChangeSetDeprecated, []byte("key1"), []byte("value1.3"))
-	rwTx.Put(kv.AccountChangeSetDeprecated, []byte("key3"), []byte("value3.3"))
+	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1"))
+	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.1"))
+	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.3"))
+	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.3"))
 }
 
 func TestNext(t *testing.T) {
@@ -420,9 +420,9 @@ func TestNext(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	batch.Put(kv.AccountChangeSetDeprecated, []byte("key1"), []byte("value1.2"))
+	batch.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2"))
 
-	cursor, err := batch.CursorDupSort(kv.AccountChangeSetDeprecated)
+	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
 
 	k, v, err := cursor.First()
@@ -464,10 +464,10 @@ func TestNextNoDup(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	batch.Put(kv.AccountChangeSetDeprecated, []byte("key2"), []byte("value2.1"))
-	batch.Put(kv.AccountChangeSetDeprecated, []byte("key2"), []byte("value2.2"))
+	batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.1"))
+	batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.2"))
 
-	cursor, err := batch.CursorDupSort(kv.AccountChangeSetDeprecated)
+	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
 
 	k, _, err := cursor.First()
@@ -491,7 +491,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	cursor, err := batch.RwCursorDupSort(kv.AccountChangeSetDeprecated)
+	cursor, err := batch.RwCursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
 
 	require.NoError(t, cursor.Put([]byte("key3"), []byte("value3.2")))
@@ -506,7 +506,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 
 	var keys []string
 	var values []string
-	err = rwTx.ForEach(kv.AccountChangeSetDeprecated, nil, func(k, v []byte) error {
+	err = rwTx.ForEach(kv.TblAccountVals, nil, func(k, v []byte) error {
 		keys = append(keys, string(k))
 		values = append(values, string(v))
 		return nil
@@ -520,13 +520,13 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 func TestSeekBothRange(t *testing.T) {
 	_, rwTx := memdb.NewTestTx(t)
 
-	rwTx.Put(kv.AccountChangeSetDeprecated, []byte("key1"), []byte("value1.1"))
-	rwTx.Put(kv.AccountChangeSetDeprecated, []byte("key3"), []byte("value3.3"))
+	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1"))
+	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.3"))
 
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	cursor, err := batch.RwCursorDupSort(kv.AccountChangeSetDeprecated)
+	cursor, err := batch.RwCursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
 
 	require.NoError(t, cursor.Put([]byte("key3"), []byte("value3.1")))
