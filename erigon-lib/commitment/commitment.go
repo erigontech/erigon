@@ -1352,5 +1352,5 @@ func (u *Update) String() string {
 	return sb.String()
 }
 
-func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) } //nolint
 func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }
