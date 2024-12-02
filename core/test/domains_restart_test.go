@@ -241,7 +241,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -411,7 +411,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 

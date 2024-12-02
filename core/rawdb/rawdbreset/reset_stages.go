@@ -162,7 +162,6 @@ func ResetExec(ctx context.Context, db kv.RwDB, agg *state.Aggregator, chain str
 	cleanupList := make([]string, 0)
 	cleanupList = append(cleanupList, stateBuckets...)
 	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, stateV3Buckets...)
 	cleanupList = append(cleanupList, agg.DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain)...)
 	cleanupList = append(cleanupList, agg.InvertedIndexTables(kv.LogAddrIdxPos, kv.LogTopicIdxPos, kv.TracesFromIdxPos, kv.TracesToIdxPos)...)
 
@@ -203,9 +202,6 @@ var stateBuckets = []string{
 	kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
 }
 var stateHistoryBuckets = []string{
-	kv.Receipts,
-}
-var stateV3Buckets = []string{
 	kv.TblPruningProgress,
 	kv.ChangeSets3,
 }

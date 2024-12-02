@@ -1032,7 +1032,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer borSn.Close()
 	defer agg.Close()
 	if reset {
-		if err := reset2.ResetExec(ctx, db, chain, "", logger); err != nil {
+		if err := reset2.ResetExec(ctx, db, agg, chain, "", logger); err != nil {
 			return err
 		}
 		return nil
