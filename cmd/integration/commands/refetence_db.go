@@ -45,8 +45,6 @@ var stateBuckets = []string{
 	kv.HashedStorage,
 	kv.ContractCode,
 	kv.PlainState,
-	kv.AccountChangeSet,
-	kv.StorageChangeSet,
 	kv.PlainContractCode,
 	kv.IncarnationMap,
 	kv.Code,

@@ -103,8 +103,6 @@ var bucketLabels = map[string]string{
 	kv.HashedStorage:     "Hashed Storage",
 	kv.TrieOfAccounts:    "Intermediate Hashes Of Accounts",
 	kv.TrieOfStorage:     "Intermediate Hashes Of Storage",
-	kv.AccountChangeSet:  "Account Changes",
-	kv.StorageChangeSet:  "Storage Changes",
 	kv.IncarnationMap:    "Incarnations",
 	kv.Senders:           "Transaction Senders",
 }

@@ -52,7 +52,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	}
 	defer cancelWorkers()
 
-	storageCursor, err := tx.CursorDupSort(kv.StorageChangeSet)
+	storageCursor, err := tx.CursorDupSort(kv.StorageChangeSetDeprecated)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
