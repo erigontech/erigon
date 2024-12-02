@@ -332,6 +332,8 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 	}
 }
 
+func (ii *InvertedIndex) Tables() []string { return []string{ii.keysTable, ii.valuesTable} }
+
 func (ii *InvertedIndex) Close() {
 	if ii == nil {
 		return

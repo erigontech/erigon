@@ -1031,9 +1031,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
-	if warmup {
-		return reset2.WarmupExec(ctx, db)
-	}
 	if reset {
 		if err := reset2.ResetExec(ctx, db, chain, "", logger); err != nil {
 			return err
@@ -1177,10 +1174,6 @@ func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
-	if warmup {
-		panic("not implemented")
-		//return reset2.WarmupExec(ctx, db)
-	}
 	if reset {
 		if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
 			return err
@@ -1218,9 +1211,6 @@ func stagePatriciaTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error
 	defer agg.Close()
 	_, _, _, _, _ = newSync(ctx, db, nil /* miningConfig */, logger)
 
-	if warmup {
-		return reset2.Warmup(ctx, db, log.LvlInfo, stages.Execution)
-	}
 	if reset {
 		return reset2.Reset(ctx, db, stages.Execution)
 	}
