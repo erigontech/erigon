@@ -1151,12 +1151,19 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 	clear(sdc.branches)
 }
 
+var hit, total int
+
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
 	cached, ok := sdc.branches[toStringZeroCopy(pref)]
+	total++
 	if ok {
+		hit++
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
 		return cached.data, cached.step, nil
+	}
+	if total%100 == 0 {
+		fmt.Printf("[dbg] branch cache %f, %d, %d\n", hit/total, hit, total)
 	}
 
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
