@@ -1,6 +1,8 @@
 ARG RELEASE_DOCKER_BASE_IMAGE="alpine:3.20.1" \
     CI_CD_MAIN_BUILDER_IMAGE="golang:1.22-bookworm" \
     CI_CD_MAIN_TARGET_BASE_IMAGE="alpine:3.20.1" \
+    UID_ERIGON=1000 \
+    GID_ERIGON=1000 \
     EXPOSED_PORTS="8545 \
        8551 \
        8546 \
@@ -31,6 +33,8 @@ FROM ${RELEASE_DOCKER_BASE_IMAGE} AS release
 
 ARG USER=erigon \
     GROUP=erigon \
+    UID_ERIGON \
+    GID_ERIGON \
     APPLICATION \
     TARGETARCH \
     EXPOSED_PORTS
@@ -42,7 +46,7 @@ SHELL ["/bin/bash", "-c"]
 RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${APPLICATION} \
     echo Installing on ${TARGETOS} with variant ${TARGETVARIANT} && \
     adduser --group ${GROUP} && \
-    adduser --system --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
+    adduser --system --uid ${UID_ERIGON} --gid ${GID_ERIGON} --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
     apt update -y && \
     apt install -y --no-install-recommends ca-certificates && \
     apt clean && \
@@ -53,13 +57,13 @@ RUN --mount=type=bind,from=temporary,source=/tmp/${APPLICATION},target=/tmp/${AP
         echo "Done." ; \
     fi && \    
     install -d -o ${USER} -g ${GROUP} /home/${USER}/.local /home/${USER}/.local/share /home/${USER}/.local/share/erigon && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/erigon /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/integration /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/diag /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/sentry /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/txpool /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/downloader /usr/local/bin/ && \
-    install -o ${USER} -g ${GROUP} /tmp/${APPLICATION}/rpcdaemon /usr/local/bin/
+    install -o root -g root /tmp/${APPLICATION}/erigon /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/integration /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/diag /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/sentry /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/txpool /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/downloader /usr/local/bin/ && \
+    install -o root -g root /tmp/${APPLICATION}/rpcdaemon /usr/local/bin/
 
 VOLUME [ "/home/${USER}" ]
 WORKDIR /home/${USER}
