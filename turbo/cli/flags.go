@@ -153,7 +153,7 @@ var (
 	SyncLoopPruneLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.prune.limit",
 		Usage: "Sets the maximum number of block to prune per loop iteration",
-		Value: 100,
+		Value: 10,
 	}
 
 	SyncLoopBreakAfterFlag = cli.StringFlag{

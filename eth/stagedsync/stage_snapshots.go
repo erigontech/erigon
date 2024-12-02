@@ -505,7 +505,11 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			//cfg.agg.BuildFilesInBackground()
 		}
 
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, cfg.syncConfig.PruneLimit); err != nil {
+		pruneLimit := cfg.syncConfig.PruneLimit
+		if initialCycle { //aggressive prune now. because on chain-tip have limited time to prune
+			pruneLimit = 10_000
+		}
+		if err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
 			return err
 		}
 	}
