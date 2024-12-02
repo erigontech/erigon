@@ -402,7 +402,7 @@ const (
 
 	// Erigon-CL Objects
 
-	// [slot] => [signature + block without execution payload]
+	// [slot + block root] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
 
 	EffectiveBalancesDump = "EffectiveBalancesDump"

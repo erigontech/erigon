@@ -25,6 +25,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
@@ -44,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/polygon/sync"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -115,6 +118,12 @@ func NewPolygonSyncStageCfg(
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
+
+	signaturesCache, err := lru.NewARC[common.Hash, common.Address](sync.InMemorySignatures)
+	if err != nil {
+		panic(err)
+	}
+
 	syncStore := polygonsync.NewStore(logger, executionEngine, bridgeService)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
@@ -135,11 +144,12 @@ func NewPolygonSyncStageCfg(
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
-		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService),
+		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache),
 		heimdallService,
 		bridgeService,
 		events.Events(),
 		notifications,
+		sync.NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
 	)
 	syncService := &polygonSyncStageService{
 		logger:          logger,

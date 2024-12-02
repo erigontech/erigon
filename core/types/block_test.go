@@ -606,5 +606,4 @@ func TestCopyTxs(t *testing.T) {
 
 	copies := CopyTxs(txs)
 	assert.Equal(t, txs, copies)
-
 }
