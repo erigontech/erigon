@@ -1570,7 +1570,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 			}
 		}
 
-		v, found, offset, err = dt.getLatestFromFile(i, filekey)
+		v, found, _, err = dt.getLatestFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
