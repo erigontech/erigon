@@ -141,10 +141,7 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	}
 
 	res.Type, ok = ParseFileType(parts[len(parts)-1])
-
-	if !ok {
-		res.Type, ok = ParseFileType(parts[0])
-	}
+	res.TypeString = parts[len(parts)-1]
 
 	if ok {
 		res.TypeString = res.Type.Name()
