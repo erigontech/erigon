@@ -171,7 +171,7 @@ func (t *prestateTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 		addr := libcommon.Address(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
 	case op == vm.CREATE:
-		nonce := t.env.IntraBlockState().GetNonce(caller)
+		nonce, _ := t.env.IntraBlockState().GetNonce(caller)
 		addr := crypto.CreateAddress(caller, nonce)
 		t.lookupAccount(addr)
 		t.created[addr] = true
@@ -203,12 +203,12 @@ func (t *prestateTracer) CaptureTxEnd(restGas uint64) {
 		}
 		modified := false
 		postAccount := &account{Storage: make(map[libcommon.Hash]libcommon.Hash)}
-		newBalance := t.env.IntraBlockState().GetBalance(addr).ToBig()
-		newNonce := t.env.IntraBlockState().GetNonce(addr)
+		newBalance, _ := t.env.IntraBlockState().GetBalance(addr)
+		newNonce, _ := t.env.IntraBlockState().GetNonce(addr)
 
-		if newBalance.Cmp(t.pre[addr].Balance) != 0 {
+		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
 			modified = true
-			postAccount.Balance = newBalance
+			postAccount.Balance = newBalance.ToBig()
 		}
 		if newNonce != t.pre[addr].Nonce {
 			modified = true
@@ -216,7 +216,7 @@ func (t *prestateTracer) CaptureTxEnd(restGas uint64) {
 		}
 
 		if !t.config.DisableCode {
-			newCode := t.env.IntraBlockState().GetCode(addr)
+			newCode, _ := t.env.IntraBlockState().GetCode(addr)
 			if !bytes.Equal(newCode, t.pre[addr].Code) {
 				modified = true
 				postAccount.Code = newCode
@@ -292,13 +292,17 @@ func (t *prestateTracer) lookupAccount(addr libcommon.Address) {
 		return
 	}
 
+	balance, _ := t.env.IntraBlockState().GetBalance(addr)
+	nonce, _ := t.env.IntraBlockState().GetNonce(addr)
+	code, _ := t.env.IntraBlockState().GetCode(addr)
+
 	t.pre[addr] = &account{
-		Balance: t.env.IntraBlockState().GetBalance(addr).ToBig(),
-		Nonce:   t.env.IntraBlockState().GetNonce(addr),
+		Balance: balance.ToBig(),
+		Nonce:   nonce,
 	}
 
 	if !t.config.DisableCode {
-		t.pre[addr].Code = t.env.IntraBlockState().GetCode(addr)
+		t.pre[addr].Code = code
 	}
 	if !t.config.DisableStorage {
 		t.pre[addr].Storage = make(map[libcommon.Hash]libcommon.Hash)
