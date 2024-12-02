@@ -620,7 +620,7 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep
 
 func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, prevStep uint64) error {
 	sd.put(kv.CommitmentDomain, prefix, data)
-	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev([]byte(prefix), nil, data, prev, prevStep)
+	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, prev, prevStep)
 }
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
@@ -818,7 +818,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 			switch ci1.t {
 			case RAM_CURSOR:
 				if ci1.iter.Next() {
-					k = []byte(ci1.iter.Key())
+					k = toBytesZeroCopy(ci1.iter.Key())
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value().data)
@@ -906,8 +906,8 @@ func (sd *SharedDomains) Close() {
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	for key, changeset := range sd.pastChangesAccumulator {
-		blockNum := binary.BigEndian.Uint64([]byte(key[:8]))
-		blockHash := common.BytesToHash([]byte(key[8:]))
+		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
+		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
 		if err := WriteDiffSet(tx, blockNum, blockHash, changeset); err != nil {
 			return err
 		}
@@ -1468,4 +1468,5 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	return cs.blockNum, cs.txNum, nil
 }
 
-func toStringZeroCopy(v []byte) string { return *(*string)(unsafe.Pointer(&v)) }
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
+func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

@@ -84,6 +84,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			//cn()
 		}
 
 		// subscribe to subnets
