@@ -22,6 +22,7 @@ import (
 	"maps"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -215,7 +216,7 @@ func MergeDiffSets(newer, older []DomainEntryDiff) []DomainEntryDiff {
 	var result []DomainEntryDiff
 	i, j := 0, 0
 	for i < len(newer) && j < len(older) {
-		cmp := bytes.Compare(older[j].Key, newer[i].Key)
+		cmp := strings.Compare(older[j].Key, newer[i].Key)
 		if cmp < 0 {
 			result = append(result, older[j])
 			j++
