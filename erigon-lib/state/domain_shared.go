@@ -761,11 +761,10 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 	iter := sd.storage.Iter()
 	if iter.Seek(string(prefix)) {
-		kx := iter.Key()
+		k := toBytesZeroCopy(iter.Key())
 		v = iter.Value().data
-		k = []byte(kx)
 
-		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
+		if len(k) > 0 && bytes.HasPrefix(k, prefix) {
 			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: iter, endTxNum: sd.txNum, reverse: true})
 		}
 	}
