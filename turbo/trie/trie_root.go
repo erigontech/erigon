@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	dbutils2 "github.com/erigontech/erigon-lib/kv/dbutils"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/rlphacks"
 )
 
