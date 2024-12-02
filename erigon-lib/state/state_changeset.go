@@ -55,7 +55,7 @@ type StateDiffDomain struct {
 	prevValues    map[string][]byte
 	prevValsSlice []DomainEntryDiff
 
-	prevStepBuf, keyBuf, valBuf []byte
+	prevStepBuf, keyBuf []byte
 }
 
 func (d *StateDiffDomain) Copy() *StateDiffDomain {
