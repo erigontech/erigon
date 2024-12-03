@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bufio"
 	"fmt"
 	"hash"
 	"os"
@@ -157,12 +158,23 @@ func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error)
 		idx.empty = stat.Size() == 0
 	}
 
-	if !idx.empty {
-		var err error
-		idx.filter, _, err = bloomfilter.ReadFile(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
-		}
+	if idx.empty {
+		return idx, nil
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	filter := new(bloomfilter.Filter)
+	_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 1*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
+	}
+	idx.filter = filter
+	if err != nil {
+		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
 	}
 	return idx, nil
 }
