@@ -2,13 +2,11 @@ name: Integration tests - ERIGON
 on:
   push:
     branches:
-      - test-integration-michele
-#      - main
-#      - 'release/**'
+      - main
+      - 'release/**'
   pull_request:
     branches:
-      # - main 
-      - test-integration-michele
+      - main 
     types:
       - opened
       - reopened
