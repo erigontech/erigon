@@ -12,6 +12,10 @@ on:
       - synchronize
       - ready_for_review
 
+env:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
 jobs:
   resequence-test:
     runs-on: ubuntu-latest

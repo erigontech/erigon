@@ -8,6 +8,7 @@ on:
     branches:
       - zkevm
       - zkevm-2.60
+      - stable*
     types:
       - opened
       - reopened
@@ -19,9 +20,15 @@ concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
 jobs:
   tests:
     strategy:
+      max-parallel: 2
+      fail-fast: true
       matrix:
         os: [ ubuntu-22.04, macos-14-xlarge ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
@@ -37,7 +44,7 @@ jobs:
         run: sudo apt update && sudo apt install build-essential
 
       - name: Build
-        run: make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
+        run: make BUILD_TAGS=nosqlite,noboltdb,nosilkworm cdk-erigon
 
       - name: Reproducible build test
         run: |
@@ -75,6 +82,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup kurtosis
         uses: ./.github/actions/setup-kurtosis
+
 
       - name: Run process with CPU monitoring
         working-directory: ./cdk-erigon

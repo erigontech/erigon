@@ -74,7 +74,6 @@ echo -e '\nRun Erigon to BlockHeight: ' "${firstStop}" '\n'
 ./build/bin/cdk-erigon \
     --datadir="$dataPath/rpc-datadir" \
     --config="zk/tests/unwinds/config/dynamic-integration8.yaml" \
-    --debug.limit=1 \
     --debug.limit="${firstStop}"
 
 echo -e '\nDumping data \n'
