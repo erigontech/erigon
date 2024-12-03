@@ -521,7 +521,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if chainConfig.Bor != nil {
 		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
 		if err != nil {
-			return nil, err
+			//return nil, err
 		}
 
 		if len(events) != 0 {
