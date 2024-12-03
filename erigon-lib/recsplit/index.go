@@ -25,7 +25,6 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -232,17 +231,6 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 		},
 	}
 	validationPassed = true
-
-	if idx.lessFalsePositives {
-		arr := idx.ExtractOffsetsArray()
-		ef := eliasfano32.NewEliasFano(uint64(len(arr)), slices.Max(arr))
-		for _, n := range arr {
-			ef.AddOffset(n)
-		}
-		ef.Build()
-		fmt.Printf("[dbg]: ef %s, %d -> %d\n", idx.fileName, int(idx.bytesPerRec)*int(idx.keyCount), ef.SerializedSizeInBytes())
-	}
-
 	return idx, nil
 }
 

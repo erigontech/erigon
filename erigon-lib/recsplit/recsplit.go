@@ -70,7 +70,6 @@ type RecSplit struct {
 	indexW          *bufio.Writer
 	indexF          *os.File
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
-	enumEf          *eliasfano32.EliasFano // Elias Fano instance for encoding 1-st layer of `Enum=true`
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
 
 	existenceF *os.File
@@ -478,11 +477,11 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			}
 			salt++
 		}
-
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
 		}
+		fmt.Printf("[dbg] write mapping: %d\n", rs.offsetBuffer[:m])
 		for _, offset := range rs.offsetBuffer[:m] {
 			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
 			if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
@@ -608,7 +607,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 	// Write number of bytes per index record
-	rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	if rs.enums {
+		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
+	} else {
+		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	}
 	if err = rs.indexW.WriteByte(byte(rs.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
@@ -635,7 +638,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.bytesPerRec, len(b), rs.keysAdded, rs.bytesPerRec, rs.indexFile))
 		}
 	}
-
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] write", "file", rs.indexFileName)
 	}
@@ -643,7 +645,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		fmt.Printf("[dbg] build rs.maxOffset=%d\n", rs.maxOffset)
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
 		defer rs.offsetCollector.Close()
-
 		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
 			return err
 		}
