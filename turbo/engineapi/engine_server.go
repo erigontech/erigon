@@ -138,17 +138,16 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests []hexutility.Bytes) error {
-	if !s.config.IsPrague(time) {
-		if executionRequests != nil {
-			return &rpc.InvalidParamsError{Message: "requests before Prague"}
-		}
+func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutility.Bytes) error {
+	if version < clparams.ElectraVersion && executionRequests != nil {
+		return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
 	}
-	// if s.config.IsPrague(time) {
-	//   if len(executionRequests) < 3 {
-	// 		return &rpc.InvalidParamsError{Message: "missing requests list"}
-	// 	}
-	// }
+	if executionRequests == nil {
+		return &rpc.InvalidParamsError{Message: "missing requests list"}
+	}
+	if len(executionRequests) != len(types.KnownRequestTypes) {
+		return &rpc.InvalidParamsError{Message: "invalid requests lists"}
+	}
 	return nil
 }
 
@@ -204,7 +203,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var requests types.FlatRequests
-	if err := s.checkRequestsPresence(header.Time, executionRequests); err != nil {
+	if err := s.checkRequestsPresence(version, executionRequests); err != nil {
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
