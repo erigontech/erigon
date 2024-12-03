@@ -616,6 +616,7 @@ func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHe
 		return nil, err
 	}
 	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
+	fmt.Printf("[dbg] /polygon/bridge/mdbx_store.go %d, %s\n", len(bytevals), err)
 	if err != nil {
 		return nil, err
 	}

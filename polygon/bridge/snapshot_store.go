@@ -268,7 +268,9 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 
 func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	if start > s.LastFrozenEventId() {
-		return s.Store.Events(ctx, start, end)
+		e, err := s.Store.Events(ctx, start, end)
+		fmt.Printf("[dbg] /polygon/bridge/snapshot_store.go1 %d, %s\n", len(bytevals), err)
+		return e, err
 	}
 
 	tx := s.snapshots.ViewType(heimdall.Events)
@@ -278,6 +280,7 @@ func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	var buf []byte
 	var result [][]byte
 
+	fmt.Printf("[dbg] /polygon/bridge/snapshot_store.go2 %d\n", len(segments))
 	for i := len(segments) - 1; i >= 0; i-- {
 		gg0 := segments[i].Src().MakeGetter()
 
@@ -355,6 +358,7 @@ func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, 
 		return nil, err
 	}
 	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
+	fmt.Printf("[dbg] /polygon/bridge/snapshot_store.go %d, %s\n", len(bytevals), err)
 	if err != nil {
 		return nil, err
 	}
