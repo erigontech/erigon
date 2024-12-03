@@ -131,7 +131,7 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 	if trace {
 		fmt.Println("end of read ***** ")
 	}
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 

@@ -1194,7 +1194,7 @@ func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []by
 	return accountNode, nil
 }
 
-func (hph *HexPatriciaHashed) nCellsInRow(row int) int {
+func (hph *HexPatriciaHashed) nCellsInRow(row int) int { //nolint:unused
 	count := 0
 	for col := 0; col < 16; col++ {
 		c := &hph.grid[row][col]
@@ -1260,7 +1260,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 				return nil, err
 			}
 			storageValueNode := trie.ValueNode(storageUpdate.Storage[:storageUpdate.StorageLen])
-			nextNode = &storageValueNode
+			nextNode = &storageValueNode //nolint:ineffassign, wastedassign
 			break
 		} else if cellToExpand.accountAddrLen > 0 { // account cell
 			accNode, err := hph.createAccountNode(cellToExpand, row, hashedKey, codeReads)
@@ -1296,7 +1296,7 @@ func (hph *HexPatriciaHashed) ToTrie(hashedKey []byte, codeReads map[libcommon.H
 			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
 		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
 			if len(hashedKey) <= 64 { // no storage, stop here
-				nextNode = nil
+				nextNode = nil // nolint:ineffassign, wastedassign
 				break
 			}
 			// there is storage so we need to expand further
@@ -2634,7 +2634,7 @@ func (hph *HexPatriciaHashed) HashAndNibblizeKey(key []byte) []byte {
 	return nibblized
 }
 
-func nibblize(key []byte) []byte {
+func nibblize(key []byte) []byte { // nolint:unused
 	nibblized := make([]byte, len(key)*2)
 	for i, b := range key {
 		nibblized[i*2] = (b >> 4) & 0xf

@@ -53,7 +53,7 @@ type OperatorHash struct {
 
 func (o *OperatorHash) WriteTo(output *OperatorMarshaller) error {
 	if err := output.WriteOpCode(OpHash); err != nil {
-		return nil
+		return err
 	}
 	return output.WriteHash(o.Hash)
 }
