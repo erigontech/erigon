@@ -1540,8 +1540,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
 	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
-		cv, ok := dt.getFromFileCache.Get(hi)
-		if ok {
+		if cv, ok := dt.getFromFileCache.Get(hi); ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
