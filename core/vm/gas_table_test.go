@@ -144,10 +144,8 @@ func TestEIP2200(t *testing.T) {
 
 			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), w)
 			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) error {
-					return nil
-				},
+				CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
+				Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
 			}
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, params.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
@@ -209,10 +207,8 @@ func TestCreateGas(t *testing.T) {
 		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), stateWriter)
 
 		vmctx := evmtypes.BlockContext{
-			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) (bool, error) { return true, nil },
-			Transfer: func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) error {
-				return nil
-			},
+			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
+			Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
 		}
 		config := vm.Config{}
 		if tt.eip3860 {

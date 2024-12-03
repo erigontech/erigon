@@ -93,33 +93,17 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if !exist {
+	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(from)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 1000000000 {
+	if balance := st.GetBalance(from); balance.Uint64() != 1000000000 {
 		t.Fatalf("got %v, expected %v", balance, 1000000000)
 	}
-	balance, err = st.GetBalance(data.addresses[1])
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 999995000 {
+	if balance := st.GetBalance(data.addresses[1]); balance.Uint64() != 999995000 {
 		t.Fatalf("got %v, expected %v", balance, 999995000)
 	}
-	balance, err = st.GetBalance(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 5000 {
+	if balance := st.GetBalance(to); balance.Uint64() != 5000 {
 		t.Fatalf("got %v, expected %v", balance, 5000)
 	}
 }
@@ -177,26 +161,14 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if !exist {
+	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(from)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 999995000 {
+	if balance := st.GetBalance(from); balance.Uint64() != 999995000 {
 		t.Fatalf("got %v, expected %v", balance, 999995000)
 	}
-	balance, err = st.GetBalance(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 5000 {
+	if balance := st.GetBalance(to); balance.Uint64() != 5000 {
 		t.Fatalf("got %v, expected %v", balance, 5000)
 	}
 }
@@ -251,26 +223,14 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if !exist {
+	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(from)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 999999000 {
+	if balance := st.GetBalance(from); balance.Uint64() != 999999000 {
 		t.Fatalf("got %v, expected %v", balance, 999999000)
 	}
-	balance, err = st.GetBalance(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 1000 {
+	if balance := st.GetBalance(to); balance.Uint64() != 1000 {
 		t.Fatalf("got %v, expected %v", balance, 1000)
 	}
 }
@@ -325,26 +285,14 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if !exist {
+	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(from)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 2000 {
+	if balance := st.GetBalance(from); balance.Uint64() != 2000 {
 		t.Fatalf("got %v, expected %v", balance, 2000)
 	}
-	balance, err = st.GetBalance(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 1000 {
+	if balance := st.GetBalance(to); balance.Uint64() != 1000 {
 		t.Fatalf("got %v, expected %v", balance, 1000)
 	}
 }
@@ -399,26 +347,14 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if !exist {
+	if !st.Exist(to) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(from)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 2000 {
+	if balance := st.GetBalance(from); balance.Uint64() != 2000 {
 		t.Fatalf("got %v, expected %v", balance, 2000)
 	}
-	balance, err = st.GetBalance(to)
-	if err != nil {
-		t.Error(err)
-	}
-	if balance.Uint64() != 1000 {
+	if balance := st.GetBalance(to); balance.Uint64() != 1000 {
 		t.Fatalf("got %v, expected %v", balance, 1000)
 	}
 }
@@ -452,18 +388,11 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(from)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if exist {
+
+		if st.Exist(contractAddress) {
 			t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
 		}
 		return nil
@@ -482,19 +411,11 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(from)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if exist {
+		if st.Exist(contractAddress) {
 			t.Error("expected contractAddress to not exist at the block 1", contractAddress.Hash().String())
 		}
 		return nil
@@ -508,19 +429,11 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(from)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to not exist at the block 1", contractAddress.Hash().String())
 		}
 		return nil
@@ -562,19 +475,11 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(from)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if exist {
+		if st.Exist(contractAddress) {
 			t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
 		}
 
@@ -588,19 +493,11 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(from)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 2", contractAddress.Hash().String())
 		}
 
@@ -662,19 +559,11 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(from)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if exist {
+		if st.Exist(contractAddress) {
 			t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
 		}
 
@@ -689,19 +578,11 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(from)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 2", contractAddress.Hash().String())
 		}
 		return nil
@@ -767,19 +648,11 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(from)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if exist {
+		if st.Exist(contractAddress) {
 			t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
 		}
 		return nil
@@ -793,19 +666,11 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(from)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(from) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.Hash().String())
 		}
 		return nil
