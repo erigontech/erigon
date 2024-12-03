@@ -161,7 +161,7 @@ func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error)
 	}
 
 	filter := new(bloomfilter.Filter)
-	_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 1*1024*1024))
+	_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 2*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
 	}
