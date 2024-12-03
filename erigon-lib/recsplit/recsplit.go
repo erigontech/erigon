@@ -606,7 +606,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	// Write number of bytes per index record
 	if rs.enums {
 		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
-		fmt.Printf("[dbg] %s, %d -> %d\n", rs.indexFileName, common.BitLenToByteLen(bits.Len64(rs.maxOffset)), rs.bytesPerRec)
+		fmt.Printf("[dbg] %s, %d -> %d, keys=%dM\n", rs.indexFileName, common.BitLenToByteLen(bits.Len64(rs.maxOffset)), rs.bytesPerRec, rs.keysAdded/1_000_000)
 	} else {
 		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
 	}
