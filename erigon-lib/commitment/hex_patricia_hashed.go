@@ -89,7 +89,6 @@ type HexPatriciaHashed struct {
 	hadToLoadL    map[uint64]skipStat
 
 	//temp buffers
-	keyPrefix [1]byte
 	accValBuf rlp.RlpEncodedBytes
 }
 
