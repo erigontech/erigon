@@ -513,7 +513,6 @@ func (ef *EliasFano) Write(w io.Writer) error {
 		return e
 	}
 	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*uint64Size)
-	fmt.Printf("[dbg] len ef %d\n", len(b))
 	if _, e := w.Write(b); e != nil {
 		return e
 	}
