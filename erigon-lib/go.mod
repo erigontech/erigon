@@ -2,6 +2,11 @@ module github.com/erigontech/erigon-lib
 
 go 1.22.0
 
+replace (
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
+)
+
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e
 	github.com/erigontech/interfaces v0.0.0-20241116035842-5d396f10468e
@@ -153,9 +158,4 @@ require (
 	modernc.org/mathutil v1.6.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
-)
-
-replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
-	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 )
