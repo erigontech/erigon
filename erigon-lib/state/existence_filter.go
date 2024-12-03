@@ -145,37 +145,27 @@ func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error)
 	if !exists {
 		return nil, fmt.Errorf("file doesn't exists: %s", fileName)
 	}
-	{
-		ff, err := os.Open(filePath)
-		if err != nil {
-			return nil, err
-		}
-		defer ff.Close()
-		stat, err := ff.Stat()
-		if err != nil {
-			return nil, err
-		}
-		idx.empty = stat.Size() == 0
-	}
-
-	if idx.empty {
-		return idx, nil
-	}
 
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	stat, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	idx.empty = stat.Size() == 0
+	if idx.empty {
+		return idx, nil
+	}
+
 	filter := new(bloomfilter.Filter)
 	_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 1*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
 	}
 	idx.filter = filter
-	if err != nil {
-		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
-	}
 	return idx, nil
 }
 func (b *ExistenceFilter) Close() {
