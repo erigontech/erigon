@@ -249,7 +249,7 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 
 	ku := make([]*KeyUpdate, len(plainKeys))
 	for i, pk := range plainKeys {
-		ku[i] = &KeyUpdate{plainKey: pk, hashedKey: hph.hashAndNibblizeKey(pk), update: &updates[i]}
+		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: hph.hashAndNibblizeKey(pk), update: &updates[i]}
 	}
 
 	sort.Slice(updates, func(i, j int) bool {
@@ -259,7 +259,7 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 	pks := make([][]byte, len(updates))
 	upds := make([]Update, len(updates))
 	for i, u := range ku {
-		pks[i] = u.plainKey
+		pks[i] = []byte(u.plainKey)
 		upds[i] = *u.update
 	}
 	return pks, upds

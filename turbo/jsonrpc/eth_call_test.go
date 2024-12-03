@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/testlog"
 
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -50,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 func TestEstimateGas(t *testing.T) {
@@ -553,13 +553,17 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	assert.NoError(t, err)
 	st := state.New(stateReader)
 	assert.NoError(t, err)
-	assert.False(t, st.Exist(contractAddr), "Contract should not exist at block #1")
+	exist, err := st.Exist(contractAddr)
+	assert.NoError(t, err)
+	assert.False(t, exist, "Contract should not exist at block #1")
 
 	stateReader, err = rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 2, 0, "")
 	assert.NoError(t, err)
 	st = state.New(stateReader)
 	assert.NoError(t, err)
-	assert.True(t, st.Exist(contractAddr), "Contract should exist at block #2")
+	exist, err = st.Exist(contractAddr)
+	assert.NoError(t, err)
+	assert.True(t, exist, "Contract should exist at block #2")
 
 	return m, bankAddress, contractAddr
 }

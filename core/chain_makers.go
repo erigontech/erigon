@@ -35,12 +35,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -176,10 +176,18 @@ func (b *BlockGen) AddUncheckedReceipt(receipt *types.Receipt) {
 // TxNonce returns the next valid transaction nonce for the
 // account at addr. It panics if the account does not exist.
 func (b *BlockGen) TxNonce(addr libcommon.Address) uint64 {
-	if !b.ibs.Exist(addr) {
+	exist, err := b.ibs.Exist(addr)
+	if err != nil {
+		panic(fmt.Sprintf("can't get account: %s", err))
+	}
+	if !exist {
 		panic("account does not exist")
 	}
-	return b.ibs.GetNonce(addr)
+	nonce, err := b.ibs.GetNonce(addr)
+	if err != nil {
+		panic(fmt.Sprintf("can't get account: %s", err))
+	}
+	return nonce
 }
 
 // AddUncle adds an uncle header to the generated block.

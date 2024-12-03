@@ -1355,9 +1355,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
@@ -1411,9 +1408,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ac.Close()
 
 	if err = agg.MergeLoop(ctx); err != nil {
-		return err
-	}
-	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
