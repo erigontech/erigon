@@ -5,14 +5,15 @@ on:
       - test-integration-michele
 #      - main
 #      - 'release/**'
-#  pull_request:
-#    branches:
-#      - main
-#    types:
-#      - opened
-#      - reopened
-#      - synchronize
-#      - ready_for_review
+  pull_request:
+    branches:
+      # - main
+      - test-integration-michele
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
   workflow_dispatch:
