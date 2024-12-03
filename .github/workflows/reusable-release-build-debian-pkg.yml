@@ -42,7 +42,7 @@ jobs:
           #!/bin/bash
           echo "WARNING: erigon package does not install any configurations nor services."
           echo "Use your specific way to configure and run erigon according to your needs."
-          echo "More details how to run erigon could be found at https://erigon.gitbook.io/erigon ."
+          echo "More details on how to run erigon could be found at https://erigon.gitbook.io/erigon ."
           END
 
       # Creating directory structure
