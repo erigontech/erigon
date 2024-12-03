@@ -497,6 +497,10 @@ func (efi *EliasFanoIter) Next() (uint64, error) {
 	return efi.upper | (lower & efi.lowerBitsMask), nil
 }
 
+func (ef *EliasFano) SerializedSizeInBytes() int {
+	return 8 + 8 + len(ef.data)*uint64Size
+}
+
 // Write outputs the state of golomb rice encoding into a writer, which can be recovered later by Read
 func (ef *EliasFano) Write(w io.Writer) error {
 	var numBuf [8]byte
