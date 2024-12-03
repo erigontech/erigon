@@ -269,7 +269,7 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	if start > s.LastFrozenEventId() {
 		e, err := s.Store.Events(ctx, start, end)
-		fmt.Printf("[dbg] /polygon/bridge/snapshot_store.go1 %d, %s\n", len(bytevals), err)
+		fmt.Printf("[dbg] /polygon/bridge/snapshot_store.go1 %d, %s\n", len(e), err)
 		return e, err
 	}
 
