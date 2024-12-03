@@ -1395,7 +1395,6 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		return nil, fmt.Errorf("%T has no WithTx converter", r.borBridgeStore)
 	}
 
-	fmt.Printf("[dbg] BlockReader.EventsByBlock: %T\n", txHandler.WithTx(tx))
 	return txHandler.WithTx(tx).EventsByBlock(ctx, hash, blockHeight)
 }
 
