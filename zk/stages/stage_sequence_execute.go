@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -432,12 +433,21 @@ func sequencingBatchStep(
 							continue
 						}
 
-						// if we have an error at this point something has gone wrong, either in the pool or otherwise
-						// to stop the pool growing and hampering further processing of good transactions here
-						// we mark it for being discarded
-						log.Warn(fmt.Sprintf("[%s] error adding transaction to batch, discarding from pool", logPrefix), "hash", txHash, "err", err)
-						badTxHashes = append(badTxHashes, txHash)
-						batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
+						if isOkKnownError(err) {
+							// if this is a known error that could be caused by some edge case coming from the pool we want to warn
+							// about it and continue on as normal but ensure we don't continue to keep trying to add this transaction
+							// to the block
+							log.Warn(fmt.Sprintf("[%s] known error adding transaction to block, skipping for now: %v", logPrefix, err),
+								"hash", txHash)
+							badTxHashes = append(badTxHashes, txHash)
+						} else {
+							// if we have an error at this point something has gone wrong, either in the pool or otherwise
+							// to stop the pool growing and hampering further processing of good transactions here
+							// we mark it for being discarded
+							log.Warn(fmt.Sprintf("[%s] error adding transaction to batch, discarding from pool", logPrefix), "hash", txHash, "err", err)
+							badTxHashes = append(badTxHashes, txHash)
+							batchState.blockState.transactionsToDiscard = append(batchState.blockState.transactionsToDiscard, batchState.blockState.transactionHashesToSlots[txHash])
+						}
 					}
 
 					switch anyOverflow {
@@ -575,8 +585,12 @@ func sequencingBatchStep(
 			return err
 		}
 
-		cfg.txPool.RemoveMinedTransactions(batchState.blockState.builtBlockElements.txSlots)
-		cfg.txPool.RemoveMinedTransactions(batchState.blockState.transactionsToDiscard)
+		if err := cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, batchState.blockState.builtBlockElements.txSlots); err != nil {
+			return err
+		}
+		if err := cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, batchState.blockState.transactionsToDiscard); err != nil {
+			return err
+		}
 
 		if batchState.isLimboRecovery() {
 			stateRoot := block.Root()
@@ -659,4 +673,9 @@ func removeInclusionTransaction(orig []types.Transaction, index int) []types.Tra
 		return orig
 	}
 	return append(orig[:index], orig[index+1:]...)
+}
+
+func isOkKnownError(err error) bool {
+	return err == nil ||
+		errors.Is(err, core.ErrNonceTooHigh)
 }

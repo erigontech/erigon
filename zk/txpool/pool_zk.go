@@ -279,7 +279,9 @@ func (p *TxPool) MarkForDiscardFromPendingBest(txHash common.Hash) {
 	}
 }
 
-func (p *TxPool) RemoveMinedTransactions(ids []common.Hash) {
+func (p *TxPool) RemoveMinedTransactions(ctx context.Context, tx kv.Tx, blockGasLimit uint64, ids []common.Hash) error {
+	cache := p.cache()
+
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -304,9 +306,28 @@ func (p *TxPool) RemoveMinedTransactions(ids []common.Hash) {
 		return true
 	})
 
+	sendersWithChangedState := make(map[uint64]struct{})
 	for _, mt := range toDelete {
 		p.discardLocked(mt, Mined)
+		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
 	}
+
+	baseFee := p.pendingBaseFee.Load()
+
+	cacheView, err := cache.View(ctx, tx)
+	if err != nil {
+		return err
+	}
+	for senderID := range sendersWithChangedState {
+		nonce, balance, err := p.senders.info(cacheView, senderID)
+		if err != nil {
+			return err
+		}
+		p.onSenderStateChange(senderID, nonce, balance, p.all,
+			baseFee, blockGasLimit, p.pending, p.baseFee, p.queued, p.discardLocked)
+
+	}
+	return nil
 }
 
 // discards the transactions that are in overflowZkCoutners from pending
