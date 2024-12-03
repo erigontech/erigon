@@ -243,13 +243,11 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 			continue
 		}
 		if sn.To() <= blockNum {
-			fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: skip2 %s\n", sn.Src().FileName())
 			break
 		}
 
 		gg := sn.Src().MakeGetter()
 		var buf []byte
-		fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: use file %s\n", sn.Src().FileName())
 
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0])
@@ -287,7 +285,6 @@ func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte
 	var buf []byte
 	var result [][]byte
 
-	fmt.Printf("[dbg] /polygon/bridge/snapshot_store.go2 %d\n", len(segments))
 	for i := len(segments) - 1; i >= 0; i-- {
 		gg0 := segments[i].Src().MakeGetter()
 
