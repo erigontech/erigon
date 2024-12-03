@@ -131,7 +131,10 @@ func (v *iiVisible) preAlloc() {
 	}
 }
 func (v *iiVisible) newSeekInFilesCache() *IISeekInFilesCache {
-	return v.caches.Get().(*IISeekInFilesCache)
+	if v._sing == nil {
+		v._sing = v.caches.Get().(*IISeekInFilesCache)
+	}
+	return v._sing
 }
 func (v *iiVisible) returnSeekInFilesCache(c *IISeekInFilesCache) {
 	if c == nil {

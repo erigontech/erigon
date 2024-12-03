@@ -97,6 +97,8 @@ type iiVisible struct {
 	files  []visibleFile
 	name   string
 	caches *sync.Pool
+
+	_sing *IISeekInFilesCache
 }
 
 func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
