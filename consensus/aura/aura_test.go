@@ -30,13 +30,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv/memdb"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/consensus/aura"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,

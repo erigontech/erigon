@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon-lib/rlphacks"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
@@ -658,17 +658,6 @@ func (hb *HashBuilder) code(code []byte) error {
 	return nil
 }
 
-func (hb *HashBuilder) emptyRoot() {
-	if hb.trace {
-		fmt.Printf("EMPTYROOT\n")
-	}
-	hb.nodeStack = append(hb.nodeStack, nil)
-	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
-	hash[0] = 0x80 + length2.Hash
-	copy(hash[1:], EmptyRoot[:])
-	hb.hashStack = append(hb.hashStack, hash[:]...)
-}
-
 func (hb *HashBuilder) RootHash() (libcommon.Hash, error) {
 	if !hb.hasRoot() {
 		return libcommon.Hash{}, errors.New("no root in the tree")
@@ -695,12 +684,12 @@ func (hb *HashBuilder) rootHash() libcommon.Hash {
 
 func (hb *HashBuilder) topHash() []byte {
 	pos := len(hb.hashStack) - hashStackStride
-	len := hb.hashStack[pos] - 0x80
-	if len > 32 {
+	length := hb.hashStack[pos] - 0x80
+	if length > 32 {
 		// node itself (RLP list), not its hash
-		len = hb.hashStack[pos] - 0xc0
+		length = hb.hashStack[pos] - 0xc0
 	}
-	return hb.hashStack[pos : pos+1+int(len)]
+	return hb.hashStack[pos : pos+1+int(length)]
 }
 
 func (hb *HashBuilder) printTopHashes(prefix []byte, _, children uint16) {
