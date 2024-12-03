@@ -632,7 +632,7 @@ func EncodeUint256(i *uint256.Int, w io.Writer, buffer []byte) error {
 		_, err := w.Write(buffer[:1])
 		return err
 	}
-	nBytes := byte((nBits + 7) / 8)
+	nBytes := byte(libcommon.BitLenToByteLen(nBits))
 	buffer[0] = 0x80 + nBytes
 	if _, err := w.Write(buffer[:1]); err != nil {
 		return err
