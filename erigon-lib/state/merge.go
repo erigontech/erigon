@@ -338,6 +338,7 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
+// TODO: add support to multiencseq
 func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	preef, _ := eliasfano32.ReadEliasFano(preval)
 	ef, _ := eliasfano32.ReadEliasFano(val)
@@ -778,6 +779,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				})
 			}
 		}
+		// TODO: dedup
 		// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
 		// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
 		// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned

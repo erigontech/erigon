@@ -1015,6 +1015,7 @@ func (iit *InvertedIndexRoTx) IterateChangedKeys(startTxNum, endTxNum uint64, ro
 	return ii1
 }
 
+// TODO: add multiencseq support to collate
 // collate [stepFrom, stepTo)
 func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (InvertedIndexCollation, error) {
 	stepTo := step + 1

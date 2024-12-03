@@ -609,6 +609,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 }
 
+// TODO: implement multiencseq support for collation
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
 
