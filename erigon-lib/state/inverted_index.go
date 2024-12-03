@@ -574,7 +574,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 			if txNum <= fromCache.found {
 				iit.seekInFilesCache.hit++
 				return true, fromCache.found, nil
-			} else if fromCache.found == 0 {
+			} else if fromCache.found == 0 { //not found
 				iit.seekInFilesCache.hit++
 				return false, 0, nil
 			}
@@ -604,6 +604,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 				return false, equalOrHigherTxNum, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon seg integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
 			}
 			if iit.seekInFilesCache != nil {
+				fmt.Printf("[dbg] insert %d\n", equalOrHigherTxNum-txNum)
 				iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum})
 			}
 			return true, equalOrHigherTxNum, nil
