@@ -270,7 +270,6 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 		}
 	}
 
-	panic(2)
 	return 0, 0, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
 }
 
@@ -366,8 +365,10 @@ func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, 
 		return nil, err
 	}
 	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
-	fmt.Printf("[dbg] /polygon/bridge/snapshot_store.go %d, %s\n", len(bytevals), err)
 	if err != nil {
+		if errors.Is(err, ErrEventIdRangeNotFound) {
+			return []rlp.RawValue{}, nil
+		}
 		return nil, err
 	}
 	result := make([]rlp.RawValue, len(bytevals))
