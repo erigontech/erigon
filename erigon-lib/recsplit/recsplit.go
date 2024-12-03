@@ -475,10 +475,12 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			}
 			salt++
 		}
+		fmt.Printf("before: %d\n", offsets[:m])
 		for i := uint16(0); i < m; i++ {
-			j := remap16(remix(bucket[i]+salt), m)
+			j := remap16(remix(bucket[i]), m)
 			rs.offsetBuffer[j] = offsets[i]
 		}
+		fmt.Printf("after: %d\n", rs.offsetBuffer[:m])
 		for _, offset := range rs.offsetBuffer[:m] {
 			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
 			if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
@@ -604,7 +606,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 	// Write number of bytes per index record
-	rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	if rs.enums {
+		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
+	} else {
+		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	}
 	if err = rs.indexW.WriteByte(byte(rs.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}

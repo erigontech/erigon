@@ -1313,15 +1313,14 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	if sdc.discard {
 		return
 	}
-	ks := []byte(key)
 
 	switch d {
 	case kv.AccountsDomain:
-		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchAccount)
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
 	case kv.CodeDomain:
-		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchCode)
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
 	case kv.StorageDomain:
-		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchStorage)
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
 	default:
 		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
