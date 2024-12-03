@@ -25,6 +25,7 @@ import (
 	"math/bits"
 	"sort"
 	"strings"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 
@@ -1025,29 +1026,30 @@ func (t *Updates) Size() (updates uint64) {
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byte)) {
+func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
 	case ModeUpdate:
 		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
 
 		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
-			if bytes.Equal(item.plainKey, pivot.plainKey) {
+			if item.plainKey == pivot.plainKey {
 				fn(item, val)
 				updated = true
 			}
 			return false
 		})
 		if !updated {
-			pivot.hashedKey = t.hasher(pivot.plainKey)
+			pivot.hashedKey = t.hasher(toBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
 		}
 	case ModeDirect:
-		if _, ok := t.keys[string(key)]; !ok {
-			if err := t.etl.Collect(t.hasher(key), key); err != nil {
+		if _, ok := t.keys[key]; !ok {
+			keyBytes := toBytesZeroCopy(key)
+			if err := t.etl.Collect(t.hasher(keyBytes), keyBytes); err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
-			t.keys[string(key)] = struct{}{}
+			t.keys[key] = struct{}{}
 		}
 	default:
 	}
@@ -1139,7 +1141,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 			default:
 			}
 
-			if err := fn(item.hashedKey, item.plainKey, item.update); err != nil {
+			if err := fn(item.hashedKey, toBytesZeroCopy(item.plainKey), item.update); err != nil {
 				return false
 			}
 			return true
@@ -1165,13 +1167,13 @@ func (t *Updates) Reset() {
 }
 
 type KeyUpdate struct {
-	plainKey  []byte
+	plainKey  string
 	hashedKey []byte
 	update    *Update
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
-	return bytes.Compare(i.plainKey, j.plainKey) < 0
+	return i.plainKey < j.plainKey
 }
 
 type UpdateFlags uint8
@@ -1349,3 +1351,6 @@ func (u *Update) String() string {
 	}
 	return sb.String()
 }
+
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) } //nolint
+func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }
