@@ -208,6 +208,9 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.balanceInc)
 	sdb.txIndex = 0
 	sdb.logSize = 0
+	sdb.versionedReads = nil
+	sdb.versionedReads = nil
+	sdb.dep = -1
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
@@ -464,16 +467,19 @@ func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error {
-	stateObject, err := sdb.getStateObject(addr)
-	if err != nil {
-		return err
-	}
-	if stateObject != nil && !stateObject.deleted {
-		stateObject.GetCommittedState(key, value)
-	} else {
-		value.Clear()
-	}
-	return nil
+	_, err := versionedRead(sdb, VersionStateKey(addr, *key), nil, func(s *IntraBlockState) (*uint256.Int, error) {
+		stateObject, err := sdb.getStateObject(addr)
+		if err != nil {
+			return value, err
+		}
+		if stateObject != nil && !stateObject.deleted {
+			stateObject.GetCommittedState(key, value)
+		} else {
+			value.Clear()
+		}
+		return value, nil
+	})
+	return err
 }
 
 func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) (bool, error) {
@@ -506,9 +512,13 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
 
+	if sdb.versionMap != nil {
+		sdb.GetBalance(addr)
+	}
+
 	// If this account has not been read, add to the balance increment map
 	_, needAccount := sdb.stateObjects[addr]
-	if !needAccount && addr == ripemd && amount.IsZero() {
+	if !needAccount && addr == ripemd && amount.IsZero() || sdb.versionMap != nil {
 		needAccount = true
 	}
 	if !needAccount {
@@ -538,6 +548,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 
 		bi.increase.Add(&bi.increase, amount)
 		bi.count++
+		sdb.writeVersion(VersionSubpathKey(addr, BalancePath))
 		return nil
 	}
 
@@ -545,7 +556,9 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if err != nil {
 		return err
 	}
+	stateObject = sdb.recordWritten(stateObject)
 	stateObject.AddBalance(amount, reason)
+	sdb.writeVersion(VersionSubpathKey(addr, BalancePath))
 	return nil
 }
 
@@ -556,11 +569,17 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
 	}
 
+	if sdb.versionMap != nil {
+		sdb.GetBalance(addr)
+	}
+	sdb.writeVersion(VersionSubpathKey(addr, BalancePath))
+
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
 	}
 	if stateObject != nil {
+		stateObject = sdb.recordWritten(stateObject)
 		stateObject.SubBalance(amount, reason)
 	}
 	return nil
@@ -572,7 +591,9 @@ func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.I
 	if err != nil {
 		return err
 	}
+	sdb.writeVersion(VersionSubpathKey(addr, BalancePath))
 	if stateObject != nil {
+		stateObject = sdb.recordWritten(stateObject)
 		stateObject.SetBalance(amount, reason)
 	}
 	return nil
@@ -585,7 +606,9 @@ func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) error
 		return err
 	}
 	if stateObject != nil {
+		stateObject = sdb.recordWritten(stateObject)
 		stateObject.SetNonce(nonce)
+		sdb.writeVersion(VersionSubpathKey(addr, NoncePath))
 	}
 	return nil
 }
@@ -598,7 +621,9 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 		return err
 	}
 	if stateObject != nil {
+		stateObject = sdb.recordWritten(stateObject)
 		stateObject.SetCode(crypto.Keccak256Hash(code), code)
+		sdb.writeVersion(VersionSubpathKey(addr, CodePath))
 	}
 	return nil
 }
@@ -610,7 +635,9 @@ func (sdb *IntraBlockState) SetState(addr libcommon.Address, key *libcommon.Hash
 		return err
 	}
 	if stateObject != nil {
+		stateObject = sdb.recordWritten(stateObject)
 		stateObject.SetState(key, value)
+		sdb.writeVersion(VersionStateKey(addr, *key))
 	}
 	return nil
 }
@@ -769,7 +796,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 }
 
 func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *stateObject) {
-	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
 		object.data.Balance.Add(&object.data.Balance, &bi.increase)
 		bi.transferred = true
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})

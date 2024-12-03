@@ -480,7 +480,6 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	domains.SetTxNum(1)
 	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 	mvhm := &VersionMap{}
 
 	s := NewWithVersionMap(NewReaderV3(domains), mvhm)
@@ -615,7 +614,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
-	states[1].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs,nil))
+	states[1].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, nil))
 	states[1].FlushVersionedWrites()
 
 	// Tx2 check the state and balance
@@ -1011,7 +1010,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	states[0].SetBalance(addr1, balance1, tracing.BalanceChangeUnspecified)
 	states[0].SetState(addr2, &key2, val2)
 	states[0].GetOrNewStateObject(addr3)
-	states[0].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs,nil))
+	states[0].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, nil))
 	states[0].FlushVersionedWrites()
 
 	sSingleProcess.GetOrNewStateObject(addr1)
@@ -1026,7 +1025,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	states[1].SetState(addr1, &key2, val2)
 	states[1].SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
 	states[1].SetNonce(addr1, 1)
-	states[1].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs,nil))
+	states[1].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, nil))
 	states[1].FlushVersionedWrites()
 
 	sSingleProcess.SetState(addr1, &key2, val2)
@@ -1039,7 +1038,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	states[2].SetState(addr1, &key1, val2)
 	states[2].SetBalance(addr1, balance2, tracing.BalanceChangeUnspecified)
 	states[2].SetNonce(addr1, 2)
-	states[2].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs,nil))
+	states[2].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, nil))
 	states[2].FlushVersionedWrites()
 
 	sSingleProcess.SetState(addr1, &key1, val2)
@@ -1051,7 +1050,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	// Tx3 write
 	states[3].Selfdestruct(addr2)
 	states[3].SetCode(addr1, code)
-	states[3].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs,nil))
+	states[3].FinalizeTx(&chain.Rules{}, NewStateWriterV3(rs, nil))
 	states[3].FlushVersionedWrites()
 
 	sSingleProcess.Selfdestruct(addr2)
