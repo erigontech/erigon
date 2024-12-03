@@ -272,6 +272,11 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	return a, nil
 }
 
+// TODO: exported for idx_optimize.go
+func GetStateIndicesSalt(baseDir string) (salt *uint32, err error) {
+	return getStateIndicesSalt(baseDir)
+}
+
 // getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
 func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
@@ -604,6 +609,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 	}
 }
 
+// TODO: implement multiencseq support for collation
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
 

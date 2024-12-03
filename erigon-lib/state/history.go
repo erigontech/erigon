@@ -379,6 +379,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	histReader := seg.NewReader(hist.MakeGetter(), h.compression)
 	efHistReader := seg.NewReader(efHist.MakeGetter(), h.InvertedIndex.compression)
 
+	// TODO: dedup
 	for {
 		histReader.Reset(0)
 		efHistReader.Reset(0)
@@ -572,6 +573,7 @@ func (c HistoryCollation) Close() {
 	}
 }
 
+// TODO: dedup collate code for ii
 // [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
 	if h.snapshotsDisabled {
