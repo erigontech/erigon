@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
-	"strconv"
 	"sync"
 	"time"
 
@@ -35,7 +34,6 @@ var (
 	doMemstat           = EnvBool("NO_MEMSTAT", true)
 	saveHeapProfile     = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	mdbxReadahead       = EnvBool("MDBX_READAHEAD", false)
 	mdbxLockInRam       = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks    = EnvBool("STAGES_ONLY_BLOCKS", false)
 
@@ -47,7 +45,6 @@ var (
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
 	noMerge              = EnvBool("NO_MERGE", false)
-	discardHistory       = EnvBool("DISCARD_HISTORY", false)
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -78,10 +75,8 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 }
 
-func MdbxReadAhead() bool { return mdbxReadahead }
 func MdbxLockInRam() bool { return mdbxLockInRam }
 
-func DiscardHistory() bool       { return discardHistory }
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
 func NoMerge() bool              { return noMerge }
@@ -96,10 +91,7 @@ func DirtySpace() uint64 {
 	dirtySaceOnce.Do(func() {
 		v, _ := os.LookupEnv("MDBX_DIRTY_SPACE_MB")
 		if v != "" {
-			i, err := strconv.Atoi(v)
-			if err != nil {
-				panic(err)
-			}
+			i := MustParseInt(v)
 			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
 			dirtySace = uint64(i * 1024 * 1024)
 		}

@@ -84,13 +84,6 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: parseSegmentRequest error %w", err)
 	}
-	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
-	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: ReadTd error %w", err)
-	}
-	if td == nil {
-		return &execution.GetBodyResponse{Body: nil}, nil
-	}
 	body, err := e.getBody(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: getBody error %w", err)

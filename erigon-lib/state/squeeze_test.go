@@ -114,7 +114,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	require.NoError(t, err)
 
 	// collect account keys to trigger commitment
-	acit, err := ac.DomainRangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
+	acit, err := ac.RangeLatest(rwTx, kv.AccountsDomain, nil, nil, -1)
 	require.NoError(t, err)
 	defer acit.Close()
 
@@ -122,7 +122,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	for acit.HasNext() {
 		k, _, err := acit.Next()
 		require.NoError(t, err)
-		domains.sdCtx.updates.TouchPlainKey(k, nil, domains.sdCtx.updates.TouchAccount)
+		domains.sdCtx.updates.TouchPlainKey(string(k), nil, domains.sdCtx.updates.TouchAccount)
 	}
 
 	// check if the commitment is the same

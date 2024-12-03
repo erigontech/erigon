@@ -28,11 +28,11 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
+	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 )
 
-const RUNS = 100000 // for local tests increase this number
+const RUNS = 10000 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -51,6 +51,11 @@ func (tr *TRand) RandIntInRange(_min, _max int) int {
 func (tr *TRand) RandUint64() *uint64 {
 	a := tr.rnd.Uint64()
 	return &a
+}
+
+func (tr *TRand) RandUint256() *uint256.Int {
+	a := new(uint256.Int).SetBytes(tr.RandBytes(tr.RandIntInRange(1, 32)))
+	return a
 }
 
 func (tr *TRand) RandBig() *big.Int {
@@ -141,8 +146,8 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
 			YParity: uint8(*tr.RandUint64()),
-			R:       *uint256.NewInt(*tr.RandUint64()),
-			S:       *uint256.NewInt(*tr.RandUint64()),
+			R:       *tr.RandUint256(),
+			S:       *tr.RandUint256(),
 		}
 	}
 	return auths
@@ -162,9 +167,9 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		To:    &to,
 		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
 		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
-		V:     *uint256.NewInt(*tr.RandUint64()),
-		R:     *uint256.NewInt(*tr.RandUint64()),
-		S:     *uint256.NewInt(*tr.RandUint64()),
+		V:     *tr.RandUint256(),
+		R:     *tr.RandUint256(),
+		S:     *tr.RandUint256(),
 	}
 	switch txType {
 	case LegacyTxType:

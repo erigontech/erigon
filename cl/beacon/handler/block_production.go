@@ -112,6 +112,34 @@ func (a *ApiHandler) waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(ctx context
 		time.Sleep(30 * time.Millisecond)
 	}
 }
+
+func (a *ApiHandler) waitForHeadSlot(slot uint64) {
+	stopCh := time.After(time.Second)
+	for {
+		headSlot := a.syncedData.HeadSlot()
+		if headSlot >= slot || a.slotWaitedForAttestationProduction.Contains(slot) {
+			return
+		}
+		_, ok, err := a.attestationProducer.CachedAttestationData(slot, 0)
+		if err != nil {
+			log.Warn("Failed to get attestation data", "err", err)
+		}
+		if ok {
+			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
+			return
+		}
+
+		time.Sleep(1 * time.Millisecond)
+		select {
+		case <-stopCh:
+			a.slotWaitedForAttestationProduction.Add(slot, struct{}{})
+			return
+		default:
+		}
+
+	}
+}
+
 func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -120,6 +148,8 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	start := time.Now()
+
 	// wait until the head state is at the target slot or later
 	err = a.waitUntilHeadStateAtEpochIsReadyOrCountAsMissed(r.Context(), a.syncedData, *slot/a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
@@ -141,6 +171,27 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			errors.New("slot is required"),
 		)
 	}
+	if *slot > a.ethClock.GetCurrentSlot() {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot is in the future"))
+	}
+
+	a.waitForHeadSlot(*slot)
+
+	attestationData, ok, err := a.attestationProducer.CachedAttestationData(*slot, *committeeIndex)
+	if err != nil {
+		log.Warn("Failed to get attestation data", "err", err)
+	}
+
+	defer func() {
+		a.logger.Debug("Produced Attestation", "slot", *slot,
+			"committee_index", *committeeIndex, "cached", ok, "beacon_block_root",
+			attestationData.BeaconBlockRoot, "duration", time.Since(start))
+	}()
+
+	if ok {
+		return newBeaconResponse(attestationData), nil
+	}
+
 	clversion := a.beaconChainCfg.GetCurrentStateVersion(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) && committeeIndex == nil {
 		return nil, beaconhttp.NewEndpointError(
@@ -153,7 +204,6 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeeIndex = &zero
 	}
 
-	var attestationData solid.AttestationData
 	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
 			tx,
@@ -162,6 +212,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			*slot,
 			*committeeIndex,
 		)
+
 		if err == attestation_producer.ErrHeadStateBehind {
 			return beaconhttp.NewEndpointError(
 				http.StatusServiceUnavailable,

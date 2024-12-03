@@ -86,6 +86,9 @@ var (
 			timer: metrics.GetOrCreateSummary("client_requests_checkpointcount_duration"),
 		},
 	}
+
+	waypointCheckpointLength = metrics.NewGauge(`waypoint_length{type="checkpoint"}`)
+	waypointMilestoneLength  = metrics.NewGauge(`waypoint_length{type="milestone"}`)
 )
 
 func sendMetrics(ctx context.Context, start time.Time, isSuccessful bool) {
@@ -101,4 +104,12 @@ func sendMetrics(ctx context.Context, start time.Time, isSuccessful bool) {
 
 	meters.request[isSuccessful].Set(1)
 	meters.timer.ObserveDuration(start)
+}
+
+func UpdateObservedWaypointCheckpointLength(length uint64) {
+	waypointCheckpointLength.SetUint64(length)
+}
+
+func UpdateObservedWaypointMilestoneLength(length uint64) {
+	waypointMilestoneLength.SetUint64(length)
 }

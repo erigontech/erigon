@@ -46,6 +46,10 @@ type bridgeSynchronizer interface {
 	Ready(ctx context.Context) <-chan error
 }
 
+type wiggleCalculator interface {
+	CalculateWiggle(ctx context.Context, header *types.Header) (time.Duration, error)
+}
+
 func NewSync(
 	logger log.Logger,
 	store Store,
@@ -59,6 +63,7 @@ func NewSync(
 	bridgeSync bridgeSynchronizer,
 	events <-chan Event,
 	notifications *shards.Notifications,
+	wiggleCalculator wiggleCalculator,
 ) *Sync {
 	badBlocksLru, err := simplelru.NewLRU[common.Hash, struct{}](1024, nil)
 	if err != nil {
@@ -79,6 +84,7 @@ func NewSync(
 		events:            events,
 		badBlocks:         badBlocksLru,
 		notifications:     notifications,
+		wiggleCalculator:  wiggleCalculator,
 	}
 }
 
@@ -96,6 +102,7 @@ type Sync struct {
 	events            <-chan Event
 	badBlocks         *simplelru.LRU[common.Hash, struct{}]
 	notifications     *shards.Notifications
+	wiggleCalculator  wiggleCalculator
 }
 
 func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
@@ -305,6 +312,26 @@ func (s *Sync) applyNewBlockOnTip(ctx context.Context, event EventNewBlock, ccb 
 	if len(newConnectedHeaders) == 0 {
 		return nil
 	}
+
+	go func() {
+		for i := range newConnectedHeaders {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				wiggle, err := s.wiggleCalculator.CalculateWiggle(ctx, newConnectedHeaders[i])
+				if err != nil {
+					s.logger.Error(
+						syncLogPrefix("failed update wiggle metrics"),
+						"err", err,
+					)
+					continue
+				}
+
+				UpdateWiggleDuration(wiggle)
+			}
+		}
+	}()
 
 	newTip := ccb.Tip()
 	firstNewConnectedHeader := newConnectedHeaders[0]
@@ -610,6 +637,10 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
+	if err := s.store.Prepare(ctx); err != nil {
+		return err
+	}
+
 	s.logger.Info(syncLogPrefix("running sync component"))
 
 	result, err := s.syncToTip(ctx)
@@ -766,15 +797,16 @@ func (s *Sync) sync(
 	blockDownload blockDownloadFunc,
 ) (syncToTipResult, error) {
 	var waypoint heimdall.Waypoint
+	var err error
 
 	for {
-		newWaypoint, err := waypointSync(ctx)
+		waypoint, err = waypointSync(ctx)
 		if err != nil {
 			return syncToTipResult{}, err
 		}
 
 		// notify about latest waypoint end block so that eth_syncing API doesn't flicker on initial sync
-		s.notifications.NewLastBlockSeen(newWaypoint.EndBlock().Uint64())
+		s.notifications.NewLastBlockSeen(waypoint.EndBlock().Uint64())
 
 		newTip, err := blockDownload(ctx, tip.Number.Uint64()+1)
 		if err != nil {
@@ -794,7 +826,6 @@ func (s *Sync) sync(
 		}
 
 		tip = newTip
-		waypoint = newWaypoint
 	}
 
 	return syncToTipResult{latestTip: tip, latestWaypoint: waypoint}, nil

@@ -66,6 +66,7 @@ type CaplinConfig struct {
 	SentinelPort           uint64
 	SubscribeAllTopics     bool
 	MaxPeerCount           uint64
+	EnableUPnP             bool
 	// Erigon Sync
 	LoopBlockLimit uint64
 	// Beacon API router configuration
@@ -885,6 +886,7 @@ func holeskyConfig() BeaconChainConfig {
 
 func gnosisConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
+	cfg.PresetBase = "gnosis"
 	cfg.MinGenesisTime = 1638968400
 	cfg.MinGenesisActiveValidatorCount = 4096
 	cfg.GenesisDelay = 6000
@@ -922,6 +924,7 @@ func gnosisConfig() BeaconChainConfig {
 
 func chiadoConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
+	cfg.PresetBase = "gnosis"
 	cfg.MinGenesisTime = 1665396000
 	cfg.MinGenesisActiveValidatorCount = 6000
 	cfg.GenesisDelay = 300

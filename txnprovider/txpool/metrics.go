@@ -19,12 +19,12 @@ package txpool
 import "github.com/erigontech/erigon-lib/metrics"
 
 var (
-	processBatchTxsTimer    = metrics.NewSummary(`pool_process_remote_txs`)
-	addRemoteTxsTimer       = metrics.NewSummary(`pool_add_remote_txs`)
+	processBatchTxnsTimer   = metrics.NewSummary(`pool_process_remote_txs`)
+	addRemoteTxnsTimer      = metrics.NewSummary(`pool_add_remote_txs`)
 	newBlockTimer           = metrics.NewSummary(`pool_new_block`)
 	writeToDBTimer          = metrics.NewSummary(`pool_write_to_db`)
 	propagateToNewPeerTimer = metrics.NewSummary(`pool_propagate_to_new_peer`)
-	propagateNewTxsTimer    = metrics.NewSummary(`pool_propagate_new_txs`)
+	propagateNewTxnsTimer   = metrics.NewSummary(`pool_propagate_new_txs`)
 	writeToDBBytesCounter   = metrics.GetOrCreateGauge(`pool_write_to_db_bytes`)
 	pendingSubCounter       = metrics.GetOrCreateGauge(`txpool_pending`)
 	queuedSubCounter        = metrics.GetOrCreateGauge(`txpool_queued`)

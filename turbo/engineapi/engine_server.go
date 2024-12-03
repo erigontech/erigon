@@ -37,10 +37,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/types"
@@ -491,6 +491,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	var executionRequests []hexutility.Bytes
 	if version >= clparams.ElectraVersion {
 		executionRequests = make([]hexutility.Bytes, len(types.KnownRequestTypes))
+		if len(data.Requests.Requests) != 3 {
+			s.logger.Warn("Error in getPayload - data.Requests.Requests len not 3")
+		}
 		for i := 0; i < len(types.KnownRequestTypes); i++ {
 			if len(data.Requests.Requests) < i+1 || data.Requests.Requests[i] == nil {
 				executionRequests[i] = make(hexutility.Bytes, 0)
@@ -865,7 +868,6 @@ func (e *EngineServer) HandleNewPayload(
 			if !success {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
 				return nil, err

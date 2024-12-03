@@ -20,19 +20,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  define_matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      os: ${{ steps.os.outputs.os }}
-
-    steps:
-     - name: Define os
-       id: os
-       run: echo 'os=ubuntu-latest' >> "$GITHUB_OUTPUT"
 
   Build:
-    needs: define_matrix
-    runs-on: ${{ needs.define_matrix.outputs.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
@@ -83,7 +73,7 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo erigon integration rpcdaemon"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
 
       - name: Build amd64
         run: |
@@ -94,7 +84,7 @@ jobs:
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
-          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm,netgo erigon integration rpcdaemon"
+          -c "apk update; apk add make git gcc libstdc++ build-base linux-headers bash ca-certificates; git config --global --add safe.directory /erigon; make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm erigon integration rpcdaemon"
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the main branch
         env:
@@ -167,11 +157,3 @@ jobs:
               fi
               echo "Done."
             done
-
-  run-kurtosis-assertoor:
-    needs: [define_matrix, Build]
-    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
-    with:
-      checkout_ref: ${{ github.sha }}
-      os: ${{ needs.define_matrix.outputs.os }}
-      docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}

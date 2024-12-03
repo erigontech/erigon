@@ -28,11 +28,11 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon/rlp"
 )
 
-type encodingBuf [33]byte
+type encodingBuf [32]byte
 
 var pooledBuf = sync.Pool{
 	New: func() interface{} { return new(encodingBuf) },
@@ -40,7 +40,7 @@ var pooledBuf = sync.Pool{
 
 func newEncodingBuf() *encodingBuf {
 	b := pooledBuf.Get().(*encodingBuf)
-	*b = encodingBuf([33]byte{}) // reset, do we need to?
+	*b = encodingBuf([32]byte{}) // reset, do we need to?
 	return b
 }
 
