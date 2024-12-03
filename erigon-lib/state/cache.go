@@ -20,6 +20,7 @@ type u192 struct{ hi, lo, ext uint64 } //nolint
 type DomainGetFromFileCache struct {
 	*freelru.LRU[uint64, domainGetFromFileCacheItem]
 	enabled, trace bool
+	limit          uint32
 }
 
 // nolint
@@ -41,16 +42,20 @@ func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
 	if err != nil {
 		panic(err)
 	}
-	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace}
+	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
 }
 
 func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
-func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
+func (c *DomainGetFromFileCache) LogStats(domain kv.Domain) {
 	if c == nil || !c.enabled || !c.trace {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+	limit := domainGetFromFileCacheLimit
+	if domain == kv.CodeDomain {
+		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	}
+	log.Warn("[dbg] DomainGetFromFileCache", "a", domain.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
 
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
