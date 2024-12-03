@@ -262,8 +262,6 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 					end = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 				}
 				return start, end, nil
-			} else {
-				fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: skip record %d != %d\n", blockNum, binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]))
 			}
 		}
 	}
