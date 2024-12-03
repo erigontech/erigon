@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/types/accounts"
-	"github.com/erigontech/erigon/ethdb"
 )
 
 var (
@@ -334,7 +333,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code codeNode) error {
 
 	accNode, gotValue := t.getAccount(t.root, hex, 0)
 	if accNode == nil || !gotValue {
-		return fmt.Errorf("account not found with key: %x, %w", key, ethdb.ErrKeyNotFound)
+		return fmt.Errorf("account not found with key: %x", key)
 	}
 
 	actualCodeHash := crypto.Keccak256(code)
@@ -360,7 +359,7 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 
 	accNode, gotValue := t.getAccount(t.root, hex, 0)
 	if accNode == nil || !gotValue {
-		return fmt.Errorf("account not found with key: %x, %w", key, ethdb.ErrKeyNotFound)
+		return fmt.Errorf("account not found with key: %x", key)
 	}
 
 	accNode.codeSize = codeSize
