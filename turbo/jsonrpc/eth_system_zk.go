@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/ethclient"
 	"github.com/ledgerwatch/erigon/zkevm/encoding"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 	"github.com/ledgerwatch/log/v3"
@@ -39,23 +40,15 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return &price, nil
 	}
 
-	res, err := client.JSONRPCCall(api.l2RpcUrl, "eth_gasPrice")
+	client, err := ethclient.DialContext(ctx, api.l2RpcUrl)
 	if err != nil {
 		return nil, err
 	}
+	defer client.Close()
 
-	if res.Error != nil {
-		return nil, fmt.Errorf("RPC error response: %s", res.Error.Message)
-	}
-
-	var resultString string
-	if err := json.Unmarshal(res.Result, &resultString); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal result: %v", err)
-	}
-
-	price, ok := big.NewInt(0).SetString(resultString[2:], 16)
-	if !ok {
-		return nil, fmt.Errorf("failed to convert result to big.Int")
+	price, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	return (*hexutil.Big)(price), nil
@@ -71,11 +64,13 @@ func (api *APIImpl) GasPrice_nonRedirected(ctx context.Context) (*hexutil.Big, e
 	if time.Since(api.L1GasPrice.timestamp) > 3*time.Second || api.L1GasPrice.gasPrice == nil {
 		l1GasPrice, err := api.l1GasPrice()
 		if err != nil {
-			return nil, err
-		}
-		api.L1GasPrice = L1GasPrice{
-			timestamp: time.Now(),
-			gasPrice:  l1GasPrice,
+			log.Debug("Failed to get L1 gas price: ", err)
+
+		} else {
+			api.L1GasPrice = L1GasPrice{
+				timestamp: time.Now(),
+				gasPrice:  l1GasPrice,
+			}
 		}
 	}
 
