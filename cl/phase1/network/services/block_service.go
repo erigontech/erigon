@@ -156,6 +156,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if msg.Block.Body.BlobKzgCommitments.Len() > int(b.beaconCfg.MaxBlobsPerBlock) {
 		return ErrInvalidCommitmentsCount
 	}
+
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
