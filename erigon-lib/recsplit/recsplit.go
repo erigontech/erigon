@@ -368,7 +368,6 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 			return err
 		}
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-		fmt.Printf("[dbg] bucketCollector.Collect %d, %d, key=%s, value=%d\n", remap(hi, rs.bucketCount), rs.keysAdded, key, offset)
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
@@ -379,7 +378,6 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 			}
 		}
 	} else {
-		fmt.Printf("[dbg] bucketCollector.Collect %d, %d, key=%s, value=%d\n", remap(hi, rs.bucketCount), rs.keysAdded, key, offset)
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
@@ -481,7 +479,6 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
 		}
-		fmt.Printf("[dbg] write mapping: %d\n", rs.offsetBuffer[:m])
 		for _, offset := range rs.offsetBuffer[:m] {
 			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
 			if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
@@ -609,6 +606,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	// Write number of bytes per index record
 	if rs.enums {
 		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
+		fmt.Printf("[dbg] %s, %d -> %d\n", rs.indexFileName, common.BitLenToByteLen(bits.Len64(rs.maxOffset)), rs.bytesPerRec)
 	} else {
 		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
 	}
@@ -642,7 +640,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		log.Log(rs.lvl, "[index] write", "file", rs.indexFileName)
 	}
 	if rs.enums && rs.keysAdded > 0 {
-		fmt.Printf("[dbg] build rs.maxOffset=%d\n", rs.maxOffset)
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
 		defer rs.offsetCollector.Close()
 		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
