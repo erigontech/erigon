@@ -149,7 +149,7 @@ func TestTwoLayerIndex(t *testing.T) {
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
-	N := 100
+	N := 2571
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:           N,
 		BucketSize:         10,
