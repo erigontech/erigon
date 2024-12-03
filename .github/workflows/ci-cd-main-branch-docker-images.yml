@@ -20,19 +20,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  define_matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      os: ${{ steps.os.outputs.os }}
-
-    steps:
-     - name: Define os
-       id: os
-       run: echo 'os=ubuntu-latest' >> "$GITHUB_OUTPUT"
 
   Build:
-    needs: define_matrix
-    runs-on: ${{ needs.define_matrix.outputs.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
@@ -167,11 +157,3 @@ jobs:
               fi
               echo "Done."
             done
-
-  run-kurtosis-assertoor:
-    needs: [define_matrix, Build]
-    uses: erigontech/erigon/.github/workflows/test-kurtosis-assertoor.yml@main
-    with:
-      checkout_ref: ${{ github.sha }}
-      os: ${{ needs.define_matrix.outputs.os }}
-      docker_build_tag: ${{ needs.Build.outputs.docker_build_tag }}

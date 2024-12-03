@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
@@ -299,13 +300,13 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 
 	accountDiffs := changeset[kv.AccountsDomain]
 	for _, kv := range accountDiffs {
-		if err := stateChanges.Collect(kv.Key[:length.Addr], kv.Value); err != nil {
+		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key)[:length.Addr], kv.Value); err != nil {
 			return err
 		}
 	}
 	storageDiffs := changeset[kv.StorageDomain]
 	for _, kv := range storageDiffs {
-		if err := stateChanges.Collect(kv.Key, kv.Value); err != nil {
+		if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
 			return err
 		}
 	}
@@ -628,10 +629,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 	return enc, nil
 }
 
-func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	//if codeHash == emptyCodeHashH { // TODO: how often do we have this case on mainnet/bor-mainnet?
-	//	return nil, nil
-	//}
+func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -642,7 +640,7 @@ func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, c
 	return enc, nil
 }
 
-func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
 	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return 0, err
@@ -753,7 +751,7 @@ func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnatio
 	return enc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	enc, _, err := r.sd.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -768,7 +766,7 @@ func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
 	enc, _, err := r.sd.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return 0, err
@@ -849,3 +847,6 @@ func returnReadList(v map[string]*libstate.KvList) {
 	//}
 	readListPool.Put(v)
 }
+
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
+func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

@@ -50,7 +50,7 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	}
 	defer cancelWorkers()
 
-	accountCursor, err := tx.CursorDupSort(kv.AccountChangeSet)
+	accountCursor, err := tx.CursorDupSort(kv.AccountChangeSetDeprecated)
 	if err != nil {
 		return err
 	}

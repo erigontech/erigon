@@ -186,7 +186,7 @@ func EncodeU64(i uint64, to []byte) int {
 func StringLen(s []byte) int {
 	sLen := len(s)
 	switch {
-	case sLen > 56:
+	case sLen >= 56:
 		beLen := common.BitLenToByteLen(bits.Len(uint(sLen)))
 		return 1 + beLen + sLen
 	case sLen == 0:
@@ -202,7 +202,7 @@ func StringLen(s []byte) int {
 }
 func EncodeString(s []byte, to []byte) int {
 	switch {
-	case len(s) > 56:
+	case len(s) >= 56:
 		beLen := common.BitLenToByteLen(bits.Len(uint(len(s))))
 		binary.BigEndian.PutUint64(to[1:], uint64(len(s)))
 		_ = to[beLen+len(s)]
@@ -230,7 +230,15 @@ func EncodeString(s []byte, to []byte) int {
 	}
 }
 
-// EncodeHash assumes that `to` buffer is already 32bytes long
+// EncodeAddress assumes that `to` buffer is already 21-bytes long
+func EncodeAddress(a, to []byte) int {
+	_ = to[20] // early bounds check to guarantee safety of writes below
+	to[0] = 128 + 20
+	copy(to[1:21], a[:20])
+	return 21
+}
+
+// EncodeHash assumes that `to` buffer is already 33-bytes long
 func EncodeHash(h, to []byte) int {
 	_ = to[32] // early bounds check to guarantee safety of writes below
 	to[0] = 128 + 32
@@ -267,7 +275,7 @@ func AnnouncementsLen(types []byte, sizes []uint32, hashes []byte) int {
 	return ListPrefixLen(totalLen) + totalLen
 }
 
-// EIP-5793: eth/68 - Add tx type to tx announcement
+// EIP-5793: eth/68 - Add txn type to txn announcement
 func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf []byte) int {
 	if len(types) == 0 {
 		encodeBuf[0] = 0xc3
@@ -295,12 +303,4 @@ func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 		pos += EncodeHash(hashes[i:], encodeBuf[pos:])
 	}
 	return pos
-}
-
-// EncodeAddress assumes that `to` buffer is already 21-bytes long
-func EncodeAddress(a, to []byte) int {
-	_ = to[20] // early bounds check to guarantee safety of writes below
-	to[0] = 128 + 20
-	copy(to[1:21], a[:20])
-	return 21
 }

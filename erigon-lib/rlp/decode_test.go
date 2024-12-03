@@ -56,7 +56,7 @@ func TestStreamKind(t *testing.T) {
 	for i, test := range tests {
 		// using plainReader to inhibit input limit errors.
 		s := NewStream(newPlainReader(unhex(test.input)), 0)
-		kind, _len, err := s.Kind()
+		kind, len, err := s.Kind()
 		if err != nil {
 			t.Errorf("test %d: Kind returned error: %v", i, err)
 			continue
@@ -64,8 +64,8 @@ func TestStreamKind(t *testing.T) {
 		if kind != test.wantKind {
 			t.Errorf("test %d: kind mismatch: got %d, want %d", i, kind, test.wantKind)
 		}
-		if _len != test.wantLen {
-			t.Errorf("test %d: _len mismatch: got %d, want %d", i, _len, test.wantLen)
+		if len != test.wantLen {
+			t.Errorf("test %d: len mismatch: got %d, want %d", i, len, test.wantLen)
 		}
 	}
 }
@@ -234,10 +234,10 @@ testfor:
 func TestStreamList(t *testing.T) {
 	s := NewStream(bytes.NewReader(unhex("C80102030405060708")), 0)
 
-	if _len, err := s.List(); err != nil {
+	if len, err := s.List(); err != nil {
 		t.Fatalf("List error: %v", err)
-	} else if _len != 8 {
-		t.Fatalf("List returned invalid length, got %d, want 8", _len)
+	} else if len != 8 {
+		t.Fatalf("List returned invalid length, got %d, want 8", len)
 	}
 
 	for i := uint64(1); i <= 8; i++ {
@@ -795,7 +795,6 @@ var decodeTests = []decodeTest{
 func uintp(i uint) *uint { return &i }
 
 func runTests(t *testing.T, decode func([]byte, interface{}) error) {
-	t.Helper()
 	for i, test := range decodeTests {
 		input, err := hex.DecodeString(test.input)
 		if err != nil {
@@ -828,7 +827,6 @@ func TestDecodeWithByteReader(t *testing.T) {
 }
 
 func testDecodeWithEncReader(t *testing.T, n int) {
-	t.Helper()
 	s := strings.Repeat("0", n)
 	_, r, _ := EncodeToReader(s)
 	var decoded string
