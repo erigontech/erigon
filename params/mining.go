@@ -37,4 +37,10 @@ type MiningConfig struct {
 	GasLimit   uint64            // Target gas limit for mined blocks.
 	GasPrice   *big.Int          // Minimum gas price for mining a transaction
 	Recommit   time.Duration     // The time interval for miner to re-create mining work.
+
+	// EIP-7783 parameters
+	EIP7783BlockNumStart uint64 // The block number to start using EIP-7783 gas limit calculation
+	EIP7783InitialGas    uint64 // The initial gas limit to use before EIP-7783 calculation
+	Eip7783IncreaseRate  uint64 // The rate of gas limit increase per block
+	EIP7783GasLimitCap   uint64 // The maximum gas limit to use after EIP-7783 calculation
 }
