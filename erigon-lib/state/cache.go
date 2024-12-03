@@ -36,8 +36,8 @@ var (
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
 )
 
-func NewDomainGetFromFileCache() *DomainGetFromFileCache {
-	c, err := freelru.New[uint64, domainGetFromFileCacheItem](domainGetFromFileCacheLimit, u64noHash)
+func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
+	c, err := freelru.New[uint64, domainGetFromFileCacheItem](limit, u64noHash)
 	if err != nil {
 		panic(err)
 	}
@@ -53,13 +53,18 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
 
-func NewDomainGetFromFileCacheAny() any { return NewDomainGetFromFileCache() }
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	d := &domainVisible{
-		name:   name,
-		files:  files,
-		caches: &sync.Pool{New: NewDomainGetFromFileCacheAny},
+		name:  name,
+		files: files,
 	}
+	limit := domainGetFromFileCacheLimit
+	if name == kv.CodeDomain {
+		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	}
+	d.caches = &sync.Pool{New: func() any {
+		return NewDomainGetFromFileCache(limit)
+	}}
 	return d
 }
 
