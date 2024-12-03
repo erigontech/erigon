@@ -196,11 +196,17 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
-		rs = append(rs, *depositReqs)
+		if depositReqs != nil {
+			rs = append(rs, *depositReqs)
+		}
 		withdrawalReq := misc.DequeueWithdrawalRequests7002(syscall)
-		rs = append(rs, *withdrawalReq)
+		if withdrawalReq != nil {
+			rs = append(rs, *withdrawalReq)
+		}
 		consolidations := misc.DequeueConsolidationRequests7251(syscall)
-		rs = append(rs, *consolidations)
+		if consolidations != nil {
+			rs = append(rs, *consolidations)
+		}
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
