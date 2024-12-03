@@ -79,6 +79,7 @@ var (
 	iiGetFromFileCacheLimit   = uint32(dbg.EnvInt("II_LRU", 4096))
 	iiGetFromFileCacheTrace   = dbg.EnvBool("II_LRU_TRACE", false)
 	iiGetFromFileCacheEnabled = dbg.EnvBool("II_LRU_ENABLED", true)
+	iiGetFromFileCacheMin     = uint64(dbg.EnvInt("II_LRU_MIN", 8))
 )
 
 type IISeekInFilesCache struct {
