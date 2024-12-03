@@ -234,12 +234,10 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 	tx := s.snapshots.ViewType(heimdall.Events)
 	defer tx.Close()
 	segments := tx.Segments
-	fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: %d\n", len(segments))
 
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.From() > blockNum {
-			fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: skip1 %s\n", sn.Src().FileName())
 			continue
 		}
 		if sn.To() <= blockNum {
