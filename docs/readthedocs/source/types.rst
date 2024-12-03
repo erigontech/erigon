@@ -8,7 +8,7 @@ They are found in `github.com/erigontech/erigon/core/types` and `github.com/erig
 Address and Hash
 ================
 
-package: `github.com/erigontech/erigon-/common`
+package: `github.com/erigontech/erigon-lib/common`
 
 .. code-block:: go
 
