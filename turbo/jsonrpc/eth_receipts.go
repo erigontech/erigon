@@ -508,6 +508,11 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
+	events, err := api._blockReader.EventsByBlock(ctx, tx, blockHash, blockNum)
+	for _, e := range events {
+		fmt.Printf("[dbg] %+v, %s\n", e, err)
+	}
+	fmt.Printf("[dbg] ---done: %s\n", err)
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
