@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/state"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -629,10 +629,7 @@ func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64
 	return enc, nil
 }
 
-func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	//if codeHash == emptyCodeHashH { // TODO: how often do we have this case on mainnet/bor-mainnet?
-	//	return nil, nil
-	//}
+func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -643,7 +640,7 @@ func (r *ReaderV3) ReadAccountCode(address common.Address, incarnation uint64, c
 	return enc, nil
 }
 
-func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *ReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
 	enc, _, err := r.tx.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return 0, err
@@ -754,7 +751,7 @@ func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnatio
 	return enc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	enc, _, err := r.sd.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return nil, err
@@ -769,7 +766,7 @@ func (r *ReaderParallelV3) ReadAccountCode(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
 	enc, _, err := r.sd.GetLatest(kv.CodeDomain, address[:], nil)
 	if err != nil {
 		return 0, err

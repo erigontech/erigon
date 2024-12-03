@@ -194,6 +194,7 @@ func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 }
 
 func isAccountsEqual(t *testing.T, src, dst Account) {
+	t.Helper()
 	if dst.Initialised != src.Initialised {
 		t.Fatal("cant decode the account Initialised", src.Initialised, dst.Initialised)
 	}
@@ -325,6 +326,7 @@ func TestIncarnationWithInvalidEncodedAccount(t *testing.T) {
 }
 
 func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnation uint64) {
+	t.Helper()
 	if initialIncarnation != decodedIncarnation {
 		t.Fatal("Can't decode the incarnation", initialIncarnation, decodedIncarnation)
 	}

@@ -857,6 +857,19 @@ func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo
 	}
 }
 
+func (a *Aggregator) DomainTables(domains ...kv.Domain) (tables []string) {
+	for _, domain := range domains {
+		tables = append(tables, a.d[domain].Tables()...)
+	}
+	return tables
+}
+func (a *Aggregator) InvertedIndexTables(indices ...kv.InvertedIdxPos) (tables []string) {
+	for _, idx := range indices {
+		tables = append(tables, a.iis[idx].Tables()...)
+	}
+	return tables
+}
+
 type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }

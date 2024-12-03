@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto"
 
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon-lib/rlphacks"
 )
 
 type hasher struct {

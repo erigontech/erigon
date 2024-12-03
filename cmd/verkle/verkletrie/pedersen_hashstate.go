@@ -31,7 +31,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/debug"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 func RegeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter) error {

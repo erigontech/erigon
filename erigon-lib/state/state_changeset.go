@@ -23,6 +23,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -53,6 +54,8 @@ type StateDiffDomain struct {
 	keys          map[string][]byte
 	prevValues    map[string][]byte
 	prevValsSlice []DomainEntryDiff
+
+	prevStepBuf, keyBuf []byte
 }
 
 func (d *StateDiffDomain) Copy() *StateDiffDomain {
@@ -62,32 +65,25 @@ func (d *StateDiffDomain) Copy() *StateDiffDomain {
 // RecordDelta records a state change.
 func (d *StateDiffDomain) DomainUpdate(key1, key2, prevValue, stepBytes []byte, prevStep uint64) {
 	if d.keys == nil {
-		d.keys = make(map[string][]byte)
+		d.keys = make(map[string][]byte, 16)
+		d.prevValues = make(map[string][]byte, 16)
+		d.prevStepBuf = make([]byte, 8)
 	}
-	if d.prevValues == nil {
-		d.prevValues = make(map[string][]byte)
-	}
-	prevStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(prevStepBytes, ^prevStep)
+	binary.BigEndian.PutUint64(d.prevStepBuf, ^prevStep)
 
-	key := make([]byte, len(key1)+len(key2))
-	copy(key, key1)
-	copy(key[len(key1):], key2)
-
-	keyS := toStringZeroCopy(key)
-	if _, ok := d.keys[keyS]; !ok {
-		d.keys[keyS] = prevStepBytes
+	d.keyBuf = append(append(append(d.keyBuf[:0], key1...), key2...), stepBytes...)
+	key := toStringZeroCopy(d.keyBuf[:len(key1)+len(key2)])
+	if _, ok := d.keys[key]; !ok {
+		d.keys[strings.Clone(key)] = common.Copy(d.prevStepBuf)
 	}
 
-	valsKey := make([]byte, len(key)+len(stepBytes))
-	copy(valsKey, key)
-	copy(valsKey[len(key):], stepBytes)
-	valsKeyS := toStringZeroCopy(valsKey)
-	if _, ok := d.prevValues[valsKeyS]; !ok {
-		if bytes.Equal(stepBytes, prevStepBytes) {
-			d.prevValues[valsKeyS] = common.Copy(prevValue)
+	valsKey := toStringZeroCopy(d.keyBuf)
+	if _, ok := d.prevValues[valsKey]; !ok {
+		valsKeySCopy := strings.Clone(valsKey)
+		if bytes.Equal(stepBytes, d.prevStepBuf) {
+			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
 		} else {
-			d.prevValues[valsKeyS] = []byte{} // We need to delete the current step but restore the previous one
+			d.prevValues[valsKeySCopy] = []byte{} // We need to delete the current step but restore the previous one
 		}
 		d.prevValsSlice = nil
 	}
@@ -268,9 +264,19 @@ func DeserializeKeys(in []byte) [kv.DomainLen][]DomainEntryDiff {
 const diffChunkKeyLen = 48
 const diffChunkLen = 4*1024 - 32
 
+type threadSafeBuf struct {
+	b []byte
+	sync.Mutex
+}
+
+var writeDiffsetBuf = &threadSafeBuf{}
+
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
-	// Write the diffSet to the database
-	keys := diffSet.SerializeKeys(nil)
+	writeDiffsetBuf.Lock()
+	defer writeDiffsetBuf.Unlock()
+	writeDiffsetBuf.b = diffSet.SerializeKeys(writeDiffsetBuf.b[:0])
+	keys := writeDiffsetBuf.b
+
 	chunkCount := (len(keys) + diffChunkLen - 1) / diffChunkLen
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount

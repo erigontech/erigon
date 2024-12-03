@@ -111,7 +111,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 	if acc == nil || err != nil {
 		return hexutility.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(address, acc.Incarnation, acc.CodeHash)
+	res, _ := reader.ReadAccountCode(address, acc.Incarnation)
 	if res == nil {
 		return hexutility.Bytes(""), nil
 	}

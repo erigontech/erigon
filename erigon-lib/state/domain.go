@@ -450,6 +450,10 @@ func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
+func (d *Domain) Tables() []string {
+	return append([]string{d.keysTable, d.valuesTable}, d.History.Tables()...)
+}
+
 func (d *Domain) Close() {
 	if d == nil {
 		return
@@ -1541,11 +1545,11 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 			if !cv.exists {
 				return nil, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 			}
-			g := dt.statelessGetter(int(cv.lvl))
-			g.Reset(cv.offset)
-			g.Skip()
-			v, _ = g.Next(nil) // can be compressed
-			return v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
+			//g := dt.statelessGetter(int(cv.lvl))
+			//g.Reset(cv.offset)
+			//g.Skip()
+			//v, _ = g.Next(nil) // can be compressed
+			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
 
@@ -1589,7 +1593,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 		}
 
 		if dt.getFromFileCache != nil {
-			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), offset: offset, exists: true})
+			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), offset: offset, exists: true, v: v})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
@@ -1598,7 +1602,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 	}
 
 	if dt.getFromFileCache != nil {
-		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false})
+		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false, v: nil})
 	}
 	return nil, false, 0, 0, nil
 }
