@@ -131,7 +131,7 @@ func FindOldestWitness(tx kv.Tx, tableName string) (uint64, error) {
 func (db *WitnessDBWriter) MustUpsertOneWitness(blockNumber uint64, witness *trie.Witness) {
 	k := make([]byte, 8)
 
-	binary.LittleEndian.PutUint64(k[:], blockNumber)
+	binary.LittleEndian.PutUint64(k, blockNumber)
 
 	var buf bytes.Buffer
 	_, err := witness.WriteInto(&buf)
@@ -191,9 +191,9 @@ func (db *WitnessDBWriter) MustUpsert(blockNumber uint64, maxTrieSize uint32, re
 	}
 
 	err = db.statsWriter.Write([]string{
-		fmt.Sprintf("%v", blockNumber),
-		fmt.Sprintf("%v", maxTrieSize),
-		fmt.Sprintf("%v", len(bytes)),
+		strconv.Itoa(int(blockNumber)),
+		strconv.Itoa(int(maxTrieSize)),
+		strconv.Itoa(len(bytes)),
 	})
 
 	if err != nil {
@@ -227,7 +227,7 @@ func (db *WitnessDBReader) GetWitnessesForBlock(blockNumber uint64, maxTrieSize 
 func deriveDbKey(blockNumber uint64, maxTrieSize uint32) []byte {
 	buffer := make([]byte, 8+4)
 
-	binary.LittleEndian.PutUint64(buffer[:], blockNumber)
+	binary.LittleEndian.PutUint64(buffer, blockNumber)
 	binary.LittleEndian.PutUint32(buffer[8:], maxTrieSize)
 
 	return buffer

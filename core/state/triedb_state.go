@@ -365,7 +365,7 @@ func (tds *TrieDbState) PopulateStorageBlockProof(storageTouches common.StorageK
 	for _, storageKey := range storageTouches {
 		addr, _, hash := dbutils.ParseCompositeStorageKey(storageKey[:])
 		key := dbutils.GenerateCompositeTrieKey(addr, hash)
-		tds.retainListBuilder.AddStorageTouch(key[:])
+		tds.retainListBuilder.AddStorageTouch(key)
 	}
 	return nil
 }
@@ -736,7 +736,7 @@ func (tds *TrieDbState) ReadAccountCode(address libcommon.Address, incarnation u
 func (tds *TrieDbState) ReadAccountCodeSize(address libcommon.Address, incarnation uint64) (codeSize int, err error) {
 	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
-		codeSize, err = cached, nil
+		return cached, nil
 	} else {
 		codeSize, err = tds.StateReader.ReadAccountCodeSize(address, incarnation)
 		if err != nil {

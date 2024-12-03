@@ -497,7 +497,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 
 	if !fullBlock && int(txIndex) >= len(block.Transactions()) {
-		return nil, fmt.Errorf("transaction index out of bounds")
+		return nil, fmt.Errorf("transaction index out of bounds: %d", txIndex)
 	}
 
 	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
@@ -523,13 +523,14 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 
 	engine, ok := api.engine().(consensus.Engine)
 	if !ok {
-		return nil, fmt.Errorf("engine is not consensus.Engine")
+		return nil, errors.New("engine is not consensus.Engine")
 	}
 
 	roTx2, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer roTx2.Rollback()
 	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
 	defer txBatch2.Rollback()
 
