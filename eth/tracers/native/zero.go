@@ -27,7 +27,8 @@ func init() {
 }
 
 type zeroTracer struct {
-	noopTracer  // stub struct to mock not used interface methods
+	noopTracer // stub struct to mock not used interface methods
+
 	env         *vm.EVM
 	tx          types.TxnInfo
 	gasLimit    uint64      // Amount of gas bought for the whole tx
@@ -39,7 +40,7 @@ type zeroTracer struct {
 	addrOpCodes map[libcommon.Address]map[vm.OpCode]struct{}
 }
 
-func newZeroTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
+func newZeroTracer(ctx *tracers.Context, _ json.RawMessage) (tracers.Tracer, error) {
 	return &zeroTracer{
 		tx: types.TxnInfo{
 			Traces: make(map[libcommon.Address]*types.TxnTrace),
@@ -72,19 +73,22 @@ func (t *zeroTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcom
 		}
 	}
 
+	receiverTxTrace := t.tx.Traces[to]
+	senderTxTrace := t.tx.Traces[from]
+
 	// The recipient balance includes the value transferred.
-	toBal := new(big.Int).Sub(t.tx.Traces[to].Balance.ToBig(), value.ToBig())
-	t.tx.Traces[to].Balance = uint256.MustFromBig(toBal)
+	toBal := new(big.Int).Sub(receiverTxTrace.Balance.ToBig(), value.ToBig())
+	receiverTxTrace.Balance = uint256.MustFromBig(toBal)
 
 	// The sender balance is after reducing: value and gasLimit.
 	// We need to re-add them to get the pre-tx balance.
-	fromBal := new(big.Int).Set(t.tx.Traces[from].Balance.ToBig())
+	fromBal := new(big.Int).Set(senderTxTrace.Balance.ToBig())
 	gasPrice := env.TxContext.GasPrice
 	consumedGas := new(big.Int).Mul(gasPrice.ToBig(), new(big.Int).SetUint64(t.gasLimit))
 	fromBal.Add(fromBal, new(big.Int).Add(value.ToBig(), consumedGas))
-	t.tx.Traces[from].Balance = uint256.MustFromBig(fromBal)
-	if t.tx.Traces[from].Nonce.Cmp(uint256.NewInt(0)) > 0 {
-		t.tx.Traces[from].Nonce.Sub(t.tx.Traces[from].Nonce, uint256.NewInt(1))
+	senderTxTrace.Balance = uint256.MustFromBig(fromBal)
+	if senderTxTrace.Nonce.Cmp(uint256.NewInt(0)) > 0 {
+		senderTxTrace.Nonce.Sub(senderTxTrace.Nonce, uint256.NewInt(1))
 	}
 }
 
@@ -291,24 +295,22 @@ func (t *zeroTracer) CaptureTxEnd(restGas uint64) {
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = t.env.IntraBlockState().GetLogs(t.ctx.Txn.Hash())
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-	receipt.BlockNumber = big.NewInt(0).SetUint64(t.ctx.BlockNum)
+	receipt.BlockNumber = new(big.Int).SetUint64(t.ctx.BlockNum)
 	receipt.TransactionIndex = uint(t.ctx.TxIndex)
 
 	receiptBuffer := &bytes.Buffer{}
-	encodeErr := receipt.EncodeRLP(receiptBuffer)
-
-	if encodeErr != nil {
-		log.Error("failed to encode receipt", "err", encodeErr)
+	err := receipt.EncodeRLP(receiptBuffer)
+	if err != nil {
+		log.Error("failed to encode receipt", "err", err)
 		return
 	}
 
 	t.tx.Meta.NewReceiptTrieNode = receiptBuffer.Bytes()
 
 	txBuffer := &bytes.Buffer{}
-	encodeErr = t.ctx.Txn.MarshalBinary(txBuffer)
-
-	if encodeErr != nil {
-		log.Error("failed to encode transaction", "err", encodeErr)
+	err = t.ctx.Txn.EncodeRLP(txBuffer)
+	if err != nil {
+		log.Error("failed to encode transaction", "err", err)
 		return
 	}
 
@@ -326,10 +328,7 @@ func (t *zeroTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 // GetResult returns the json-encoded nested list of call traces, and any
 // error arising from the encoding or forceful termination (via `Stop`).
 func (t *zeroTracer) GetResult() (json.RawMessage, error) {
-	var res []byte
-	var err error
-	res, err = json.Marshal(t.tx)
-
+	res, err := json.Marshal(t.tx)
 	if err != nil {
 		return nil, err
 	}

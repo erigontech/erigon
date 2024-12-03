@@ -78,7 +78,6 @@ func (t *TxnTrace) MarshalJSON() ([]byte, error) {
 
 type TxnMeta struct {
 	ByteCode           HexBytes `json:"byte_code,omitempty"`
-	NewTxnTrieNode     HexBytes `json:"new_txn_trie_node_byte,omitempty"`
 	NewReceiptTrieNode HexBytes `json:"new_receipt_trie_node_byte,omitempty"`
 	GasUsed            uint64   `json:"gas_used,omitempty"`
 }
@@ -87,8 +86,6 @@ type TxnInfo struct {
 	Traces map[libcommon.Address]*TxnTrace `json:"traces,omitempty"`
 	Meta   TxnMeta                         `json:"meta,omitempty"`
 }
-
-type BlockUsedCodeHashes []libcommon.Hash
 
 type CombinedPreImages struct {
 	Compact HexBytes `json:"compact,omitempty"`
