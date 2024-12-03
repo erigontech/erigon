@@ -111,7 +111,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		targetEpoch    uint64
 		signature      [96]byte
 		data           *solid.AttestationData
-		attHashKey     [32]byte
 	)
 	if att.Attestation != nil {
 		slot = att.Attestation.Data.Slot
@@ -129,10 +128,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		targetEpoch = att.SingleAttestation.Data.Target.Epoch
 		signature = att.SingleAttestation.Signature
 		data = att.SingleAttestation.Data
-		attHashKey, err = att.SingleAttestation.HashSSZ()
-		if err != nil {
-			return err
-		}
 	} else {
 		// deneb and before case
 		root = att.Attestation.Data.BeaconBlockRoot
@@ -141,10 +136,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		targetEpoch = att.Attestation.Data.Target.Epoch
 		signature = att.Attestation.Signature
 		data = att.Attestation.Data
-		attHashKey, err = att.Attestation.HashSSZ()
-		if err != nil {
-			return err
-		}
 	}
 
 	// Commented because we have a check in validatorAttestationSeen that does the same thing.
