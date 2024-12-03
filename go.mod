@@ -2,6 +2,13 @@ module github.com/erigontech/erigon
 
 go 1.22.5
 
+replace github.com/erigontech/erigon-lib => ./erigon-lib
+
+replace (
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
+)
+
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.38.4
@@ -9,7 +16,6 @@ require (
 	github.com/erigontech/silkworm-go v0.18.0
 )
 
-replace github.com/erigontech/erigon-lib => ./erigon-lib
 
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
@@ -286,9 +292,4 @@ require (
 	modernc.org/token v1.1.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
-)
-
-replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
-	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 )
