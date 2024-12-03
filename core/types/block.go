@@ -77,6 +77,7 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 }
 
 //()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
+//go:generate go run ../../cmd/rlpgen -type Header -out gen_header_rlp.go
 
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
