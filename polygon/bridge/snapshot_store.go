@@ -249,6 +249,8 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 
 		gg := sn.Src().MakeGetter()
 		var buf []byte
+		fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: use file %s\n", sn.Src().FileName())
+
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0])
 			if blockNum == binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]) {
@@ -263,7 +265,7 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 				}
 				return start, end, nil
 			} else {
-				fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: skip3 %s, %d != %d\n", sn.Src().FileName(), blockNum, binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]))
+				fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: skip record %d != %d\n", blockNum, binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]))
 			}
 		}
 	}
