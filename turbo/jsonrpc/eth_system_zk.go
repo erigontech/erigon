@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/ethclient"
 	"github.com/ledgerwatch/erigon/zkevm/encoding"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
@@ -119,6 +121,10 @@ func (api *APIImpl) l1GasPrice() (*big.Int, error) {
 	}
 
 	if res.Error != nil {
+		if strings.Contains(res.Error.Message, api.L1RpcUrl) {
+			replacement := fmt.Sprintf("<%s>", utils.L1RpcUrlFlag.Name)
+			res.Error.Message = strings.ReplaceAll(res.Error.Message, api.L1RpcUrl, replacement)
+		}
 		return nil, fmt.Errorf("RPC error response: %s", res.Error.Message)
 	}
 
