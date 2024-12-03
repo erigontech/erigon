@@ -459,7 +459,7 @@ var ChaindataTables = []string{
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
-	Witnesses,
+	// Witnesses,
 	AccountChangeSetDeprecated,
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,
