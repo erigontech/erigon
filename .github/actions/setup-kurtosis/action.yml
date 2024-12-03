@@ -1,0 +1,74 @@
+
+name: "Setup Kurtosis"
+description: "Setup Kurtosis CDK for tests"
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout cdk-erigon
+      uses: actions/checkout@v4
+      with:
+        path: cdk-erigon
+
+    - name: Checkout kurtosis-cdk
+      uses: actions/checkout@v4
+      with:
+        repository: 0xPolygon/kurtosis-cdk
+        ref: v0.2.24
+        path: kurtosis-cdk
+
+    - name: Install Kurtosis CDK tools
+      uses: ./kurtosis-cdk/.github/actions/setup-kurtosis-cdk
+
+    - name: Install Foundry
+      uses: foundry-rs/foundry-toolchain@v1
+
+    - name: Install polycli
+      shell: bash
+      run: |
+        tmp_dir=$(mktemp -d) && curl -L https://github.com/0xPolygon/polygon-cli/releases/download/v0.1.48/polycli_v0.1.48_linux_amd64.tar.gz | tar -xz -C "$tmp_dir" && mv "$tmp_dir"/* /usr/local/bin/polycli && rm -rf "$tmp_dir"
+        sudo chmod +x /usr/local/bin/polycli
+        /usr/local/bin/polycli version
+
+    - name: Install yq
+      shell: bash
+      run: |
+        sudo curl -L https://github.com/mikefarah/yq/releases/download/v4.44.2/yq_linux_amd64 -o /usr/local/bin/yq
+        sudo chmod +x /usr/local/bin/yq
+        /usr/local/bin/yq --version
+        
+    - name: Build docker image
+      working-directory: ./cdk-erigon
+      shell: bash
+      run: docker build -t cdk-erigon:local --file Dockerfile .
+
+    - name: Remove unused flags
+      working-directory: ./kurtosis-cdk
+      shell: bash
+      run: |
+        sed -i '/zkevm.sequencer-batch-seal-time:/d' templates/cdk-erigon/config.yml
+        sed -i '/zkevm.sequencer-non-empty-batch-seal-time:/d' templates/cdk-erigon/config.yml
+        sed -i '/zkevm\.sequencer-initial-fork-id/d' ./templates/cdk-erigon/config.yml
+        sed -i '/sentry.drop-useless-peers:/d' templates/cdk-erigon/config.yml
+        sed -i '/zkevm\.pool-manager-url/d' ./templates/cdk-erigon/config.yml
+        sed -i '$a\zkevm.disable-virtual-counters: true' ./templates/cdk-erigon/config.yml
+        sed -i '/zkevm.l2-datastreamer-timeout:/d' templates/cdk-erigon/config.yml
+
+    - name: Create params.yml overrides
+      working-directory: ./kurtosis-cdk
+      shell: bash
+      run: |
+        echo 'args:' > params.yml
+        echo '  cdk_erigon_node_image: cdk-erigon:local' >> params.yml
+        echo '  el-1-geth-lighthouse: ethpandaops/lighthouse@sha256:4902d9e4a6b6b8d4c136ea54f0e51582a32f356f3dec7194a1adee13ed2d662e' >> params.yml
+        /usr/local/bin/yq -i '.args.data_availability_mode = "${{ matrix.da-mode }}"' params.yml
+        sed -i 's/"londonBlock": [0-9]\+/"londonBlock": 0/' ./templates/cdk-erigon/chainspec.json
+        sed -i 's/"normalcyBlock": [0-9]\+/"normalcyBlock": 0/' ./templates/cdk-erigon/chainspec.json
+        sed -i 's/"shanghaiTime": [0-9]\+/"shanghaiTime": 0/' ./templates/cdk-erigon/chainspec.json
+        sed -i 's/"cancunTime": [0-9]\+/"cancunTime": 0/' ./templates/cdk-erigon/chainspec.json
+        sed -i '/"terminalTotalDifficulty"/d' ./templates/cdk-erigon/chainspec.json
+
+    - name: Deploy Kurtosis CDK package
+      working-directory: ./kurtosis-cdk
+      shell: bash
+      run: |
+        kurtosis run --enclave cdk-v1 --args-file params.yml --image-download always . '{"args": {"erigon_strict_mode": false, "cdk_erigon_node_image": "cdk-erigon:local"}}'
