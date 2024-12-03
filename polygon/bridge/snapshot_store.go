@@ -263,7 +263,7 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 				}
 				return start, end, nil
 			} else {
-				fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: skip3 %s, %d\n", sn.Src().FileName(), blockNum)
+				fmt.Printf("[dbg] SnapshotStore.BlockEventIdsRange: skip3 %s, %d != %d\n", sn.Src().FileName(), blockNum, binary.BigEndian.Uint64(buf[length.Hash:length.Hash+length.BlockNum]))
 			}
 		}
 	}
