@@ -113,8 +113,8 @@ type forkGraphDisk struct {
 	beaconCfg   *clparams.BeaconChainConfig
 	genesisTime uint64
 	// highest block seen
-	highestSeen, anchorSlot uint64
-	lowestAvailableBlock    atomic.Uint64
+	anchorSlot           uint64
+	lowestAvailableBlock atomic.Uint64
 
 	newestLightClientUpdate atomic.Value
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
@@ -169,8 +169,13 @@ func (f *forkGraphDisk) AnchorSlot() uint64 {
 	return f.anchorSlot
 }
 
+func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot libcommon.Hash) bool {
+	blockRootState, _ := f.currentState.BlockRoot()
+	return blockRoot == blockRootState
+}
+
 // Add a new node and edge to the graph
-func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
+func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation, shallowImport bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -187,10 +192,17 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, BelowAnchor, nil
 	}
 
-	newState, err := f.getState(block.ParentRoot, false, true)
-	if err != nil {
-		return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
+	isBlockRootTheCurrentState := f.isBlockRootTheCurrentState(blockRoot)
+	var newState *state.CachingBeaconState
+	if isBlockRootTheCurrentState {
+		newState = f.currentState
+	} else {
+		newState, err = f.getState(block.ParentRoot, false, true)
+		if err != nil {
+			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
+		}
 	}
+
 	if newState == nil {
 		log.Trace("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
@@ -199,7 +211,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
 
 	// Before processing the state: update the newest lightclient update.
-	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon {
+	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon && !isBlockRootTheCurrentState {
 		nextSyncCommitteeBranch, err := newState.NextSyncCommitteeBranch()
 		if err != nil {
 			return nil, LogisticError, err
@@ -244,14 +256,22 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 
-	// Execute the state
-	if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
-		// Add block to list of invalid blocks
-		log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", blockRoot, "reason", invalidBlockErr)
-		f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
-		//f.currentState = nil
+	if !isBlockRootTheCurrentState {
+		// Execute the state
+		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
+			// Add block to list of invalid blocks
+			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", blockRoot, "reason", invalidBlockErr)
+			f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
+			//f.currentState = nil
 
-		return nil, InvalidBlock, invalidBlockErr
+			return nil, InvalidBlock, invalidBlockErr
+		}
+		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
+	}
+
+	f.currentState = newState
+	if shallowImport {
+		return newState, Success, nil
 	}
 
 	// update diff storages.
@@ -261,7 +281,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			f.currentIndicies.add(epoch, newState.RawCurrentEpochParticipation())
 			f.previousIndicies.add(epoch, newState.RawPreviousEpochParticipation())
 		}
-		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
 
 		period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
 		f.syncCommittees.Store(period, syncCommittees{
@@ -277,6 +296,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			f.lightclientBootstraps.Store(libcommon.Hash(blockRoot), lightclientBootstrap)
 		}
 	}
+
 	f.blocks.Store(libcommon.Hash(blockRoot), signedBlock)
 	bodyRoot, err := signedBlock.Block.Body.HashSSZ()
 	if err != nil {
@@ -294,10 +314,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// Lastly add checkpoints to caches as well.
 	f.currentJustifiedCheckpoints.Store(libcommon.Hash(blockRoot), newState.CurrentJustifiedCheckpoint())
 	f.finalizedCheckpoints.Store(libcommon.Hash(blockRoot), newState.FinalizedCheckpoint())
-	if newState.Slot() > f.highestSeen {
-		f.highestSeen = newState.Slot()
-	}
-	f.currentState = newState
+
 	return newState, Success, nil
 }
 
