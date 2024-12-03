@@ -18,7 +18,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"golang.org/x/sync/errgroup"

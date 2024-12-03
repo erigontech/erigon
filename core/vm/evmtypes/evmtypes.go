@@ -140,7 +140,7 @@ type IntraBlockState interface {
 	GetDelegatedDesignation(common.Address) (common.Address, bool, error)
 
 	AddRefund(uint64)
-	SubRefund(uint64)
+	SubRefund(uint64) error
 	GetRefund() uint64
 
 	GetCommittedState(common.Address, *common.Hash, *uint256.Int) error

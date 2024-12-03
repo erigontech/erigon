@@ -131,7 +131,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	gp := new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas())
 	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 	if err != nil {
-		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
+		return nil, fmt.Errorf("%w: blockNum=%d, index=%d txNum=%d, %s", err, e.blockNum, txIndex, txNum)
 	}
 	e.ibs.SoftFinalise()
 	if e.vmConfig.Tracer != nil {

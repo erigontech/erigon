@@ -724,7 +724,6 @@ func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
 
 func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
-	fmt.Println("SDB", blockNum)
 	sd.blockNum.Store(blockNum)
 }
 
