@@ -236,17 +236,6 @@ func (r HistoryRanges) any() bool {
 	return r.history.needMerge || r.index.needMerge
 }
 
-func (dt *DomainRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
-	if err := dt.ht.iit.BuildOptionalMissedIndices(ctx, ps); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (iit *InvertedIndexRoTx) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
-	return nil
-}
-
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
 // files are in the descending order of endTxNum
 func (dt *DomainRoTx) staticFilesInRange(r DomainRanges) (valuesFiles, indexFiles, historyFiles []*filesItem) {

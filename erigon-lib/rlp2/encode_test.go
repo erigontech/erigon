@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2023 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,26 +14,31 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bodydownload_test
+package rlp
 
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/turbo/stages/bodydownload"
-	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/consensus/ethash"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 )
 
-func TestCreateBodyDownload(t *testing.T) {
-	t.Parallel()
-	m := mock.Mock(t)
-	tx, err := m.DB.BeginRo(m.Ctx)
+// Strings of length 56 are a boundary case.
+// See https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp/#definition
+func TestStringLen56(t *testing.T) {
+	str := hexutility.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
+	require.Equal(t, 56, len(str))
+
+	strLen := StringLen(str)
+	assert.Equal(t, 56+2, strLen)
+
+	encoded := make([]byte, strLen)
+	EncodeString(str, encoded)
+
+	dataPos, dataLen, err := String(encoded, 0)
 	require.NoError(t, err)
-	defer tx.Rollback()
-	bd := bodydownload.NewBodyDownload(ethash.NewFaker(), 128, 100, m.BlockReader, m.Log)
-	if err := bd.UpdateFromDb(tx); err != nil {
-		t.Fatalf("update from db: %v", err)
-	}
+	assert.Equal(t, dataPos, 2)
+	assert.Equal(t, dataLen, 56)
 }

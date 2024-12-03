@@ -129,7 +129,7 @@ func (m *mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool, awaitFlush bool)
 	}
 
 	// if we're awaiting flush update the DB immediately so it does not
-	// intefere with the timing of the background commit - may not be
+	// interfere with the timing of the background commit - may not be
 	// necessary - in which case the batch can be used
 	if awaitFlush {
 		return m.db.Update(context.Background(), func(tx kv.RwTx) error {

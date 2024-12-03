@@ -576,7 +576,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// so this is just to satisfy the current hex patricia trie api.
 	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
 	for _, key := range touchedPlainKeys {
-		updates.TouchPlainKey(key, nil, updates.TouchAccount)
+		updates.TouchPlainKey(string(key), nil, updates.TouchAccount)
 	}
 
 	hph.SetTrace(false) // disable tracing to avoid mixing with trace from witness computation

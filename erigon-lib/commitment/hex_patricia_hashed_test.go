@@ -249,17 +249,17 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 
 	ku := make([]*KeyUpdate, len(plainKeys))
 	for i, pk := range plainKeys {
-		ku[i] = &KeyUpdate{PlainKey: pk, HashedKey: hph.HashAndNibblizeKey(pk), update: &updates[i]}
+		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: hph.HashAndNibblizeKey(pk), update: &updates[i]}
 	}
 
 	sort.Slice(updates, func(i, j int) bool {
-		return bytes.Compare(ku[i].HashedKey, ku[j].HashedKey) < 0
+		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
 	})
 
 	pks := make([][]byte, len(updates))
 	upds := make([]Update, len(updates))
 	for i, u := range ku {
-		pks[i] = u.PlainKey
+		pks[i] = []byte(u.plainKey)
 		upds[i] = *u.update
 	}
 	return pks, upds
@@ -1276,7 +1276,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	//prefixesCnt := make(map[string]int)
 	//for i := 0; i < 5000000; i++ {
 	//	rnd.Read(noise)
-	//	//hashed := trieOne.hashAndNibblizeKey(noise)
+	//	//hashed := trieOne.HashAndNibblizeKey(noise)
 	//	trieOne.keccak.Reset()
 	//	trieOne.keccak.Write(noise)
 	//	hashed := make([]byte, 32)

@@ -23,8 +23,9 @@ import (
 	"bytes"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/common"
 )
 
 func TestHexCompact(t *testing.T) {
@@ -82,39 +83,39 @@ func TestHexKeybytes(t *testing.T) {
 }
 
 func TestKeybytesToCompact(t *testing.T) {
-	keybytes := Keybytes{libcommon.FromHex("5a70"), true, true}
+	keybytes := Keybytes{common.FromHex("5a70"), true, true}
 	compact := keybytes.ToCompact()
-	assert.Equal(t, libcommon.FromHex("35a7"), compact)
+	assert.Equal(t, common.FromHex("35a7"), compact)
 
-	keybytes = Keybytes{libcommon.FromHex("5a70"), true, false}
+	keybytes = Keybytes{common.FromHex("5a70"), true, false}
 	compact = keybytes.ToCompact()
-	assert.Equal(t, libcommon.FromHex("15a7"), compact)
+	assert.Equal(t, common.FromHex("15a7"), compact)
 
-	keybytes = Keybytes{libcommon.FromHex("5a7c"), false, true}
+	keybytes = Keybytes{common.FromHex("5a7c"), false, true}
 	compact = keybytes.ToCompact()
-	assert.Equal(t, libcommon.FromHex("205a7c"), compact)
+	assert.Equal(t, common.FromHex("205a7c"), compact)
 
-	keybytes = Keybytes{libcommon.FromHex("5a7c"), false, false}
+	keybytes = Keybytes{common.FromHex("5a7c"), false, false}
 	compact = keybytes.ToCompact()
-	assert.Equal(t, libcommon.FromHex("005a7c"), compact)
+	assert.Equal(t, common.FromHex("005a7c"), compact)
 }
 
 func TestCompactToKeybytes(t *testing.T) {
-	compact := libcommon.FromHex("35a7")
+	compact := common.FromHex("35a7")
 	keybytes := CompactToKeybytes(compact)
-	assert.Equal(t, Keybytes{libcommon.FromHex("5a70"), true, true}, keybytes)
+	assert.Equal(t, Keybytes{common.FromHex("5a70"), true, true}, keybytes)
 
-	compact = libcommon.FromHex("15a7")
+	compact = common.FromHex("15a7")
 	keybytes = CompactToKeybytes(compact)
-	assert.Equal(t, Keybytes{libcommon.FromHex("5a70"), true, false}, keybytes)
+	assert.Equal(t, Keybytes{common.FromHex("5a70"), true, false}, keybytes)
 
-	compact = libcommon.FromHex("205a7c")
+	compact = common.FromHex("205a7c")
 	keybytes = CompactToKeybytes(compact)
-	assert.Equal(t, Keybytes{libcommon.FromHex("5a7c"), false, true}, keybytes)
+	assert.Equal(t, Keybytes{common.FromHex("5a7c"), false, true}, keybytes)
 
-	compact = libcommon.FromHex("005a7c")
+	compact = common.FromHex("005a7c")
 	keybytes = CompactToKeybytes(compact)
-	assert.Equal(t, Keybytes{libcommon.FromHex("5a7c"), false, false}, keybytes)
+	assert.Equal(t, Keybytes{common.FromHex("5a7c"), false, false}, keybytes)
 }
 
 func BenchmarkHexToCompact(b *testing.B) {

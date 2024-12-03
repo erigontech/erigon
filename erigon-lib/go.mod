@@ -2,6 +2,11 @@ module github.com/erigontech/erigon-lib
 
 go 1.22.0
 
+replace (
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
+)
+
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e
 	github.com/erigontech/interfaces v0.0.0-20241116035842-5d396f10468e
@@ -25,7 +30,6 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/elastic/go-freelru v0.13.0
 	github.com/erigontech/speedtest v0.0.2
-	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.12.1
 	github.com/google/btree v1.1.3
@@ -99,6 +103,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
 	github.com/go-llsqlite/crawshaw v0.4.0 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
@@ -153,11 +158,4 @@ require (
 	modernc.org/mathutil v1.6.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
-)
-
-replace github.com/erigontech/erigon => ..
-
-replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
-	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 )

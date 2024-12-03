@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 
@@ -134,12 +133,9 @@ func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint6
 }
 
 // ReadAccountCode is a part of the StateReader interface
-func (s *Stateless) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) (code []byte, err error) {
-	if bytes.Equal(codeHash[:], emptyCodeHash) {
-		return nil, nil
-	}
+func (s *Stateless) ReadAccountCode(address common.Address, incarnation uint64) (code []byte, err error) {
 	if s.trace {
-		fmt.Printf("Getting code for %x\n", codeHash)
+		fmt.Printf("Getting code for address %x\n", address)
 	}
 
 	addrHash, err := common.HashData(address[:])
@@ -160,11 +156,7 @@ func (s *Stateless) ReadAccountCode(address common.Address, incarnation uint64, 
 // ReadAccountCodeSize is a part of the StateReader interface
 // This implementation looks the code up in the codeMap, and returns its size
 // It fails if the code is not found in the map
-func (s *Stateless) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (codeSize int, err error) {
-	if bytes.Equal(codeHash[:], emptyCodeHash) {
-		return 0, nil
-	}
-
+func (s *Stateless) ReadAccountCodeSize(address common.Address, incarnation uint64) (codeSize int, err error) {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return 0, err

@@ -658,7 +658,6 @@ func (hb *HashBuilder) code(code []byte) error {
 	return nil
 }
 
-// nolint
 func (hb *HashBuilder) emptyRoot() {
 	if hb.trace {
 		fmt.Printf("EMPTYROOT\n")

@@ -668,11 +668,11 @@ func NewStream(r io.Reader, inputLimit uint64) *Stream {
 
 // NewListStream creates a new stream that pretends to be positioned
 // at an encoded list of the given length.
-func NewListStream(r io.Reader, _len uint64) *Stream {
+func NewListStream(r io.Reader, len uint64) *Stream {
 	s := new(Stream)
-	s.Reset(r, _len)
+	s.Reset(r, len)
 	s.kind = List
-	s.size = _len
+	s.size = len
 	return s
 }
 

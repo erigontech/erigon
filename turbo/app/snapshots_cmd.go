@@ -1355,9 +1355,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
@@ -1411,9 +1408,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	ac.Close()
 
 	if err = agg.MergeLoop(ctx); err != nil {
-		return err
-	}
-	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
@@ -1473,7 +1467,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}

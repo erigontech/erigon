@@ -157,7 +157,6 @@ func decodeLengthForHashing(buffer []byte, pos int) (length int, structure bool,
 	case firstByte < 192:
 		// Next byte is the length of the length + 183
 		lenEnd := pos + 1 + firstByte - 183
-		length = 0
 		for i := pos + 1; i < lenEnd; i++ {
 			length = (length << 8) + int(buffer[i])
 		}
@@ -167,7 +166,6 @@ func decodeLengthForHashing(buffer []byte, pos int) (length int, structure bool,
 	default:
 		// Next byte is the length of the length + 247
 		lenEnd := pos + 1 + firstByte - 247
-		length = 0
 		for i := pos + 1; i < lenEnd; i++ {
 			length = (length << 8) + int(buffer[i])
 		}

@@ -709,17 +709,13 @@ func (tds *TrieDbState) readAccountCodeSizeFromTrie(addrHash []byte) (int, bool)
 	return tds.t.GetAccountCodeSize(addrHash)
 }
 
-func (tds *TrieDbState) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (code []byte, err error) {
-	if bytes.Equal(codeHash[:], emptyCodeHash) {
-		return nil, nil
-	}
-
+func (tds *TrieDbState) ReadAccountCode(address libcommon.Address, incarnation uint64) (code []byte, err error) {
 	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 
 	if cached, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
 		code, err = cached, nil
 	} else {
-		code, err = tds.StateReader.ReadAccountCode(address, incarnation, codeHash)
+		code, err = tds.StateReader.ReadAccountCode(address, incarnation)
 	}
 	if tds.resolveReads {
 		addrHash, err1 := libcommon.HashData(address[:])
@@ -730,28 +726,31 @@ func (tds *TrieDbState) ReadAccountCode(address libcommon.Address, incarnation u
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
+		codeHash := crypto.Keccak256Hash(code)
 		tds.currentBuffer.codeReads[addrHash] = witnesstypes.CodeWithHash{Code: code, CodeHash: codeHash}
 		tds.retainListBuilder.ReadCode(codeHash, code)
 	}
 	return code, err
 }
 
-func (tds *TrieDbState) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (codeSize int, err error) {
+func (tds *TrieDbState) ReadAccountCodeSize(address libcommon.Address, incarnation uint64) (codeSize int, err error) {
 	addrHash := libcommon.Hash(crypto.Keccak256(address.Bytes()))
 	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
 		codeSize, err = cached, nil
 	} else {
-		codeSize, err = tds.StateReader.ReadAccountCodeSize(address, incarnation, codeHash)
+		codeSize, err = tds.StateReader.ReadAccountCodeSize(address, incarnation)
 		if err != nil {
 			return 0, err
 		}
 	}
 	if tds.resolveReads {
 		// We will need to read the code explicitly to make sure code is in the witness
-		code, err := tds.ReadAccountCode(address, incarnation, codeHash)
+		code, err := tds.ReadAccountCode(address, incarnation)
 		if err != nil {
 			return 0, err
 		}
+
+		codeHash := crypto.Keccak256Hash(code)
 
 		addrHash, err1 := libcommon.HashData(address[:])
 		if err1 != nil {
