@@ -1542,13 +1542,6 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
 		cv, ok := dt.getFromFileCache.Get(hi)
 		if ok {
-			if !cv.exists {
-				return nil, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
-			}
-			//g := dt.statelessGetter(int(cv.lvl))
-			//g.Reset(cv.offset)
-			//g.Skip()
-			//v, _ = g.Next(nil) // can be compressed
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
