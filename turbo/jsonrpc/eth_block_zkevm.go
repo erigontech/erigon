@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 )
 
 func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
@@ -217,7 +218,12 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	defer tx.Rollback()
 
 	// get latest finished block
-	finishedBlock, err := stages.GetStageProgress(tx, stages.Finish)
+	var finishedBlock uint64
+	if sequencer.IsSequencer() {
+		finishedBlock, err = stages.GetStageProgress(tx, stages.Execution)
+	} else {
+		finishedBlock, err = stages.GetStageProgress(tx, stages.Finish)
+	}
 	if err != nil {
 		return nil, err
 	}

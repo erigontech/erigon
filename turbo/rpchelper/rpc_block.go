@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 )
 
 var UnknownBlockError = &rpc.CustomError{
@@ -18,15 +19,13 @@ var UnknownBlockError = &rpc.CustomError{
 }
 
 func GetLatestFinishedBlockNumber(tx kv.Tx) (uint64, error) {
-	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
-	if forkchoiceHeadHash != (libcommon.Hash{}) {
-		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
-		if forkchoiceHeadNum != nil {
-			return *forkchoiceHeadNum, nil
-		}
+	var blockNum uint64
+	var err error
+	if sequencer.IsSequencer() {
+		blockNum, err = stages.GetStageProgress(tx, stages.Execution)
+	} else {
+		blockNum, err = stages.GetStageProgress(tx, stages.Finish)
 	}
-
-	blockNum, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return 0, fmt.Errorf("getting latest block number: %w", err)
 	}
@@ -48,14 +47,19 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		return 0, err
 	}
 
-	finishedBlockNumber, err := stages.GetStageProgress(tx, stages.Finish)
+	var highestBlockNumber uint64
+	if sequencer.IsSequencer() {
+		highestBlockNumber, err = stages.GetStageProgress(tx, stages.Execution)
+	} else {
+		highestBlockNumber, err = stages.GetStageProgress(tx, stages.Finish)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("getting latest finished block number: %w", err)
 	}
 
 	blockNumber := highestVerifiedBlock
-	if finishedBlockNumber < blockNumber {
-		blockNumber = finishedBlockNumber
+	if highestBlockNumber < blockNumber {
+		blockNumber = highestBlockNumber
 	}
 
 	return blockNumber, nil
