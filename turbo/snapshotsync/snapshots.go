@@ -1016,6 +1016,7 @@ func TypedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps
 }
 
 func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic bool) error {
+	defer func(t time.Time) { fmt.Printf("snapshots.go:1019: %s\n", time.Since(t)) }(time.Now())
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
