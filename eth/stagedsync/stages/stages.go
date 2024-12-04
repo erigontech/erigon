@@ -32,20 +32,18 @@ import (
 type SyncStage string
 
 var (
-	Snapshots       SyncStage = "OtterSync"       // Snapshots
-	Headers         SyncStage = "Headers"         // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
-	BorHeimdall     SyncStage = "BorHeimdall"     // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
-	PolygonSync     SyncStage = "PolygonSync"     // Use polygon sync component to sync headers, bodies and heimdall data
-	CumulativeIndex SyncStage = "CumulativeIndex" // Calculate how much gas has been used up to each block.
-	BlockHashes     SyncStage = "BlockHashes"     // Headers Number are written, fills blockHash => number bucket
-	Bodies          SyncStage = "Bodies"          // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Senders         SyncStage = "Senders"         // "From" recovered from signatures, bodies re-written
-	Execution       SyncStage = "Execution"       // Executing each block w/o building a trie
-	CustomTrace     SyncStage = "CustomTrace"     // Executing each block w/o building a trie
-	Translation     SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
-	VerkleTrie      SyncStage = "VerkleTrie"
-	TxLookup        SyncStage = "TxLookup" // Generating transactions lookup index
-	Finish          SyncStage = "Finish"   // Nominal stage after all other stages
+	Snapshots   SyncStage = "OtterSync"   // Snapshots
+	Headers     SyncStage = "Headers"     // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	BorHeimdall SyncStage = "BorHeimdall" // Downloading data from heimdall corresponding to the downloaded headers (validator sets and sync events)
+	PolygonSync SyncStage = "PolygonSync" // Use polygon sync component to sync headers, bodies and heimdall data
+	BlockHashes SyncStage = "BlockHashes" // Headers Number are written, fills blockHash => number bucket
+	Bodies      SyncStage = "Bodies"      // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	Senders     SyncStage = "Senders"     // "From" recovered from signatures, bodies re-written
+	Execution   SyncStage = "Execution"   // Executing each block w/o building a trie
+	CustomTrace SyncStage = "CustomTrace" // Executing each block w/o building a trie
+	VerkleTrie  SyncStage = "VerkleTrie"
+	TxLookup    SyncStage = "TxLookup" // Generating transactions lookup index
+	Finish      SyncStage = "Finish"   // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningBorHeimdall SyncStage = "MiningBorHeimdall"
@@ -69,7 +67,6 @@ var AllStages = []SyncStage{
 	Senders,
 	Execution,
 	CustomTrace,
-	Translation,
 	TxLookup,
 	Finish,
 }
