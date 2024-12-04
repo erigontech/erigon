@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/stretchr/testify/assert"
 
@@ -32,7 +31,7 @@ import (
 func TestCreateLoadingPrefixes(t *testing.T) {
 	assert := assert.New(t)
 
-	tr := New(libcommon.Hash{})
+	tr := New(common.Hash{})
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	kInc := make([]byte, 8)
 	binary.BigEndian.PutUint64(kInc, uint64(1))
@@ -99,13 +98,13 @@ func TestIsBefore(t *testing.T) {
 	assert.Equal(true, is)
 
 	contract := fmt.Sprintf("2%063x", 0)
-	storageKey := libcommon.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))
-	cacheKey := libcommon.Hex2Bytes(contract + "ffffffff" + "20")
+	storageKey := common.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))
+	cacheKey := common.Hex2Bytes(contract + "ffffffff" + "20")
 	is = keyIsBefore(cacheKey, storageKey)
 	assert.False(is)
 
-	storageKey = libcommon.Hex2Bytes(contract + "ffffffffffffffff" + fmt.Sprintf("20%062x", 0))
-	cacheKey = libcommon.Hex2Bytes(contract + "ffffffffffffffff" + "10")
+	storageKey = common.Hex2Bytes(contract + "ffffffffffffffff" + fmt.Sprintf("20%062x", 0))
+	cacheKey = common.Hex2Bytes(contract + "ffffffffffffffff" + "10")
 	is = keyIsBefore(cacheKey, storageKey)
 	assert.True(is)
 }

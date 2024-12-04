@@ -662,30 +662,16 @@ func (sd *StateDiff) CreateContract(address libcommon.Address) error {
 }
 
 // CompareStates uses the addresses accumulated in the sdMap and compares balances, nonces, and codes of the accounts, and fills the rest of the sdMap
-func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error {
+func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 	var toRemove []libcommon.Address
 	for addr, accountDiff := range sd.sdMap {
-		initialExist, err := initialIbs.Exist(addr)
-		if err != nil {
-			return err
-		}
-		exist, err := ibs.Exist(addr)
-		if err != nil {
-			return err
-		}
+		initialExist := initialIbs.Exist(addr)
+		exist := ibs.Exist(addr)
 		if initialExist {
 			if exist {
 				var allEqual = len(accountDiff.Storage) == 0
-				ifromBalance, err := initialIbs.GetBalance(addr)
-				if err != nil {
-					return err
-				}
-				fromBalance := ifromBalance.ToBig()
-				itoBalance, err := ibs.GetBalance(addr)
-				if err != nil {
-					return err
-				}
-				toBalance := itoBalance.ToBig()
+				fromBalance := initialIbs.GetBalance(addr).ToBig()
+				toBalance := ibs.GetBalance(addr).ToBig()
 				if fromBalance.Cmp(toBalance) == 0 {
 					accountDiff.Balance = "="
 				} else {
@@ -694,14 +680,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Balance = m
 					allEqual = false
 				}
-				fromCode, err := initialIbs.GetCode(addr)
-				if err != nil {
-					return err
-				}
-				toCode, err := ibs.GetCode(addr)
-				if err != nil {
-					return err
-				}
+				fromCode := initialIbs.GetCode(addr)
+				toCode := ibs.GetCode(addr)
 				if bytes.Equal(fromCode, toCode) {
 					accountDiff.Code = "="
 				} else {
@@ -710,14 +690,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Code = m
 					allEqual = false
 				}
-				fromNonce, err := initialIbs.GetNonce(addr)
-				if err != nil {
-					return err
-				}
-				toNonce, err := ibs.GetNonce(addr)
-				if err != nil {
-					return err
-				}
+				fromNonce := initialIbs.GetNonce(addr)
+				toNonce := ibs.GetNonce(addr)
 				if fromNonce == toNonce {
 					accountDiff.Nonce = "="
 				} else {
@@ -731,59 +705,35 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				}
 			} else {
 				{
-					balance, err := initialIbs.GetBalance(addr)
-					if err != nil {
-						return err
-					}
 					m := make(map[string]*hexutil.Big)
-					m["-"] = (*hexutil.Big)(balance.ToBig())
+					m["-"] = (*hexutil.Big)(initialIbs.GetBalance(addr).ToBig())
 					accountDiff.Balance = m
 				}
 				{
-					code, err := initialIbs.GetCode(addr)
-					if err != nil {
-						return err
-					}
 					m := make(map[string]hexutility.Bytes)
-					m["-"] = code
+					m["-"] = initialIbs.GetCode(addr)
 					accountDiff.Code = m
 				}
 				{
-					nonce, err := initialIbs.GetNonce(addr)
-					if err != nil {
-						return err
-					}
 					m := make(map[string]hexutil.Uint64)
-					m["-"] = hexutil.Uint64(nonce)
+					m["-"] = hexutil.Uint64(initialIbs.GetNonce(addr))
 					accountDiff.Nonce = m
 				}
 			}
 		} else if exist {
 			{
-				balance, err := ibs.GetBalance(addr)
-				if err != nil {
-					return err
-				}
 				m := make(map[string]*hexutil.Big)
-				m["+"] = (*hexutil.Big)(balance.ToBig())
+				m["+"] = (*hexutil.Big)(ibs.GetBalance(addr).ToBig())
 				accountDiff.Balance = m
 			}
 			{
-				code, err := ibs.GetCode(addr)
-				if err != nil {
-					return err
-				}
 				m := make(map[string]hexutility.Bytes)
-				m["+"] = code
+				m["+"] = ibs.GetCode(addr)
 				accountDiff.Code = m
 			}
 			{
-				nonce, err := ibs.GetNonce(addr)
-				if err != nil {
-					return err
-				}
 				m := make(map[string]hexutil.Uint64)
-				m["+"] = hexutil.Uint64(nonce)
+				m["+"] = hexutil.Uint64(ibs.GetNonce(addr))
 				accountDiff.Nonce = m
 			}
 			// Transform storage
@@ -799,7 +749,6 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 	for _, addr := range toRemove {
 		delete(sd.sdMap, addr)
 	}
-	return nil
 }
 
 func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) (*TraceCallResult, error) {

@@ -30,7 +30,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	gomock "go.uber.org/mock/gomock"
+	"go.uber.org/mock/gomock"
 )
 
 func TestStateLogger(t *testing.T) {
@@ -86,8 +86,7 @@ func TestStateLogger(t *testing.T) {
 					}
 				}
 
-				so, err := stateDB.GetOrNewStateObject(libcommon.Address{})
-				require.NoError(t, err)
+				so := stateDB.GetOrNewStateObject(libcommon.Address{})
 				if !reflect.DeepEqual(so.Balance(), uint256.NewInt(3)) {
 					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", libcommon.Address{}, uint256.NewInt(3), so.Balance())
 				}
@@ -104,8 +103,7 @@ func TestStateLogger(t *testing.T) {
 				state.SubBalance(libcommon.Address{}, uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
-				so, err := stateDB.GetOrNewStateObject(libcommon.Address{})
-				require.NoError(t, err)
+				so := stateDB.GetOrNewStateObject(libcommon.Address{})
 				if !reflect.DeepEqual(so.Balance(), uint256.NewInt(1)) {
 					t.Errorf("Incorrect Balance for  %s expectedBalance: %s, got:%s", libcommon.Address{}, uint256.NewInt(1), so.Balance())
 				}

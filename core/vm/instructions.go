@@ -288,11 +288,7 @@ func opAddress(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 func opBalance(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
 	address := libcommon.Address(slot.Bytes20())
-	balance, err := interpreter.evm.IntraBlockState().GetBalance(address)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-	slot.Set(balance)
+	slot.Set(interpreter.evm.IntraBlockState().GetBalance(address))
 	return nil, nil
 }
 
@@ -376,11 +372,7 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	codeSize, err := interpreter.evm.IntraBlockState().ResolveCodeSize(slot.Bytes20())
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-	slot.SetUint64(uint64(codeSize))
+	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().ResolveCodeSize(slot.Bytes20())))
 	return nil, nil
 }
 
@@ -417,11 +409,7 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
 
-	code, err := interpreter.evm.IntraBlockState().ResolveCode(addr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-	codeCopy := getDataBig(code, &codeOffset, len64)
+	codeCopy := getDataBig(interpreter.evm.IntraBlockState().ResolveCode(addr), &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
 }
@@ -467,18 +455,10 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	slot := scope.Stack.Peek()
 	address := libcommon.Address(slot.Bytes20())
 
-	empty, err := interpreter.evm.IntraBlockState().Empty(address)
-	if err != nil {
-		return nil, err
-	}
-	if empty {
+	if interpreter.evm.IntraBlockState().Empty(address) {
 		slot.Clear()
 	} else {
-		codeHash, err := interpreter.evm.IntraBlockState().ResolveCodeHash(address)
-		if err != nil {
-			return nil, err
-		}
-		slot.SetBytes(codeHash.Bytes())
+		slot.SetBytes(interpreter.evm.IntraBlockState().ResolveCodeHash(address).Bytes())
 	}
 	return nil, nil
 }
@@ -580,7 +560,8 @@ func opMstore8(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	loc := scope.Stack.Peek()
 	interpreter.hasherBuf = loc.Bytes32()
-	return nil, interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), &interpreter.hasherBuf, loc)
+	interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), &interpreter.hasherBuf, loc)
+	return nil, nil
 }
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -590,7 +571,8 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	loc := scope.Stack.Pop()
 	val := scope.Stack.Pop()
 	interpreter.hasherBuf = loc.Bytes32()
-	return nil, interpreter.evm.IntraBlockState().SetState(scope.Contract.Address(), &interpreter.hasherBuf, val)
+	interpreter.evm.IntraBlockState().SetState(scope.Contract.Address(), &interpreter.hasherBuf, val)
+	return nil, nil
 }
 
 func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -898,10 +880,7 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
-	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
-	if err != nil {
-		return nil, err
-	}
+	balance := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	if interpreter.evm.Config().Debug {
 		if interpreter.cfg.Debug {
 			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, balance, nil /* code */)
@@ -920,11 +899,7 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
-	pbalance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
-	if err != nil {
-		return nil, err
-	}
-	balance := *pbalance
+	balance := *interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	interpreter.evm.IntraBlockState().SubBalance(callerAddr, &balance, tracing.BalanceDecreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, &balance, tracing.BalanceIncreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
