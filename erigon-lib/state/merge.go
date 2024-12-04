@@ -26,6 +26,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tidwall/btree"
 
@@ -449,6 +450,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
 	var keyFileStartTxNum, keyFileEndTxNum uint64
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
@@ -485,6 +488,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
 			keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-logEvery.C:
+			log.Trace("[merge] ", "name", dt.name, "key", fmt.Sprintf("%x", lastKey))
 		}
 	}
 	if keyBuf != nil {
