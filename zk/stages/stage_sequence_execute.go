@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
-var shouldCheckForExecutionAndDataStreamAlighment = true
+var shouldCheckForExecutionAndDataStreamAlignment = true
 
 func SpawnSequencingStage(
 	s *stagedsync.StageState,
@@ -136,7 +136,7 @@ func sequencingBatchStep(
 		return sdb.tx.Commit()
 	}
 
-	if shouldCheckForExecutionAndDataStreamAlighment {
+	if shouldCheckForExecutionAndDataStreamAlignment {
 		// handle cases where the last batch wasn't committed to the data stream.
 		// this could occur because we're migrating from an RPC node to a sequencer
 		// or because the sequencer was restarted and not all processes completed (like waiting from remote executor)
@@ -155,11 +155,11 @@ func sequencingBatchStep(
 					// do not set shouldCheckForExecutionAndDataStreamAlighment=false because of the error
 					return err
 				}
-				shouldCheckForExecutionAndDataStreamAlighment = false
+				shouldCheckForExecutionAndDataStreamAlignment = false
 				return nil
 			}
 		}
-		shouldCheckForExecutionAndDataStreamAlighment = false
+		shouldCheckForExecutionAndDataStreamAlignment = false
 	}
 
 	needsUnwind, err := tryHaltSequencer(batchContext, batchState, streamWriter, u, executionAt)

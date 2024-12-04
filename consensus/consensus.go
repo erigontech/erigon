@@ -104,6 +104,8 @@ type Reward struct {
 }
 
 // Engine is an algorithm agnostic consensus engine.
+//
+//go:generate mockgen -typed=true -destination=./engine_mock.go -package=consensus . Engine
 type Engine interface {
 	EngineReader
 	EngineWriter

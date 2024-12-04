@@ -48,6 +48,7 @@ type CacheValidationResult struct {
 	CodeKeysOutOfSync  [][]byte
 }
 
+//go:generate mockgen -typed=true -destination=./mocks/cache_mock.go -package=mocks . Cache
 type Cache interface {
 	// View - returns CacheView consistent with givent kv.Tx
 	View(ctx context.Context, tx kv.Tx) (CacheView, error)
