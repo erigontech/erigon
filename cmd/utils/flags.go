@@ -856,7 +856,7 @@ var (
 	CaplinMaxOutboundTrafficPerPeerFlag = cli.StringFlag{
 		Name:  "caplin.max-outbound-traffic-per-peer",
 		Usage: "Max outbound traffic per second per peer",
-		Value: "128KB",
+		Value: "256KB",
 	}
 	CaplinCheckpointSyncUrlFlag = cli.StringSliceFlag{
 		Name:  "caplin.checkpoint-sync-url",
