@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -59,9 +58,9 @@ type attestationService struct {
 	emitters               *beaconevents.EventEmitter
 	batchSignatureVerifier *BatchSignatureVerifier
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
-	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
-	attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
-	attestationsToBeLaterProcessed sync.Map
+	validatorAttestationSeen *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
+	// attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
+	// attestationsToBeLaterProcessed sync.Map
 }
 
 // AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
@@ -95,10 +94,10 @@ func NewAttestationService(
 		emitters:                 emitters,
 		batchSignatureVerifier:   batchSignatureVerifier,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
-		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
+		//attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 
-	go a.loop(ctx)
+	//go a.loop(ctx)
 	return a
 }
 
@@ -120,14 +119,16 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		committeeIndex = index
 	}
 
-	key, err := att.Attestation.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if _, ok := s.attestationProcessed.Get(key); ok {
-		return ErrIgnore
-	}
-	s.attestationProcessed.Add(key, struct{}{})
+	// Commented because we have a check in validatorAttestationSeen that does the same thing.
+
+	// key, err := att.Attestation.HashSSZ()
+	// if err != nil {
+	// 	return err
+	// }
+	// if _, ok := s.attestationProcessed.Get(key); ok {
+	// 	return ErrIgnore
+	// }
+	// s.attestationProcessed.Add(key, struct{}{})
 
 	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
 	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
@@ -228,7 +229,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
 	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
-		s.scheduleAttestationForLaterProcessing(att)
+		//s.scheduleAttestationForLaterProcessing(att)
 		return ErrIgnore
 	}
 
@@ -245,10 +246,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 
-	if !s.committeeSubscribe.NeedToAggregate(att.Attestation) {
-		return ErrIgnore
-	}
-
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures: [][]byte{signature[:]},
 		SignRoots:  [][]byte{signingRoot[:]},
@@ -257,10 +254,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
-			err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
-			if errors.Is(err, aggregation.ErrIsSuperset) {
-				return
+			if s.committeeSubscribe.NeedToAggregate(att.Attestation) {
+				err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
+				if errors.Is(err, aggregation.ErrIsSuperset) {
+					return
+				}
 			}
+
 			if err != nil {
 				log.Warn("could not check aggregate attestation", "err", err)
 				return
@@ -284,47 +284,47 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	return ErrIgnore
 }
 
-type attestationJob struct {
-	att          *AttestationWithGossipData
-	creationTime time.Time
-	subnet       uint64
-}
+// type attestationJob struct {
+// 	att          *AttestationWithGossipData
+// 	creationTime time.Time
+// 	subnet       uint64
+// }
 
-func (a *attestationService) scheduleAttestationForLaterProcessing(att *AttestationWithGossipData) {
-	key, err := att.Attestation.HashSSZ()
-	if err != nil {
-		return
-	}
-	a.attestationsToBeLaterProcessed.Store(key, &attestationJob{
-		att:          att,
-		creationTime: time.Now(),
-	})
-}
+// func (a *attestationService) scheduleAttestationForLaterProcessing(att *AttestationWithGossipData) {
+// 	key, err := att.Attestation.HashSSZ()
+// 	if err != nil {
+// 		return
+// 	}
+// 	a.attestationsToBeLaterProcessed.Store(key, &attestationJob{
+// 		att:          att,
+// 		creationTime: time.Now(),
+// 	})
+// }
 
-func (a *attestationService) loop(ctx context.Context) {
-	ticker := time.NewTicker(singleAttestationIntervalTick)
-	defer ticker.Stop()
+// func (a *attestationService) loop(ctx context.Context) {
+// 	ticker := time.NewTicker(singleAttestationIntervalTick)
+// 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		a.attestationsToBeLaterProcessed.Range(func(key, value any) bool {
-			k := key.([32]byte)
-			v := value.(*attestationJob)
-			if time.Now().After(v.creationTime.Add(singleAttestationJobExpiry)) {
-				a.attestationsToBeLaterProcessed.Delete(k)
-				return true
-			}
+// 	for {
+// 		select {
+// 		case <-ctx.Done():
+// 			return
+// 		case <-ticker.C:
+// 		}
+// 		a.attestationsToBeLaterProcessed.Range(func(key, value any) bool {
+// 			k := key.([32]byte)
+// 			v := value.(*attestationJob)
+// 			if time.Now().After(v.creationTime.Add(singleAttestationJobExpiry)) {
+// 				a.attestationsToBeLaterProcessed.Delete(k)
+// 				return true
+// 			}
 
-			root := v.att.Attestation.Data.BeaconBlockRoot
-			if _, ok := a.forkchoiceStore.GetHeader(root); !ok {
-				return true
-			}
-			a.ProcessMessage(ctx, &v.subnet, v.att)
-			return true
-		})
-	}
-}
+// 			root := v.att.Attestation.Data.BeaconBlockRoot
+// 			if _, ok := a.forkchoiceStore.GetHeader(root); !ok {
+// 				return true
+// 			}
+// 			a.ProcessMessage(ctx, &v.subnet, v.att)
+// 			return true
+// 		})
+// 	}
+// }

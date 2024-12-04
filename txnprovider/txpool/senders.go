@@ -100,7 +100,7 @@ func (b *BySenderAndNonce) blobCount(senderID uint64) uint64 {
 	return b.senderIDBlobCount[senderID]
 }
 
-func (b *BySenderAndNonce) hasTxs(senderID uint64) bool {
+func (b *BySenderAndNonce) hasTxns(senderID uint64) bool {
 	has := false
 	b.ascend(senderID, func(*metaTxn) bool {
 		has = true
@@ -138,7 +138,7 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 			delete(b.senderIDTxnCount, senderID)
 		}
 
-		if mt.TxnSlot.Type == BlobTxType && mt.TxnSlot.Blobs != nil {
+		if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.Blobs != nil {
 			accBlobCount := b.senderIDBlobCount[senderID]
 			txnBlobCount := len(mt.TxnSlot.Blobs)
 			if txnBlobCount > 1 {
@@ -165,7 +165,7 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *meta
 	}
 
 	b.senderIDTxnCount[mt.TxnSlot.SenderID]++
-	if mt.TxnSlot.Type == BlobTxType && mt.TxnSlot.Blobs != nil {
+	if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.Blobs != nil {
 		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(mt.TxnSlot.Blobs))
 	}
 	return nil
@@ -242,26 +242,26 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 	return nonce, balance, nil
 }
 
-func (sc *sendersBatch) registerNewSenders(newTxs *TxnSlots, logger log.Logger) (err error) {
-	for i, txn := range newTxs.Txs {
-		txn.SenderID, txn.Traced = sc.getOrCreateID(newTxs.Senders.AddressAt(i), logger)
+func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {
+	for i, txn := range newTxns.Txns {
+		txn.SenderID, txn.Traced = sc.getOrCreateID(newTxns.Senders.AddressAt(i), logger)
 	}
 	return nil
 }
 
-func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs TxnSlots, logger log.Logger) error {
+func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
 	for _, diff := range stateChanges.ChangeBatch {
 		for _, change := range diff.Changes { // merge state changes
 			addrB := gointerfaces.ConvertH160toAddress(change.Address)
 			sc.getOrCreateID(addrB, logger)
 		}
 
-		for i, txn := range unwindTxs.Txs {
-			txn.SenderID, txn.Traced = sc.getOrCreateID(unwindTxs.Senders.AddressAt(i), logger)
+		for i, txn := range unwindTxns.Txns {
+			txn.SenderID, txn.Traced = sc.getOrCreateID(unwindTxns.Senders.AddressAt(i), logger)
 		}
 
-		for i, txn := range minedTxs.Txs {
-			txn.SenderID, txn.Traced = sc.getOrCreateID(minedTxs.Senders.AddressAt(i), logger)
+		for i, txn := range minedTxns.Txns {
+			txn.SenderID, txn.Traced = sc.getOrCreateID(minedTxns.Senders.AddressAt(i), logger)
 		}
 	}
 	return nil

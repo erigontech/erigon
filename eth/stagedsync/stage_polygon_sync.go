@@ -25,6 +25,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/generics"
@@ -33,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
 	"github.com/erigontech/erigon/core/types"
@@ -43,8 +46,8 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/p2p"
+	"github.com/erigontech/erigon/polygon/sync"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )
@@ -55,7 +58,7 @@ func NewPolygonSyncStageCfg(
 	logger log.Logger,
 	chainConfig *chain.Config,
 	db kv.RwDB,
-	heimdallClient heimdall.HeimdallClient,
+	heimdallClient heimdall.Client,
 	heimdallStore heimdall.Store,
 	bridgeStore bridge.Store,
 	sentry sentryproto.SentryClient,
@@ -115,6 +118,12 @@ func NewPolygonSyncStageCfg(
 	checkpointVerifier := polygonsync.VerifyCheckpointHeaders
 	milestoneVerifier := polygonsync.VerifyMilestoneHeaders
 	blocksVerifier := polygonsync.VerifyBlocks
+
+	signaturesCache, err := lru.NewARC[common.Hash, common.Address](sync.InMemorySignatures)
+	if err != nil {
+		panic(err)
+	}
+
 	syncStore := polygonsync.NewStore(logger, executionEngine, bridgeService)
 	blockDownloader := polygonsync.NewBlockDownloader(
 		logger,
@@ -135,11 +144,12 @@ func NewPolygonSyncStageCfg(
 		blocksVerifier,
 		p2pService,
 		blockDownloader,
-		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService),
+		polygonsync.NewCanonicalChainBuilderFactory(chainConfig, borConfig, heimdallService, signaturesCache),
 		heimdallService,
 		bridgeService,
 		events.Events(),
 		notifications,
+		sync.NewWiggleCalculator(borConfig, signaturesCache, heimdallService),
 	)
 	syncService := &polygonSyncStageService{
 		logger:          logger,
@@ -1541,9 +1551,7 @@ func (e *polygonSyncStageExecutionEngine) processCachedForkChoiceIfNeeded(ctx co
 	}
 
 	if e.cachedForkChoice.state == forkChoiceConnected {
-		if err := e.executeForkChoice(tx); err != nil {
-			return err
-		}
+		return e.executeForkChoice(tx)
 	}
 
 	if e.cachedForkChoice.state == forkChoiceExecuted {

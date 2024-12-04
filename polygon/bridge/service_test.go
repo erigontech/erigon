@@ -42,10 +42,10 @@ var defaultBorConfig = borcfg.BorConfig{
 	StateSyncConfirmationDelay: map[string]uint64{"0": 1},
 }
 
-func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockHeimdallClient, *Service) {
+func setup(t *testing.T, borConfig borcfg.BorConfig) (*heimdall.MockClient, *Service) {
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlDebug)
-	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
+	heimdallClient := heimdall.NewMockClient(ctrl)
 	b := NewService(ServiceConfig{
 		Store:        NewMdbxStore(t.TempDir(), logger, false, 1),
 		Logger:       logger,

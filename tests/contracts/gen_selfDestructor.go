@@ -10,9 +10,10 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
+
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/accounts/ab
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/event"
 )

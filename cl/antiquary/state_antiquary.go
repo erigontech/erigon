@@ -497,11 +497,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 
 	if s.snapgen {
-
-		// Keep gnosis out for a bit
-		if s.currentState.BeaconConfig().ConfigName == "gnosis" {
-			return nil
-		}
 		blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
 		from := s.stateSn.BlocksAvailable() + 1
 		if from+blocksPerStatefulFile+safetyMargin > s.currentState.Slot() {
