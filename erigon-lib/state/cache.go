@@ -20,6 +20,7 @@ type u192 struct{ hi, lo, ext uint64 } //nolint
 type DomainGetFromFileCache struct {
 	*freelru.LRU[uint64, domainGetFromFileCacheItem]
 	enabled, trace bool
+	limit          uint32
 }
 
 // nolint
@@ -34,21 +35,25 @@ var (
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
 )
 
-func NewDomainGetFromFileCache() *DomainGetFromFileCache {
-	c, err := freelru.New[uint64, domainGetFromFileCacheItem](domainGetFromFileCacheLimit, u64noHash)
+func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
+	c, err := freelru.New[uint64, domainGetFromFileCacheItem](limit, u64noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace}
+	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
 }
 
 func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
-func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
+func (c *DomainGetFromFileCache) LogStats(domain kv.Domain) {
 	if c == nil || !c.enabled || !c.trace {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", domainGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
+	limit := domainGetFromFileCacheLimit
+	if domain == kv.CodeDomain {
+		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	}
+	log.Warn("[dbg] DomainGetFromFileCache", "a", domain.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", limit)
 }
 
 func NewDomainGetFromFileCacheAny() any { return NewDomainGetFromFileCache() }
@@ -82,7 +87,8 @@ var (
 )
 
 type IISeekInFilesCache struct {
-	*freelru.LRU[uint64, iiSeekInFilesCacheItem]
+	*freelru.LRU[uint64, iiSeekInFilesCacheItem] // murmur3(key) -> {requestedTxNum, foundTxNum}
+
 	hit, total int
 	trace      bool
 }
@@ -106,7 +112,7 @@ func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] IISeekInFilesCache", "a", fileBaseName, "hit", c.hit, "total", c.total, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", iiGetFromFileCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
+	log.Warn("[dbg] II_LRU", "a", fileBaseName, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)), "hit", c.hit, "collisions", m.Collisions, "evictions", m.Evictions, "inserts", m.Inserts, "removals", m.Removals, "limit", iiGetFromFileCacheLimit)
 }
 
 func NewIISeekInFilesCacheAny() any { return NewIISeekInFilesCache() }
