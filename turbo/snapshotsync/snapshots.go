@@ -1019,6 +1019,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
+	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
 	wg := &errgroup.Group{}
 	wg.SetLimit(64)
 	//fmt.Println("RS", s)
@@ -1056,7 +1057,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.IsFrozen(s.cfg.ChainName, f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snConfig.IsFrozen(f)}
 		}
 
 		if open {
