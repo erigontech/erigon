@@ -144,7 +144,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
-	defer idx.EnableMadvNormal().DisableReadAhead()
+	defer idx.EnableReadAhead().DisableReadAhead()
 
 	// Read number of keys and bytes per record
 	idx.baseDataID = binary.BigEndian.Uint64(idx.data[:8])
