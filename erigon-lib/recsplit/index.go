@@ -446,6 +446,11 @@ func (idx *Index) EnableReadAhead() *Index {
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
+func (idx *Index) EnableMadvNormal() *Index {
+	idx.readAheadRefcnt.Add(1)
+	_ = mmap.MadviseNormal(idx.mmapHandle1)
+	return idx
+}
 func (idx *Index) EnableWillNeed() *Index {
 	idx.readAheadRefcnt.Add(1)
 	fmt.Printf("[dbg] madv_will_need: %s\n", idx.fileName)
