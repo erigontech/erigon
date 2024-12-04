@@ -1019,6 +1019,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
+	wg := &errgroup.Group{}
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
 
@@ -1081,9 +1082,12 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		}
 
 		if open {
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
-			}
+			wg.Go(func() error {
+				if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+					return err
+				}
+				return nil
+			})
 		}
 
 		if f.To > 0 {
