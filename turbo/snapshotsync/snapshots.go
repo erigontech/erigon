@@ -1100,6 +1100,9 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
+	if err := wg.Wait(); err != nil {
+		return err
+	}
 
 	return nil
 }
