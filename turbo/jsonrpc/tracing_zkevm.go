@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -81,87 +82,20 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		stream.WriteNil()
 		return err
 	}
-	engine := api.engine()
 
-	txEnv, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
-	if err != nil {
-		stream.WriteNil()
-		return err
-	}
-	blockCtx := txEnv.BlockContext
-	ibs := txEnv.Ibs
-
-	rules := chainConfig.Rules(block.NumberU64(), block.Time())
-	stream.WriteArrayStart()
-
-	borTx := rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
-	txns := block.Transactions()
-	if borTx != nil && *config.BorTraceEnabled {
-		txns = append(txns, borTx)
+	blockTracer := &blockTracer{
+		ctx:            ctx,
+		stream:         stream,
+		engine:         api.engine(),
+		tx:             tx,
+		config:         config,
+		chainConfig:    chainConfig,
+		_blockReader:   api._blockReader,
+		historyV3:      api.historyV3(tx),
+		evmCallTimeout: api.evmCallTimeout,
 	}
 
-	cumulativeGas := uint64(0)
-	hermezReader := hermez_db.NewHermezDbReader(tx)
-
-	for idx, txn := range txns {
-		stream.WriteObjectStart()
-		stream.WriteObjectField("txHash")
-		stream.WriteString(txn.Hash().Hex())
-		stream.WriteMore()
-		stream.WriteObjectField("result")
-		select {
-		default:
-		case <-ctx.Done():
-			stream.WriteNil()
-			return ctx.Err()
-		}
-
-		txHash := txn.Hash()
-		evm, effectiveGasPricePercentage, err := core.PrepareForTxExecution(chainConfig, &vm.Config{}, &blockCtx, hermezReader, ibs, block, &txHash, idx)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-
-		msg, _, err := core.GetTxContext(chainConfig, engine, ibs, block.Header(), txn, evm, effectiveGasPricePercentage)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-
-		txCtx := evmtypes.TxContext{
-			TxHash:            txn.Hash(),
-			Origin:            msg.From(),
-			GasPrice:          msg.GasPrice(),
-			Txn:               txn,
-			CumulativeGasUsed: &cumulativeGas,
-			BlockNum:          block.NumberU64(),
-		}
-
-		err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
-		if err == nil {
-			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
-		}
-		stream.WriteObjectEnd()
-
-		// if we have an error we want to output valid json for it before continuing after clearing down potential writes to the stream
-		if err != nil {
-			stream.WriteMore()
-			stream.WriteObjectStart()
-			rpc.HandleError(err, stream)
-			stream.WriteObjectEnd()
-			if err != nil {
-				return err
-			}
-		}
-		if idx != len(txns)-1 {
-			stream.WriteMore()
-		}
-		stream.Flush()
-	}
-	stream.WriteArrayEnd()
-	stream.Flush()
-	return nil
+	return blockTracer.TraceBlock(block)
 }
 
 func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error {
@@ -468,4 +402,81 @@ func (api *PrivateDebugAPIImpl) TraceTransactionCounters(ctx context.Context, ha
 
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, txEnv.Msg, txEnv.BlockContext, txEnv.TxContext, txEnv.Ibs, config, chainConfig, stream, api.evmCallTimeout)
+}
+
+func (api *PrivateDebugAPIImpl) TraceBatchByNumber(ctx context.Context, batchNum rpc.BlockNumber, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+	defer tx.Rollback()
+
+	reader := hermez_db.NewHermezDbReader(tx)
+	badBatch, err := reader.GetInvalidBatch(batchNum.Uint64())
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
+	if badBatch {
+		stream.WriteNil()
+		return errors.New("batch is invalid")
+	}
+
+	blockNumbers, err := reader.GetL2BlockNosByBatch(batchNum.Uint64())
+	if err != nil {
+		stream.WriteNil()
+		return fmt.Errorf("failed to get block numbers for batch %d: %w", batchNum, err)
+	}
+	if len(blockNumbers) == 0 {
+		return fmt.Errorf("no blocks found for batch %d", batchNum)
+	}
+
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+	if err = api.BaseAPI.checkPruneHistory(tx, blockNumbers[0]); err != nil {
+		stream.WriteNil()
+		return err
+	}
+
+	if config == nil {
+		config = &tracers.TraceConfig_ZkEvm{}
+	}
+
+	if config.BorTraceEnabled == nil {
+		config.BorTraceEnabled = newBoolPtr(false)
+	}
+
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+	blockTracer := &blockTracer{
+		ctx:            ctx,
+		stream:         stream,
+		engine:         api.engine(),
+		tx:             tx,
+		config:         config,
+		chainConfig:    chainConfig,
+		_blockReader:   api._blockReader,
+		historyV3:      api.historyV3(tx),
+		evmCallTimeout: api.evmCallTimeout,
+	}
+
+	for _, blockNum := range blockNumbers {
+		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+		if err != nil {
+			stream.WriteNil()
+			return nil
+		}
+
+		if err := blockTracer.TraceBlock(block); err != nil {
+			stream.WriteNil()
+			return err
+		}
+	}
+
+	return nil
 }

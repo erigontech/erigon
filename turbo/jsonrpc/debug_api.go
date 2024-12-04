@@ -44,6 +44,7 @@ type PrivateDebugAPI interface {
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 	TraceTransactionCounters(ctx context.Context, hash common.Hash, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error
+	TraceBatchByNumber(ctx context.Context, number rpc.BlockNumber, config *tracers.TraceConfig_ZkEvm, stream *jsoniter.Stream) error
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access

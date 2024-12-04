@@ -338,6 +338,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)  |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)  |
 | debug_traceCallMany                        | Yes     | Erigon Method PR#4567.               |
+| debug_traceBatchByNumber                   | Yes     | Streaming (can handle huge results)  |
 |                                            |         |                                      |
 | trace_call                                 | Yes     |                                      |
 | trace_callMany                             | Yes     |                                      |

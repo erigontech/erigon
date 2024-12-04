@@ -41,6 +41,7 @@ If the endpoint is not in the list below, it means this specific endpoint is not
 - debug_getRawBlock
 - debug_getRawHeader
 - debug_storageRangeAt
+- debug_traceBatchByNumber
 - debug_traceBlockByHash
 - debug_traceBlockByNumber
 - debug_traceCall
