@@ -1,4 +1,5 @@
 name: Release
+run-name: Release ${{ inputs.release_version }} from branch ${{ inputs.checkout_ref  }} executed by @${{ github.actor }}
 
 env:
   APPLICATION: "erigon"
@@ -11,17 +12,16 @@ env:
   GITHUB_AUTOMATION_EMAIL: "github-automation@erigon.tech"
   GITHUB_AUTOMATION_NAME: "Erigon Github Automation"
   LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
+  TEST_ERIGON_DATA_DIR: "erigon_data"
+  TEST_ERIGON_BIN_DIR: "erigon_bin"
+  TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
+  TEST_TOTAL_TIME_SECONDS: 18000 # 5 hours
+  TEST_CHAIN: "mainnet"
 
 on:
   push:
     branches-ignore:
       - '**'
-    #branches:
-    #  - 'master'
-    #tags:
-      ## only trigger on release tags:
-      #- 'v*.*.*'
-      #- 'v*.*.*-*'
   workflow_dispatch:
     inputs:
       checkout_ref:
@@ -37,8 +37,7 @@ on:
         required: false
         type: boolean
         default: false
-        description: 'perform_release: when set then all artifacts will be published and the DRAFT of the release 
-          notes will be created.'
+        description: 'perform_release: when set then all artifacts will be published and the DRAFT of the release notes will be created.'
       publish_latest_tag:
         required: false
         type: boolean
@@ -48,10 +47,9 @@ on:
 jobs:
 
   build-release:
-    ## runs-on: ubuntu-22.04
     runs-on: ubuntu-latest-devops-xxlarge
     timeout-minutes: 60
-    name: Build Artifacts and multi-platform Docker image, publish draft of the Release Notes
+    name: Build Artifacts and multi-platform Docker image
 
     steps:
       - name: Checkout git repository ${{ env.APP_REPO }}
@@ -185,18 +183,91 @@ jobs:
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
+  ## not required for now -- commented:
+  #      - name: Create and push a git tag for the released version in case perform_release is set
+  #        if: ${{ inputs.perform_release }}
+  #        run: |
+  #          git config --global user.email ${{ env.GITHUB_AUTOMATION_EMAIL }}
+  #          git config --global user.name "${{ env.GITHUB_AUTOMATION_NAME }}"
+  #          git tag -a ${{ inputs.release_version }} -m "Release ${{ inputs.release_version }}"
+  #          git push origin ${{ inputs.release_version }}
 
-## not required for now -- commented:
-#      - name: Create and push a git tag for the released version in case perform_release is set
-#        if: ${{ inputs.perform_release }}
-#        run: |
-#          git config --global user.email ${{ env.GITHUB_AUTOMATION_EMAIL }}
-#          git config --global user.name "${{ env.GITHUB_AUTOMATION_NAME }}"
-#          git tag -a ${{ inputs.release_version }} -m "Release ${{ inputs.release_version }}"
-#          git push origin ${{ inputs.release_version }}
+  test-release:
+    strategy:
+      matrix:
+        platform: [linux_arm64, linux_amd64, linux_amd64v2, darwin_arm64, darwin_amd64]
+    runs-on: ${{ matrix.platform }}
+    name: Test release on ${{ matrix.platform }}
 
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.platform }}.tar.gz
+          path: ${{ runner.workspace }}/${{ env.TEST_ERIGON_BIN_DIR }}
+
+      - name: Unzip artifact
+        run: |
+          import tarfile
+          import os
+
+          artifact_path = os.path.join("${{ runner.workspace }}", "${{ env.TEST_ERIGON_BIN_DIR }}", "${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.platform }}.tar.gz")
+          extract_path = os.path.join("${{ runner.workspace }}", "${{ env.TEST_ERIGON_BIN_DIR }}")
+
+          with tarfile.open(artifact_path, "r:gz") as tar:
+            tar.extractall(path=extract_path)
+
+      - name: Checkout QA Tests Repository & Install Requirements
+        run: |
+          rm -rf ${{runner.workspace}}/erigon-qa
+          git -c advice.detachedHead=false clone --depth 1 https://github.com/erigontech/erigon-qa ${{runner.workspace}}/erigon-qa
+          cd ${{runner.workspace}}/erigon-qa
+          pip3 install -r requirements.txt
+
+      - name: Run Erigon and execute tests
+        id: test_step
+        run: |
+          set +e # Disable exit on error
+          
+          # Run Erigon, wait sync and check ability to maintain sync
+          python3 ${{runner.workspace}}/erigon-qa/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+            ${{ runner.workspace }}/${{ env.TEST_ERIGON_BIN_DIR }} ${{ runner.workspace }}/${{ env.TEST_ERIGON_DATA_DIR }} ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} Erigon3 ${{ env.TEST_CHAIN }} minimal_node
+          
+          # Capture monitoring script exit status
+          test_exit_status=$?
+          
+          # Save the subsection reached status
+          echo "::set-output name=test_executed::true"
+          
+          # Check test runner script exit status
+          if [ $test_exit_status -eq 0 ]; then
+            echo "Tests completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error detected during tests"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Action for Success
+        if: steps.test_step.outputs.TEST_RESULT == 'success'
+        run: echo "::notice::Tests completed successfully"
+
+      - name: Action for Not Success
+        if: steps.test_step.outputs.TEST_RESULT != 'success'
+        run: |
+          echo "::error::Error detected during tests"
+          exit 1
+
+  publish-release-notes:
+    name: Publish draft of the Release Notes
+    runs-on: ubuntu-latest
+    needs: [build-release, test-release]
+
+    steps:
       - name: Publish draft of the Release notes with assets in case perform_release is set
-        if: ${{ inputs.perform_release }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
