@@ -1326,20 +1326,6 @@ func (d *Domain) missedAccessors() (l []*filesItem) {
 	return l
 }
 
-//func (d *Domain) missedExistenceFilter() (l []*filesItem) {
-//	d.files.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
-//		for _, item := range items {
-//			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-//      bloomPath := d.kvExistenceIdxFilePath(fromStep, toStep)
-//      if !dir.FileExist(bloomPath) {
-//				l = append(l, item)
-//			}
-//		}
-//		return true
-//	})
-//	return l
-//}
-
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedAccessors(ctx, g, ps)
@@ -1540,15 +1526,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 		dt.getFromFileCache = dt.visible.newGetFromFileCache()
 	}
 	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
-		cv, ok := dt.getFromFileCache.Get(hi)
-		if ok {
-			if !cv.exists {
-				return nil, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
-			}
-			//g := dt.statelessGetter(int(cv.lvl))
-			//g.Reset(cv.offset)
-			//g.Skip()
-			//v, _ = g.Next(nil) // can be compressed
+		if cv, ok := dt.getFromFileCache.Get(hi); ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1577,8 +1555,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 			}
 		}
 
-		var offset uint64
-		v, found, offset, err = dt.getLatestFromFile(i, filekey)
+		v, found, _, err = dt.getLatestFromFile(i, filekey)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
@@ -1593,7 +1570,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 		}
 
 		if dt.getFromFileCache != nil {
-			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), offset: offset, exists: true, v: v})
+			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
@@ -1602,7 +1579,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 	}
 
 	if dt.getFromFileCache != nil {
-		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false, v: nil})
+		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, v: nil})
 	}
 	return nil, false, 0, 0, nil
 }

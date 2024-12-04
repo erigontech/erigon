@@ -105,18 +105,10 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(address)
-		if err != nil {
-			return err
-		}
-		if !exist {
+		if !st.Exist(address) {
 			t.Error("expected account to exist")
 		}
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			return err
-		}
-		if exist {
+		if st.Exist(contractAddress) {
 			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
 		}
 		return nil
@@ -139,25 +131,13 @@ func TestSelfDestructReceive(t *testing.T) {
 		// and that means that the state of the accounts written in the first block was correct.
 		// This test checks that the storage root of the account is properly set to the root of the empty tree
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(address)
-		if err != nil {
-			t.Error(err)
-		}
-		if !exist {
+		if !st.Exist(address) {
 			t.Error("expected account to exist")
 		}
-		exist, err = st.Exist(contractAddress)
-		if err != nil {
-			t.Error(err)
-		}
-		if !exist {
+		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 2", contractAddress.String())
 		}
-		code, err := st.GetCode(contractAddress)
-		if err != nil {
-			t.Error(err)
-		}
-		if len(code) != 0 {
+		if len(st.GetCode(contractAddress)) != 0 {
 			t.Error("expected empty code in contract at block 2", contractAddress.String())
 		}
 		return nil

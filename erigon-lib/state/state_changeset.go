@@ -127,16 +127,16 @@ func SerializeDiffSet(diffSet []DomainEntryDiff, out []byte) []byte {
 		ret = append(ret, v)            // v is always 1 byte
 	}
 	// Write the diffSet
-	tmp := make([]byte, 4)
-	binary.BigEndian.PutUint32(tmp, uint32(len(diffSet)))
-	ret = append(ret, tmp...)
+	var tmp [4]byte
+	binary.BigEndian.PutUint32(tmp[:], uint32(len(diffSet)))
+	ret = append(ret, tmp[:]...)
 	for _, diff := range diffSet {
 		// write uint32(len(key)) + key + uint32(len(value)) + value + prevStepBytes
-		binary.BigEndian.PutUint32(tmp, uint32(len(diff.Key)))
-		ret = append(ret, tmp...)
+		binary.BigEndian.PutUint32(tmp[:], uint32(len(diff.Key)))
+		ret = append(ret, tmp[:]...)
 		ret = append(ret, diff.Key...)
-		binary.BigEndian.PutUint32(tmp, uint32(len(diff.Value)))
-		ret = append(ret, tmp...)
+		binary.BigEndian.PutUint32(tmp[:], uint32(len(diff.Value)))
+		ret = append(ret, tmp[:]...)
 		ret = append(ret, diff.Value...)
 		ret = append(ret, dict[toStringZeroCopy(diff.PrevStepBytes)])
 	}

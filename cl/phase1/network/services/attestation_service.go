@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -59,9 +58,9 @@ type attestationService struct {
 	emitters               *beaconevents.EventEmitter
 	batchSignatureVerifier *BatchSignatureVerifier
 	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
-	validatorAttestationSeen       *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
-	attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
-	attestationsToBeLaterProcessed sync.Map
+	validatorAttestationSeen *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
+	// attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
+	// attestationsToBeLaterProcessed sync.Map
 }
 
 // AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
@@ -95,7 +94,7 @@ func NewAttestationService(
 		emitters:                 emitters,
 		batchSignatureVerifier:   batchSignatureVerifier,
 		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
-		attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
+		//attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
 	}
 
 	//go a.loop(ctx)
@@ -120,14 +119,16 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		committeeIndex = index
 	}
 
-	key, err := att.Attestation.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if _, ok := s.attestationProcessed.Get(key); ok {
-		return ErrIgnore
-	}
-	s.attestationProcessed.Add(key, struct{}{})
+	// Commented because we have a check in validatorAttestationSeen that does the same thing.
+
+	// key, err := att.Attestation.HashSSZ()
+	// if err != nil {
+	// 	return err
+	// }
+	// if _, ok := s.attestationProcessed.Get(key); ok {
+	// 	return ErrIgnore
+	// }
+	// s.attestationProcessed.Add(key, struct{}{})
 
 	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
 	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).

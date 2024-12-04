@@ -1151,7 +1151,8 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	cached, ok := sdc.branches[toStringZeroCopy(pref)]
+	prefS := toStringZeroCopy(pref)
+	cached, ok := sdc.branches[prefS]
 	if ok {
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
@@ -1167,7 +1168,7 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
-	sdc.branches[string(pref)] = cachedBranch{data: v, step: step}
+	sdc.branches[prefS] = cachedBranch{data: v, step: step}
 
 	if len(v) == 0 {
 		return nil, 0, nil
