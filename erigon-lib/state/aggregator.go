@@ -1233,7 +1233,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 		step = (txTo - 1) / ac.a.StepSize()
 	}
 
-	if txFrom == txTo || !ac.CanPrune(tx, txTo) {
+	if txFrom == txTo {
 		return nil, nil
 	}
 

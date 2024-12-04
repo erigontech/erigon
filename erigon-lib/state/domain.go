@@ -1921,10 +1921,10 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
-	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
-	if !canPrune {
-		return stat, nil
-	}
+	_, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
+	//if !canPrune {
+	//		return stat, nil
+	//}
 	if step > maxPrunableStep {
 		step = maxPrunableStep
 	}
@@ -1967,6 +1967,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		dt.d.logger.Error("get domain pruning progress", "name", dt.name.String(), "error", err)
 	}
 
+	fmt.Println("LAL prunedKey:", prunedKey)
+
 	var k, v []byte
 	if prunedKey != nil && limit < 100_000 {
 		k, v, err = valsCursor.Seek(prunedKey)
@@ -1996,6 +1998,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			if err := ancientDomainValsCollector.Load(rwTx, dt.d.valuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 				return stat, fmt.Errorf("load domain values: %w", err)
 			}
+			fmt.Println("LAL save prunedKey:", k)
+
 			if err := SaveExecV3PruneProgress(rwTx, dt.d.valuesTable, k); err != nil {
 				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.name.String(), err)
 			}
