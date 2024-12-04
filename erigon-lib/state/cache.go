@@ -49,20 +49,21 @@ func (c *DomainGetFromFileCache) LogStats(domain kv.Domain) {
 		return
 	}
 	m := c.Metrics()
-	limit := domainGetFromFileCacheLimit
-	if domain == kv.CodeDomain {
-		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
-	}
-	log.Warn("[dbg] DomainGetFromFileCache", "a", domain.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", limit)
+	log.Warn("[dbg] DomainGetFromFileCache", "a", domain.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
 }
 
-func NewDomainGetFromFileCacheAny() any { return NewDomainGetFromFileCache() }
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	d := &domainVisible{
-		name:   name,
-		files:  files,
-		caches: &sync.Pool{New: NewDomainGetFromFileCacheAny},
+		name:  name,
+		files: files,
 	}
+	limit := domainGetFromFileCacheLimit
+	if name == kv.CodeDomain {
+		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	}
+	d.caches = &sync.Pool{New: func() any {
+		return NewDomainGetFromFileCache(limit)
+	}}
 	return d
 }
 
