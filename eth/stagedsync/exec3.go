@@ -672,11 +672,11 @@ Loop:
 					t1, t3 time.Duration
 				)
 
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
-					return err
-				} else if !ok {
-					break Loop
-				}
+				//if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
+				//	return err
+				//} else if !ok {
+				//	break Loop
+				//}
 
 				t1 = time.Since(tt) + ts
 
