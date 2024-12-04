@@ -848,6 +848,16 @@ var (
 		Usage: "Enable NAT porting for Caplin",
 		Value: false,
 	}
+	CaplinMaxInboundTrafficPerPeerFlag = cli.StringFlag{
+		Name:  "caplin.max-inbound-traffic-per-peer",
+		Usage: "Max inbound traffic per second per peer",
+		Value: "1MB",
+	}
+	CaplinMaxOutboundTrafficPerPeerFlag = cli.StringFlag{
+		Name:  "caplin.max-outbound-traffic-per-peer",
+		Usage: "Max outbound traffic per second per peer",
+		Value: "512KB",
+	}
 	CaplinCheckpointSyncUrlFlag = cli.StringSliceFlag{
 		Name:  "caplin.checkpoint-sync-url",
 		Usage: "checkpoint sync endpoint",
@@ -1820,6 +1830,16 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
+	var err error
+	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
+	if err != nil {
+		Fatalf("Option %s: %v", CaplinMaxInboundTrafficPerPeerFlag.Name, err)
+	}
+	cfg.CaplinConfig.MaxOutboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxOutboundTrafficPerPeerFlag.Name))
+	if err != nil {
+		Fatalf("Option %s: %v", CaplinMaxOutboundTrafficPerPeerFlag.Name, err)
+	}
+
 	cfg.CaplinConfig.SubscribeAllTopics = ctx.Bool(CaplinSubscribeAllTopicsFlag.Name)
 	cfg.CaplinConfig.MaxPeerCount = ctx.Uint64(CaplinMaxPeerCount.Name)
 

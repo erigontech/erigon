@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/go-chi/chi/v5"
 	"github.com/prysmaticlabs/go-bitfield"
 
@@ -275,7 +276,7 @@ func New(
 		return nil, err
 	}
 	s.host = host
-	go reportMetrics(ctx, bwc)
+	go s.observeBandwidth(ctx, bwc)
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
@@ -294,7 +295,7 @@ func New(
 	return s, nil
 }
 
-func reportMetrics(ctx context.Context, bwc *metrics.BandwidthCounter) {
+func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthCounter) {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
 		select {
@@ -304,6 +305,21 @@ func reportMetrics(ctx context.Context, bwc *metrics.BandwidthCounter) {
 			totals := bwc.GetBandwidthTotals()
 			monitor.ObserveTotalInBytes(totals.TotalIn)
 			monitor.ObserveTotalOutBytes(totals.TotalOut)
+			minInbound, maxOutbound := datasize.KB, datasize.KB
+			// define rate cap
+			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, maxOutbound))
+			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minInbound))
+			peers := s.host.Network().Peers()
+			for _, p := range peers {
+				// get peer bandwidth
+				peerBandwidth := bwc.GetBandwidthForPeer(p)
+				// check if peer is over limit
+				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
+					s.Peers().SetBanStatus(p, true)
+					s.Host().Peerstore().RemovePeer(p)
+					s.Host().Network().ClosePeer(p)
+				}
+			}
 		}
 	}
 }
