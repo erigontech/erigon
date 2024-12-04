@@ -31,9 +31,8 @@ import (
 	length2 "github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	dbutils2 "github.com/erigontech/erigon-lib/kv/dbutils"
-
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon-lib/rlphacks"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 /*
@@ -127,7 +126,6 @@ type RootHashAggregator struct {
 	curr           bytes.Buffer   // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ           bytes.Buffer
 	currAccK       []byte
-	value          []byte // Current value to be used as the value tape for the hash builder
 	hadTreeAcc     bool
 	groups         []uint16 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. See `GenStructStep` docs
 	hasTree        []uint16
@@ -205,7 +203,7 @@ func (l *FlatDBTrieLoader) SetProofRetainer(pr *ProofRetainer) {
 //		}
 func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcommon.Hash, error) {
 
-	accC, err := tx.Cursor(kv.HashedAccounts)
+	accC, err := tx.Cursor(kv.HashedAccountsDeprecated)
 	if err != nil {
 		return EmptyRoot, err
 	}
@@ -229,7 +227,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcomm
 	accTrie := AccTrie(canUse, l.hc, trieAccC, quit)
 	storageTrie := StorageTrie(canUse, l.shc, trieStorageC, quit)
 
-	ss, err := tx.CursorDupSort(kv.HashedStorage)
+	ss, err := tx.CursorDupSort(kv.HashedStorageDeprecated)
 	if err != nil {
 		return EmptyRoot, err
 	}

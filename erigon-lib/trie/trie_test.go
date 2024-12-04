@@ -32,10 +32,9 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 func init() {
@@ -45,7 +44,7 @@ func init() {
 
 // Used for testing
 func newEmpty() *Trie {
-	trie := New(libcommon.Hash{})
+	trie := New(common.Hash{})
 	return trie
 }
 
@@ -79,31 +78,31 @@ func TestLargeValue(t *testing.T) {
 // TestRandomCases tests som cases that were found via random fuzzing
 func TestRandomCases(t *testing.T) {
 	var rt = []randTestStep{
-		{op: 6, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 0
-		{op: 6, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 1
-		{op: 0, key: libcommon.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: libcommon.Hex2Bytes("0000000000000002")},   // step 2
-		{op: 2, key: libcommon.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: libcommon.Hex2Bytes("")},                 // step 3
-		{op: 3, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 4
-		{op: 3, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 5
-		{op: 6, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 6
-		{op: 3, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 7
-		{op: 0, key: libcommon.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: libcommon.Hex2Bytes("0000000000000008")}, // step 8
-		{op: 0, key: libcommon.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: libcommon.Hex2Bytes("0000000000000009")},   // step 9
-		{op: 2, key: libcommon.Hex2Bytes("fd"), value: libcommon.Hex2Bytes("")},                                                                                       // step 10
-		{op: 6, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 11
-		{op: 6, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 12
-		{op: 0, key: libcommon.Hex2Bytes("fd"), value: libcommon.Hex2Bytes("000000000000000d")},                                                                       // step 13
-		{op: 6, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 14
-		{op: 1, key: libcommon.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: libcommon.Hex2Bytes("")},                 // step 15
-		{op: 3, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 16
-		{op: 0, key: libcommon.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: libcommon.Hex2Bytes("0000000000000011")}, // step 17
-		{op: 5, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 18
-		{op: 3, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")},                                                                                         // step 19
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 0
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 1
+		{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000002")},   // step 2
+		{op: 2, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("")},                 // step 3
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 4
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 5
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 6
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 7
+		{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000008")}, // step 8
+		{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000009")},   // step 9
+		{op: 2, key: common.Hex2Bytes("fd"), value: common.Hex2Bytes("")},                                                                                       // step 10
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 11
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 12
+		{op: 0, key: common.Hex2Bytes("fd"), value: common.Hex2Bytes("000000000000000d")},                                                                       // step 13
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 14
+		{op: 1, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("")},                 // step 15
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 16
+		{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000011")}, // step 17
+		{op: 5, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 18
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 19
 		// FIXME: fix these testcases for Erigon
 		//{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000014")},           // step 20
 		//{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000015")},           // step 21
 		//{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000016")},         // step 22
-		{op: 5, key: libcommon.Hex2Bytes(""), value: libcommon.Hex2Bytes("")}, // step 23
+		{op: 5, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")}, // step 23
 		//{op: 1, key: common.Hex2Bytes("980c393656413a15c8da01978ed9f89feb80b502f58f2d640e3a2f5f7a99a7018f1b573befd92053ac6f78fca4a87268"), value: common.Hex2Bytes("")}, // step 24
 		//{op: 1, key: common.Hex2Bytes("fd"), value: common.Hex2Bytes("")}, // step 25
 	}
@@ -165,7 +164,7 @@ func (randTest) Generate(r *rand.Rand, size int) reflect.Value {
 }
 
 func runRandTest(rt randTest) bool {
-	tr := New(libcommon.Hash{})
+	tr := New(common.Hash{})
 	values := make(map[string]string) // tracks content of the trie
 
 	for i, step := range rt {
@@ -194,7 +193,7 @@ func runRandTest(rt randTest) bool {
 		case opItercheckhash:
 			// FIXME: restore for Erigon
 			/*
-				checktr := New(libcommon.Hash{})
+				checktr := New(common.Hash{})
 				it := NewIterator(tr.NodeIterator(nil))
 				for it.Next() {
 					checktr.Update(it.Key, it.Value)
@@ -232,7 +231,7 @@ func BenchmarkHash(b *testing.B) {
 	for i := 0; i < len(accounts); i++ {
 		var (
 			nonce   = uint64(random.Int63())
-			balance = new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+			balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 			root    = EmptyRoot
 			code    = crypto.Keccak256(nil)
 		)
@@ -262,13 +261,13 @@ func TestDeepHash(t *testing.T) {
 	}
 	for i, keyVals := range testdata {
 		fmt.Println("Test", i)
-		trie := New(libcommon.Hash{})
+		trie := New(common.Hash{})
 		for _, keyVal := range keyVals {
 			trie.Update([]byte(keyVal.key), []byte(keyVal.value))
 		}
 		hash1 := trie.Hash()
 
-		prefixTrie := New(libcommon.Hash{})
+		prefixTrie := New(common.Hash{})
 		prefixTrie.UpdateAccount([]byte(prefix), &acc)
 		for _, keyVal := range keyVals {
 			// Add a prefix to every key
@@ -313,8 +312,8 @@ func TestCodeNodeValid(t *testing.T) {
 	codeValues := make([][]byte, len(addresses))
 	for i := 0; i < len(addresses); i++ {
 		codeValues[i] = genRandomByteArrayOfLen(128)
-		codeHash := libcommon.BytesToHash(crypto.Keccak256(codeValues[i]))
-		balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+		codeHash := common.BytesToHash(crypto.Keccak256(codeValues[i]))
+		balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 		acc := accounts.NewAccount()
 		acc.Nonce = uint64(random.Int63())
 		acc.Balance.SetFromBig(balance)
@@ -341,8 +340,8 @@ func TestCodeNodeUpdateNotExisting(t *testing.T) {
 	address := getAddressForIndex(0)
 	codeValue := genRandomByteArrayOfLen(128)
 
-	codeHash := libcommon.BytesToHash(crypto.Keccak256(codeValue))
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	codeHash := common.BytesToHash(crypto.Keccak256(codeValue))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -369,8 +368,8 @@ func TestCodeNodeGetNotExistingAccount(t *testing.T) {
 	address := getAddressForIndex(0)
 	codeValue := genRandomByteArrayOfLen(128)
 
-	codeHash := libcommon.BytesToHash(crypto.Keccak256(codeValue))
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	codeHash := common.BytesToHash(crypto.Keccak256(codeValue))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -395,7 +394,7 @@ func TestCodeNodeGetHashedAccount(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	fakeAccount := genRandomByteArrayOfLen(50)
-	fakeAccountHash := libcommon.BytesToHash(crypto.Keccak256(fakeAccount))
+	fakeAccountHash := common.BytesToHash(crypto.Keccak256(fakeAccount))
 
 	hex := keybytesToHex(crypto.Keccak256(address[:]))
 
@@ -414,8 +413,8 @@ func TestCodeNodeGetExistingAccountNoCodeNotEmpty(t *testing.T) {
 	address := getAddressForIndex(0)
 	codeValue := genRandomByteArrayOfLen(128)
 
-	codeHash := libcommon.BytesToHash(crypto.Keccak256(codeValue))
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	codeHash := common.BytesToHash(crypto.Keccak256(codeValue))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -438,7 +437,7 @@ func TestCodeNodeGetExistingAccountEmptyCode(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeHash := EmptyCodeHash
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -461,9 +460,9 @@ func TestCodeNodeWrongHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -486,9 +485,9 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -501,7 +500,7 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 	assert.Nil(t, err, "should successfully insert code")
 
 	codeValue2 := genRandomByteArrayOfLen(128)
-	codeHash2 := libcommon.BytesToHash(crypto.Keccak256(codeValue2))
+	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
 
 	acc.CodeHash = codeHash2
 
@@ -518,9 +517,9 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -533,7 +532,7 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 	assert.Nil(t, err, "should successfully insert code")
 
 	codeValue2 := genRandomByteArrayOfLen(128)
-	codeHash2 := libcommon.BytesToHash(crypto.Keccak256(codeValue2))
+	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
 
 	codeValue3 := genRandomByteArrayOfLen(128)
 
@@ -552,9 +551,9 @@ func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -567,7 +566,7 @@ func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
 	assert.Nil(t, err, "should successfully insert code")
 
 	codeValue2 := genRandomByteArrayOfLen(128)
-	codeHash2 := libcommon.BytesToHash(crypto.Keccak256(codeValue2))
+	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
 
 	acc.CodeHash = codeHash2
 
@@ -585,9 +584,9 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -600,7 +599,7 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 	assert.Nil(t, err, "should successfully insert code")
 
 	acc.Nonce = uint64(random.Int63())
-	balance = new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
+	balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 	acc.Balance.SetFromBig(balance)
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
@@ -636,63 +635,3 @@ func TestNextSubtreeHex(t *testing.T) {
 		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
 	}
 }
-
-//func TestIHCursorCanUseNextParent(t *testing.T) {
-//	db, assert := ethdb.NewMemDatabase(), require.New(t)
-//	defer db.Close()
-//	hash := fmt.Sprintf("%064d", 0)
-//
-//	ih := AccTrie(nil, nil, nil, nil)
-//
-//	ih.k[1], ih.v[1], ih.hasTree[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
-//	ih.k[2], ih.v[2], ih.hasTree[2] = common.FromHex("0001"), common.FromHex(hash), 0b1000000000000000
-//	ih.lvl = 2
-//	ih.hashID[2] = 1
-//	ih.hashID[1] = 0
-//	assert.True(ih._nextSiblingOfParentInMem())
-//	assert.Equal(ih.k[ih.lvl], common.FromHex("00"))
-//
-//	ih.k[1], ih.v[1], ih.hasTree[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
-//	ih.k[3], ih.v[3], ih.hasTree[3] = common.FromHex("000101"), common.FromHex(hash), 0b1000000000000000
-//	ih.lvl = 3
-//	ih.hashID[3] = 1
-//	ih.hashID[1] = 0
-//	assert.True(ih._nextSiblingOfParentInMem())
-//	assert.Equal(ih.k[ih.lvl], common.FromHex("00"))
-//
-//}
-//
-//func _TestEmptyRoot(t *testing.T) {
-//	sc := shards.NewStateCache(32, 64*1024)
-//
-//	sc.SetAccountHashesRead(common.FromHex("00"), 0b111, 0b111, 0b111, []libcommon.Hash{{}, {}, {}})
-//	sc.SetAccountHashesRead(common.FromHex("01"), 0b111, 0b111, 0b111, []libcommon.Hash{{}, {}, {}})
-//	sc.SetAccountHashesRead(common.FromHex("02"), 0b111, 0b111, 0b111, []libcommon.Hash{{}, {}, {}})
-//
-//	rl := NewRetainList(0)
-//	rl.AddHex(common.FromHex("01"))
-//	rl.AddHex(common.FromHex("0101"))
-//	canUse := func(prefix []byte) bool { return !rl.Retain(prefix) }
-//	i := 0
-//	if err := sc.AccountTree([]byte{}, func(ihK []byte, h libcommon.Hash, hasTree, skipState bool) (toChild bool, err error) {
-//		i++
-//		switch i {
-//		case 1:
-//			assert.Equal(t, common.FromHex("0001"), ihK)
-//		case 2:
-//			assert.Equal(t, common.FromHex("0100"), ihK)
-//		case 3:
-//			assert.Equal(t, common.FromHex("0102"), ihK)
-//		case 4:
-//			assert.Equal(t, common.FromHex("0202"), ihK)
-//		}
-//		if ok := canUse(ihK); ok {
-//			return false, nil
-//		}
-//		return hasTree, nil
-//	}, func(cur []byte) {
-//		panic(fmt.Errorf("key %x not found in cache", cur))
-//	}); err != nil {
-//		t.Fatal(err)
-//	}
-//}
