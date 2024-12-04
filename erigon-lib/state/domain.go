@@ -1979,7 +1979,10 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		return nil, err
 	}
 	var stepBytes []byte
+	var i uint64
 	for ; k != nil; k, v, err = valsCursor.Next() {
+		i++
+
 		if err != nil {
 			return stat, fmt.Errorf("iterate over %s domain keys: %w", dt.name.String(), err)
 		}
@@ -2023,6 +2026,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		default:
 		}
 	}
+	fmt.Println("LAL finish size:", i)
+
 	mxPruneSizeDomain.AddUint64(stat.Values)
 	if err := ancientDomainValsCollector.Load(rwTx, dt.d.valuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return stat, fmt.Errorf("load domain values: %w", err)
