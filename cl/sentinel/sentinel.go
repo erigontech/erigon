@@ -287,6 +287,15 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, minBound))
 			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minBound))
 			peers := s.host.Network().Peers()
+			maxPeersToBan := int(s.cfg.MaxPeerCount) / 8
+			// do not ban peers if we have less than 1/8 of max peer count
+			if len(peers) <= maxPeersToBan {
+				continue
+			}
+			maxPeersToBan = min(maxPeersToBan, len(peers)-maxPeersToBan)
+
+			peersToBan := make([]peer.ID, 0, len(peers))
+			// Check which peers should be banned
 			for _, p := range peers {
 				// get peer bandwidth
 				peerBandwidth := bwc.GetBandwidthForPeer(p)
@@ -295,10 +304,18 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 				fmt.Println("maxRateOut", maxRateOut)
 				// check if peer is over limit
 				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
-					s.Peers().SetBanStatus(p, true)
-					s.Host().Peerstore().RemovePeer(p)
-					s.Host().Network().ClosePeer(p)
+					peersToBan = append(peersToBan, p)
 				}
+			}
+			// if we have more than 1/8 of max peer count to ban, limit to maxPeersToBan
+			if len(peersToBan) > maxPeersToBan {
+				peersToBan = peersToBan[:maxPeersToBan]
+			}
+			// ban hammer
+			for _, p := range peersToBan {
+				s.Peers().SetBanStatus(p, true)
+				s.Host().Peerstore().RemovePeer(p)
+				s.Host().Network().ClosePeer(p)
 			}
 		}
 	}
