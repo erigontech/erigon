@@ -301,6 +301,7 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 				peerBandwidth := bwc.GetBandwidthForPeer(p)
 				// check if peer is over limit
 				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
+					fmt.Println("Banning peer", p, "rateIn", peerBandwidth.RateIn, "rateOut", peerBandwidth.RateOut, "maxRateIn", maxRateIn, "maxRateOut", maxRateOut)
 					peersToBan = append(peersToBan, p)
 				}
 			}
