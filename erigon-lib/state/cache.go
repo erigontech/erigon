@@ -64,9 +64,7 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	if limit == 0 {
 		domainGetFromFileCacheEnabled = false
 	}
-	d.caches = &sync.Pool{New: func() any {
-		return NewDomainGetFromFileCache(limit)
-	}}
+	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
 	return d
 }
 
@@ -119,7 +117,6 @@ func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
 	log.Warn("[dbg] II_LRU", "a", fileBaseName, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)), "hit", c.hit, "collisions", m.Collisions, "evictions", m.Evictions, "inserts", m.Inserts, "removals", m.Removals, "limit", iiGetFromFileCacheLimit)
 }
 
-func NewIISeekInFilesCacheAny() any { return NewIISeekInFilesCache() }
 func newIIVisible(name string, files []visibleFile) *iiVisible {
 	if iiGetFromFileCacheLimit == 0 {
 		iiGetFromFileCacheEnabled = false
@@ -127,7 +124,7 @@ func newIIVisible(name string, files []visibleFile) *iiVisible {
 	ii := &iiVisible{
 		name:   name,
 		files:  files,
-		caches: &sync.Pool{New: NewIISeekInFilesCacheAny},
+		caches: &sync.Pool{New: func() { return NewIISeekInFilesCache() }},
 	}
 	return ii
 }
