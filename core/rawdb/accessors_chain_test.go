@@ -794,6 +794,7 @@ func TestBadBlocks(t *testing.T) {
 
 		return header.Hash()
 	}
+	rawdb.ResetBadBlockCache(tx, 4)
 
 	// put some blocks
 	for i := 1; i <= 6; i++ {
@@ -805,7 +806,6 @@ func TestBadBlocks(t *testing.T) {
 	hash4 := putBlock(10)
 
 	// mark some blocks as bad
-	rawdb.ResetBadBlockCache(tx, 4)
 	require.NoError(rawdb.TruncateCanonicalHash(tx, 7, true))
 	badBlks, err := rawdb.GetLatestBadBlocks(tx)
 	require.NoError(err)
