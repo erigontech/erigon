@@ -494,7 +494,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		case <-ctx.Done():
 			return
 		case <-logEvery.C:
-			log.Trace("[trace] ", "name", dt.name, "key", fmt.Sprintf("%x", lastKey))
+			log.Debug("[merge] ", "name", dt.name, "key", fmt.Sprintf("%x", lastKey))
 		}
 	}
 	if keyBuf != nil {
