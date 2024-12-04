@@ -40,6 +40,9 @@ func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
 	if err != nil {
 		panic(err)
 	}
+	if limit == 0 {
+		domainGetFromFileCacheEnabled = false
+	}
 	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
 }
 
