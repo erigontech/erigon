@@ -159,6 +159,8 @@ func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
+	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
+
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -191,7 +193,7 @@ Loop:
 					snaptype.BeaconBlocks,
 					f.Version,
 					f.From, f.To,
-					snapcfg.IsFrozen(s.cfg.ChainName, f))
+					snConfig.IsFrozen(f))
 			}
 			if err := sn.Open(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -247,7 +249,7 @@ Loop:
 					snaptype.BlobSidecars,
 					f.Version,
 					f.From, f.To,
-					snapcfg.IsFrozen(s.cfg.ChainName, f))
+					snConfig.IsFrozen(f))
 			}
 			if err := sn.Open(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {

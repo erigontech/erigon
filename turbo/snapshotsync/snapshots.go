@@ -1019,8 +1019,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
-	//fmt.Println("RS", s)
-	//defer fmt.Println("Done RS", s)
+	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
 
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
@@ -1054,7 +1053,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.IsFrozen(s.cfg.ChainName, f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snConfig.IsFrozen(f)}
 		}
 
 		if open {
@@ -1108,6 +1107,7 @@ func (s *RoSnapshots) Ranges() []Range {
 
 func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 func (s *RoSnapshots) OpenFolder() error {
+	defer func(t time.Time) { fmt.Printf("snapshots.go:1111: %s\n", time.Since(t)) }(time.Now())
 	if err := func() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
