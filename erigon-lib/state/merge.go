@@ -408,7 +408,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvFilePath := dt.d.kvFilePath(fromStep, toStep)
 
 	log.Warn("[dbg] compress worker", "name", dt.name, "compress.workers", dt.d.compressCfg.Workers)
-	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.compressCfg, log.LvlTrace, dt.d.logger)
+	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.filenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.compressCfg, log.LvlDebug, dt.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.filenameBase, err)
 	}
@@ -751,7 +751,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		fromStep, toStep := r.history.from/ht.h.aggregationStep, r.history.to/ht.h.aggregationStep
 		datPath := ht.h.vFilePath(fromStep, toStep)
 		idxPath := ht.h.vAccessorFilePath(fromStep, toStep)
-		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.compressorCfg, log.LvlTrace, ht.h.logger); err != nil {
+		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.filenameBase, datPath, ht.h.dirs.Tmp, ht.h.compressorCfg, log.LvlDebug, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.filenameBase, err)
 		}
 		compr := seg.NewWriter(comp, ht.h.compression)
@@ -846,7 +846,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("create recsplit: %w", err)
 		}
-		rs.LogLvl(log.LvlTrace)
+		rs.LogLvl(log.LvlDebug)
 
 		var (
 			txKey      [8]byte
