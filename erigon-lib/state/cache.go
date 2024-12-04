@@ -124,7 +124,7 @@ func newIIVisible(name string, files []visibleFile) *iiVisible {
 	ii := &iiVisible{
 		name:   name,
 		files:  files,
-		caches: &sync.Pool{New: func() { return NewIISeekInFilesCache() }},
+		caches: &sync.Pool{New: func() any { return NewIISeekInFilesCache() }},
 	}
 	return ii
 }
