@@ -341,7 +341,7 @@ func (api *APIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{},
 	}
 	defer tx.Rollback()
 
-	blocks, err := rawdb.GetLatestBadBlocks(tx, 100)
+	blocks, err := rawdb.GetLatestBadBlocks(tx)
 	if err != nil || len(blocks) == 0 {
 		return nil, err
 	}

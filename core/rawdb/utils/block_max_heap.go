@@ -11,8 +11,9 @@ import (
 // Effectively the heap stores the maximum `limit` blocks (by block_num) among all blocks pushed.
 // -1 means unlimited length
 type blockMaxHeap struct {
-	heap  []*BlockId
-	limit int
+	heap     []*BlockId
+	limit    int
+	isLoaded bool
 }
 
 type BlockId struct {
@@ -20,8 +21,17 @@ type BlockId struct {
 	Hash   common.Hash
 }
 
-func NewBlockMaxHeap(limit int) heap.Interface {
-	return &blockMaxHeap{limit: limit}
+type ExtendedHeap interface {
+	heap.Interface
+	SortedValues() []*BlockId
+
+	// mark the heap as "loaded" i.e. values are filled. 
+	IsLoaded() bool
+	SetLoaded()
+}
+
+func NewBlockMaxHeap(limit int) ExtendedHeap {
+	return &blockMaxHeap{limit: limit, isLoaded: false}
 }
 
 func (h *blockMaxHeap) Len() int {
@@ -57,4 +67,31 @@ func (h *blockMaxHeap) Pop() any {
 	x := h.heap[n-1]
 	h.heap = h.heap[0 : n-1]
 	return x
+}
+
+func (h *blockMaxHeap) copy() *blockMaxHeap {
+	newHeap := NewBlockMaxHeap(h.limit)
+	for _, b := range h.heap {
+		heap.Push(newHeap, b)
+	}
+	return newHeap.(*blockMaxHeap)
+}
+
+func (h *blockMaxHeap) SortedValues() []*BlockId {
+	// copy
+	copyHeap := h.copy()
+	res := make([]*BlockId, len(copyHeap.heap))
+	for copyHeap.Len() > 0 {
+		res[copyHeap.Len()-1] = heap.Pop(copyHeap).(*BlockId)
+	}
+
+	return res
+}
+
+func (h *blockMaxHeap) IsLoaded() bool {
+	return h.isLoaded
+}
+
+func (h *blockMaxHeap) SetLoaded() {
+	h.isLoaded = true
 }

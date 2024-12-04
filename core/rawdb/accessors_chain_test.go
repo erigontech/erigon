@@ -805,8 +805,9 @@ func TestBadBlocks(t *testing.T) {
 	hash4 := putBlock(10)
 
 	// mark some blocks as bad
+	rawdb.ResetBadBlockCache(4)
 	require.NoError(rawdb.TruncateCanonicalHash(tx, 7, true))
-	badBlks, err := rawdb.GetLatestBadBlocks(tx, 10)
+	badBlks, err := rawdb.GetLatestBadBlocks(tx)
 	require.NoError(err)
 	require.Len(badBlks, 4)
 
@@ -816,7 +817,8 @@ func TestBadBlocks(t *testing.T) {
 	require.Equal(badBlks[3].Hash(), hash1)
 
 	// testing the "limit"
-	badBlks, err = rawdb.GetLatestBadBlocks(tx, 2)
+	rawdb.ResetBadBlockCache(2)
+	badBlks, err = rawdb.GetLatestBadBlocks(tx)
 	require.NoError(err)
 	require.Len(badBlks, 2)
 	require.Equal(badBlks[0].Hash(), hash4)

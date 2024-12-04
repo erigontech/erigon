@@ -81,6 +81,8 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 			if err := tx.Put(kv.BadHeaderNumber, blockHash, blockNumBytes); err != nil {
 				return err
 			}
+
+			heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
 		}
 		return tx.Delete(kv.HeaderCanonical, blockNumBytes)
 	}); err != nil {
@@ -89,24 +91,43 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 	return nil
 }
 
-func GetLatestBadBlocks(tx kv.Tx, limit int) ([]*types.Block, error) {
+/* latest bad blocks start */
+
+func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 	// BadHeaderNumber table is typically small, so that we can go through all of it.
-	bheap := utils.NewBlockMaxHeap(limit)
+	if bheapCache == nil {
+		ResetBadBlockCache(100)
+	} else if bheapCache.IsLoaded() {
+		return getBlocksFor(tx, bheapCache.SortedValues()), nil
+	}
+
 	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
-		heap.Push(bheap, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
 		return nil
 	}); err != nil {
 		return nil, err
 	}
+	bheapCache.SetLoaded()
+	return getBlocksFor(tx, bheapCache.SortedValues()), nil
+}
 
-	res := make([]*types.Block, bheap.Len())
-	for bheap.Len() > 0 {
-		blockId := heap.Pop(bheap).(*utils.BlockId)
-		res[bheap.Len()] = ReadBlock(tx, blockId.Hash, blockId.Number)
+var bheapCache utils.ExtendedHeap
+
+// mainly for testing purposes
+func ResetBadBlockCache(limit int) {
+	bheapCache = utils.NewBlockMaxHeap(limit)
+}
+
+func getBlocksFor(tx kv.Tx, blockIds []*utils.BlockId) []*types.Block {
+	blocks := make([]*types.Block, len(blockIds))
+	for i, blockId := range blockIds {
+		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
 	}
 
-	return res, nil
+	return blocks
 }
+
+/* latest bad blocks end */
 
 func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
 	canonicalHash, err := ReadCanonicalHash(db, number)
