@@ -1917,14 +1917,16 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		limit = math.MaxUint64
 	}
 
+	fmt.Println("LAL step:", step)
+
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
 	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
-	_, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
-	//if !canPrune {
-	//		return stat, nil
-	//}
+	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
+	if !canPrune {
+		return stat, nil
+	}
 	if step > maxPrunableStep {
 		step = maxPrunableStep
 	}
@@ -1967,7 +1969,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		dt.d.logger.Error("get domain pruning progress", "name", dt.name.String(), "error", err)
 	}
 
-	fmt.Println("LAL prunedKey:", prunedKey)
+	fmt.Println("LAL prunedKey:", prunedKey, step)
 
 	var k, v []byte
 	if prunedKey != nil && limit < 100_000 {
