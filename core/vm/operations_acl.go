@@ -231,22 +231,10 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			gas = params.ColdAccountAccessCostEIP2929
 		}
 		// if empty and transfers value
-		empty, err := evm.IntraBlockState().Empty(address)
-		if err != nil {
-			return 0, err
-		}
-		balance, err := evm.IntraBlockState().GetBalance(contract.Address())
-		if err != nil {
-			return 0, err
-		}
-		if empty && !balance.IsZero() {
+		if evm.IntraBlockState().Empty(address) && !evm.IntraBlockState().GetBalance(contract.Address()).IsZero() {
 			gas += params.CreateBySelfdestructGas
 		}
-		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(contract.Address())
-		if err != nil {
-			return 0, err
-		}
-		if refundsEnabled && !hasSelfdestructed {
+		if refundsEnabled && !evm.IntraBlockState().HasSelfdestructed(contract.Address()) {
 			evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
 		}
 		return gas, nil
@@ -278,11 +266,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		}
 
 		// Check if code is a delegation and if so, charge for resolution.
-		dd, ok, err := evm.intraBlockState.GetDelegatedDesignation(addr)
-		if err != nil {
-			return 0, err
-		}
-		if ok {
+		if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
 			var ddCost uint64
 			if evm.intraBlockState.AddAddressToAccessList(dd) {
 				ddCost = params.ColdAccountAccessCostEIP2929
@@ -327,11 +311,8 @@ func gasEip7702CodeCheck(evm *EVM, contract *Contract, stack *stack.Stack, mem *
 		// Check if code is a delegation and if so, charge for resolution
 		cost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 	}
-	dd, ok, err := evm.intraBlockState.GetDelegatedDesignation(addr)
-	if err != nil {
-		return 0, err
-	}
-	if ok {
+
+	if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
 		if evm.intraBlockState.AddAddressToAccessList(dd) {
 			cost += params.ColdAccountAccessCostEIP2929
 		} else {
@@ -359,11 +340,7 @@ func gasExtCodeCopyEIP7702(evm *EVM, contract *Contract, stack *stack.Stack, mem
 	}
 
 	// Check if addr has a delegation and if so, charge for resolution
-	dd, ok, err := evm.intraBlockState.GetDelegatedDesignation(addr)
-	if err != nil {
-		return 0, err
-	}
-	if ok {
+	if dd, ok := evm.intraBlockState.GetDelegatedDesignation(addr); ok {
 		var overflow bool
 		if evm.intraBlockState.AddAddressToAccessList(dd) {
 			if gas, overflow = math.SafeAdd(gas, params.ColdAccountAccessCostEIP2929); overflow {

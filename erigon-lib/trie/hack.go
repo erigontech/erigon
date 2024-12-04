@@ -19,8 +19,6 @@ package trie
 import (
 	"fmt"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -47,7 +45,7 @@ func FullNode2() {
 func FullNode3() {
 	f := &fullNode{}
 	f.Children[0] = valueNode(nil)
-	h := libcommon.Hash{}
+	h := common.Hash{}
 	f.Children[1] = hashNode{hash: h[:]}
 	b, err := rlp.EncodeToBytes(f)
 	if err != nil {
@@ -58,7 +56,7 @@ func FullNode3() {
 
 func FullNode4() {
 	f := &fullNode{}
-	h := libcommon.Hash{}
+	h := common.Hash{}
 	for i := 0; i < 17; i++ {
 		f.Children[i] = hashNode{hash: h[:]}
 	}
@@ -92,7 +90,7 @@ func hashRoot(n node, title string) {
 	h1 := newHasher(true)
 	defer returnHasherToPool(h)
 	defer returnHasherToPool(h1)
-	var hash libcommon.Hash
+	var hash common.Hash
 	hLen, _ := h.hash(n, true, hash[:])
 	if hLen < 32 {
 		panic("expected hashNode")

@@ -56,10 +56,8 @@ type dummyStatedb struct {
 	state.IntraBlockState
 }
 
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }
-func (*dummyStatedb) GetBalance(addr libcommon.Address) (*uint256.Int, error) {
-	return &uint256.Int{}, nil
-}
+func (*dummyStatedb) GetRefund() uint64                              { return 1337 }
+func (*dummyStatedb) GetBalance(addr libcommon.Address) *uint256.Int { return &uint256.Int{} }
 
 type vmContext struct {
 	blockCtx evmtypes.BlockContext

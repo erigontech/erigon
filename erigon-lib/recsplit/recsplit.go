@@ -604,7 +604,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
 	// Write number of bytes per index record
-	rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	if rs.enums {
+		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
+	} else {
+		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	}
 	if err = rs.indexW.WriteByte(byte(rs.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
