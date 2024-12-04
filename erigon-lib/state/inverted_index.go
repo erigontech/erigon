@@ -749,7 +749,7 @@ func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
-	fmt.Println("LAL can prune iit?", iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum())
+	fmt.Println("LAL can prune iit?", iit.ii.minTxNumInDB(tx), iit.files.EndTxNum())
 	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
 }
 
