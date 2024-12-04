@@ -1108,6 +1108,7 @@ func (s *RoSnapshots) Ranges() []Range {
 
 func (s *RoSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
 func (s *RoSnapshots) OpenFolder() error {
+	defer func(t time.Time) { fmt.Printf("snapshots.go:1111: %s\n", time.Since(t)) }(time.Now())
 	if err := func() error {
 		s.dirtyLock.Lock()
 		defer s.dirtyLock.Unlock()
