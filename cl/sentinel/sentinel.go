@@ -305,10 +305,10 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 			totals := bwc.GetBandwidthTotals()
 			monitor.ObserveTotalInBytes(totals.TotalIn)
 			monitor.ObserveTotalOutBytes(totals.TotalOut)
-			minInbound, maxOutbound := datasize.KB, datasize.KB
+			minBound := datasize.KB
 			// define rate cap
-			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, maxOutbound))
-			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minInbound))
+			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, minBound))
+			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minBound))
 			peers := s.host.Network().Peers()
 			for _, p := range peers {
 				// get peer bandwidth
