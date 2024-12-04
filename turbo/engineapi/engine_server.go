@@ -139,14 +139,17 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 }
 
 func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutility.Bytes) error {
-	if version < clparams.ElectraVersion && executionRequests != nil {
-		return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
-	}
-	if executionRequests == nil {
-		return &rpc.InvalidParamsError{Message: "missing requests list"}
-	}
-	if len(executionRequests) != len(types.KnownRequestTypes) {
-		return &rpc.InvalidParamsError{Message: "invalid requests lists"}
+	if version < clparams.ElectraVersion {
+		if executionRequests != nil {
+			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
+		}
+	} else {
+		if executionRequests == nil {
+			return &rpc.InvalidParamsError{Message: "missing requests list"}
+		}
+		if len(executionRequests) != len(types.KnownRequestTypes) {
+			return &rpc.InvalidParamsError{Message: "invalid requests lists"}
+		}
 	}
 	return nil
 }
