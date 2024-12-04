@@ -11,9 +11,8 @@ import (
 // Effectively the heap stores the maximum `limit` blocks (by block_num) among all blocks pushed.
 // -1 means unlimited length
 type blockMaxHeap struct {
-	heap     []*BlockId
-	limit    int
-	isLoaded bool
+	heap  []*BlockId
+	limit int
 }
 
 type BlockId struct {
@@ -24,14 +23,10 @@ type BlockId struct {
 type ExtendedHeap interface {
 	heap.Interface
 	SortedValues() []*BlockId
-
-	// mark the heap as "loaded" i.e. values are filled. 
-	IsLoaded() bool
-	SetLoaded()
 }
 
 func NewBlockMaxHeap(limit int) ExtendedHeap {
-	return &blockMaxHeap{limit: limit, isLoaded: false}
+	return &blockMaxHeap{limit: limit}
 }
 
 func (h *blockMaxHeap) Len() int {
@@ -86,12 +81,4 @@ func (h *blockMaxHeap) SortedValues() []*BlockId {
 	}
 
 	return res
-}
-
-func (h *blockMaxHeap) IsLoaded() bool {
-	return h.isLoaded
-}
-
-func (h *blockMaxHeap) SetLoaded() {
-	h.isLoaded = true
 }

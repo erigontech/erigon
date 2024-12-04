@@ -82,7 +82,9 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 				return err
 			}
 
-			heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+			if bheapCache != nil {
+				heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+			}
 		}
 		return tx.Delete(kv.HeaderCanonical, blockNumBytes)
 	}); err != nil {
@@ -92,39 +94,30 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 }
 
 /* latest bad blocks start */
+var bheapCache utils.ExtendedHeap
 
 func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 	// BadHeaderNumber table is typically small, so that we can go through all of it.
 	if bheapCache == nil {
-		ResetBadBlockCache(100)
-	} else if bheapCache.IsLoaded() {
-		return getBlocksFor(tx, bheapCache.SortedValues()), nil
+		ResetBadBlockCache(tx, 100)
 	}
 
-	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
-		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	bheapCache.SetLoaded()
-	return getBlocksFor(tx, bheapCache.SortedValues()), nil
-}
-
-var bheapCache utils.ExtendedHeap
-
-// mainly for testing purposes
-func ResetBadBlockCache(limit int) {
-	bheapCache = utils.NewBlockMaxHeap(limit)
-}
-
-func getBlocksFor(tx kv.Tx, blockIds []*utils.BlockId) []*types.Block {
+	blockIds := bheapCache.SortedValues()
 	blocks := make([]*types.Block, len(blockIds))
 	for i, blockId := range blockIds {
 		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
 	}
 
-	return blocks
+	return blocks, nil
+}
+
+// mainly for testing purposes
+func ResetBadBlockCache(tx kv.Tx, limit int) error {
+	bheapCache = utils.NewBlockMaxHeap(limit)
+	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
+		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+		return nil
+	})
 }
 
 /* latest bad blocks end */
