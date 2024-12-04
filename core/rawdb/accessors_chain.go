@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -27,6 +28,10 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb/utils"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/rlp"
 
 	"github.com/gballet/go-verkle"
 	"github.com/ledgerwatch/log/v3"
@@ -38,10 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -78,6 +79,10 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 			if err := tx.Put(kv.BadHeaderNumber, blockHash, blockNumBytes); err != nil {
 				return err
 			}
+
+			if bheapCache != nil {
+				heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+			}
 		}
 		return tx.Delete(kv.HeaderCanonical, blockNumBytes)
 	}); err != nil {
@@ -86,18 +91,34 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 	return nil
 }
 
-// IsCanonicalHashDeprecated determines whether a header with the given hash is on the canonical chain.
-func IsCanonicalHashDeprecated(db kv.Getter, hash common.Hash) (bool, *uint64, error) {
-	number := ReadHeaderNumber(db, hash)
-	if number == nil {
-		return false, nil, nil
+/* latest bad blocks start */
+var bheapCache utils.ExtendedHeap
+
+func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
+	if bheapCache == nil {
+		ResetBadBlockCache(tx, 100)
 	}
-	canonicalHash, err := ReadCanonicalHash(db, *number)
-	if err != nil {
-		return false, nil, err
+
+	blockIds := bheapCache.SortedValues()
+	blocks := make([]*types.Block, len(blockIds))
+	for i, blockId := range blockIds {
+		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
 	}
-	return canonicalHash != (common.Hash{}) && canonicalHash == hash, number, nil
+
+	return blocks, nil
 }
+
+// mainly for testing purposes
+func ResetBadBlockCache(tx kv.Tx, limit int) error {
+	bheapCache = utils.NewBlockMaxHeap(limit)
+	// load the heap
+	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
+		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+		return nil
+	})
+}
+
+/* latest bad blocks end */
 
 func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
 	canonicalHash, err := ReadCanonicalHash(db, number)
