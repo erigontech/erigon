@@ -39,8 +39,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
-	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 
 	"github.com/erigontech/erigon-lib/crypto"
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
@@ -240,27 +238,6 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	str, err := rcmgrObs.NewStatsTraceReporter()
-	if err != nil {
-		return nil, err
-	}
-
-	subnetCount := cfg.NetworkConfig.AttestationSubnetCount +
-		cfg.BeaconConfig.SyncCommitteeSubnetCount +
-		cfg.BeaconConfig.MaxBlobsPerBlock
-
-	defaultLimits := rcmgr.DefaultLimits.AutoScale()
-	newLimit := rcmgr.PartialLimitConfig{
-		System: rcmgr.ResourceLimits{
-			StreamsOutbound: rcmgr.LimitVal(subnetCount * 4),
-			StreamsInbound:  rcmgr.LimitVal(subnetCount * 4),
-		},
-	}.Build(defaultLimits)
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
-	if err != nil {
-		return nil, err
-	}
-	opts = append(opts, libp2p.ResourceManager(rmgr))
 
 	gater, err := NewGater(cfg)
 	if err != nil {
