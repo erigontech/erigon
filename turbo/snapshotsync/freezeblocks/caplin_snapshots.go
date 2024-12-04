@@ -474,6 +474,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 			return err
 		}
 	}
+	tx.Rollback()
 	if sn.Count() != snaptype.CaplinMergeLimit {
 		return fmt.Errorf("expected %d blocks, got %d", snaptype.CaplinMergeLimit, sn.Count())
 	}
@@ -566,6 +567,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		}
 
 	}
+	tx.Rollback()
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
 	}

@@ -46,7 +46,7 @@ func (arr *hashVector) Bytes() []byte {
 }
 
 func (h *hashVector) Append(val libcommon.Hash) {
-	panic("not implmented")
+	panic("not implemented")
 }
 
 func (h hashVector) MarshalJSON() ([]byte, error) {
@@ -86,6 +86,7 @@ func (h *hashVector) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < h.Length()*length.Hash {
 		return ssz.ErrBadDynamicLength
 	}
+	h.u.MerkleTree = nil
 	copy(h.u.u, buf)
 	return nil
 }

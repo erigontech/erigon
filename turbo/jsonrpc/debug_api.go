@@ -29,11 +29,11 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
@@ -93,7 +93,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return StorageRangeResult{}, err
 	}
 	if number == nil {
-		return StorageRangeResult{}, errors.New("block not found")
+		return StorageRangeResult{}, nil
 	}
 	minTxNum, err := txNumsReader.Min(tx, *number)
 	if err != nil {
@@ -322,7 +322,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		return nil, err
 	}
 	ttx := tx.(kv.TemporalTx)
-	v, ok, err := ttx.DomainGetAsOf(kv.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
+	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +339,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash
 
-	code, _, err := ttx.DomainGetAsOf(kv.CodeDomain, address[:], nil, minTxNum+txIndex)
+	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], nil, minTxNum+txIndex)
 	if err != nil {
 		return nil, err
 	}

@@ -125,12 +125,12 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
-	hi.largeVals = dc.d.largeVals
+	hi.largeVals = dc.d.largeValues
 	heap.Init(hi.h)
 	var key, value []byte
 
-	if dc.d.largeVals {
-		valsCursor, err := hi.roTx.Cursor(dc.d.valsTable)
+	if dc.d.largeValues {
+		valsCursor, err := hi.roTx.Cursor(dc.d.valuesTable)
 		if err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 			heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
 		}
 	} else {
-		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valsTable)
+		valsCursor, err := hi.roTx.CursorDupSort(dc.d.valuesTable)
 		if err != nil {
 			return err
 		}
@@ -200,6 +200,8 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 					if ci1.key != nil && (hi.to == nil || bytes.Compare(ci1.key, hi.to) < 0) {
 						heap.Push(hi.h, ci1)
 					}
+				} else {
+					ci1.btCursor.Close()
 				}
 			case DB_CURSOR:
 				if hi.largeVals {
@@ -229,6 +231,8 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 
 						ci1.val = common.Copy(v)
 						heap.Push(hi.h, ci1)
+					} else {
+						ci1.cNonDup.Close()
 					}
 				} else {
 					// start from current go to next
@@ -247,6 +251,8 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 
 						ci1.val = common.Copy(v)
 						heap.Push(hi.h, ci1)
+					} else {
+						ci1.cDup.Close()
 					}
 				}
 

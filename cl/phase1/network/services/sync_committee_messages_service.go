@@ -39,7 +39,7 @@ type seenSyncCommitteeMessage struct {
 }
 
 type syncCommitteeMessagesService struct {
-	seenSyncCommitteeMessages map[seenSyncCommitteeMessage]struct{}
+	seenSyncCommitteeMessages sync.Map
 	syncedDataManager         *synced_data.SyncedDataManager
 	beaconChainCfg            *clparams.BeaconChainConfig
 	syncContributionPool      sync_contribution_pool.SyncContributionPool
@@ -60,13 +60,12 @@ func NewSyncCommitteeMessagesService(
 	test bool,
 ) SyncCommitteeMessagesService {
 	return &syncCommitteeMessagesService{
-		seenSyncCommitteeMessages: make(map[seenSyncCommitteeMessage]struct{}),
-		ethClock:                  ethClock,
-		syncedDataManager:         syncedDataManager,
-		beaconChainCfg:            beaconChainCfg,
-		syncContributionPool:      syncContributionPool,
-		batchSignatureVerifier:    batchSignatureVerifier,
-		test:                      test,
+		ethClock:               ethClock,
+		syncedDataManager:      syncedDataManager,
+		beaconChainCfg:         beaconChainCfg,
+		syncContributionPool:   syncContributionPool,
+		batchSignatureVerifier: batchSignatureVerifier,
+		test:                   test,
 	}
 }
 
@@ -96,7 +95,8 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 			return fmt.Errorf("validator is not into any subnet %d", *subnet)
 		}
 		// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
-		if _, ok := s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier]; ok {
+
+		if _, ok := s.seenSyncCommitteeMessages.Load(seenSyncCommitteeMessageIdentifier); ok {
 			return ErrIgnore
 		}
 		// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
@@ -110,7 +110,7 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 			Pks:        [][]byte{pubKey},
 			GossipData: msg.GossipData,
 			F: func() {
-				s.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
+				s.seenSyncCommitteeMessages.Store(seenSyncCommitteeMessageIdentifier, struct{}{})
 				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
 				// Aggregate the message
 				s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
@@ -135,10 +135,17 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 // cleanupOldSyncCommitteeMessages removes old sync committee messages from the cache
 func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	headSlot := s.syncedDataManager.HeadSlot()
-	for k := range s.seenSyncCommitteeMessages {
+
+	entriesToRemove := []seenSyncCommitteeMessage{}
+	s.seenSyncCommitteeMessages.Range(func(key, value interface{}) bool {
+		k := key.(seenSyncCommitteeMessage)
 		if headSlot > k.slot+1 {
-			delete(s.seenSyncCommitteeMessages, k)
+			entriesToRemove = append(entriesToRemove, k)
 		}
+		return true
+	})
+	for _, k := range entriesToRemove {
+		s.seenSyncCommitteeMessages.Delete(k)
 	}
 }
 

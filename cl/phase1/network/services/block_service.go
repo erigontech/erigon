@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -121,12 +122,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return ErrIgnore
 	}
 
-	// headState, cn := b.syncedData.HeadState()
-	// defer cn()
-	// if headState == nil {
-	// 	b.scheduleBlockForLaterProcessing(msg)
-	// 	return ErrIgnore
-	// }
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 		// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
@@ -208,6 +203,20 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 
 // processAndStoreBlock processes and stores a block
 func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	group, _ := errgroup.WithContext(ctx)
+
+	group.Go(func() error {
+		return b.forkchoiceStore.ProcessBlockExecution(ctx, block)
+	})
+	group.Go(func() error {
+		return b.forkchoiceStore.ProcessBlockConsensus(ctx, block)
+	})
+
+	err := group.Wait()
+	if err != nil {
+		return err
+	}
+
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 	}); err != nil {

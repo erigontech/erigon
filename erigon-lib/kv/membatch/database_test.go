@@ -35,7 +35,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var testBucket = kv.HashedAccounts
+var testBucket = kv.HashedAccountsDeprecated
 var testValues = []string{"a", "1251", "\x00123\x00"}
 
 func TestPutGet(t *testing.T) {
@@ -99,7 +99,7 @@ func TestPutGet(t *testing.T) {
 }
 
 func TestNoPanicAfterDbClosed(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -136,7 +136,7 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 }
 
 func TestParallelPutGet(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	const n = 8
 	var pending sync.WaitGroup

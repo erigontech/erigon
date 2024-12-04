@@ -95,6 +95,7 @@ type SnapshotsCfg struct {
 
 	caplin           bool
 	blobs            bool
+	caplinState      bool
 	agg              *state.Aggregator
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
@@ -113,6 +114,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 	agg *state.Aggregator,
 	caplin bool,
 	blobs bool,
+	caplinState bool,
 	silkworm *silkworm.Silkworm,
 	prune prune.Mode,
 ) SnapshotsCfg {
@@ -130,6 +132,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		syncConfig:         syncConfig,
 		blobs:              blobs,
 		prune:              prune,
+		caplinState:        caplinState,
 	}
 
 	if uploadFs := cfg.syncConfig.UploadLocation; len(uploadFs) > 0 {
@@ -277,7 +280,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	// Download only the snapshots that are for the header chain.
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true /*headerChain=*/, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, true /*headerChain=*/, cfg.blobs, cfg.caplinState, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
 
@@ -286,7 +289,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false /*headerChain=*/, cfg.blobs, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+	if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.dirs, false /*headerChain=*/, cfg.blobs, cfg.caplinState, cfg.prune, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 		return err
 	}
 	if cfg.notifier.Events != nil {
@@ -305,10 +308,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := cfg.agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
-
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
 	if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err

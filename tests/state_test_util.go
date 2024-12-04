@@ -42,17 +42,16 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon-lib/wrap"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 )
 
@@ -102,7 +101,7 @@ type stTransaction struct {
 	To                   string                    `json:"to"`
 	Data                 []string                  `json:"data"`
 	Value                []string                  `json:"value"`
-	AccessLists          []*types2.AccessList      `json:"accessLists,omitempty"`
+	AccessLists          []*types.AccessList       `json:"accessLists,omitempty"`
 	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
 	Authorizations       []types.JsonAuthorization `json:"authorizationList,omitempty"`
 }
@@ -284,7 +283,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 
 	var root libcommon.Hash
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), false, header.Number.Uint64(), "")
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), true, header.Number.Uint64(), "")
 	if err != nil {
 		return statedb, root, fmt.Errorf("ComputeCommitment: %w", err)
 	}
@@ -418,7 +417,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (core.Message
 	if err != nil {
 		return nil, fmt.Errorf("invalid txn data %q", dataHex)
 	}
-	var accessList types2.AccessList
+	var accessList types.AccessList
 	if tx.AccessLists != nil && tx.AccessLists[ps.Indexes.Data] != nil {
 		accessList = *tx.AccessLists[ps.Indexes.Data]
 	}

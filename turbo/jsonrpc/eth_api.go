@@ -39,14 +39,12 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
-	types2 "github.com/erigontech/erigon-lib/types"
-
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	ethFilters "github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -151,13 +149,11 @@ type BaseAPI struct {
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
 	var (
-		blocksLRUSize      = 128 // ~32Mb
-		receiptsCacheLimit = 32
+		blocksLRUSize = 128 // ~32Mb
 	)
 	// if RPCDaemon deployed as independent process: increase cache sizes
 	if !singleNodeMode {
 		blocksLRUSize *= 5
-		receiptsCacheLimit *= 5
 	}
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
@@ -172,8 +168,8 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txnReader:          blockReader,
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(receiptsCacheLimit, blockReader, engine),
-		borReceiptGenerator: receipts.NewBorGenerator(receiptsCacheLimit, blockReader, engine),
+		receiptsGenerator:   receipts.NewGenerator(blockReader, engine),
+		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine),
 		dirs:                dirs,
 		useBridgeReader:     bridgeReader != nil && !reflect.ValueOf(bridgeReader).IsNil(), // needed for interface nil caveat
 		bridgeReader:        bridgeReader,
@@ -435,7 +431,7 @@ type RPCTransaction struct {
 	TransactionIndex    *hexutil.Uint64            `json:"transactionIndex"`
 	Value               *hexutil.Big               `json:"value"`
 	Type                hexutil.Uint64             `json:"type"`
-	Accesses            *types2.AccessList         `json:"accessList,omitempty"`
+	Accesses            *types.AccessList          `json:"accessList,omitempty"`
 	ChainID             *hexutil.Big               `json:"chainId,omitempty"`
 	MaxFeePerBlobGas    *hexutil.Big               `json:"maxFeePerBlobGas,omitempty"`
 	BlobVersionedHashes []common.Hash              `json:"blobVersionedHashes,omitempty"`

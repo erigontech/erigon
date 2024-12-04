@@ -41,7 +41,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	var v []byte
 	var ok bool
 
-	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum)
+	v, ok, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, nil, txNum)
 	if err != nil {
 		return
 	}
@@ -49,7 +49,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 		cumGasUsed = uvarint(v)
 	}
 
-	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, txNum)
+	v, ok, err = tx.GetAsOf(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, nil, txNum)
 	if err != nil {
 		return
 	}
@@ -61,7 +61,7 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	//logIndex always 0
 	//}
 
-	v, ok, err = tx.DomainGetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum)
+	v, ok, err = tx.GetAsOf(kv.ReceiptDomain, FirstLogIndexKey, nil, txNum)
 	if err != nil {
 		return
 	}

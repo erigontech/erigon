@@ -44,7 +44,7 @@ jobs:
         set +e # Disable exit on error
         
         # Run Erigon under memory constraints, wait sync and check ability to maintain sync
-        cgexec -g memory:constrained_res_64G python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+        cgexec -g memory:constrained_res_32G python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
           ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN standard_node statistics
   
         # Capture monitoring script exit status

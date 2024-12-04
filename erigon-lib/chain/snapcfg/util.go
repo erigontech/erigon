@@ -89,8 +89,18 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 
 	for _, p := range p {
+		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
+
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
+			continue
+		}
+
+		if strings.HasPrefix(p.Name, "caplin") {
+			bestVersions.Set(p.Name, p)
 			continue
 		}
 
@@ -391,6 +401,9 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	for _, p := range c.Preverified {
 		info, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
+			continue
+		}
+		if strings.Contains(p.Name, "caplin") {
 			continue
 		}
 

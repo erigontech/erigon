@@ -6,29 +6,12 @@ set +e # Disable exit on error
 disabled_tests=(
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
-    # Erigon bugs
-    debug_accountRange
-    # changed in last commits
-    debug_storageRangeAt/test_11.json
-    # needs investigations
-    debug_getModifiedAccountsByHash
-    debug_getModifiedAccountsByNumber
     # Erigon bug https://github.com/erigontech/erigon/issues/12603
     erigon_getLatestLogs
-    parity_listStorageKeys/test_12.json
-    # created task https://github.com/erigontech/erigon/issues/12668
-    debug_traceCallMany/test_02.tar
-    debug_traceCallMany/test_04.tar
-    debug_traceCallMany/test_05.tar
-    debug_traceCallMany/test_06.tar
-    debug_traceCallMany/test_07.tar
-    debug_traceCallMany/test_09.json
-    debug_traceCallMany/test_10.tar
     # to investigate
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
-    trace_replayBlockTransactions/test_29.tar
     # these tests requires Erigon active
     admin_nodeInfo/test_01.json
     admin_peers/test_01.json
@@ -44,9 +27,7 @@ disabled_tests=(
     net_peerCount/test_1.json
     net_version/test_1.json
     txpool_status/test_1.json
-    web3_clientVersion/test_1.json
-    # broken by https://github.com/erigontech/erigon/pull/12642 (@AskAlexSharov will fix)
-    debug_storageRangeAt/test_11.json)
+    web3_clientVersion/test_1.json)
 
 # Transform the array into a comma-separated string
 disabled_test_list=$(IFS=,; echo "${disabled_tests[*]}")

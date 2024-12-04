@@ -87,9 +87,9 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 }
 
 var snapshotCommand = cli.Command{
-	Name:    "snapshots",
-	Aliases: []string{"seg"},
-	Usage:   `Managing snapshots (historical data partitions)`,
+	Name:    "seg",
+	Aliases: []string{"snapshots", "segments"},
+	Usage:   `Managing historical data segments (partitions)`,
 	Before: func(cliCtx *cli.Context) error {
 		go mem.LogMemStats(cliCtx.Context, log.New())
 		go disk.UpdateDiskStats(cliCtx.Context, log.New())
@@ -112,7 +112,8 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
-			Name: "index",
+			Name:    "accessor",
+			Aliases: []string{"index"},
 			Action: func(c *cli.Context) error {
 				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
@@ -453,6 +454,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	defer cur.Close()
 	if cur != nil {
 		fmt.Printf("seek: %x, -> %x, %x\n", seek, cur.Key(), cur.Value())
 	} else {
@@ -1353,9 +1355,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
@@ -1411,9 +1410,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
 	}
-	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
 	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
@@ -1466,14 +1462,12 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	const ThreadsLimit = 9_000
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
-	opts := mdbx.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
-	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
-	// to read all options from DB, instead of overriding them
-	opts = opts.Accede()
-	return opts
+	return mdbx.New(label, log.New()).Path(path).
+		RoTxsLimiter(limiterB).
+		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.Aggregator {
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.HistoryV3AggregationStep, chainDB, logger)
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}

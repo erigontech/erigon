@@ -55,8 +55,6 @@ type ValidatorSet struct {
 	// We have phase0 data below
 	phase0Data   []Phase0Data
 	attesterBits []byte
-
-	hashBuf
 }
 
 func NewValidatorSet(c int) *ValidatorSet {
@@ -158,6 +156,7 @@ func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
 	}
 	v.expandBuffer(len(buf) / validatorSize)
 	copy(v.buffer, buf)
+	v.MerkleTree = nil
 	v.l = len(buf) / validatorSize
 	v.phase0Data = make([]Phase0Data, v.l)
 	v.attesterBits = make([]byte, v.l)

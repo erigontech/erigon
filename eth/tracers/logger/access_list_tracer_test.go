@@ -20,7 +20,8 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon-lib/common"
-	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/types"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +33,7 @@ var (
 	slot3 = common.BytesToHash([]byte{0x03})
 	slot4 = common.BytesToHash([]byte{0x04})
 
-	ordered = types2.AccessList{{
+	ordered = types.AccessList{{
 		Address: addr,
 		StorageKeys: []common.Hash{
 			slot1,
