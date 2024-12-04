@@ -200,7 +200,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(tx kv.Tx, baseStat
 		Source:          baseState.CurrentJustifiedCheckpoint(),
 		Target:          targetCheckpoint,
 	}
-	fmt.Println("baseAttestationData", baseAttestationData, "epoch", epoch, "baseStateBlockRoot", baseStateBlockRoot)
 	ap.attestationsCache.Add(epoch, baseAttestationData)
 	ap.blockRootsUsedForSlotCache.Add(slot, baseStateBlockRoot)
 

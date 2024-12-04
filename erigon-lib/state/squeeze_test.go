@@ -122,7 +122,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	for acit.HasNext() {
 		k, _, err := acit.Next()
 		require.NoError(t, err)
-		domains.sdCtx.updates.TouchPlainKey(k, nil, domains.sdCtx.updates.TouchAccount)
+		domains.sdCtx.updates.TouchPlainKey(string(k), nil, domains.sdCtx.updates.TouchAccount)
 	}
 
 	// check if the commitment is the same

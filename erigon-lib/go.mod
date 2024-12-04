@@ -2,6 +2,11 @@ module github.com/erigontech/erigon-lib
 
 go 1.22.0
 
+replace (
+	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
+)
+
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20241023024258-f64407a77e8e
 	github.com/erigontech/interfaces v0.0.0-20241120074553-214b5fd396ed
@@ -19,6 +24,7 @@ require (
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/containerd/cgroups/v3 v3.0.3
+	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/edsrzf/mmap-go v1.1.0
@@ -94,9 +100,10 @@ require (
 	github.com/consensys/bavard v0.1.13 // indirect
 	github.com/consensys/gnark-crypto v0.12.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
 	github.com/go-llsqlite/crawshaw v0.4.0 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
@@ -151,9 +158,4 @@ require (
 	modernc.org/mathutil v1.6.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
-)
-
-replace (
-	github.com/anacrolix/torrent => github.com/erigontech/torrent v1.54.2-alpha-38
-	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
 )

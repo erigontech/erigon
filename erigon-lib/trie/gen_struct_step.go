@@ -26,7 +26,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/turbo/rlphacks"
+	"github.com/erigontech/erigon-lib/rlphacks"
 )
 
 // Experimental code for separating data and structural information

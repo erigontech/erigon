@@ -46,14 +46,7 @@ func MBToGB(b uint64) (float64, int) {
 	return float64(b) / float64(div), exp
 }
 
-func Copy(b []byte) []byte {
-	if b == nil {
-		return nil
-	}
-	c := make([]byte, len(b))
-	copy(c, b)
-	return c
-}
+var Copy = bytes.Clone
 
 func Append(data ...[]byte) []byte {
 	s := new(bytes.Buffer)

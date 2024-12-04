@@ -284,6 +284,10 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	}
 }
 
+func (h *History) Tables() []string {
+	return append([]string{h.keysTable, h.valuesTable}, h.InvertedIndex.Tables()...)
+}
+
 func (h *History) Close() {
 	if h == nil {
 		return
