@@ -1865,6 +1865,9 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 	case "commitment":
 		mxPrunableDComm.Set(delta)
 	}
+
+	fmt.Println("LAL can prune domain?", sm, min(maxStepToPrune, untilStep))
+
 	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
 	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
 }
@@ -1924,6 +1927,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	canPrune, maxPrunableStep := dt.canPruneDomainTables(rwTx, txTo)
+	fmt.Println("LAL DOPRUNE?", canPrune)
+
 	if !canPrune {
 		return stat, nil
 	}

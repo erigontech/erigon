@@ -1031,6 +1031,9 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	case "commitment":
 		mxPrunableHComm.Set(float64(txTo - minIdxTx))
 	}
+
+	fmt.Println("LAL can prune ht?", minIdxTx, txTo)
+
 	return minIdxTx < txTo, txTo
 }
 
