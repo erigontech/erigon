@@ -348,8 +348,11 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 		}
 		bitset ^= bit
 	}
+	res := make([]byte, be.buf.Len())
+	copy(res, be.buf.Bytes())
+
 	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
-	return be.buf.Bytes(), lastNibble, nil
+	return res, lastNibble, nil
 }
 
 func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }
