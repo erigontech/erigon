@@ -273,7 +273,7 @@ func New(
 }
 
 func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthCounter) {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(time.Minute)
 	for {
 		select {
 		case <-ctx.Done():
