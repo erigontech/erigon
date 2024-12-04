@@ -40,9 +40,6 @@ func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
 	if err != nil {
 		panic(err)
 	}
-	if limit == 0 {
-		domainGetFromFileCacheEnabled = false
-	}
 	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
 }
 
@@ -63,6 +60,9 @@ func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
 	limit := domainGetFromFileCacheLimit
 	if name == kv.CodeDomain {
 		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	}
+	if limit == 0 {
+		domainGetFromFileCacheEnabled = false
 	}
 	d.caches = &sync.Pool{New: func() any {
 		return NewDomainGetFromFileCache(limit)
@@ -121,23 +121,15 @@ func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
 
 func NewIISeekInFilesCacheAny() any { return NewIISeekInFilesCache() }
 func newIIVisible(name string, files []visibleFile) *iiVisible {
+	if iiGetFromFileCacheLimit == 0 {
+		iiGetFromFileCacheEnabled = false
+	}
 	ii := &iiVisible{
 		name:   name,
 		files:  files,
 		caches: &sync.Pool{New: NewIISeekInFilesCacheAny},
 	}
-	// Not on hot-path: better pre-alloc here
-	ii.preAlloc()
 	return ii
-}
-func (v *iiVisible) preAlloc() {
-	var preAlloc [10]any
-	for i := 0; i < len(preAlloc); i++ {
-		preAlloc[i] = v.caches.Get()
-	}
-	for i := 0; i < len(preAlloc); i++ {
-		v.caches.Put(preAlloc[i])
-	}
 }
 func (v *iiVisible) newSeekInFilesCache() *IISeekInFilesCache {
 	return v.caches.Get().(*IISeekInFilesCache)
