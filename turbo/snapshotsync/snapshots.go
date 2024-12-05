@@ -1298,8 +1298,10 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	if s == nil {
 		return nil
 	}
+
 	v := s.View()
 	defer v.Close()
+
 	defer s.recalcVisibleFiles()
 	if err := s.delete(fileName); err != nil {
 		return fmt.Errorf("can't delete file: %w", err)
