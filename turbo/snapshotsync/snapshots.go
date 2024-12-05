@@ -1024,6 +1024,8 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
 
+	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
+
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok || isState {
@@ -1056,7 +1058,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.IsFrozen(s.cfg.ChainName, f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snConfig.IsFrozen(f)}
 		}
 
 		if open {

@@ -67,7 +67,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.Aggregator, br services.Full
 	}
 
 	// remove all canonical markers from this point
-	if err := rawdb.TruncateCanonicalHash(tx, 1, false); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, 1, false /* markChainAsBad */); err != nil {
 		return err
 	}
 	if err := rawdb.TruncateTd(tx, 1); err != nil {
