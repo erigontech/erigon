@@ -433,8 +433,7 @@ type parallelExecutor struct {
 	slowDownLimit            *time.Ticker
 	progress                 *Progress
 
-	currentBlock uint64
-	blockStatus  map[uint64]*blockExecStatus
+	blockStatus map[uint64]*blockExecStatus
 }
 
 func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, blockComplete *atomic.Bool, errCh chan error) {
@@ -664,41 +663,23 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 	defer rwsIt.Close()
 	//defer fmt.Println("PRQ", "Done")
 
-	var i int
 	outputTxNum = inputTxNum
 	for rwsIt.HasNext(outputTxNum) {
 		result := rwsIt.PopNext()
-		txTask := result.Task.(*exec.TxTask)
+		txTask := result.Task.(*execTask)
 		//fmt.Println("PRQ", txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
-		if result.Err != nil || !pe.rs.ReadsValid(txTask.ReadLists) {
-			conflicts++
-			//fmt.Println(txTask.TxNum, txTask.Error)
-			if !canRetry ||
-				errors.Is(result.Err, vm.ErrIntraBlockStateFailed) ||
-				errors.Is(result.Err, core.ErrStateTransitionFailed) {
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %d: %v", consensus.ErrInvalidBlock, txTask.BlockNum, result.Err)
+		if pe.cfg.syncCfg.ChaosMonkey {
+			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, result.Err)
+			if chaosErr != nil {
+				log.Warn("Monkey in consensus")
+				return outputTxNum, conflicts, triggers, processedBlockNum, false, chaosErr
 			}
-			if i > 0 {
-				//send to re-exec
-				pe.in.ReTry(txTask)
-				continue
-			}
+		}
 
-			// resolve first conflict right here: it's faster and conflict-free
-			pe.applyWorker.RunTxTaskNoLock(txTask.Reset(), pe.isMining)
-			if result.Err != nil {
-				//fmt.Println("RETRY", txTask.BlockNum, txTask.TxIndex, txTask.Error)
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("%w: %d: %v", consensus.ErrInvalidBlock, txTask.BlockNum, result.Err)
-			}
-			if pe.cfg.syncCfg.ChaosMonkey {
-				chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, result.Err)
-				if chaosErr != nil {
-					log.Warn("Monkey in a consensus")
-					return outputTxNum, conflicts, triggers, processedBlockNum, false, chaosErr
-				}
-			}
-			// TODO: post-validation of gasUsed and blobGasUsed
-			i++
+		_, err := pe.nextResult(ctx, pe.lastBlockNum.Load(), result)
+
+		if err != nil {
+			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 
 		if txTask.Final {
@@ -1033,13 +1014,13 @@ func (pe *parallelExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (
 				skipCheck:    map[int]bool{},
 				estimateDeps: map[int][]int{},
 			}
-			pe.currentBlock = t.BlockNum
+			pe.lastBlockNum.Store(t.BlockNum)
 			pe.blockStatus = map[uint64]*blockExecStatus{
 				t.BlockNum: blockStatus,
 			}
 		} else {
 			var ok bool
-			blockStatus, ok := pe.blockStatus[t.BlockNum]
+			blockStatus, ok = pe.blockStatus[t.BlockNum]
 
 			if !ok {
 				blockStatus = &blockExecStatus{
