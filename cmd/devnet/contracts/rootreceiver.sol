@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {RLPReader} from "lib/rlpreader.sol";
-import {MerklePatriciaProof} from "lib/merklepatriciaproof.sol";
-import {Merkle} from "lib/Merkle.sol";
-import "lib/exitpayloadreader.sol";
+import {RLPReader} from "./lib/rlpreader.sol";
+import {MerklePatriciaProof} from "./lib/merklepatriciaproof.sol";
+import {Merkle} from "./lib/merkle.sol";
+import "./lib/exitpayloadreader.sol";
 
 contract ICheckpointManager {
     struct HeaderBlock {
