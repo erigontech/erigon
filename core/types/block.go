@@ -201,7 +201,8 @@ func (h *Header) EncodingSize() int {
 func (h *Header) EncodeRLP(w io.Writer) error {
 	encodingSize := h.EncodingSize()
 
-	var b [33]byte
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// Prefix
 	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
@@ -210,39 +211,39 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(h.ParentHash.Bytes()); err != nil {
+	if _, err := w.Write(h.ParentHash[:]); err != nil {
 		return err
 	}
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(h.UncleHash.Bytes()); err != nil {
+	if _, err := w.Write(h.UncleHash[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 20
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(h.Coinbase.Bytes()); err != nil {
+	if _, err := w.Write(h.Coinbase[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 32
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(h.Root.Bytes()); err != nil {
+	if _, err := w.Write(h.Root[:]); err != nil {
 		return err
 	}
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(h.TxHash.Bytes()); err != nil {
+	if _, err := w.Write(h.TxHash[:]); err != nil {
 		return err
 	}
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(h.ReceiptHash.Bytes()); err != nil {
+	if _, err := w.Write(h.ReceiptHash[:]); err != nil {
 		return err
 	}
 	b[0] = 183 + 2
@@ -251,7 +252,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:3]); err != nil {
 		return err
 	}
-	if _, err := w.Write(h.Bloom.Bytes()); err != nil {
+	if _, err := w.Write(h.Bloom[:]); err != nil {
 		return err
 	}
 	if err := rlp.EncodeBigInt(h.Difficulty, w, b[:]); err != nil {
@@ -285,7 +286,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
-		if _, err := w.Write(h.MixDigest.Bytes()); err != nil {
+		if _, err := w.Write(h.MixDigest[:]); err != nil {
 			return err
 		}
 		b[0] = 128 + 8
@@ -308,7 +309,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
-		if _, err := w.Write(h.WithdrawalsHash.Bytes()); err != nil {
+		if _, err := w.Write(h.WithdrawalsHash[:]); err != nil {
 			return err
 		}
 	}
@@ -329,7 +330,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
-		if _, err := w.Write(h.ParentBeaconBlockRoot.Bytes()); err != nil {
+		if _, err := w.Write(h.ParentBeaconBlockRoot[:]); err != nil {
 			return err
 		}
 	}
@@ -339,7 +340,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
-		if _, err := w.Write(h.RequestsHash.Bytes()); err != nil {
+		if _, err := w.Write(h.RequestsHash[:]); err != nil {
 			return err
 		}
 	}
@@ -789,7 +790,8 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
-	var b [33]byte
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
@@ -874,7 +876,8 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
-	var b [33]byte
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -957,7 +960,9 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 
 func (bb Body) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
-	var b [33]byte
+
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
@@ -1202,7 +1207,9 @@ func (bb *Block) EncodingSize() int {
 // EncodeRLP serializes b into the Ethereum RLP block format.
 func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
-	var b [33]byte
+
+	b := newEncodingBuf()
+	defer pooledBuf.Put(b)
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err

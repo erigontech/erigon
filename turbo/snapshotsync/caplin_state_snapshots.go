@@ -81,7 +81,7 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 		var err error
 		if err := db.View(context.TODO(), func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
-			value, err = tx.GetOne(tableName, base_encoding.Encode64ToBytes4(numId))
+			value, err = tx.GetOne(tableName, key)
 			value = libcommon.Copy(value)
 			return err
 		}); err != nil {
@@ -269,6 +269,8 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
+	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
+
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -303,7 +305,7 @@ Loop:
 				// segType: f.Type, Unsupported
 				version:  f.Version,
 				Range:    Range{f.From, f.To},
-				frozen:   snapcfg.IsFrozen(s.cfg.ChainName, f),
+				frozen:   snConfig.IsFrozen(f),
 				filePath: filePath,
 			}
 		}

@@ -318,6 +318,10 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	if err != nil {
 		return fmt.Errorf("failed to get state at block root: %w", err)
 	}
+	// fail-safe check§
+	if headState == nil {
+		return nil
+	}
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)
 	}

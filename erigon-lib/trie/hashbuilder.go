@@ -658,18 +658,6 @@ func (hb *HashBuilder) code(code []byte) error {
 	return nil
 }
 
-// nolint
-func (hb *HashBuilder) emptyRoot() {
-	if hb.trace {
-		fmt.Printf("EMPTYROOT\n")
-	}
-	hb.nodeStack = append(hb.nodeStack, nil)
-	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
-	hash[0] = 0x80 + length2.Hash
-	copy(hash[1:], EmptyRoot[:])
-	hb.hashStack = append(hb.hashStack, hash[:]...)
-}
-
 func (hb *HashBuilder) RootHash() (libcommon.Hash, error) {
 	if !hb.hasRoot() {
 		return libcommon.Hash{}, errors.New("no root in the tree")

@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	lru "github.com/hashicorp/golang-lru/v2"
-
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -19,12 +18,15 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/turbo/transactions"
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type Generator struct {
-	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
-	blockReader   services.FullBlockReader
-	engine        consensus.EngineReader
+	receiptsCache      *lru.Cache[common.Hash, types.Receipts]
+	receiptsCacheTrace bool
+
+	blockReader services.FullBlockReader
+	engine      consensus.EngineReader
 }
 
 type ReceiptEnv struct {
@@ -37,18 +39,31 @@ type ReceiptEnv struct {
 	header      *types.Header
 }
 
-func NewGenerator(cacheSize int, blockReader services.FullBlockReader,
-	engine consensus.EngineReader) *Generator {
-	receiptsCache, err := lru.New[common.Hash, []*types.Receipt](cacheSize)
+var (
+	receiptsCacheLimit = dbg.EnvInt("R_LRU", 1024) //ethmainnet: 1K receipts is ~200mb RAM
+	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
+)
+
+func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader) *Generator {
+	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit)
 	if err != nil {
 		panic(err)
 	}
 
 	return &Generator{
-		receiptsCache: receiptsCache,
-		blockReader:   blockReader,
-		engine:        engine,
+		receiptsCache:      receiptsCache,
+		blockReader:        blockReader,
+		engine:             engine,
+		receiptsCacheTrace: receiptsCacheTrace,
 	}
+}
+
+func (g *Generator) LogStats() {
+	if g == nil || !g.receiptsCacheTrace {
+		return
+	}
+	//m := g.receiptsCache.Metrics()
+	//log.Warn("[dbg] ReceiptsCache", "hit", m.Hits, "total", m.Hits+m.Misses, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", receiptsCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)))
 }
 
 func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool) {
@@ -87,7 +102,15 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 	}, nil
 }
 
+func (g *Generator) addToCache(header *types.Header, receipts types.Receipts) {
+	g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
+}
+
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
+	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok && len(receipts) > index {
+		return receipts[index], nil
+	}
+
 	var receipt *types.Receipt
 	if optimize {
 		genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, index)
@@ -142,6 +165,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx
 		receipts[i] = receipt
 	}
 
-	g.receiptsCache.Add(block.Hash(), receipts)
+	g.addToCache(block.HeaderNoCopy(), receipts)
 	return receipts, nil
 }

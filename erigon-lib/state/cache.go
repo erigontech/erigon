@@ -24,9 +24,8 @@ type DomainGetFromFileCache struct {
 
 // nolint
 type domainGetFromFileCacheItem struct {
-	lvl    uint8
-	exists bool
-	offset uint64
+	lvl uint8
+	v   []byte
 }
 
 var (

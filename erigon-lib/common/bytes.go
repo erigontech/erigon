@@ -46,14 +46,7 @@ func MBToGB(b uint64) (float64, int) {
 	return float64(b) / float64(div), exp
 }
 
-func Copy(b []byte) []byte {
-	if b == nil {
-		return nil
-	}
-	c := make([]byte, len(b))
-	copy(c, b)
-	return c
-}
+var Copy = bytes.Clone
 
 func Append(data ...[]byte) []byte {
 	s := new(bytes.Buffer)
@@ -91,11 +84,6 @@ func BytesToUint64(buf []byte) (x uint64) {
 		}
 	}
 	return
-}
-
-// has0xPrefix validates str begins with '0x' or '0X'.
-func has0xPrefix(str string) bool { //nolint
-	return len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')
 }
 
 // isHexCharacter returns bool of c being a valid hexadecimal.

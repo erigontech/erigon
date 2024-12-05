@@ -30,6 +30,7 @@ import (
 
 	"gopkg.in/yaml.v2"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 
@@ -59,13 +60,16 @@ type CaplinConfig struct {
 	CustomGenesisStatePath string
 
 	// Network stuff
-	CaplinDiscoveryAddr    string
-	CaplinDiscoveryPort    uint64
-	CaplinDiscoveryTCPPort uint64
-	SentinelAddr           string
-	SentinelPort           uint64
-	SubscribeAllTopics     bool
-	MaxPeerCount           uint64
+	CaplinDiscoveryAddr       string
+	CaplinDiscoveryPort       uint64
+	CaplinDiscoveryTCPPort    uint64
+	SentinelAddr              string
+	SentinelPort              uint64
+	SubscribeAllTopics        bool
+	MaxPeerCount              uint64
+	EnableUPnP                bool
+	MaxInboundTrafficPerPeer  datasize.ByteSize
+	MaxOutboundTrafficPerPeer datasize.ByteSize
 	// Erigon Sync
 	LoopBlockLimit uint64
 	// Beacon API router configuration

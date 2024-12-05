@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -51,6 +52,10 @@ func (h *UnprefixedHash) UnmarshalText(input []byte) error {
 func (h UnprefixedHash) MarshalText() ([]byte, error) {
 	return []byte(hex.EncodeToString(h[:])), nil
 }
+
+/////////// Address
+
+var addressT = reflect.TypeOf(Address{})
 
 // UnprefixedAddress allows marshaling an Address without 0x prefix.
 type UnprefixedAddress Address
