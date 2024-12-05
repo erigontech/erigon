@@ -18,6 +18,7 @@ package state
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
 )
@@ -44,6 +45,7 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, 
 		return nil, nil
 	case 1:
 		if v[0] == 1 {
+			fmt.Println("LAL real key:", v[1:])
 			return []byte{}, nil
 		}
 		// nil values returned an empty key which actually is a value
