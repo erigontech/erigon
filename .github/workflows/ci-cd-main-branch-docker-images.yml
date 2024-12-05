@@ -177,7 +177,8 @@ jobs:
           echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ env.BUILD_VERSION_LATEST }}"
           echo "${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }} (empty, if keep_images is 0)"
           echo
-          echo "Cleanup old docker images matching pattern tag ~= ${{ env.TAG_KEY }}-XXXXXXX"
+          echo "Cleanup old docker images matching pattern tag ~= ${{ env.TAG_KEY }}-XXXXXXX (where XXXXXXX is a short Commit IDs)"
+          echo "Only last $KEEP_IMAGES images will be kept."
           curl_cmd="curl -s -H \"Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}\" "
           dockerhub_url='https://hub.docker.com/v2/namespaces/erigontech/repositories/erigon'
           my_list () {
