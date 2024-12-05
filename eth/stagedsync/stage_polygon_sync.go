@@ -240,8 +240,8 @@ func UnwindPolygonSyncStage(ctx context.Context, tx kv.RwTx, u *UnwindState, cfg
 	}
 
 	// headers
-	unwindBlock := u.Reason.Block != nil
-	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, unwindBlock); err != nil {
+	badBlock := u.Reason.IsBadBlock()
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1, badBlock); err != nil {
 		return err
 	}
 
