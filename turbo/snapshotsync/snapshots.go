@@ -1019,6 +1019,11 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
+	wg := &errgroup.Group{}
+	wg.SetLimit(64)
+	//fmt.Println("RS", s)
+	//defer fmt.Println("Done RS", s)
+
 	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
 
 	for _, fName := range fileNames {
@@ -1080,9 +1085,12 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		}
 
 		if open {
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
-			}
+			wg.Go(func() error {
+				if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+					return err
+				}
+				return nil
+			})
 		}
 
 		if f.To > 0 {
@@ -1094,6 +1102,9 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
+	}
+	if err := wg.Wait(); err != nil {
+		return err
 	}
 
 	return nil
