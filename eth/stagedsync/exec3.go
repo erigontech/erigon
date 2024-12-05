@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
@@ -86,7 +87,7 @@ type Progress struct {
 	logger       log.Logger
 }
 
-func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
+func (p *Progress) Log(suffix string, rs *state.StateV3, in *exec.QueueWithRetry, rws *exec.ResultsQueue, txCount uint64, gas uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
 	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -524,11 +525,11 @@ Loop:
 		// So we skip that check for the first block, if we find half-executed data.
 		skipPostEvaluation := false
 		var usedGas uint64
-		var txTasks []*state.TxTask
+		var txTasks []*exec.TxTask
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
-			txTask := &state.TxTask{
+			txTask := &exec.TxTask{
 				BlockNum:           blockNum,
 				Header:             header,
 				Coinbase:           b.Coinbase(),

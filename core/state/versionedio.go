@@ -1,6 +1,10 @@
 package state
 
-import "github.com/erigontech/erigon/core/tracing"
+import (
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/core/tracing"
+	"github.com/heimdalr/dag"
+)
 
 const (
 	ReadKindMap     = 0
@@ -24,7 +28,7 @@ type VersionedReads []VersionedRead
 type VersionedWrites []VersionedWrite
 
 // hasNewWrite: returns true if the current set has a new write compared to the input
-func (txo VersionedWrites) hasNewWrite(cmpSet []VersionedWrite) bool {
+func (txo VersionedWrites) HasNewWrite(cmpSet []VersionedWrite) bool {
 	if len(txo) == 0 {
 		return false
 	} else if len(cmpSet) == 0 || len(txo) > len(cmpSet) {
@@ -51,7 +55,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStor
 		return readStorage(s)
 	}
 
-	if s.versionWritten(k) {
+	if s.hasVersionedWrite(k) {
 		return readStorage(s)
 	}
 
@@ -74,7 +78,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStor
 	var err error
 	var vr = VersionedRead{
 		V: Version{
-			TxnIndex:    res.DepIdx(),
+			TxIndex:     res.DepIdx(),
 			Incarnation: res.Incarnation(),
 		},
 		Path: k,
@@ -150,11 +154,11 @@ func NewVersionedIO(numTx int) *VersionedIO {
 	}
 }
 
-func (io *VersionedIO) recordRead(txId int, input []VersionedRead) {
+func (io *VersionedIO) RecordRead(txId int, input []VersionedRead) {
 	io.inputs[txId] = input
 }
 
-func (io *VersionedIO) recordWrite(txId int, output []VersionedWrite) {
+func (io *VersionedIO) RecordWrite(txId int, output []VersionedWrite) {
 	io.outputs[txId] = output
 	io.outputsSet[txId] = make(map[VersionKey]struct{}, len(output))
 
@@ -163,7 +167,7 @@ func (io *VersionedIO) recordWrite(txId int, output []VersionedWrite) {
 	}
 }
 
-func (io *VersionedIO) recordAllWrite(txId int, output []VersionedWrite) {
+func (io *VersionedIO) RecordAllWrite(txId int, output []VersionedWrite) {
 	io.allOutputs[txId] = output
 }
 
@@ -177,4 +181,117 @@ func (io *VersionedIO) RecordAllWriteAtOnce(outputs [][]VersionedWrite) {
 	for ind, val := range outputs {
 		io.allOutputs[ind] = val
 	}
+}
+
+type DAG struct {
+	*dag.DAG
+}
+
+type TxDep struct {
+	Index         int
+	ReadList      []VersionedRead
+	FullWriteList [][]VersionedWrite
+}
+
+func HasReadDep(txFrom VersionedWrites, txTo VersionedReads) bool {
+	reads := make(map[VersionKey]bool)
+
+	for _, v := range txTo {
+		reads[v.Path] = true
+	}
+
+	for _, rd := range txFrom {
+		if _, ok := reads[rd.Path]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+func BuildDAG(deps VersionedIO, logger log.Logger) (d DAG) {
+	d = DAG{dag.NewDAG()}
+	ids := make(map[int]string)
+
+	for i := len(deps.inputs) - 1; i > 0; i-- {
+		txTo := deps.inputs[i]
+
+		var txToId string
+
+		if _, ok := ids[i]; ok {
+			txToId = ids[i]
+		} else {
+			txToId, _ = d.AddVertex(i)
+			ids[i] = txToId
+		}
+
+		for j := i - 1; j >= 0; j-- {
+			txFrom := deps.allOutputs[j]
+
+			if HasReadDep(txFrom, txTo) {
+				var txFromId string
+				if _, ok := ids[j]; ok {
+					txFromId = ids[j]
+				} else {
+					txFromId, _ = d.AddVertex(j)
+					ids[j] = txFromId
+				}
+
+				err := d.AddEdge(txFromId, txToId)
+				if err != nil {
+					logger.Warn("Failed to add edge", "from", txFromId, "to", txToId, "err", err)
+				}
+			}
+		}
+	}
+
+	return
+}
+
+func depsHelper(dependencies map[int]map[int]bool, txFrom VersionedWrites, txTo VersionedReads, i int, j int) map[int]map[int]bool {
+	if HasReadDep(txFrom, txTo) {
+		dependencies[i][j] = true
+
+		for k := range dependencies[i] {
+			_, foundDep := dependencies[j][k]
+
+			if foundDep {
+				delete(dependencies[i], k)
+			}
+		}
+	}
+
+	return dependencies
+}
+
+func UpdateDeps(deps map[int]map[int]bool, t TxDep) map[int]map[int]bool {
+	txTo := t.ReadList
+
+	deps[t.Index] = map[int]bool{}
+
+	for j := 0; j <= t.Index-1; j++ {
+		txFrom := t.FullWriteList[j]
+
+		deps = depsHelper(deps, txFrom, txTo, t.Index, j)
+	}
+
+	return deps
+}
+
+func GetDep(deps VersionedIO) map[int]map[int]bool {
+	newDependencies := map[int]map[int]bool{}
+
+	for i := 1; i < len(deps.inputs); i++ {
+		txTo := deps.inputs[i]
+
+		newDependencies[i] = map[int]bool{}
+
+		for j := 0; j <= i-1; j++ {
+			txFrom := deps.allOutputs[j]
+
+			newDependencies = depsHelper(newDependencies, txFrom, txTo, i, j)
+		}
+	}
+
+	return newDependencies
 }

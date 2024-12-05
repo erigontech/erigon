@@ -12,6 +12,7 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -34,19 +35,17 @@ func (se *serialExecutor) processEvents(ctx context.Context, commitThreshold uin
 	return nil
 }
 
-func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (cont bool, err error) {
+func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (cont bool, err error) {
 	for _, txTask := range tasks {
-		if txTask.Error != nil {
-			return false, nil
-		}
+		result := se.applyWorker.RunTxTaskNoLock(txTask, se.isMining)
+		txTask := result.Task.(*execTask)
 
-		se.applyWorker.RunTxTaskNoLock(txTask, se.isMining)
 		if err := func() error {
-			if errors.Is(txTask.Error, context.Canceled) {
-				return txTask.Error
+			if errors.Is(result.Err, context.Canceled) {
+				return result.Err
 			}
-			if txTask.Error != nil {
-				return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, txTask.Error) //same as in stage_exec.go
+			if result.Err != nil {
+				return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
 			}
 
 			se.txCount++
@@ -77,7 +76,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 				se.outputBlockNum.SetUint64(txTask.BlockNum)
 			}
 			if se.cfg.syncCfg.ChaosMonkey {
-				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, txTask.Error)
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, result.Err)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")
 					return chaosErr
@@ -123,9 +122,12 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 		}
 
 		// MA applystate
-		if err := se.rs.ApplyState4(ctx, txTask); err != nil {
+		if err := se.rs.ApplyState4(ctx, txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
+			txTask.BalanceIncreaseSet, txTask.Logs, txTask.TraceFroms, txTask.TraceTos,
+			txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
 			return false, err
 		}
+		txTask.ReadLists, txTask.WriteLists = nil, nil
 
 		se.doms.SetTxNum(txTask.TxNum)
 		se.doms.SetBlockNum(txTask.BlockNum)

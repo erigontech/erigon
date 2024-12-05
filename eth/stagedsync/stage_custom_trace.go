@@ -32,8 +32,8 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/state/exec3"
 	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/ethdb/prune"
@@ -173,11 +173,12 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
-		Reduce: func(txTask *state.TxTask, tx kv.Tx) (err error) {
-			if txTask.Error != nil {
+		Reduce: func(result *exec.Result, tx kv.Tx) (err error) {
+			if result.Err != nil {
 				return err
 			}
 
+			txTask := result.Task.(*exec.TxTask)
 			if txTask.Tx != nil {
 				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
 			}

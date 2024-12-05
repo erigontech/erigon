@@ -81,6 +81,11 @@ type StateTransition struct {
 	//some pre-allocated intermediate variables
 	sharedBuyGas        *uint256.Int
 	sharedBuyGasBalance *uint256.Int
+
+	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
+	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
+	// This is useful during parallel state transition, where the common account read/write should be minimized.
+	noFeeBurnAndTip bool
 }
 
 // Message represents a message sent to a contract.
@@ -155,6 +160,12 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 // for trace_call to replicate OE/Parity behaviour
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
+}
+
+func ApplyMessageNoFeeBurnOrTip(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
+	st := NewStateTransition(evm, msg, gp)
+	st.noFeeBurnAndTip = true
+	return st.TransitionDb(refunds, gasBailout)
 }
 
 // to returns the recipient of the message.
@@ -330,12 +341,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
 	senderInitBalance = senderInitBalance.Clone()
-	coinbaseInitBalance, err := st.state.GetBalance(coinbase)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
-	}
-	coinbaseInitBalance = coinbaseInitBalance.Clone()
 
+	var coinbaseInitBalance *uint256.Int
+	if !st.noFeeBurnAndTip {
+		coinbaseInitBalance, err = st.state.GetBalance(coinbase)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
+		coinbaseInitBalance = coinbaseInitBalance.Clone()
+	}
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
@@ -524,17 +538,28 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+
+	if !st.noFeeBurnAndTip {
+		if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
 	}
+
+	var burnAmount *uint256.Int
+	var burntContractAddress *libcommon.Address
+
 	if !msg.IsFree() && rules.IsLondon {
-		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
+		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
-			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
-			st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
+			burnAmount = new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
-				st.state.AddBalance(*burntContractAddress, st.evm.BlobFee, tracing.BalanceChangeUnspecified)
+				burnAmount = new(uint256.Int).Add(burnAmount, st.evm.BlobFee)
+			}
+
+			if !st.noFeeBurnAndTip {
+				st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
 			}
 		}
 	}
@@ -547,6 +572,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           amount,
+		FeeBurnt:            burnAmount,
+	}
+
+	if burntContractAddress != nil {
+		result.BurntContractAddress = *burntContractAddress
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {

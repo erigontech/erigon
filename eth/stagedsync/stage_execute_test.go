@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/params"
 )
@@ -39,7 +40,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 			stateWriter.SetTxNum(context.Background(), n)
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
-			txTask := &state.TxTask{
+			txTask := &exec.TxTask{
 				BlockNum:   n,
 				Rules:      params.TestRules,
 				TxNum:      n,
@@ -49,9 +50,12 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 			}
 			txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
 			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
-			if err := rs.ApplyState4(context.Background(), txTask); err != nil {
+			if err := rs.ApplyState4(context.Background(), txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
+				txTask.BalanceIncreaseSet, txTask.Logs, txTask.TraceFroms, txTask.TraceTos,
+				txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
 				panic(err)
 			}
+			txTask.ReadLists, txTask.WriteLists = nil, nil
 			_, err := rs.Domains().ComputeCommitment(context.Background(), true, txTask.BlockNum, "")
 			if err != nil {
 				panic(err)

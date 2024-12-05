@@ -28,11 +28,11 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -50,7 +50,7 @@ type Worker struct {
 	chainTx     kv.Tx
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
-	in          *state.QueueWithRetry
+	in          *exec.QueueWithRetry
 	rs          *state.StateV3
 	stateWriter *state.StateWriterV3
 	stateReader state.ResettableStateReader
@@ -60,7 +60,7 @@ type Worker struct {
 	ctx      context.Context
 	engine   consensus.Engine
 	genesis  *types.Genesis
-	resultCh *state.ResultsQueue
+	resultCh *exec.ResultsQueue
 	chain    consensus.ChainReader
 
 	callTracer  *CallTracer
@@ -75,7 +75,7 @@ type Worker struct {
 	isMining bool
 }
 
-func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *state.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
+func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
@@ -133,18 +133,18 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 func (rw *Worker) Run() error {
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		//fmt.Println("RTX", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Final)
-		rw.RunTxTask(txTask, rw.isMining)
-		if err := rw.resultCh.Add(rw.ctx, txTask); err != nil {
+		result := rw.RunTxTask(txTask.(*exec.TxTask), rw.isMining)
+		if err := rw.resultCh.Add(rw.ctx, result); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (rw *Worker) RunTxTask(txTask *state.TxTask, isMining bool) {
+func (rw *Worker) RunTxTask(txTask *exec.TxTask, isMining bool) *exec.Result {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	rw.RunTxTaskNoLock(txTask, isMining)
+	return rw.RunTxTaskNoLock(txTask, isMining)
 }
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
@@ -166,7 +166,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
+func (rw *Worker) RunTxTaskNoLock(txTask *exec.TxTask, isMining bool) *exec.Result {
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -187,124 +187,33 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		rw.stateReader.SetTx(rw.chainTx)
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
-	txTask.Error = nil
-
-	rw.stateReader.SetTxNum(txTask.TxNum)
-	rw.rs.Domains().SetTxNum(txTask.TxNum)
-	rw.stateReader.ResetReadSet()
-	rw.stateWriter.ResetWriteSet()
-
-	rw.ibs.Reset()
-	ibs := rw.ibs
-	//ibs.SetTrace(true)
-
-	rules := txTask.Rules
-	var err error
-	header := txTask.Header
-	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
 	switch {
 	case txTask.TxIndex == -1:
-		if txTask.BlockNum == 0 {
-
-			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			_, ibs, err = core.GenesisToBlock(rw.genesis, rw.dirs, rw.logger)
-			if err != nil {
-				panic(err)
-			}
-			// For Genesis, rules should be empty, so that empty accounts can be included
-			rules = &chain.Rules{}
-			break
-		}
-
-		// Block initialisation
-		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */)
-		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
-		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
-		if txTask.BlockNum == 0 {
-			break
-		}
-
-		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		// End of block transaction in a block
-		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
-		}
-
-		if isMining {
-			_, txTask.Txs, txTask.BlockReceipts, _, err = rw.engine.FinalizeAndAssemble(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, nil, rw.logger)
-		} else {
-			_, _, _, err = rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, rw.logger)
-		}
-		if err != nil {
-			txTask.Error = err
-		} else {
-			//incorrect unwind to block 2
-			//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
-			//	txTask.Error = err
-			//}
-			txTask.TraceTos = map[libcommon.Address]struct{}{}
-			txTask.TraceTos[txTask.Coinbase] = struct{}{}
-			for _, uncle := range txTask.Uncles {
-				txTask.TraceTos[uncle.Coinbase] = struct{}{}
-			}
-		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), rw.chainConfig.GetMaxBlobGasPerBlock())
 		rw.callTracer.Reset()
-		rw.vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		ibs.SetTxContext(txTask.TxIndex)
-		msg := txTask.TxAsMessage
-		if msg.FeeCap().IsZero() && rw.engine != nil {
-			// Only zero-gas transactions may be service ones
-			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */)
-			}
-			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
-		}
-
-		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
-
-		// MA applytx
-		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
-		if err != nil {
-			txTask.Error = err
-		} else {
-			txTask.Failed = applyRes.Failed()
-			txTask.UsedGas = applyRes.UsedGas
-			// Update the state with pending changes
-			ibs.SoftFinalise()
-			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
-			txTask.TraceFroms = rw.callTracer.Froms()
-			txTask.TraceTos = rw.callTracer.Tos()
-		}
-
 	}
-	// Prepare read set, write set and balanceIncrease set and send for serialisation
-	if txTask.Error == nil {
-		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		//for addr, bal := range txTask.BalanceIncreaseSet {
-		//	fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		//}
-		if err = ibs.MakeWriteSet(rules, rw.stateWriter); err != nil {
-			panic(err)
-		}
-		txTask.ReadLists = rw.stateReader.ReadSet()
-		txTask.WriteLists = rw.stateWriter.WriteSet()
-		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
+
+	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.rs, rw.ibs,
+		core.ApplyMessage, rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs, isMining)
+
+	switch {
+	case txTask.TxIndex == -1:
+	case txTask.Final:
+	default:
+		txTask.TraceFroms = rw.callTracer.Froms()
+		txTask.TraceTos = rw.callTracer.Tos()
 	}
+
+	return result
 }
 
-func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *state.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *state.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8
-	rws = state.NewResultsQueue(resultChSize, workerCount) // workerCount * 4
+	rws = exec.NewResultsQueue(resultChSize, workerCount) // workerCount * 4
 	{
 		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 		// and in applyLoop all errors are critical

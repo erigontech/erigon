@@ -90,7 +90,7 @@ type TxnIndexCells struct {
 }
 
 type Version struct {
-	TxnIndex    int
+	TxIndex    int
 	Incarnation int
 }
 
@@ -119,13 +119,13 @@ func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}) {
 	})
 
 	cells.rw.RLock()
-	ci, ok := cells.tm.Get(v.TxnIndex)
+	ci, ok := cells.tm.Get(v.TxIndex)
 	cells.rw.RUnlock()
 
 	if ok {
 		if ci.incarnation > v.Incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %v, %v",
-				k, v.TxnIndex))
+				k, v.TxIndex))
 		}
 
 		ci.flag = FlagDone
@@ -135,8 +135,8 @@ func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}) {
 		func() {
 			cells.rw.Lock()
 			defer cells.rw.Unlock()
-			if ci, ok = cells.tm.Get(v.TxnIndex); !ok {
-				cells.tm.Set(v.TxnIndex, &WriteCell{
+			if ci, ok = cells.tm.Get(v.TxIndex); !ok {
+				cells.tm.Set(v.TxIndex, &WriteCell{
 					flag:        FlagDone,
 					incarnation: v.Incarnation,
 					data:        data,
@@ -286,7 +286,7 @@ func ValidateVersion(txIdx int, lastInputOutput *VersionedIO, versionedData *Ver
 			// }
 
 			valid = rd.Kind == ReadKindMap && rd.V == Version{
-				TxnIndex:    mvResult.depIdx,
+				TxIndex:    mvResult.depIdx,
 				Incarnation: mvResult.incarnation,
 			}
 		case MVReadResultDependency:

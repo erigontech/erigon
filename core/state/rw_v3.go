@@ -24,11 +24,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -36,17 +37,14 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
 var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 
 type StateV3 struct {
-	domains      *libstate.SharedDomains
-	triggerLock  sync.Mutex
-	triggers     map[uint64]*TxTask
-	senderTxNums map[common.Address]uint64
-
+	domains             *libstate.SharedDomains
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	logger              log.Logger
@@ -57,71 +55,19 @@ type StateV3 struct {
 func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
-		triggers:            map[uint64]*TxTask{},
-		senderTxNums:        map[common.Address]uint64{},
 		applyPrevAccountBuf: make([]byte, 256),
 		logger:              logger,
 		//trace: true,
 	}
 }
 
-func (rs *StateV3) ReTry(txTask *TxTask, in *QueueWithRetry) {
-	txTask.Reset()
-	in.ReTry(txTask)
-}
-func (rs *StateV3) AddWork(ctx context.Context, txTask *TxTask, in *QueueWithRetry) {
-	txTask.Reset()
-	in.Add(ctx, txTask)
-}
-
-func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
-	//TODO: it deadlocks on panic, fix it
-	defer func() {
-		rec := recover()
-		if rec != nil {
-			fmt.Printf("panic?: %s,%s\n", rec, dbg.Stack())
-		}
-	}()
-	rs.triggerLock.Lock()
-	defer rs.triggerLock.Unlock()
-	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
-	if deferral {
-		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
-		// So we add this data dependency as a trigger
-		//fmt.Printf("trigger[%d] sender [%x]<=%x\n", lastTxNum, *txTask.Sender, txTask.Tx.Hash())
-		rs.triggers[lastTxNum] = txTask
-	}
-	//fmt.Printf("senderTxNums[%x]=%d\n", *txTask.Sender, txTask.TxNum)
-	rs.senderTxNums[*txTask.Sender] = txTask.TxNum
-	return !deferral
-}
-
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWithRetry) (count int) {
-	execTxsDone.Inc()
-
-	rs.triggerLock.Lock()
-	defer rs.triggerLock.Unlock()
-	if triggered, ok := rs.triggers[txNum]; ok {
-		in.ReTry(triggered)
-		count++
-		delete(rs.triggers, txNum)
-	}
-	if sender != nil {
-		if lastTxNum, ok := rs.senderTxNums[*sender]; ok && lastTxNum == txNum {
-			// This is the last transaction so far with this sender, remove
-			delete(rs.senderTxNums, *sender)
-		}
-	}
-	return count
-}
-
-func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
+func (rs *StateV3) applyState(writeLists map[string]*state.KvList, balanceIncreases map[libcommon.Address]uint256.Int, domains *libstate.SharedDomains, rules *chain.Rules) error {
 	var acc accounts.Account
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
-	if txTask.WriteLists != nil {
+	if writeLists != nil {
 		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain, kv.StorageDomain} {
-			list, ok := txTask.WriteLists[domain.String()]
+			list, ok := writeLists[domain.String()]
 			if !ok {
 				continue
 			}
@@ -140,8 +86,8 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 		}
 	}
 
-	emptyRemoval := txTask.Rules.IsSpuriousDragon
-	for addr, increase := range txTask.BalanceIncreaseSet {
+	emptyRemoval := rules.IsSpuriousDragon
+	for addr, increase := range balanceIncreases {
 		increase := increase
 		addrBytes := addr.Bytes()
 		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, addrBytes, nil)
@@ -178,42 +124,53 @@ func (rs *StateV3) SetTxNum(txNum, blockNum uint64) {
 	rs.domains.SetBlockNum(blockNum)
 }
 
-func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
-	if txTask.HistoryExecution {
+func (rs *StateV3) ApplyState4(ctx context.Context,
+	blockNum uint64,
+	txNum uint64,
+	readLists ReadLists,
+	writeLists WriteLists,
+	balanceIncreases map[libcommon.Address]uint256.Int,
+	logs []*types.Log,
+	traceFroms map[libcommon.Address]struct{},
+	traceTos map[libcommon.Address]struct{},
+	config *chain.Config,
+	rules *chain.Rules,
+	pruneNonEssentials bool,
+	historyExecution bool) error {
+	if historyExecution {
 		return nil
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	if err := rs.applyState(txTask, rs.domains); err != nil {
+	if err := rs.applyState(writeLists, balanceIncreases, rs.domains, rules); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
-	returnReadList(txTask.ReadLists)
-	returnWriteList(txTask.WriteLists)
+	readLists.Return()
+	writeLists.Return()
 
-	if err := rs.ApplyLogsAndTraces4(txTask, rs.domains); err != nil {
+	if err := rs.ApplyLogsAndTraces4(logs, traceFroms, traceTos, rs.domains, pruneNonEssentials, config); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
-	if (txTask.TxNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ {
+	if (txNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
 		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
 		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, true, txTask.BlockNum,
-			fmt.Sprintf("applying step %d", txTask.TxNum/rs.domains.StepSize()))
+		_, err := rs.domains.ComputeCommitment(ctx, true, blockNum,
+			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()))
 		if err != nil {
 			return fmt.Errorf("StateV3.ComputeCommitment: %w", err)
 		}
 	}
 
-	txTask.ReadLists, txTask.WriteLists = nil, nil
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedDomains) error {
-	shouldPruneNonEssentials := txTask.PruneNonEssentials && txTask.Config != nil
+func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[libcommon.Address]struct{}, traceTos map[libcommon.Address]struct{}, domains *libstate.SharedDomains, pruneNonEssentials bool, config *chain.Config) error {
+	shouldPruneNonEssentials := pruneNonEssentials && config != nil
 
-	for addr := range txTask.TraceFroms {
-		if shouldPruneNonEssentials && addr != txTask.Config.DepositContract {
+	for addr := range traceFroms {
+		if shouldPruneNonEssentials && addr != config.DepositContract {
 			continue
 		}
 		if err := domains.IndexAdd(kv.TblTracesFromIdx, addr[:]); err != nil {
@@ -221,8 +178,8 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 		}
 	}
 
-	for addr := range txTask.TraceTos {
-		if shouldPruneNonEssentials && addr != txTask.Config.DepositContract {
+	for addr := range traceTos {
+		if shouldPruneNonEssentials && addr != config.DepositContract {
 			continue
 		}
 		if err := domains.IndexAdd(kv.TblTracesToIdx, addr[:]); err != nil {
@@ -230,8 +187,8 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 		}
 	}
 
-	for _, lg := range txTask.Logs {
-		if shouldPruneNonEssentials && lg.Address != txTask.Config.DepositContract {
+	for _, lg := range logs {
+		if shouldPruneNonEssentials && lg.Address != config.DepositContract {
 			continue
 		}
 		if err := domains.IndexAdd(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
@@ -787,9 +744,15 @@ func (r *ReaderParallelV3) ReadAccountIncarnation(address common.Address) (uint6
 	return 0, nil
 }
 
+type WriteLists map[string]*libstate.KvList
+
+func (v WriteLists) Return() {
+	returnWriteList(v)
+}
+
 var writeListPool = sync.Pool{
 	New: func() any {
-		return map[string]*libstate.KvList{
+		return WriteLists{
 			kv.AccountsDomain.String(): {},
 			kv.StorageDomain.String():  {},
 			kv.CodeDomain.String():     {},
@@ -797,7 +760,7 @@ var writeListPool = sync.Pool{
 	},
 }
 
-func newWriteList() map[string]*libstate.KvList {
+func newWriteList() WriteLists {
 	v := writeListPool.Get().(map[string]*libstate.KvList)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
@@ -805,7 +768,7 @@ func newWriteList() map[string]*libstate.KvList {
 	return v
 	//return writeListPool.Get().(map[string]*libstate.KvList)
 }
-func returnWriteList(v map[string]*libstate.KvList) {
+func returnWriteList(v WriteLists) {
 	if v == nil {
 		return
 	}
@@ -817,9 +780,15 @@ func returnWriteList(v map[string]*libstate.KvList) {
 	writeListPool.Put(v)
 }
 
+type ReadLists map[string]*libstate.KvList
+
+func (v ReadLists) Return() {
+	returnReadList(v)
+}
+
 var readListPool = sync.Pool{
 	New: func() any {
-		return map[string]*libstate.KvList{
+		return ReadLists{
 			kv.AccountsDomain.String(): {},
 			kv.CodeDomain.String():     {},
 			libstate.CodeSizeTableFake: {},
@@ -828,15 +797,15 @@ var readListPool = sync.Pool{
 	},
 }
 
-func newReadList() map[string]*libstate.KvList {
-	v := readListPool.Get().(map[string]*libstate.KvList)
+func newReadList() ReadLists {
+	v := readListPool.Get().(ReadLists)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
 	//return readListPool.Get().(map[string]*libstate.KvList)
 }
-func returnReadList(v map[string]*libstate.KvList) {
+func returnReadList(v ReadLists) {
 	if v == nil {
 		return
 	}
