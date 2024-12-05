@@ -181,13 +181,14 @@ jobs:
           echo "Only last $KEEP_IMAGES images will be kept."
           curl_cmd="curl -s -H \"Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}\" "
           dockerhub_url='https://hub.docker.com/v2/namespaces/erigontech/repositories/erigon'
+          ## getting all pages in a loop from dockerhub and grepping required tag from the list of tags:
           my_list () {
             # First page:
             next_page="$dockerhub_url/tags?page=1&page_size=100"
             while [ "$next_page" != "null" ]
               do
               # Print tags and push dates for tags matching "${{ env.TAG_KEY }}-":
-              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep '${{ env.TAG_KEY }}-'
+              $curl_cmd $next_page | jq -r '.results|.[]|.name + " " + .tag_last_pushed' | grep '${{ env.TAG_KEY }}-' || true
               next_page=`$curl_cmd $next_page | jq '.next' | sed -e 's/^\"//' -e 's/\"$//'`
             done
             }
