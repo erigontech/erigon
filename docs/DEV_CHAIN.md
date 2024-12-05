@@ -33,7 +33,7 @@ Or, you could start the rpcdaemon internally together
  Argument notes:
  * datadir : Tells where the data is stored, default level is dev folder.
  * chain : Tells that we want to run Erigon in the dev chain.
- * private.api.addr=localhost:9090 : Tells where Eigon is going to listen for connections.
+ * private.api.addr=localhost:9090 : Tells where Erigon is going to listen for connections.
  * mine : Add this if you want the node to mine.
  * dev.period <number-of-seconds>: Add this to specify the timing interval among blocks. Number of seconds MUST be > 0 (if you want empty blocks) otherwise the default value 0 does not allow mining of empty blocks.
  * http.api: List of services to start on http (rpc) access
@@ -150,7 +150,7 @@ From the RPC daemon terminal, you will see something like this
  
  Now we want to check the creation of a new block and that all the nodes sync.
 
-Below we can see that block 1 is created (blocn_num=1) and that the next block to be proposed increments from 1 to 2 ( block=2). The other nodes will see the same update.
+Below we can see that block 1 is created (block_num=1) and that the next block to be proposed increments from 1 to 2 ( block=2). The other nodes will see the same update.
  
 <img width="1327" alt="Block" src="https://user-images.githubusercontent.com/24697803/140509913-b2fc3140-ad81-4bf3-a595-d102f7c75245.png">
  
