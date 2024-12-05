@@ -1,4 +1,4 @@
-name: CI-CD build and deploy docker images based on the last commit in the main branch
+name: CI-CD build and deploy docker images based on the last commit in the target branch
 run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }} branch"
 
 env:
