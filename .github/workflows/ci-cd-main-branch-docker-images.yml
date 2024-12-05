@@ -1,5 +1,5 @@
 name: CI-CD build and deploy docker images based on the last commit in the main branch
-run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the ${{ github.ref_name }} branch"
+run-name: "Commit id ${{ github.sha }}: CI-CD build and deploy docker images based on the commit id in the ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }} branch"
 
 env:
   APPLICATION: "erigon"
@@ -109,7 +109,7 @@ jobs:
           docker run --platform linux/arm64 \
           --rm -v $(pwd)/erigon:/erigon:ro \
           -v $(pwd)/build-arm64:/erigon-build \
-          -v ${HOME}/.cache/go-build/arm64:/root/.cache/go-build \
+          -v ${HOME}/.cache/go-build:/root/.cache/go-build \
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
@@ -122,7 +122,7 @@ jobs:
           docker run --platform linux/amd64 \
           --rm -v $(pwd)/erigon:/erigon:ro \
           -v $(pwd)/build-amd64:/erigon-build \
-          -v ${HOME}/.cache/go-build/amd64:/root/.cache/go-build \
+          -v ${HOME}/.cache/go-build:/root/.cache/go-build \
           -v ${HOME}/go/pkg/mod:/go/pkg/mod \
           -w /erigon --entrypoint /bin/sh \
           ${{ env.BUILDER_IMAGE }} \
@@ -198,15 +198,15 @@ jobs:
             my_list | tail -n+${{ env.KEEP_IMAGES }} | while read line; do
               echo -n "Removing docker image/published - $line "
               current_image=$(echo $line | sed -e 's/^\(${{ env.TAG_KEY }}-.\{7\}\) .*/\1/')
-              #output_code=$(curl --write-out %{http_code} --output curl-output.log \
-              #      -s -X DELETE -H "Accept: application/json" \
-              #      -H "Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}" \
-              #      https://hub.docker.com/v2/repositories/erigontech/erigon/tags/${current_image} )
-              #if [ $output_code -ne 204 ]; then
-              #  echo "ERROR: failed to remove docker image erigon:${current_image}"
-              #  echo "ERROR: API response: $(cat curl-output.log)."
-              #else
-              #  echo -n " - removed. "
-              #fi
+              output_code=$(curl --write-out %{http_code} --output curl-output.log \
+                    -s -X DELETE -H "Accept: application/json" \
+                    -H "Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}" \
+                    https://hub.docker.com/v2/repositories/erigontech/erigon/tags/${current_image} )
+              if [ $output_code -ne 204 ]; then
+                echo "ERROR: failed to remove docker image erigon:${current_image}"
+                echo "ERROR: API response: $(cat curl-output.log)."
+              else
+                echo -n " - removed. "
+              fi
               echo "Done."
             done
