@@ -2008,7 +2008,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			if err := ancientDomainValsCollector.Load(rwTx, dt.d.valuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 				return stat, fmt.Errorf("load domain values: %w", err)
 			}
-			fmt.Println("LAL save prunedKey:", k)
+			fmt.Println("LAL save prunedKey:", i, k)
 
 			if err := SaveExecV3PruneProgress(rwTx, dt.d.valuesTable, k); err != nil {
 				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.name.String(), err)
