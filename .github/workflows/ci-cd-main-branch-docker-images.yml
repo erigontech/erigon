@@ -192,9 +192,9 @@ jobs:
               next_page=`$curl_cmd $next_page | jq '.next' | sed -e 's/^\"//' -e 's/\"$//'`
             done
             }
-            echo "DEBUG"
+            echo "DEBUG: full list of images:"
             my_list
-            echo "END DEBUG"
+            echo "DEBUG: end of the list."
             my_list | tail -n+${{ env.KEEP_IMAGES }} | while read line; do
               echo -n "Removing docker image/published - $line "
               current_image=$(echo $line | sed -e 's/^\(${{ env.TAG_KEY }}-.\{7\}\) .*/\1/')
