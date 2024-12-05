@@ -187,6 +187,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinEnableUPNPlag,
 	&utils.CaplinMaxInboundTrafficPerPeerFlag,
 	&utils.CaplinMaxOutboundTrafficPerPeerFlag,
+	&utils.CaplinAdaptableTrafficRequirementFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
 	&utils.SentinelBootnodes,
