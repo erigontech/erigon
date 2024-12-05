@@ -17,6 +17,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -24,6 +25,8 @@ import (
 	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
+
+var PrunedError = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 Implements StateReader and StateWriter
 type HistoryReaderV3 struct {
@@ -49,6 +52,9 @@ func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) GetTxNum() uint64      { return hr.txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
+
+// return the earliest known txnum in files
+func (hr *HistoryReaderV3) StartingTxNum() uint64 { return hr.ttx.StartingTxNum() }
 
 func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
 func (hr *HistoryReaderV3) ResetReadSet()                     {}
