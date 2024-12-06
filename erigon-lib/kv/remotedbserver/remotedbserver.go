@@ -543,7 +543,7 @@ func (s *KvServer) GetLatest(_ context.Context, req *remote.GetLatestReq) (reply
 				return err
 			}
 		} else {
-			reply.V, reply.Ok, err = ttx.GetAsOf(domainName, req.K, req.K2, req.Ts)
+			reply.V, reply.Ok, err = ttx.GetAsOf(domainName, req.K, req.Ts)
 			if err != nil {
 				return err
 			}
