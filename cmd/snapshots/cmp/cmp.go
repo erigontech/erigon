@@ -580,6 +580,11 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 	var indexTime uint64
 	var compareTime uint64
 
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.NoDownloader = true
+	freezeCfg.ProduceE2 = false
+	freezeCfg.ChainName = c.chain
+
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 
