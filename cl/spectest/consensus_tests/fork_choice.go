@@ -156,18 +156,18 @@ func (f *ForkChoiceStep) GetChecks() *ForkChoiceChecks {
 
 type ForkChoiceChecks struct {
 	Head *struct {
-		Slot *int         `yaml:"slot,omitempty"`
+		Slot *int            `yaml:"slot,omitempty"`
 		Root *libcommon.Hash `yaml:"root,omitempty"`
 	} `yaml:"head,omitempty"`
 	Time                *int `yaml:"time,omitempty"`
 	GenesisTime         *int `yaml:"genesis_time,omitempty"`
 	JustifiedCheckpoint *struct {
-		Epoch *int         `yaml:"epoch,omitempty"`
+		Epoch *int            `yaml:"epoch,omitempty"`
 		Root  *libcommon.Hash `yaml:"root,omitempty"`
 	} `yaml:"justified_checkpoint,omitempty"`
 
 	FinalizedCheckpoint *struct {
-		Epoch *int         `yaml:"epoch,omitempty"`
+		Epoch *int            `yaml:"epoch,omitempty"`
 		Root  *libcommon.Hash `yaml:"root,omitempty"`
 	} `yaml:"finalized_checkpoint,omitempty"`
 	ProposerBoostRoot *libcommon.Hash `yaml:"proposer_boost_root,omitempty"`

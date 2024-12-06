@@ -44,28 +44,28 @@ var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 // Genesis specifies the header fields, state of a genesis block. It also defines hard
 // fork switch-over blocks through the chain configuration.
 type Genesis struct {
-	Config     *chain.Config  `json:"config"`
-	Nonce      uint64         `json:"nonce"`
-	Timestamp  uint64         `json:"timestamp"`
-	ExtraData  []byte         `json:"extraData"`
-	GasLimit   uint64         `json:"gasLimit"   gencodec:"required"`
-	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
+	Config     *chain.Config     `json:"config"`
+	Nonce      uint64            `json:"nonce"`
+	Timestamp  uint64            `json:"timestamp"`
+	ExtraData  []byte            `json:"extraData"`
+	GasLimit   uint64            `json:"gasLimit"   gencodec:"required"`
+	Difficulty *big.Int          `json:"difficulty" gencodec:"required"`
 	Mixhash    libcommon.Hash    `json:"mixHash"`
 	Coinbase   libcommon.Address `json:"coinbase"`
-	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
+	Alloc      GenesisAlloc      `json:"alloc"      gencodec:"required"`
 
 	AuRaSeal *AuRaSeal `json:"seal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
-	Number     uint64      `json:"number"`
-	GasUsed    uint64      `json:"gasUsed"`
+	Number     uint64         `json:"number"`
+	GasUsed    uint64         `json:"gasUsed"`
 	ParentHash libcommon.Hash `json:"parentHash"`
 
 	// Header fields added in London and later hard forks
-	BaseFee               *big.Int     `json:"baseFeePerGas"`         // EIP-1559
-	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
-	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
+	BaseFee               *big.Int        `json:"baseFeePerGas"`         // EIP-1559
+	BlobGasUsed           *uint64         `json:"blobGasUsed"`           // EIP-4844
+	ExcessBlobGas         *uint64         `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *libcommon.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 	RequestsHash          *libcommon.Hash `json:"requestsHash"`          // EIP-7685
 }
@@ -117,12 +117,12 @@ func DecodeGenesisAlloc(i interface{}) (GenesisAlloc, error) {
 // GenesisAccount is an account in the state of the genesis block.
 // Either use "constructor" for deployment code or "code" directly for the final code.
 type GenesisAccount struct {
-	Constructor []byte                      `json:"constructor,omitempty"` // deployment code
-	Code        []byte                      `json:"code,omitempty"`        // final contract code
+	Constructor []byte                            `json:"constructor,omitempty"` // deployment code
+	Code        []byte                            `json:"code,omitempty"`        // final contract code
 	Storage     map[libcommon.Hash]libcommon.Hash `json:"storage,omitempty"`
-	Balance     *big.Int                    `json:"balance" gencodec:"required"`
-	Nonce       uint64                      `json:"nonce,omitempty"`
-	PrivateKey  []byte                      `json:"secretKey,omitempty"` // for tests
+	Balance     *big.Int                          `json:"balance" gencodec:"required"`
+	Nonce       uint64                            `json:"nonce,omitempty"`
+	PrivateKey  []byte                            `json:"secretKey,omitempty"` // for tests
 }
 
 // field type overrides for gencodec

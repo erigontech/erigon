@@ -63,13 +63,13 @@ func (bt *BlockTest) UnmarshalJSON(in []byte) error {
 }
 
 type btJSON struct {
-	Blocks     []btBlock             `json:"blocks"`
-	Genesis    btHeader              `json:"genesisBlockHeader"`
-	Pre        types.GenesisAlloc    `json:"pre"`
-	Post       types.GenesisAlloc    `json:"postState"`
+	Blocks     []btBlock                `json:"blocks"`
+	Genesis    btHeader                 `json:"genesisBlockHeader"`
+	Pre        types.GenesisAlloc       `json:"pre"`
+	Post       types.GenesisAlloc       `json:"postState"`
 	BestBlock  libcommon.UnprefixedHash `json:"lastblockhash"`
-	Network    string                `json:"network"`
-	SealEngine string                `json:"sealEngine"`
+	Network    string                   `json:"network"`
+	SealEngine string                   `json:"sealEngine"`
 }
 
 type btBlock struct {

@@ -81,8 +81,8 @@ type stJSON struct {
 type stPostState struct {
 	Root            libcommon.UnprefixedHash `json:"hash"`
 	Logs            libcommon.UnprefixedHash `json:"logs"`
-	Tx              hexutility.Bytes      `json:"txbytes"`
-	ExpectException string                `json:"expectException"`
+	Tx              hexutility.Bytes         `json:"txbytes"`
+	ExpectException string                   `json:"expectException"`
 	Indexes         struct {
 		Data  int `json:"data"`
 		Gas   int `json:"gas"`
