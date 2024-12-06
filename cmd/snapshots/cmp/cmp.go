@@ -402,6 +402,11 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 	var downloadTime uint64
 	var compareTime uint64
 
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.NoDownloader = true
+	freezeCfg.ProduceE2 = false
+	freezeCfg.ChainName = c.chain
+
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 
