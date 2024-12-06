@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -50,6 +51,7 @@ type HistoricalStatesReader struct {
 	blockReader    freezeblocks.BeaconSnapshotReader
 	stateSn        *snapshotsync.CaplinStateSnapshots
 	genesisState   *state.CachingBeaconState
+	syncedData     synced_data.SyncedData
 
 	shuffledIndiciesCache *lru.CacheWithTTL[uint64, []uint64]
 }
@@ -58,7 +60,8 @@ func NewHistoricalStatesReader(
 	cfg *clparams.BeaconChainConfig,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	validatorTable *state_accessors.StaticValidatorTable,
-	genesisState *state.CachingBeaconState, stateSn *snapshotsync.CaplinStateSnapshots) *HistoricalStatesReader {
+	genesisState *state.CachingBeaconState, stateSn *snapshotsync.CaplinStateSnapshots,
+	syncedData synced_data.SyncedData) *HistoricalStatesReader {
 	shuffledIndiciesCache := lru.NewWithTTL[uint64, []uint64]("shuffledIndiciesCacheReader", 64, 2*time.Minute)
 
 	return &HistoricalStatesReader{
@@ -68,6 +71,7 @@ func NewHistoricalStatesReader(
 		validatorTable:        validatorTable,
 		stateSn:               stateSn,
 		shuffledIndiciesCache: shuffledIndiciesCache,
+		syncedData:            syncedData,
 	}
 }
 
@@ -150,12 +154,14 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetStateRoots(stateRoots)
 
 	historicalRoots := solid.NewHashList(int(r.cfg.HistoricalRootsLimit))
-	if err := state_accessors.ReadHistoricalRoots(tx, epochData.HistoricalRootsLength, func(idx int, root common.Hash) error {
-		historicalRoots.Append(root)
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to read historical roots: %w", err)
+	for i := 0; i < int(epochData.HistoricalRootsLength); i++ {
+		historicalRoot, err := r.syncedData.HistoricalRootElementAtIndex(i)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read historical root at index %d: %w", i, err)
+		}
+		historicalRoots.Append(historicalRoot)
 	}
+
 	ret.SetHistoricalRoots(historicalRoots)
 
 	// Eth1
@@ -277,11 +283,13 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetNextWithdrawalValidatorIndex(slotData.NextWithdrawalValidatorIndex)
 	// Deep history valid from Capella onwards
 	historicalSummaries := solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(r.cfg.HistoricalRootsLimit), 64)
-	if err := state_accessors.ReadHistoricalSummaries(tx, epochData.HistoricalSummariesLength, func(idx int, historicalSummary *cltypes.HistoricalSummary) error {
+
+	for i := 0; i < int(epochData.HistoricalSummariesLength); i++ {
+		historicalSummary, err := r.syncedData.HistoricalSummaryElementAtIndex(i)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read historical summary at index %d: %w", i, err)
+		}
 		historicalSummaries.Append(historicalSummary)
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to read historical summaries: %w", err)
 	}
 	ret.SetHistoricalSummaries(historicalSummaries)
 	return ret, nil
