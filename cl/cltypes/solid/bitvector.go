@@ -126,7 +126,7 @@ func (b *BitVector) DecodeSSZ(buf []byte, _ int) error {
 func (b *BitVector) EncodeSSZ(dst []byte) ([]byte, error) {
 	// allocate enough space
 	if len(dst) < b.EncodingSizeSSZ() {
-		dst = make([]byte, b.EncodingSizeSSZ())
+		dst = append(dst, make([]byte, b.EncodingSizeSSZ())...)
 	}
 	copy(dst, b.container)
 	return dst, nil

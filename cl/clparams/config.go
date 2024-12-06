@@ -553,7 +553,6 @@ type BeaconChainConfig struct {
 	TargetNumberOfPeers          uint64 `yaml:"TARGET_NUMBER_OF_PEERS" spec:"true" json:"TARGET_NUMBER_OF_PEERS,string"`                     // TargetNumberOfPeers defines the target number of peers.
 
 	// Electra
-	CompoundingWithdrawalPrefix           byte   `yaml:"COMPOUNDING_WITHDRAWAL_PREFIX" spec:"true" json:"COMPOUNDING_WITHDRAWAL_PREFIX"`                                  // CompoundingWithdrawalPrefix is the prefix for compounding withdrawals.
 	MinPerEpochChurnLimitElectra          uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA" spec:"true" json:"MIN_PER_EPOCH_CHURN_LIMIT_ELECTRA,string"`                   // MinPerEpochChurnLimitElectra defines the minimum per epoch churn limit for Electra.
 	MaxPerEpochActivationExitChurnLimit   uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT" spec:"true" json:"MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT,string"`   // MaxPerEpochActivationExitChurnLimit defines the maximum per epoch activation exit churn limit for Electra.
 	MaxDepositRequestsPerPayload          uint64 `yaml:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD" spec:"true" json:"MAX_DEPOSIT_REQUESTS_PER_PAYLOAD,string"`                     // MaxDepositRequestsPerPayload defines the maximum number of deposit requests in a block.
@@ -566,7 +565,13 @@ type BeaconChainConfig struct {
 	PendingDepositLimit                   uint64 `yaml:"PENDING_DEPOSIT_LIMIT" spec:"true" json:"PENDING_DEPOSIT_LIMIT,string"`                                           // PendingDepositLimit defines the maximum number of pending deposits.
 	PendingPartialWithdrawalsLimit        uint64 `yaml:"PENDING_PARTIAL_WITHDRAWALS_LIMIT" spec:"true" json:"PENDING_PARTIAL_WITHDRAWALS_LIMIT,string"`                   // PendingPartialWithdrawalsLimit defines the maximum number of pending partial withdrawals.
 	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`                             // PendingConsolidationsLimit defines the maximum number of pending consolidations.
-	UnsetDepositRequestsStartIndex        uint64 `yaml:"UNSET_DEPOSIT_REQUESTS_START_INDEX" spec:"true" json:"UNSET_DEPOSIT_REQUESTS_START_INDEX,string"`                 // UnsetDepositRequestsStartIndex defines the start index for unset deposit requests.
+	// Constants for the Electra fork.
+	UnsetDepositRequestsStartIndex uint64 `yaml:"UNSET_DEPOSIT_REQUESTS_START_INDEX" spec:"true" json:"UNSET_DEPOSIT_REQUESTS_START_INDEX,string"` // UnsetDepositRequestsStartIndex defines the start index for unset deposit requests.
+	FullExitRequestAmount          uint64 `yaml:"FULL_EXIT_REQUEST_AMOUNT" spec:"true" json:"FULL_EXIT_REQUEST_AMOUNT,string"`                     // FullExitRequestAmount defines the amount for a full exit request.
+	CompoundingWithdrawalPrefix    byte   `yaml:"COMPOUNDING_WITHDRAWAL_PREFIX" spec:"true" json:"COMPOUNDING_WITHDRAWAL_PREFIX"`                  // CompoundingWithdrawalPrefix is the prefix for compounding withdrawals.
+	DepositRequestType             byte   `yaml:"DEPOSIT_REQUEST_TYPE" spec:"true" json:"DEPOSIT_REQUEST_TYPE"`                                    // DepositRequestType is the type for deposit requests.
+	WithdrawalRequestType          byte   `yaml:"WITHDRAWAL_REQUEST_TYPE" spec:"true" json:"WITHDRAWAL_REQUEST_TYPE"`                              // WithdrawalRequestType is the type for withdrawal requests.
+	ConsolidationRequestType       byte   `yaml:"CONSOLIDATION_REQUEST_TYPE" spec:"true" json:"CONSOLIDATION_REQUEST_TYPE"`                        // ConsolidationRequestType is the type for consolidation requests.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -816,7 +821,6 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	TargetNumberOfPeers:          70,
 
 	// Electra
-	CompoundingWithdrawalPrefix:           0x02,
 	MinPerEpochChurnLimitElectra:          128000000000,
 	MaxPerEpochActivationExitChurnLimit:   256000000000,
 	MaxDepositRequestsPerPayload:          8192,
@@ -829,7 +833,13 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	PendingDepositLimit:                   1 << 27,
 	PendingPartialWithdrawalsLimit:        1 << 27,
 	PendingConsolidationsLimit:            1 << 18,
-	UnsetDepositRequestsStartIndex:        ^uint64(0), // 2**64 - 1
+	// Electra constants.
+	UnsetDepositRequestsStartIndex: ^uint64(0), // 2**64 - 1
+	FullExitRequestAmount:          0,
+	CompoundingWithdrawalPrefix:    0x02,
+	DepositRequestType:             0x00,
+	WithdrawalRequestType:          0x01,
+	ConsolidationRequestType:       0x02,
 }
 
 func mainnetConfig() BeaconChainConfig {

@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
@@ -532,6 +533,30 @@ func (b *BeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionC
 
 func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 	return b.ExecutionRequests
+}
+
+func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
+	ret := []hexutility.Bytes{}
+	r := b.ExecutionRequests
+	for requestType, requests := range map[byte]ssz.EncodableSSZ{
+		b.beaconCfg.DepositRequestType:       r.Deposits,
+		b.beaconCfg.WithdrawalRequestType:    r.Withdrawals,
+		b.beaconCfg.ConsolidationRequestType: r.Consolidations,
+	} {
+		if requests != nil {
+			ssz, err := r.Deposits.EncodeSSZ(nil)
+			if err != nil {
+				log.Warn("Error encoding deposits", "err", err)
+				return nil
+			}
+			if len(ssz) == 0 {
+				continue
+			}
+			// type + ssz
+			ret = append(ret, append(hexutility.Bytes{requestType}, ssz...))
+		}
+	}
+	return ret
 }
 
 type DenebBeaconBlock struct {
