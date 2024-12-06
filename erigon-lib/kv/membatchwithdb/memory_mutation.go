@@ -717,9 +717,9 @@ func (m *MemoryMutation) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step
 	return m.db.(kv.TemporalTx).GetLatest(name, k, k2)
 }
 
-func (m *MemoryMutation) GetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
+func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	// panic("not supported")
-	return m.db.(kv.TemporalTx).GetAsOf(name, k, k2, ts)
+	return m.db.(kv.TemporalTx).GetAsOf(name, k, ts)
 }
 
 func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
