@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/go-chi/chi/v5"
 	"github.com/prysmaticlabs/go-bitfield"
 
@@ -38,8 +39,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
-	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 
 	"github.com/erigontech/erigon-lib/crypto"
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
@@ -239,27 +238,6 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	str, err := rcmgrObs.NewStatsTraceReporter()
-	if err != nil {
-		return nil, err
-	}
-
-	subnetCount := cfg.NetworkConfig.AttestationSubnetCount +
-		cfg.BeaconConfig.SyncCommitteeSubnetCount +
-		cfg.BeaconConfig.MaxBlobsPerBlock
-
-	defaultLimits := rcmgr.DefaultLimits.AutoScale()
-	newLimit := rcmgr.PartialLimitConfig{
-		System: rcmgr.ResourceLimits{
-			StreamsOutbound: rcmgr.LimitVal(subnetCount * 4),
-			StreamsInbound:  rcmgr.LimitVal(subnetCount * 4),
-		},
-	}.Build(defaultLimits)
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
-	if err != nil {
-		return nil, err
-	}
-	opts = append(opts, libp2p.ResourceManager(rmgr))
 
 	gater, err := NewGater(cfg)
 	if err != nil {
@@ -275,7 +253,7 @@ func New(
 		return nil, err
 	}
 	s.host = host
-	go reportMetrics(ctx, bwc)
+	go s.observeBandwidth(ctx, bwc)
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
@@ -294,8 +272,8 @@ func New(
 	return s, nil
 }
 
-func reportMetrics(ctx context.Context, bwc *metrics.BandwidthCounter) {
-	ticker := time.NewTicker(1 * time.Second)
+func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthCounter) {
+	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
 		select {
 		case <-ctx.Done():
@@ -304,6 +282,38 @@ func reportMetrics(ctx context.Context, bwc *metrics.BandwidthCounter) {
 			totals := bwc.GetBandwidthTotals()
 			monitor.ObserveTotalInBytes(totals.TotalIn)
 			monitor.ObserveTotalOutBytes(totals.TotalOut)
+			minBound := datasize.KB
+			// define rate cap
+			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, minBound))
+			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minBound))
+			peers := s.host.Network().Peers()
+			maxPeersToBan := int(s.cfg.MaxPeerCount) / 8
+			// do not ban peers if we have less than 1/8 of max peer count
+			if len(peers) <= maxPeersToBan {
+				continue
+			}
+			maxPeersToBan = min(maxPeersToBan, len(peers)-maxPeersToBan)
+
+			peersToBan := make([]peer.ID, 0, len(peers))
+			// Check which peers should be banned
+			for _, p := range peers {
+				// get peer bandwidth
+				peerBandwidth := bwc.GetBandwidthForPeer(p)
+				// check if peer is over limit
+				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
+					peersToBan = append(peersToBan, p)
+				}
+			}
+			// if we have more than 1/8 of max peer count to ban, limit to maxPeersToBan
+			if len(peersToBan) > maxPeersToBan {
+				peersToBan = peersToBan[:maxPeersToBan]
+			}
+			// ban hammer
+			for _, p := range peersToBan {
+				s.Peers().SetBanStatus(p, true)
+				s.Host().Peerstore().RemovePeer(p)
+				s.Host().Network().ClosePeer(p)
+			}
 		}
 	}
 }
