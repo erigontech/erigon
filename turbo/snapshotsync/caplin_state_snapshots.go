@@ -273,8 +273,6 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
-	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
-
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -309,7 +307,7 @@ Loop:
 				// segType: f.Type, Unsupported
 				version:  f.Version,
 				Range:    Range{f.From, f.To},
-				frozen:   snConfig.IsFrozen(f),
+				frozen:   snapcfg.IsFrozen(s.cfg.ChainName, f),
 				filePath: filePath,
 			}
 		}
