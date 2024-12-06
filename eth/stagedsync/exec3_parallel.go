@@ -536,13 +536,17 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				if err != nil {
 					return err
 				}
-				ac := pe.agg.BeginFilesRo()
-				if _, err = ac.PruneSmallBatches(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
-					return err
-				}
-				ac.Close()
 				if !pe.inMemExec {
-					if err = pe.doms.Flush(ctx, tx); err != nil {
+					err = tx.ApplyRw(func(tx kv.RwTx) error {
+						ac := pe.agg.BeginFilesRo()
+						if _, err = ac.PruneSmallBatches(ctx, 150*time.Millisecond, tx); err != nil { // prune part of retired data, before commit
+							return err
+						}
+						ac.Close()
+
+						return pe.doms.Flush(ctx, tx)
+					})
+					if err != nil {
 						return err
 					}
 				}
