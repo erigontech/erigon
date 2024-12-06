@@ -58,8 +58,11 @@ type Task interface {
 	CreateReceipt(tx kv.Tx)
 
 	TxHash() libcommon.Hash
+	TxIndex() int
+	TxNum() uint64
 
-	txNum() uint64
+	IsBlockEnd() bool
+	IsHistoric() bool
 }
 
 type Result struct {
@@ -69,6 +72,9 @@ type Result struct {
 	TxIn     state.VersionedReads
 	TxOut    state.VersionedWrites
 	TxAllOut state.VersionedWrites
+
+	TraceFroms map[libcommon.Address]struct{}
+	TraceTos   map[libcommon.Address]struct{}
 }
 
 type ErrExecAbortError struct {
@@ -86,11 +92,17 @@ func (e ErrExecAbortError) Error() string {
 
 type ApplyMessage func(evm *vm.EVM, msg core.Message, gp *core.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
+type Tx struct {
+	Num         uint64
+	Transaction types.Transaction
+	Index       int // -1 for block initialisation
+}
+
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
 type TxTask struct {
-	TxNum              uint64
+	Tx
 	BlockNum           uint64
 	Rules              *chain.Rules
 	Header             *types.Header
@@ -102,15 +114,11 @@ type TxTask struct {
 	Sender             *libcommon.Address
 	SkipAnalysis       bool
 	PruneNonEssentials bool
-	TxIndex            int // -1 for block initialisation
-	Final              bool
 	Failed             bool
-	Tx                 types.Transaction
 	GetHashFn          func(n uint64) libcommon.Hash
 	TxAsMessage        types.Message
 	EvmBlockContext    evmtypes.BlockContext
-
-	HistoryExecution bool // use history reader for that txn instead of state reader
+	HistoryExecution   bool // use history reader for that txn instead of state reader
 
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 	ReadLists          state.ReadLists
@@ -120,11 +128,6 @@ type TxTask struct {
 	StoragePrevs       map[string][]byte
 	CodePrevs          map[string]uint64
 	Logs               []*types.Log
-	TraceFroms         map[libcommon.Address]struct{}
-	TraceTos           map[libcommon.Address]struct{}
-
-	UsedGas uint64
-
 	// BlockReceipts is used only by Gnosis:
 	//  - it does store `proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})`
 	//  - and later read it by filter: len(l.Topics) == 2 && l.Address == s.contractAddress && l.Topics[0] == EVENT_NAME_HASH && l.Topics[1] == header.ParentHash
@@ -132,33 +135,47 @@ type TxTask struct {
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
 
+	UsedGas uint64
+
 	Config *chain.Config
 	Logger log.Logger
 }
 
-func (t *TxTask) txNum() uint64 {
-	return t.TxNum
+func (t *TxTask) TxNum() uint64 {
+	return t.Tx.Num
 }
 
 func (t *TxTask) TxHash() libcommon.Hash {
-	return t.Tx.Hash()
+	return t.Transaction.Hash()
+}
+
+func (t *TxTask) TxIndex() int {
+	return t.Tx.Index
+}
+
+func (t *TxTask) IsBlockEnd() bool {
+	return t.Tx.Index == len(t.Txs)
+}
+
+func (t *TxTask) IsHistoric() bool {
+	return t.HistoryExecution
 }
 
 func (t *TxTask) CreateReceipt(tx kv.Tx) {
-	if t.TxIndex < 0 || t.Final {
+	if t.Tx.Index < 0 || t.IsBlockEnd() {
 		return
 	}
 
 	var cumulativeGasUsed uint64
 	var firstLogIndex uint32
-	if t.TxIndex > 0 {
-		prevR := t.BlockReceipts[t.TxIndex-1]
+	if t.Tx.Index > 0 {
+		prevR := t.BlockReceipts[t.Tx.Index-1]
 		if prevR != nil {
 			cumulativeGasUsed = prevR.CumulativeGasUsed
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
 		} else {
 			var err error
-			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
+			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.Tx.Num)
 			if err != nil {
 				panic(err)
 			}
@@ -169,18 +186,18 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 
 	r := t.createReceipt(cumulativeGasUsed)
 	r.FirstLogIndexWithinBlock = firstLogIndex
-	t.BlockReceipts[t.TxIndex] = r
+	t.BlockReceipts[t.Tx.Index] = r
 }
 
 func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	receipt := &types.Receipt{
 		BlockNumber:       t.Header.Number,
 		BlockHash:         t.BlockHash,
-		TransactionIndex:  uint(t.TxIndex),
-		Type:              t.Tx.Type(),
+		TransactionIndex:  uint(t.Tx.Index),
+		Type:              t.Transaction.Type(),
 		GasUsed:           t.UsedGas,
 		CumulativeGasUsed: cumulativeGasUsed,
-		TxHash:            t.Tx.Hash(),
+		TxHash:            t.TxHash(),
 		Logs:              t.Logs,
 	}
 	blockNum := t.Header.Number.Uint64()
@@ -207,8 +224,6 @@ func (t *TxTask) Reset() *TxTask {
 	t.WriteLists.Return()
 	t.WriteLists = nil
 	t.Logs = nil
-	t.TraceFroms = nil
-	t.TraceTos = nil
 	t.Failed = false
 	return t
 }
@@ -229,8 +244,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	isMining bool) *Result {
 	var result Result
 
-	stateReader.SetTxNum(txTask.TxNum)
-	rs.Domains().SetTxNum(txTask.TxNum)
+	stateReader.SetTxNum(txTask.Tx.Num)
+	rs.Domains().SetTxNum(txTask.Tx.Num)
 	stateReader.ResetReadSet()
 	stateWriter.ResetWriteSet()
 
@@ -243,7 +258,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
 	switch {
-	case txTask.TxIndex == -1:
+	case txTask.Tx.Index == -1:
 		if txTask.BlockNum == 0 {
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
@@ -263,7 +278,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
 		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
-	case txTask.Final:
+	case txTask.IsBlockEnd():
 		if txTask.BlockNum == 0 {
 			break
 		}
@@ -286,16 +301,16 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
 			//	txTask.Error = err
 			//}
-			txTask.TraceTos = map[libcommon.Address]struct{}{}
-			txTask.TraceTos[txTask.Coinbase] = struct{}{}
+			result.TraceTos = map[libcommon.Address]struct{}{}
+			result.TraceTos[txTask.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
-				txTask.TraceTos[uncle.Coinbase] = struct{}{}
+				result.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
 	default:
-		gasPool.Reset(txTask.Tx.GetGas(), chainConfig.GetMaxBlobGasPerBlock())
+		gasPool.Reset(txTask.Transaction.GetGas(), chainConfig.GetMaxBlobGasPerBlock())
 		vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		ibs.SetTxContext(txTask.TxIndex)
+		ibs.SetTxContext(txTask.Tx.Index)
 		msg := txTask.TxAsMessage
 		if msg.FeeCap().IsZero() && engine != nil {
 			// Only zero-gas transactions may be service ones
@@ -317,7 +332,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.Tx.Hash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.Logs = ibs.GetLogs(txTask.Tx.Index, txTask.TxHash(), txTask.BlockNum, txTask.BlockHash)
 		}
 
 	}
@@ -345,7 +360,7 @@ func (h TxTaskQueue) Len() int {
 	return len(h)
 }
 func (h TxTaskQueue) Less(i, j int) bool {
-	return h[i].txNum() < h[j].txNum()
+	return h[i].TxNum() < h[j].TxNum()
 }
 
 func (h TxTaskQueue) Swap(i, j int) {
@@ -392,7 +407,7 @@ func (q *QueueWithRetry) RetriesLen() (l int) {
 func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
 	q.retiresLock.Lock()
 	for _, t := range q.retires {
-		out = append(out, t.txNum())
+		out = append(out, t.TxNum())
 	}
 	q.retiresLock.Unlock()
 	return out
@@ -441,7 +456,7 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 			if !ok {
 				q.retiresLock.Lock()
 				if q.retires.Len() > 0 {
-					task = heap.Pop(&q.retires).(*TxTask)
+					task = heap.Pop(&q.retires).(Task)
 				}
 				q.retiresLock.Unlock()
 				return task, task != nil
@@ -452,7 +467,7 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 				heap.Push(&q.retires, inTask)
 			}
 			if q.retires.Len() > 0 {
-				task = heap.Pop(&q.retires).(*TxTask)
+				task = heap.Pop(&q.retires).(Task)
 			}
 			q.retiresLock.Unlock()
 			if task != nil {
@@ -575,7 +590,7 @@ func (q *ResultsQueueIter) Close() {
 	q.q.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
-	return len(*q.q.results) > 0 && (*q.q.results)[0].txNum() == outputTxNum
+	return len(*q.q.results) > 0 && (*q.q.results)[0].TxNum() == outputTxNum
 }
 func (q *ResultsQueueIter) PopNext() *Result {
 	return heap.Pop(q.q.results).(*Result)
@@ -648,7 +663,7 @@ func (q *ResultsQueue) Len() (l int) {
 	q.Unlock()
 	return l
 }
-func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].txNum() }
+func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].TxNum() }
 func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
 func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }
 func (q *ResultsQueue) PushLocked(t *Result)     { heap.Push(q.results, t) }

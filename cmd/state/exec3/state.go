@@ -133,7 +133,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 func (rw *Worker) Run() error {
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		//fmt.Println("RTX", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Final)
-		result := rw.RunTxTask(txTask.(*exec.TxTask), rw.isMining)
+		result := rw.RunTxTask(txTask, rw.isMining)
 		if err := rw.resultCh.Add(rw.ctx, result); err != nil {
 			return err
 		}
@@ -141,7 +141,7 @@ func (rw *Worker) Run() error {
 	return nil
 }
 
-func (rw *Worker) RunTxTask(txTask *exec.TxTask, isMining bool) *exec.Result {
+func (rw *Worker) RunTxTask(txTask exec.Task, isMining bool) *exec.Result {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	return rw.RunTxTaskNoLock(txTask, isMining)
@@ -166,13 +166,13 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask *exec.TxTask, isMining bool) *exec.Result {
-	if txTask.HistoryExecution && !rw.historyMode {
+func (rw *Worker) RunTxTaskNoLock(txTask exec.Task, isMining bool) *exec.Result {
+	if txTask.IsHistoric() && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
-	} else if !txTask.HistoryExecution && rw.historyMode {
+	} else if !txTask.IsHistoric() && rw.historyMode {
 		if rw.background {
 			rw.SetReader(state.NewReaderParallelV3(rw.rs.Domains()))
 		} else {
@@ -189,8 +189,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec.TxTask, isMining bool) *exec.Resu
 	}
 
 	switch {
-	case txTask.TxIndex == -1:
-	case txTask.Final:
+	case txTask.TxIndex() == -1:
+	case txTask.IsBlockEnd():
 	default:
 		rw.callTracer.Reset()
 	}
@@ -198,12 +198,14 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec.TxTask, isMining bool) *exec.Resu
 	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.rs, rw.ibs,
 		core.ApplyMessage, rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs, isMining)
 
+	result.Task = txTask
+
 	switch {
-	case txTask.TxIndex == -1:
-	case txTask.Final:
+	case txTask.TxIndex() == -1:
+	case txTask.IsBlockEnd():
 	default:
-		txTask.TraceFroms = rw.callTracer.Froms()
-		txTask.TraceTos = rw.callTracer.Tos()
+		result.TraceFroms = rw.callTracer.Froms()
+		result.TraceTos = rw.callTracer.Tos()
 	}
 
 	return result

@@ -129,18 +129,30 @@ type VersionedIO struct {
 }
 
 func (io *VersionedIO) ReadSet(txnIdx int) []VersionedRead {
+	if len(io.inputs) <= txnIdx {
+		return nil
+	}
 	return io.inputs[txnIdx]
 }
 
 func (io *VersionedIO) WriteSet(txnIdx int) []VersionedWrite {
+	if len(io.outputs) <= txnIdx {
+		return nil
+	}
 	return io.outputs[txnIdx]
 }
 
 func (io *VersionedIO) AllWriteSet(txnIdx int) []VersionedWrite {
+	if len(io.allOutputs) <= txnIdx {
+		return nil
+	}
 	return io.allOutputs[txnIdx]
 }
 
 func (io *VersionedIO) HasWritten(txnIdx int, k VersionKey) bool {
+	if len(io.outputsSet) <= txnIdx {
+		return false
+	}
 	_, ok := io.outputsSet[txnIdx][k]
 	return ok
 }
@@ -155,11 +167,21 @@ func NewVersionedIO(numTx int) *VersionedIO {
 }
 
 func (io *VersionedIO) RecordRead(txId int, input []VersionedRead) {
+	if len(io.inputs) <= txId {
+		io.inputs = append(io.inputs, make([]VersionedReads, txId+1-len(io.inputs))...)
+	}
 	io.inputs[txId] = input
 }
 
 func (io *VersionedIO) RecordWrite(txId int, output []VersionedWrite) {
+	if len(io.outputs) <= txId {
+		io.outputs = append(io.outputs, make([]VersionedWrites, txId+1-len(io.outputs))...)
+	}
 	io.outputs[txId] = output
+
+	if len(io.outputsSet) <= txId {
+		io.outputsSet = append(io.outputsSet, make([]map[VersionKey]struct{}, txId+1-len(io.outputsSet))...)
+	}
 	io.outputsSet[txId] = make(map[VersionKey]struct{}, len(output))
 
 	for _, v := range output {
@@ -167,19 +189,32 @@ func (io *VersionedIO) RecordWrite(txId int, output []VersionedWrite) {
 	}
 }
 
-func (io *VersionedIO) RecordAllWrite(txId int, output []VersionedWrite) {
+func (io *VersionedIO) RecordAllWrites(txId int, output []VersionedWrite) {
+	if len(io.allOutputs) <= txId {
+		io.allOutputs = append(io.allOutputs, make([]VersionedWrites, txId+1-len(io.allOutputs))...)
+	}
 	io.allOutputs[txId] = output
 }
 
 func (io *VersionedIO) RecordReadAtOnce(inputs [][]VersionedRead) {
-	for ind, val := range inputs {
-		io.inputs[ind] = val
+	i := 0
+	for ; i < len(io.inputs) && i < len(inputs); i++ {
+		io.inputs[i] = inputs[i]
+	}
+
+	for ; i < len(inputs); i++ {
+		io.inputs = append(io.inputs, inputs[i])
 	}
 }
 
 func (io *VersionedIO) RecordAllWriteAtOnce(outputs [][]VersionedWrite) {
-	for ind, val := range outputs {
-		io.allOutputs[ind] = val
+	i := 0
+	for ; i < len(io.allOutputs) && i < len(outputs); i++ {
+		io.allOutputs[i] = outputs[i]
+	}
+
+	for ; i < len(outputs); i++ {
+		io.allOutputs = append(io.allOutputs, outputs[i])
 	}
 }
 

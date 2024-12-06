@@ -38,7 +38,6 @@ func (se *serialExecutor) processEvents(ctx context.Context, commitThreshold uin
 func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (cont bool, err error) {
 	for _, txTask := range tasks {
 		result := se.applyWorker.RunTxTaskNoLock(txTask, se.isMining)
-		txTask := result.Task.(*execTask)
 
 		if err := func() error {
 			if errors.Is(result.Err, context.Canceled) {
@@ -53,13 +52,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (co
 			mxExecGas.Add(float64(txTask.UsedGas))
 			mxExecTransactions.Add(1)
 
-			if txTask.Tx != nil {
-				se.blobGasUsed += txTask.Tx.GetBlobGas()
+			if txTask.Transaction != nil {
+				se.blobGasUsed += txTask.Transaction.GetBlobGas()
 			}
 
 			txTask.CreateReceipt(se.applyTx)
 
-			if txTask.Final {
+			if txTask.IsBlockEnd() {
 				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
@@ -76,7 +75,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (co
 				se.outputBlockNum.SetUint64(txTask.BlockNum)
 			}
 			if se.cfg.syncCfg.ChaosMonkey {
-				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, result.Err)
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.Tx.Index, se.cfg.badBlockHalt, result.Err)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")
 					return chaosErr
@@ -111,10 +110,10 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (co
 			return false, nil
 		}
 
-		if !txTask.Final {
+		if !txTask.IsBlockEnd() {
 			var receipt *types.Receipt
-			if txTask.TxIndex >= 0 && !txTask.Final {
-				receipt = txTask.BlockReceipts[txTask.TxIndex]
+			if txTask.Tx.Index >= 0 && !txTask.IsBlockEnd() {
+				receipt = txTask.BlockReceipts[txTask.Tx.Index]
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err
@@ -122,14 +121,14 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (co
 		}
 
 		// MA applystate
-		if err := se.rs.ApplyState4(ctx, txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
-			txTask.BalanceIncreaseSet, txTask.Logs, txTask.TraceFroms, txTask.TraceTos,
+		if err := se.rs.ApplyState4(ctx, txTask.BlockNum, txTask.Tx.Num, txTask.ReadLists, txTask.WriteLists,
+			txTask.BalanceIncreaseSet, txTask.Logs, result.TraceFroms, result.TraceTos,
 			txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
 			return false, err
 		}
 		txTask.ReadLists, txTask.WriteLists = nil, nil
 
-		se.doms.SetTxNum(txTask.TxNum)
+		se.doms.SetTxNum(txTask.Tx.Num)
 		se.doms.SetBlockNum(txTask.BlockNum)
 		se.outputTxNum.Add(1)
 	}

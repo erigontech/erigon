@@ -179,14 +179,14 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			txTask := result.Task.(*exec.TxTask)
-			if txTask.Tx != nil {
-				cumulativeBlobGasUsedInBlock += txTask.Tx.GetBlobGas()
+			if txTask.Transaction != nil {
+				cumulativeBlobGasUsedInBlock += txTask.Transaction.GetBlobGas()
 			}
 			//if txTask.Final {
 			//	cumulativeGasUsedTotal.AddUint64(cumulativeGasUsedTotal, cumulativeGasUsedInBlock)
 			//}
 
-			if txTask.Final { // TODO: move asserts to 1 level higher
+			if txTask.IsBlockEnd() { // TODO: move asserts to 1 level higher
 				if txTask.Header.BlobGasUsed != nil && *txTask.Header.BlobGasUsed != cumulativeBlobGasUsedInBlock {
 					err := fmt.Errorf("assert: %d != %d", *txTask.Header.BlobGasUsed, cumulativeBlobGasUsedInBlock)
 					panic(err)
@@ -194,18 +194,18 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			}
 
 			doms.SetTx(tx)
-			doms.SetTxNum(txTask.TxNum)
-			if !txTask.Final {
+			doms.SetTxNum(txTask.Tx.Num)
+			if !txTask.IsBlockEnd() {
 				var receipt *types.Receipt
-				if txTask.TxIndex >= 0 && !txTask.Final {
-					receipt = txTask.BlockReceipts[txTask.TxIndex]
+				if txTask.Tx.Index >= 0 && !txTask.IsBlockEnd() {
+					receipt = txTask.BlockReceipts[txTask.Tx.Index]
 				}
 				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
 					return err
 				}
 			}
 
-			if txTask.Final { // block changed
+			if txTask.IsBlockEnd() { // block changed
 				cumulativeBlobGasUsedInBlock = 0
 			}
 
@@ -213,9 +213,9 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 			case <-logEvery.C:
 				if prevTxNumLog > 0 {
 					dbg.ReadMemStats(&m)
-					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", txTask.BlockNum, "txs/sec", (txTask.TxNum-prevTxNumLog)/uint64(logPeriod.Seconds()), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+					log.Info(fmt.Sprintf("[%s] Scanned", logPrefix), "block", txTask.BlockNum, "txs/sec", (txTask.Tx.Num-prevTxNumLog)/uint64(logPeriod.Seconds()), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 				}
-				prevTxNumLog = txTask.TxNum
+				prevTxNumLog = txTask.Tx.Num
 			default:
 			}
 			return nil

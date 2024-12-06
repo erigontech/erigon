@@ -139,7 +139,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 		rw.chain = consensuschain.NewReader(rw.execArgs.ChainConfig, rw.chainTx, rw.execArgs.BlockReader, rw.logger)
 	}
 
-	rw.stateReader.SetTxNum(txTask.TxNum)
+	rw.stateReader.SetTxNum(txTask.Tx.Num)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter = state.NewNoopWriter()
 
@@ -151,7 +151,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 	header := txTask.Header
 
 	switch {
-	case txTask.TxIndex == -1:
+	case txTask.Tx.Index == -1:
 		if txTask.BlockNum == 0 {
 			// Genesis block
 			_, ibs, err = core.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
@@ -169,7 +169,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 		}
 		rw.execArgs.Engine.Initialize(rw.execArgs.ChainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
 		result.Err = ibs.FinalizeTx(rules, noop)
-	case txTask.Final:
+	case txTask.IsBlockEnd():
 		if txTask.BlockNum == 0 {
 			break
 		}
@@ -184,13 +184,13 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 			result.Err = err
 		}
 	default:
-		rw.taskGasPool.Reset(txTask.Tx.GetGas(), txTask.Tx.GetBlobGas())
+		rw.taskGasPool.Reset(txTask.Transaction.GetGas(), txTask.Transaction.GetBlobGas())
 		if tracer := rw.consumer.NewTracer(); tracer != nil {
 			rw.vmConfig.Debug = true
 			rw.vmConfig.Tracer = tracer
 		}
 		rw.vmConfig.SkipAnalysis = txTask.SkipAnalysis
-		ibs.SetTxContext(txTask.TxIndex)
+		ibs.SetTxContext(txTask.Tx.Index)
 		msg := txTask.TxAsMessage
 		msg.SetCheckNonce(!rw.vmConfig.StatelessExec)
 		if msg.FeeCap().IsZero() {
@@ -203,7 +203,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 
 		txContext := core.NewEVMTxContext(msg)
 		if rw.vmConfig.TraceJumpDest {
-			txContext.TxHash = txTask.Tx.Hash()
+			txContext.TxHash = txTask.TxHash()
 		}
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
@@ -216,7 +216,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
+			txTask.Logs = ibs.GetRawLogs(txTask.Tx.Index)
 		}
 	}
 
@@ -354,7 +354,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *exec.ResultsQueue
 
 		txTask := result.Task.(*exec.TxTask)
 
-		if txTask.TxIndex >= 0 && !txTask.Final {
+		if txTask.Tx.Index >= 0 && !txTask.IsBlockEnd() {
 			result.CreateReceipt(tx)
 		}
 
@@ -364,8 +364,8 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *exec.ResultsQueue
 
 		i++
 		outputTxNum++
-		stopedAtBlockEnd = txTask.Final
-		if forceStopAtBlockEnd && txTask.Final {
+		stopedAtBlockEnd = txTask.IsBlockEnd()
+		if forceStopAtBlockEnd && txTask.IsBlockEnd() {
 			break
 		}
 	}
@@ -458,17 +458,18 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec.TxTask{
+				Tx: exec.Tx{
+					Num:   inputTxNum,
+					Index: txIndex,
+				},
 				BlockNum:        blockNum,
 				Header:          header,
 				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
 				Rules:           rules,
 				Txs:             txs,
-				TxNum:           inputTxNum,
-				TxIndex:         txIndex,
 				BlockHash:       b.Hash(),
 				SkipAnalysis:    skipAnalysis,
-				Final:           txIndex == len(txs),
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
@@ -478,8 +479,8 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				BlockReceipts:    blockReceipts,
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
-				txTask.Tx = txs[txIndex]
-				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
+				txTask.Transaction = txs[txIndex]
+				txTask.TxAsMessage, err = txTask.Transaction.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
 					return err
 				}
@@ -487,7 +488,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				} else {
-					sender, err := signer.Sender(txTask.Tx)
+					sender, err := signer.Sender(txTask.Transaction)
 					if err != nil {
 						return err
 					}
@@ -500,7 +501,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			}
 			if WorkerCount == 1 {
 				result := applyWorker.RunTxTask(txTask)
-				if txTask.TxIndex >= 0 && !txTask.Final {
+				if txTask.TxIndex() >= 0 && !txTask.IsBlockEnd() {
 					txTask.CreateReceipt(tx)
 				}
 				if err := consumer.Reduce(result, tx); err != nil {

@@ -41,17 +41,18 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
 			txTask := &exec.TxTask{
+				Tx: exec.Tx{
+					Num:   n,
+					Index: 0,
+				},
 				BlockNum:   n,
 				Rules:      params.TestRules,
-				TxNum:      n,
-				TxIndex:    0,
-				Final:      true,
 				WriteLists: stateWriter.WriteSet(),
 			}
 			txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
-			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
-			if err := rs.ApplyState4(context.Background(), txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
-				txTask.BalanceIncreaseSet, txTask.Logs, txTask.TraceFroms, txTask.TraceTos,
+			rs.SetTxNum(txTask.Tx.Num, txTask.BlockNum)
+			if err := rs.ApplyState4(context.Background(), txTask.BlockNum, txTask.Tx.Num, txTask.ReadLists, txTask.WriteLists,
+				txTask.BalanceIncreaseSet, txTask.Logs, nil, nil,
 				txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
 				panic(err)
 			}

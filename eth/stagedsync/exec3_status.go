@@ -216,15 +216,32 @@ func (m *execStatusManager) addDependencies(blocker int, dependent int) bool {
 	if m.checkComplete(blocker) {
 		// Blocker has already completed
 		delete(curblockers, blocker)
-
 		return len(curblockers) > 0
 	}
 
 	if _, ok := m.dependency[blocker]; !ok {
-		m.dependency[blocker] = make(map[int]bool)
+		if m.dependency == nil {
+			m.dependency = map[int]map[int]bool{
+				blocker: map[int]bool{},
+			}
+		} else {
+			m.dependency[blocker] = map[int]bool{}
+		}
 	}
 
 	m.dependency[blocker][dependent] = true
+	
+	if curblockers == nil {
+		curblockers = map[int]bool{}
+		if m.blocker == nil {
+			m.blocker = map[int]map[int]bool{
+				dependent: curblockers,
+			}
+		} else {
+			m.blocker[dependent] = curblockers
+		}
+	}
+
 	curblockers[blocker] = true
 
 	return true

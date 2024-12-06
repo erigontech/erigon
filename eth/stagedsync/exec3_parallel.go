@@ -204,14 +204,14 @@ func (task *execTask) applyMessage(evm *vm.EVM, msg core.Message, gp *core.GasPo
 }
 
 func (task *execTask) settle(engine consensus.Engine, stateWriter state.StateWriter) error {
-	task.finalStateDB.SetTxContext(task.TxIndex)
+	task.finalStateDB.SetTxContext(task.Tx.Index)
 
 	task.finalStateDB.ApplyVersionedWrites(task.statedb.VersionedWrites())
 
-	txHash := task.Tx.Hash()
+	txHash := task.TxHash()
 	BlockNum := task.BlockNum
 
-	for _, l := range task.statedb.GetLogs(task.TxIndex, txHash, BlockNum, task.BlockHash) {
+	for _, l := range task.statedb.GetLogs(task.Tx.Index, txHash, BlockNum, task.BlockHash) {
 		task.finalStateDB.AddLog(l)
 	}
 
@@ -254,7 +254,7 @@ func (task *execTask) settle(engine consensus.Engine, stateWriter state.StateWri
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used
 	// by the tx.
-	receipt := &types.Receipt{Type: task.Tx.Type(), PostState: root, CumulativeGasUsed: task.UsedGas}
+	receipt := &types.Receipt{Type: task.Transaction.Type(), PostState: root, CumulativeGasUsed: task.UsedGas}
 	if task.result.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
@@ -266,15 +266,15 @@ func (task *execTask) settle(engine consensus.Engine, stateWriter state.StateWri
 
 	// If the transaction created a contract, store the creation address in the receipt.
 	if task.TxAsMessage.To() == nil {
-		receipt.ContractAddress = crypto.CreateAddress(task.TxAsMessage.From(), task.Tx.GetNonce())
+		receipt.ContractAddress = crypto.CreateAddress(task.TxAsMessage.From(), task.Transaction.GetNonce())
 	}
 
 	// Set the receipt logs and create the bloom filter.
-	receipt.Logs = task.finalStateDB.GetLogs(task.TxIndex, txHash, BlockNum, task.BlockHash)
+	receipt.Logs = task.finalStateDB.GetLogs(task.Tx.Index, txHash, BlockNum, task.BlockHash)
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockHash = task.BlockHash
 	receipt.BlockNumber = new(big.Int).SetUint64(task.BlockNum)
-	receipt.TransactionIndex = uint(task.TxIndex)
+	receipt.TransactionIndex = uint(task.Tx.Index)
 
 	task.BlockReceipts = append(task.BlockReceipts, receipt)
 	task.Logs = append(task.Logs, receipt.Logs...)
@@ -388,7 +388,7 @@ type blockExecStatus struct {
 	versionMap *state.VersionMap
 
 	// Stores the inputs and outputs of the last incarnation of all transactions
-	lastIO *state.VersionedIO
+	blockIO *state.VersionedIO
 
 	// Tracks the incarnation number of each transaction
 	txIncarnations []int
@@ -666,10 +666,10 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 	outputTxNum = inputTxNum
 	for rwsIt.HasNext(outputTxNum) {
 		result := rwsIt.PopNext()
-		txTask := result.Task.(*execTask)
+		txTask := result.Task.(*taskVersion)
 		//fmt.Println("PRQ", txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
 		if pe.cfg.syncCfg.ChaosMonkey {
-			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, result.Err)
+			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.Tx.Index, pe.cfg.badBlockHalt, result.Err)
 			if chaosErr != nil {
 				log.Warn("Monkey in consensus")
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, chaosErr
@@ -682,12 +682,12 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 
-		if txTask.Final {
-			pe.rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
+		if txTask.IsBlockEnd() {
+			pe.rs.SetTxNum(txTask.Tx.Num, txTask.BlockNum)
 
 			err := pe.rs.ApplyState4(ctx,
-				txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
-				txTask.BalanceIncreaseSet, txTask.Logs, txTask.TraceFroms, txTask.TraceTos,
+				txTask.BlockNum, txTask.Tx.Num, txTask.ReadLists, txTask.WriteLists,
+				txTask.BalanceIncreaseSet, txTask.Logs, result.TraceFroms, result.TraceTos,
 				txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution)
 
 			if err != nil {
@@ -696,7 +696,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 			txTask.ReadLists, txTask.WriteLists = nil, nil
 
 			if processedBlockNum > pe.lastBlockNum.Load() {
-				pe.doms.SetTxNum(txTask.TxNum)
+				pe.doms.SetTxNum(txTask.Tx.Num)
 				pe.doms.SetBlockNum(processedBlockNum)
 				pe.outputBlockNum.SetUint64(processedBlockNum)
 				pe.lastBlockNum.Store(processedBlockNum)
@@ -715,15 +715,15 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 			}
 		}
 		if err := pe.rs.ApplyLogsAndTraces4(
-			txTask.Logs, txTask.TraceFroms, txTask.TraceTos,
+			txTask.Logs, result.TraceFroms, result.TraceTos,
 			pe.rs.Domains(), txTask.PruneNonEssentials, txTask.Config); err != nil {
 			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 		processedBlockNum = txTask.BlockNum
 		if !stopedAtBlockEnd {
-			stopedAtBlockEnd = txTask.Final
+			stopedAtBlockEnd = txTask.IsBlockEnd()
 		}
-		if forceStopAtBlockEnd && txTask.Final {
+		if forceStopAtBlockEnd && txTask.IsBlockEnd() {
 			break
 		}
 	}
@@ -781,17 +781,17 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 		blockStatus.diagExecAbort[tx]++
 		blockStatus.cntAbort++
 	} else {
-		blockStatus.lastIO.RecordRead(tx, res.TxIn)
+		blockStatus.blockIO.RecordRead(tx, res.TxIn)
 
 		if res.Ver.Incarnation == 0 {
-			blockStatus.lastIO.RecordWrite(tx, res.TxOut)
-			blockStatus.lastIO.RecordAllWrite(tx, res.TxAllOut)
+			blockStatus.blockIO.RecordWrite(tx, res.TxOut)
+			blockStatus.blockIO.RecordAllWrites(tx, res.TxAllOut)
 		} else {
-			if res.TxAllOut.HasNewWrite(blockStatus.lastIO.AllWriteSet(tx)) {
+			if res.TxAllOut.HasNewWrite(blockStatus.blockIO.AllWriteSet(tx)) {
 				blockStatus.validateTasks.pushPendingSet(blockStatus.execTasks.getRevalidationRange(tx + 1))
 			}
 
-			prevWrite := blockStatus.lastIO.AllWriteSet(tx)
+			prevWrite := blockStatus.blockIO.AllWriteSet(tx)
 
 			// Remove entries that were previously written but are no longer written
 
@@ -807,8 +807,8 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 				}
 			}
 
-			blockStatus.lastIO.RecordWrite(tx, res.TxOut)
-			blockStatus.lastIO.RecordAllWrite(tx, res.TxAllOut)
+			blockStatus.blockIO.RecordWrite(tx, res.TxOut)
+			blockStatus.blockIO.RecordAllWrites(tx, res.TxAllOut)
 		}
 
 		blockStatus.validateTasks.pushPending(tx)
@@ -835,12 +835,12 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 
 		tx := toValidate[i]
 
-		if blockStatus.skipCheck[tx] || state.ValidateVersion(tx, blockStatus.lastIO, blockStatus.versionMap) {
+		if blockStatus.skipCheck[tx] || state.ValidateVersion(tx, blockStatus.blockIO, blockStatus.versionMap) {
 			blockStatus.validateTasks.markComplete(tx)
 		} else {
 			blockStatus.cntValidationFail++
 			blockStatus.diagExecAbort[tx]++
-			for _, v := range blockStatus.lastIO.AllWriteSet(tx) {
+			for _, v := range blockStatus.blockIO.AllWriteSet(tx) {
 				blockStatus.versionMap.MarkEstimate(v.Path, tx)
 			}
 			// 'create validation tasks for all transactions > tx ...'
@@ -865,11 +865,11 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 		var deps state.DAG
 
 		if blockStatus.profile {
-			allDeps = state.GetDep(*blockStatus.lastIO)
-			deps = state.BuildDAG(*blockStatus.lastIO, pe.logger)
+			allDeps = state.GetDep(*blockStatus.blockIO)
+			deps = state.BuildDAG(*blockStatus.blockIO, pe.logger)
 		}
 
-		return executorResult{blockNum, blockStatus.lastIO, &blockStatus.stats, &deps, allDeps}, err
+		return executorResult{blockNum, blockStatus.blockIO, &blockStatus.stats, &deps, allDeps}, err
 	}
 
 	// Send the next immediate pending transaction to be executed
@@ -1011,8 +1011,11 @@ func (pe *parallelExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (
 
 		if pe.blockStatus == nil {
 			blockStatus = &blockExecStatus{
+				begin:        time.Now(),
+				stats:        map[int]ExecutionStat{},
 				skipCheck:    map[int]bool{},
 				estimateDeps: map[int][]int{},
+				blockIO:      &state.VersionedIO{},
 			}
 			pe.lastBlockNum.Store(t.BlockNum)
 			pe.blockStatus = map[uint64]*blockExecStatus{
@@ -1024,23 +1027,33 @@ func (pe *parallelExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (
 
 			if !ok {
 				blockStatus = &blockExecStatus{
+					begin:        time.Now(),
+					stats:        map[int]ExecutionStat{},
 					skipCheck:    map[int]bool{},
 					estimateDeps: map[int][]int{},
+					blockIO:      &state.VersionedIO{},
 				}
 				pe.blockStatus[t.BlockNum] = blockStatus
 			}
 		}
 
 		blockStatus.tasks = append(blockStatus.tasks, t)
+		blockStatus.txIncarnations = append(blockStatus.txIncarnations, 0)
+		blockStatus.diagExecSuccess = append(blockStatus.diagExecSuccess, 0)
+		blockStatus.diagExecAbort = append(blockStatus.diagExecAbort, 0)
+
 		blockStatus.skipCheck[len(blockStatus.tasks)-1] = false
 		blockStatus.estimateDeps[len(blockStatus.tasks)-1] = []int{}
+
+		blockStatus.execTasks.pushPending(i)
+		blockStatus.validateTasks.pushPending(i)
 
 		if len(t.dependencies) > 0 {
 			for _, val := range t.dependencies {
 				blockStatus.execTasks.addDependencies(val, i)
 			}
 			blockStatus.execTasks.clearPending(i)
-		} else {
+		} else if t.Sender != nil {
 			if tx, ok := prevSenderTx[*t.Sender]; ok {
 				blockStatus.execTasks.addDependencies(tx, i)
 				blockStatus.execTasks.clearPending(i)
@@ -1049,7 +1062,19 @@ func (pe *parallelExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (
 			prevSenderTx[*t.Sender] = i
 		}
 
-		pe.in.Add(ctx, txTask)
+		if t.IsBlockEnd() {
+			nextTx := blockStatus.execTasks.takeNextPending()
+
+			if nextTx == -1 {
+				return false, errors.New("no executable transactions: bad dependency")
+			}
+
+			pe.in.Add(ctx,
+				&taskVersion{
+					execTask:   blockStatus.tasks[nextTx],
+					version:    state.Version{TxIndex: nextTx, Incarnation: 0},
+					versionMap: blockStatus.versionMap})
+		}
 	}
 
 	return false, nil
