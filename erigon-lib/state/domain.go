@@ -655,6 +655,7 @@ type DomainRoTx struct {
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
 
+	keyBuf [60]byte // 52b key and 8b for inverted step
 	comBuf []byte
 
 	valsC kv.Cursor
