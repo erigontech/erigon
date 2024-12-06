@@ -95,6 +95,11 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 		receipt.BlockNumber = header.Number
 		receipt.TransactionIndex = uint(ibs.TxnIndex())
+
+		// If the transaction created a contract, store the creation address in the receipt.
+		if result.TopLevelDeployed != nil {
+			receipt.ContractAddress = *result.TopLevelDeployed
+		}
 	}
 
 	return receipt, result.ReturnData, err

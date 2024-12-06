@@ -74,6 +74,11 @@ type ExecutionResult struct {
 	SenderInitBalance   *uint256.Int
 	CoinbaseInitBalance *uint256.Int
 	FeeTipped           *uint256.Int
+
+	// Arbitrum: a tx may yield others that need to run afterward (see retryables)
+	ScheduledTxes types.Transactions
+	// Arbitrum: the contract deployed from the top-level transaction, or nil if not a contract creation tx
+	TopLevelDeployed *common.Address
 }
 
 // Unwrap returns the internal evm error which allows us for further

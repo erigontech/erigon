@@ -446,13 +446,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	var (
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
+
+		deployedContract *libcommon.Address
 	)
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+		ret, *deployedContract, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
@@ -492,6 +494,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           amount,
+
+		// ScheduledTxes:    st.evm.ProcessingHook.ScheduledTxes(),
+		TopLevelDeployed: deployedContract,
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {
