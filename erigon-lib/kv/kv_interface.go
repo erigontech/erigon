@@ -458,7 +458,7 @@ type (
 )
 
 type TemporalGetter interface {
-	GetLatest(name Domain, k, k2 []byte) (v []byte, step uint64, err error)
+	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
 }
 type TemporalTx interface {
 	Tx
