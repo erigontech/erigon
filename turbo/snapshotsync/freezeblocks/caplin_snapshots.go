@@ -83,6 +83,9 @@ type CaplinSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.Logger) *CaplinSnapshots {
+	if cfg.ChainName == "" {
+		panic("ChainName is empty")
+	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg,
 		dirty:   make([]*btree.BTreeG[*snapshotsync.DirtySegment], snaptype.MaxEnum),
 		visible: make([]snapshotsync.VisibleSegments, snaptype.MaxEnum),

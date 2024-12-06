@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/erigontech/erigon/cmd/hack/tool"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -175,7 +176,10 @@ func TestSetupGenesis(t *testing.T) {
 			t.Parallel()
 			dirs := datadir.New(tmpdir)
 			db, _ := temporaltest.NewTestDB(t, dirs)
-			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.New()), nil, nil)
+			cc := tool.ChainConfigFromDB(db)
+			freezingCfg := ethconfig.Defaults.Snapshot
+			freezingCfg.ChainName = cc.ChainName
+			blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.New()), heimdall.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.New()), nil, nil)
 			config, genesis, err := test.fn(t, db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
