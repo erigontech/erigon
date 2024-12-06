@@ -34,7 +34,7 @@ jobs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
 
     steps:
-      - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref || inputs.checkout_ref }}
+      - name: Fast checkout git repository, git ref ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 ## 4.1.7 release
         with:
           repository: ${{ env.APP_REPO }}
@@ -46,6 +46,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '>=1.23'
+          cache: ${{ contains(fromJSON('["refs/heads/main","refs/heads/docker_pectra"]'), github.ref) }}
           cache-dependency-path: |
             erigon/go.sum
 
@@ -55,14 +56,15 @@ jobs:
         ##   latest image:    erigontech/erigon:${tag_name}${latest_suffix}
         ##   commit id image: erigontech/erigon:${tag_name}-${short_commit_id}
         run: |
-          case '${{ inputs.checkout_ref }}' in
-            'main' )
+          branch_name="${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }}"
+          case "$branch_name" in
+            "main" )
               export tag_name='main';
               export keep_images=100;
               export latest_suffix='-latest'
               export binaries="erigon integration rpcdaemon"
               ;;
-            'docker_pectra' )
+            "docker_pectra" )
               export tag_name='docker_pectra';
               export keep_images=5;
               export latest_suffix='';
