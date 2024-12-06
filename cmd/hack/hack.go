@@ -277,10 +277,12 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 }
 
 func extractBodies(datadir string) error {
-	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		KeepBlocks: true,
-		ProduceE2:  false,
-	}, filepath.Join(datadir, "snapshots"), 0, log.New())
+	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
+	defer db.Close()
+	cc := tool.ChainConfigFromDB(db)
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.ChainName = cc.ChainName
+	snaps := freezeblocks.NewRoSnapshots(freezeCfg, filepath.Join(datadir, "snapshots"), 0, log.New())
 	snaps.OpenFolder()
 
 	/* method Iterate was removed, need re-implement
@@ -317,8 +319,6 @@ func extractBodies(datadir string) error {
 		return nil
 	})
 	*/
-	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
-	defer db.Close()
 	br, _ := blocksIO(db)
 
 	tx, err := db.BeginRo(context.Background())
