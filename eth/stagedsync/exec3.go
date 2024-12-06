@@ -530,10 +530,8 @@ Loop:
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec.TxTask{
-				Tx: exec.Tx{
-					Num:   inputTxNum,
-					Index: txIndex,
-				},
+				TxNum:              inputTxNum,
+				TxIndex:            txIndex,
 				BlockNum:           blockNum,
 				Header:             header,
 				Coinbase:           b.Coinbase(),
@@ -555,7 +553,7 @@ Loop:
 				Config: chainConfig,
 			}
 			if txTask.HistoryExecution && usedGas == 0 {
-				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.Tx.Num)
+				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {
 					return err
 				}
@@ -565,15 +563,15 @@ Loop:
 				txTask.Config = cfg.genesis.Config
 			}
 
-			if txTask.Tx.Num <= txNumInDB && txTask.Tx.Num > 0 {
+			if txTask.TxNum <= txNumInDB && txTask.TxNum > 0 {
 				inputTxNum++
 				skipPostEvaluation = true
 				continue
 			}
 
 			if txIndex >= 0 && txIndex < len(txs) {
-				txTask.Transaction = txs[txIndex]
-				txTask.TxAsMessage, err = txTask.Transaction.AsMessage(signer, header.BaseFee, txTask.Rules)
+				txTask.Tx = txs[txIndex]
+				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
 					return err
 				}
@@ -581,7 +579,7 @@ Loop:
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				} else {
-					sender, err := signer.Sender(txTask.Transaction)
+					sender, err := signer.Sender(txTask.Tx)
 					if err != nil {
 						return err
 					}

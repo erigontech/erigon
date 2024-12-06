@@ -189,7 +189,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task, isMining bool) *exec.Result 
 	}
 
 	switch {
-	case txTask.TxIndex() == -1:
+	case txTask.Version().TxIndex == -1:
 	case txTask.IsBlockEnd():
 	default:
 		rw.callTracer.Reset()
@@ -201,7 +201,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task, isMining bool) *exec.Result 
 	result.Task = txTask
 
 	switch {
-	case txTask.TxIndex() == -1:
+	case txTask.Version().TxIndex == -1:
 	case txTask.IsBlockEnd():
 	default:
 		result.TraceFroms = rw.callTracer.Froms()

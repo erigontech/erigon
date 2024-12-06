@@ -204,14 +204,14 @@ func (task *execTask) applyMessage(evm *vm.EVM, msg core.Message, gp *core.GasPo
 }
 
 func (task *execTask) settle(engine consensus.Engine, stateWriter state.StateWriter) error {
-	task.finalStateDB.SetTxContext(task.Tx.Index)
+	task.finalStateDB.SetTxContext(task.TxIndex)
 
 	task.finalStateDB.ApplyVersionedWrites(task.statedb.VersionedWrites())
 
 	txHash := task.TxHash()
 	BlockNum := task.BlockNum
 
-	for _, l := range task.statedb.GetLogs(task.Tx.Index, txHash, BlockNum, task.BlockHash) {
+	for _, l := range task.statedb.GetLogs(task.TxIndex, txHash, BlockNum, task.BlockHash) {
 		task.finalStateDB.AddLog(l)
 	}
 
@@ -254,7 +254,7 @@ func (task *execTask) settle(engine consensus.Engine, stateWriter state.StateWri
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used
 	// by the tx.
-	receipt := &types.Receipt{Type: task.Transaction.Type(), PostState: root, CumulativeGasUsed: task.UsedGas}
+	receipt := &types.Receipt{Type: task.Tx.Type(), PostState: root, CumulativeGasUsed: task.UsedGas}
 	if task.result.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
@@ -266,15 +266,15 @@ func (task *execTask) settle(engine consensus.Engine, stateWriter state.StateWri
 
 	// If the transaction created a contract, store the creation address in the receipt.
 	if task.TxAsMessage.To() == nil {
-		receipt.ContractAddress = crypto.CreateAddress(task.TxAsMessage.From(), task.Transaction.GetNonce())
+		receipt.ContractAddress = crypto.CreateAddress(task.TxAsMessage.From(), task.Tx.GetNonce())
 	}
 
 	// Set the receipt logs and create the bloom filter.
-	receipt.Logs = task.finalStateDB.GetLogs(task.Tx.Index, txHash, BlockNum, task.BlockHash)
+	receipt.Logs = task.finalStateDB.GetLogs(task.TxIndex, txHash, BlockNum, task.BlockHash)
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockHash = task.BlockHash
 	receipt.BlockNumber = new(big.Int).SetUint64(task.BlockNum)
-	receipt.TransactionIndex = uint(task.Tx.Index)
+	receipt.TransactionIndex = uint(task.TxIndex)
 
 	task.BlockReceipts = append(task.BlockReceipts, receipt)
 	task.Logs = append(task.Logs, receipt.Logs...)
@@ -310,12 +310,15 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		return result
 	}
 
-	result.Ver = ev.version
 	result.TxIn = ev.execTask.statedb.VersionedReads()
 	result.TxOut = ev.execTask.statedb.VersionedWrites()
 	result.TxAllOut = ev.execTask.statedb.VersionedWrites()
 
 	return result
+}
+
+func (ev *taskVersion) Version() state.Version {
+	return ev.version
 }
 
 type txExecutor struct {
@@ -673,7 +676,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 		txTask := result.Task.(*taskVersion)
 		//fmt.Println("PRQ", txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
 		if pe.cfg.syncCfg.ChaosMonkey {
-			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.Tx.Index, pe.cfg.badBlockHalt, result.Err)
+			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, result.Err)
 			if chaosErr != nil {
 				log.Warn("Monkey in consensus")
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, chaosErr
@@ -687,10 +690,10 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 		}
 
 		if txTask.IsBlockEnd() {
-			pe.rs.SetTxNum(txTask.Tx.Num, txTask.BlockNum)
+			pe.rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
 
 			err := pe.rs.ApplyState4(ctx,
-				txTask.BlockNum, txTask.Tx.Num, txTask.ReadLists, txTask.WriteLists,
+				txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
 				txTask.BalanceIncreaseSet, txTask.Logs, result.TraceFroms, result.TraceTos,
 				txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution)
 
@@ -700,7 +703,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 			txTask.ReadLists, txTask.WriteLists = nil, nil
 
 			if processedBlockNum > pe.lastBlockNum.Load() {
-				pe.doms.SetTxNum(txTask.Tx.Num)
+				pe.doms.SetTxNum(txTask.TxNum)
 				pe.doms.SetBlockNum(processedBlockNum)
 				pe.outputBlockNum.SetUint64(processedBlockNum)
 				pe.lastBlockNum.Store(processedBlockNum)
@@ -735,7 +738,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 }
 
 func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res *exec.Result) (result executorResult, err error) {
-	tx := res.Ver.TxIndex
+	tx := res.Version().TxIndex
 
 	blockStatus, ok := pe.blockStatus[blockNum]
 
@@ -787,7 +790,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 	} else {
 		blockStatus.blockIO.RecordRead(tx, res.TxIn)
 
-		if res.Ver.Incarnation == 0 {
+		if res.Version().Incarnation == 0 {
 			blockStatus.blockIO.RecordWrite(tx, res.TxOut)
 			blockStatus.blockIO.RecordAllWrites(tx, res.TxAllOut)
 		} else {

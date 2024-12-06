@@ -57,9 +57,10 @@ type Task interface {
 		isMining bool) *Result
 	CreateReceipt(tx kv.Tx)
 
+	Version() state.Version
 	TxHash() libcommon.Hash
-	TxIndex() int
-	TxNum() uint64
+
+	txNum() uint64
 
 	IsBlockEnd() bool
 	IsHistoric() bool
@@ -68,7 +69,6 @@ type Task interface {
 type Result struct {
 	Task
 	Err      error
-	Ver      state.Version
 	TxIn     state.VersionedReads
 	TxOut    state.VersionedWrites
 	TxAllOut state.VersionedWrites
@@ -93,19 +93,18 @@ func (e ErrExecAbortError) Error() string {
 type ApplyMessage func(evm *vm.EVM, msg core.Message, gp *core.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
 type Tx struct {
-	Num         uint64
-	Transaction types.Transaction
-	Index       int // -1 for block initialisation
 }
 
 // ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
 type TxTask struct {
-	Tx
+	TxNum              uint64
+	TxIndex            int // -1 for block initialisation
 	BlockNum           uint64
 	Rules              *chain.Rules
 	Header             *types.Header
+	Tx                 types.Transaction
 	Txs                types.Transactions
 	Uncles             []*types.Header
 	Coinbase           libcommon.Address
@@ -141,20 +140,20 @@ type TxTask struct {
 	Logger log.Logger
 }
 
-func (t *TxTask) TxNum() uint64 {
-	return t.Tx.Num
+func (t *TxTask) txNum() uint64 {
+	return t.TxNum
 }
 
 func (t *TxTask) TxHash() libcommon.Hash {
-	return t.Transaction.Hash()
+	return t.Tx.Hash()
 }
 
-func (t *TxTask) TxIndex() int {
-	return t.Tx.Index
+func (t *TxTask) Version() state.Version {
+	return state.Version{TxIndex: t.TxIndex}
 }
 
 func (t *TxTask) IsBlockEnd() bool {
-	return t.Tx.Index == len(t.Txs)
+	return t.TxIndex == len(t.Txs)
 }
 
 func (t *TxTask) IsHistoric() bool {
@@ -162,20 +161,20 @@ func (t *TxTask) IsHistoric() bool {
 }
 
 func (t *TxTask) CreateReceipt(tx kv.Tx) {
-	if t.Tx.Index < 0 || t.IsBlockEnd() {
+	if t.TxIndex < 0 || t.IsBlockEnd() {
 		return
 	}
 
 	var cumulativeGasUsed uint64
 	var firstLogIndex uint32
-	if t.Tx.Index > 0 {
-		prevR := t.BlockReceipts[t.Tx.Index-1]
+	if t.TxIndex > 0 {
+		prevR := t.BlockReceipts[t.TxIndex-1]
 		if prevR != nil {
 			cumulativeGasUsed = prevR.CumulativeGasUsed
 			firstLogIndex = prevR.FirstLogIndexWithinBlock + uint32(len(prevR.Logs))
 		} else {
 			var err error
-			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.Tx.Num)
+			cumulativeGasUsed, _, firstLogIndex, err = rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), t.TxNum)
 			if err != nil {
 				panic(err)
 			}
@@ -186,15 +185,15 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 
 	r := t.createReceipt(cumulativeGasUsed)
 	r.FirstLogIndexWithinBlock = firstLogIndex
-	t.BlockReceipts[t.Tx.Index] = r
+	t.BlockReceipts[t.TxIndex] = r
 }
 
 func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	receipt := &types.Receipt{
 		BlockNumber:       t.Header.Number,
 		BlockHash:         t.BlockHash,
-		TransactionIndex:  uint(t.Tx.Index),
-		Type:              t.Transaction.Type(),
+		TransactionIndex:  uint(t.TxIndex),
+		Type:              t.Tx.Type(),
 		GasUsed:           t.UsedGas,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            t.TxHash(),
@@ -244,8 +243,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	isMining bool) *Result {
 	var result Result
 
-	stateReader.SetTxNum(txTask.Tx.Num)
-	rs.Domains().SetTxNum(txTask.Tx.Num)
+	stateReader.SetTxNum(txTask.TxNum)
+	rs.Domains().SetTxNum(txTask.TxNum)
 	stateReader.ResetReadSet()
 	stateWriter.ResetWriteSet()
 
@@ -258,7 +257,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
 	switch {
-	case txTask.Tx.Index == -1:
+	case txTask.TxIndex == -1:
 		if txTask.BlockNum == 0 {
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
@@ -308,9 +307,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 		}
 	default:
-		gasPool.Reset(txTask.Transaction.GetGas(), chainConfig.GetMaxBlobGasPerBlock())
+		gasPool.Reset(txTask.Tx.GetGas(), chainConfig.GetMaxBlobGasPerBlock())
 		vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		ibs.SetTxContext(txTask.Tx.Index)
+		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
 		if msg.FeeCap().IsZero() && engine != nil {
 			// Only zero-gas transactions may be service ones
@@ -332,7 +331,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			txTask.Logs = ibs.GetLogs(txTask.Tx.Index, txTask.TxHash(), txTask.BlockNum, txTask.BlockHash)
+			txTask.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNum, txTask.BlockHash)
 		}
 
 	}
@@ -360,7 +359,7 @@ func (h TxTaskQueue) Len() int {
 	return len(h)
 }
 func (h TxTaskQueue) Less(i, j int) bool {
-	return h[i].TxNum() < h[j].TxNum()
+	return h[i].txNum() < h[j].txNum()
 }
 
 func (h TxTaskQueue) Swap(i, j int) {
@@ -407,7 +406,7 @@ func (q *QueueWithRetry) RetriesLen() (l int) {
 func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
 	q.retiresLock.Lock()
 	for _, t := range q.retires {
-		out = append(out, t.TxNum())
+		out = append(out, t.txNum())
 	}
 	q.retiresLock.Unlock()
 	return out
@@ -590,7 +589,7 @@ func (q *ResultsQueueIter) Close() {
 	q.q.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
-	return len(*q.q.results) > 0 && (*q.q.results)[0].TxNum() == outputTxNum
+	return len(*q.q.results) > 0 && (*q.q.results)[0].txNum() == outputTxNum
 }
 func (q *ResultsQueueIter) PopNext() *Result {
 	return heap.Pop(q.q.results).(*Result)
@@ -663,7 +662,7 @@ func (q *ResultsQueue) Len() (l int) {
 	q.Unlock()
 	return l
 }
-func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].TxNum() }
+func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].txNum() }
 func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
 func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }
 func (q *ResultsQueue) PushLocked(t *Result)     { heap.Push(q.results, t) }

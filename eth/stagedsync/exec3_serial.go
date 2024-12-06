@@ -52,8 +52,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (co
 			mxExecGas.Add(float64(txTask.UsedGas))
 			mxExecTransactions.Add(1)
 
-			if txTask.Transaction != nil {
-				se.blobGasUsed += txTask.Transaction.GetBlobGas()
+			if txTask.Tx != nil {
+				se.blobGasUsed += txTask.Tx.GetBlobGas()
 			}
 
 			txTask.CreateReceipt(se.applyTx)
@@ -75,7 +75,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (co
 				se.outputBlockNum.SetUint64(txTask.BlockNum)
 			}
 			if se.cfg.syncCfg.ChaosMonkey {
-				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.Tx.Index, se.cfg.badBlockHalt, result.Err)
+				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, result.Err)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")
 					return chaosErr
@@ -112,8 +112,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (co
 
 		if !txTask.IsBlockEnd() {
 			var receipt *types.Receipt
-			if txTask.Tx.Index >= 0 && !txTask.IsBlockEnd() {
-				receipt = txTask.BlockReceipts[txTask.Tx.Index]
+			if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+				receipt = txTask.BlockReceipts[txTask.TxIndex]
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err
@@ -121,14 +121,14 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (co
 		}
 
 		// MA applystate
-		if err := se.rs.ApplyState4(ctx, txTask.BlockNum, txTask.Tx.Num, txTask.ReadLists, txTask.WriteLists,
+		if err := se.rs.ApplyState4(ctx, txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
 			txTask.BalanceIncreaseSet, txTask.Logs, result.TraceFroms, result.TraceTos,
 			txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
 			return false, err
 		}
 		txTask.ReadLists, txTask.WriteLists = nil, nil
 
-		se.doms.SetTxNum(txTask.Tx.Num)
+		se.doms.SetTxNum(txTask.TxNum)
 		se.doms.SetBlockNum(txTask.BlockNum)
 		se.outputTxNum.Add(1)
 	}
