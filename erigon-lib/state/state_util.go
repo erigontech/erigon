@@ -18,18 +18,33 @@ package state
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
 )
 
 // SaveExecV3PruneProgress saves latest pruned key in given table to the database.
 // nil key also allowed and means that latest pruning run has been finished.
-func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, prunedKey []byte) error {
+func SaveExecV3PruneProgress(db kv.RwTx, prunedTblName string, prunedKey []byte) error {
 	empty := make([]byte, 1)
 	if prunedKey != nil {
 		empty[0] = 1
 	}
+
+	for {
+		ok, err := db.Has(kv.TblPruningProgress, []byte(prunedTblName))
+		if err != nil {
+			return err
+		}
+
+		if !ok {
+			break
+		}
+
+		if err := db.Delete(kv.TblPruningProgress, []byte(prunedTblName)); err != nil {
+			return err
+		}
+	}
+
 	return db.Put(kv.TblPruningProgress, []byte(prunedTblName), append(empty, prunedKey...))
 }
 
@@ -45,7 +60,6 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, 
 		return nil, nil
 	case 1:
 		if v[0] == 1 {
-			fmt.Println("LAL real key:", v[1:])
 			return []byte{}, nil
 		}
 		// nil values returned an empty key which actually is a value
