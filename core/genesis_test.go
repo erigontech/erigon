@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -133,7 +132,7 @@ func TestAllocConstructor(t *testing.T) {
 
 	// This deployment code initially sets contract's 0th storage to 0x2a
 	// and its 1st storage to 0x01c9.
-	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
+	deploymentCode := libcommon.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
 
 	funds := big.NewInt(1000000000)
 	address := libcommon.HexToAddress("0x1000000000000000000000000000000000000001")
@@ -158,7 +157,7 @@ func TestAllocConstructor(t *testing.T) {
 	balance := state.GetBalance(address)
 	assert.Equal(funds, balance.ToBig())
 	code := state.GetCode(address)
-	assert.Equal(common.FromHex("5f355f55"), code)
+	assert.Equal(libcommon.FromHex("5f355f55"), code)
 
 	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}

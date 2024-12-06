@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -68,7 +67,7 @@ type btJSON struct {
 	Genesis    btHeader              `json:"genesisBlockHeader"`
 	Pre        types.GenesisAlloc    `json:"pre"`
 	Post       types.GenesisAlloc    `json:"postState"`
-	BestBlock  common.UnprefixedHash `json:"lastblockhash"`
+	BestBlock  libcommon.UnprefixedHash `json:"lastblockhash"`
 	Network    string                `json:"network"`
 	SealEngine string                `json:"sealEngine"`
 }

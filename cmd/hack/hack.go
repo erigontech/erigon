@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	hackdb "github.com/erigontech/erigon/cmd/hack/db"
 	"github.com/erigontech/erigon/cmd/hack/flow"
@@ -703,7 +702,7 @@ func keybytesToHex(str []byte) []byte {
 }
 
 func iterate(filename string, prefix string) error {
-	pBytes := common.FromHex(prefix)
+	pBytes := libcommon.FromHex(prefix)
 	efFilename := filename + ".ef"
 	viFilename := filename + ".vi"
 	vFilename := filename + ".v"
@@ -803,7 +802,7 @@ func main() {
 		printBucket(*chaindata)
 
 	case "slice":
-		dbSlice(*chaindata, *bucket, common.FromHex(*hash))
+		dbSlice(*chaindata, *bucket, libcommon.FromHex(*hash))
 
 	case "extractHeaders":
 		err = extractHeaders(*chaindata, uint64(*block), int64(*blockTotal))
