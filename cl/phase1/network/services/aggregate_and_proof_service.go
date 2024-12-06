@@ -113,11 +113,16 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := aggregate.ElectraSingleCommitteeIndex()
-		if err != nil {
-			return err
+		// [REJECT] len(committee_indices) == 1, where committee_indices = get_committee_indices(aggregate).
+		indices := aggregate.CommitteeBits.GetOnIndices()
+		if len(indices) != 1 {
+			return fmt.Errorf("invalid committee_bits length in aggregate and proof: %v", len(indices))
 		}
-		committeeIndex = index
+		// [REJECT] aggregate.data.index == 0
+		if aggregate.Data.CommitteeIndex != 0 {
+			return errors.New("invalid committee_index in aggregate and proof")
+		}
+		committeeIndex = uint64(indices[0])
 	}
 
 	var (

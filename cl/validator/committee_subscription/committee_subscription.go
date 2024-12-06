@@ -141,7 +141,7 @@ func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) er
 		clVersion      = c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
 	)
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := att.ElectraSingleCommitteeIndex()
+		index, err := att.GetCommitteeIndexFromBits()
 		if err != nil {
 			return err
 		}
@@ -166,7 +166,7 @@ func (c *CommitteeSubscribeMgmt) NeedToAggregate(att *solid.Attestation) bool {
 	)
 	clVersion := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
 	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := att.ElectraSingleCommitteeIndex()
+		index, err := att.GetCommitteeIndexFromBits()
 		if err != nil {
 			return false
 		}

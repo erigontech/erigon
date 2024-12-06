@@ -28,4 +28,5 @@ type GenericBeaconBody interface {
 	GetVoluntaryExits() *solid.ListSSZ[*SignedVoluntaryExit]
 	GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment]
 	GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionChange]
+	GetExecutionRequests() *ExecutionRequests
 }
