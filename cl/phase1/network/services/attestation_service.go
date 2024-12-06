@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
@@ -65,8 +66,9 @@ type attestationService struct {
 
 // AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
 type AttestationWithGossipData struct {
-	Attestation *solid.Attestation
-	GossipData  *sentinel.GossipData
+	Attestation       *solid.Attestation
+	SingleAttestation *solid.SingleAttestation // New container after Electra
+	GossipData        *sentinel.GossipData
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
 }
@@ -103,20 +105,37 @@ func NewAttestationService(
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationWithGossipData) error {
 	var (
-		root           = att.Attestation.Data.BeaconBlockRoot
-		slot           = att.Attestation.Data.Slot
-		committeeIndex = att.Attestation.Data.CommitteeIndex
-		targetEpoch    = att.Attestation.Data.Target.Epoch
-		attEpoch       = s.ethClock.GetEpochAtSlot(slot)
-		clVersion      = s.beaconCfg.GetCurrentStateVersion(attEpoch)
+		root           libcommon.Hash
+		slot           uint64
+		committeeIndex uint64
+		targetEpoch    uint64
+		signature      [96]byte
+		data           *solid.AttestationData
 	)
+	if att.Attestation != nil {
+		slot = att.Attestation.Data.Slot
+	} else {
+		slot = att.SingleAttestation.Data.Slot
+	}
+	attEpoch := s.ethClock.GetEpochAtSlot(slot)
+	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
 
-	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := att.Attestation.ElectraSingleCommitteeIndex()
-		if err != nil {
-			return err
-		}
-		committeeIndex = index
+	var err error
+	if clVersion >= clparams.ElectraVersion {
+		root = att.SingleAttestation.Data.BeaconBlockRoot
+		slot = att.SingleAttestation.Data.Slot
+		committeeIndex = att.SingleAttestation.CommitteeIndex
+		targetEpoch = att.SingleAttestation.Data.Target.Epoch
+		signature = att.SingleAttestation.Signature
+		data = att.SingleAttestation.Data
+	} else {
+		// deneb and before case
+		root = att.Attestation.Data.BeaconBlockRoot
+		slot = att.Attestation.Data.Slot
+		committeeIndex = att.Attestation.Data.CommitteeIndex
+		targetEpoch = att.Attestation.Data.Target.Epoch
+		signature = att.Attestation.Signature
+		data = att.Attestation.Data
 	}
 
 	// Commented because we have a check in validatorAttestationSeen that does the same thing.
@@ -142,9 +161,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	var (
-		domain    []byte
-		pubKey    common.Bytes48
-		signature common.Bytes96
+		domain      []byte
+		pubKey      common.Bytes48
+		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
 	)
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [REJECT] The committee index is within the expected range
@@ -157,50 +176,61 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if subnet == nil || subnetId != *subnet {
 			return errors.New("wrong subnet")
 		}
-
 		beaconCommittee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 		if err != nil {
 			return err
 		}
+		var vIndex uint64
+		if clVersion <= clparams.DenebVersion {
+			// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
+			bits := att.Attestation.AggregationBits.Bytes()
+			expectedAggregationBitsLength := len(beaconCommittee)
+			actualAggregationBitsLength := utils.GetBitlistLength(bits)
+			if actualAggregationBitsLength != expectedAggregationBitsLength {
+				return fmt.Errorf("aggregation bits count mismatch: %d != %d", actualAggregationBitsLength, expectedAggregationBitsLength)
+			}
 
-		// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
-		bits := att.Attestation.AggregationBits.Bytes()
-		expectedAggregationBitsLength := len(beaconCommittee)
-		actualAggregationBitsLength := utils.GetBitlistLength(bits)
-		if actualAggregationBitsLength != expectedAggregationBitsLength {
-			return fmt.Errorf("aggregation bits count mismatch: %d != %d", actualAggregationBitsLength, expectedAggregationBitsLength)
-		}
-
-		//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
-		setBits := 0
-		onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
-		for i := 0; i < len(bits); i++ {
-			for j := 0; j < 8; j++ {
-				if bits[i]&(1<<uint(j)) != 0 {
-					if i*8+j >= len(beaconCommittee) {
-						continue
+			//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
+			setBits := 0
+			onBitIndex := 0 // Aggregationbits is []byte, so we need to iterate over all bits.
+			for i := 0; i < len(bits); i++ {
+				for j := 0; j < 8; j++ {
+					if bits[i]&(1<<uint(j)) != 0 {
+						if i*8+j >= len(beaconCommittee) {
+							continue
+						}
+						setBits++
+						onBitIndex = i*8 + j
 					}
-					setBits++
-					onBitIndex = i*8 + j
 				}
 			}
-		}
-
-		if setBits == 0 {
-			return ErrIgnore // Ignore if it is just an empty bitlist
-		}
-		if setBits != 1 {
-			return errors.New("attestation does not have exactly one participating validator")
+			if setBits == 0 {
+				return ErrIgnore // Ignore if it is just an empty bitlist
+			}
+			if setBits != 1 {
+				return errors.New("attestation does not have exactly one participating validator")
+			}
+			if onBitIndex >= len(beaconCommittee) {
+				return errors.New("on bit index out of committee range")
+			}
+			vIndex = beaconCommittee[onBitIndex]
+			attestation = att.Attestation
+		} else {
+			// electra and after
+			// [REJECT] attestation.data.index == 0
+			if att.SingleAttestation.Data.CommitteeIndex != 0 {
+				return errors.New("committee index must be 0")
+			}
+			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
+			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
+			if memIndexInCommittee < 0 {
+				return errors.New("attester is not a member of the committee")
+			}
+			vIndex = att.SingleAttestation.AttesterIndex
+			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee)
 		}
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
-		if err != nil {
-			return err
-		}
-		if onBitIndex >= len(beaconCommittee) {
-			return errors.New("on bit index out of committee range")
-		}
 		// mark the validator as seen
-		vIndex := beaconCommittee[onBitIndex]
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
 			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
@@ -208,8 +238,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 
 		// [REJECT] The signature of attestation is valid.
-		signature = att.Attestation.Signature
-		pubKey, err = headState.ValidatorPublicKey(int(beaconCommittee[onBitIndex]))
+		pubKey, err = headState.ValidatorPublicKey(int(vIndex))
 		if err != nil {
 			return fmt.Errorf("unable to get public key: %v", err)
 		}
@@ -221,7 +250,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}); err != nil {
 		return err
 	}
-	signingRoot, err := computeSigningRoot(att.Attestation.Data, domain)
+	signingRoot, err := computeSigningRoot(data, domain)
 	if err != nil {
 		return fmt.Errorf("unable to get signing root: %v", err)
 	}
@@ -236,8 +265,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
-	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != att.Attestation.Data.Target.Root {
-		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, att.Attestation.Data.Target.Root.Hex(), targetBlock.Hex())
+	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != data.Target.Root {
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, data.Target.Root.Hex(), targetBlock.Hex())
 	}
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
 	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
@@ -254,18 +283,16 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
-			if s.committeeSubscribe.NeedToAggregate(att.Attestation) {
-				err = s.committeeSubscribe.AggregateAttestation(att.Attestation)
-				if errors.Is(err, aggregation.ErrIsSuperset) {
-					return
-				}
+			err = s.committeeSubscribe.AggregateAttestation(attestation)
+			if errors.Is(err, aggregation.ErrIsSuperset) {
+				return
 			}
 
 			if err != nil {
 				log.Warn("could not check aggregate attestation", "err", err)
 				return
 			}
-			s.emitters.Operation().SendAttestation(att.Attestation)
+			s.emitters.Operation().SendAttestation(attestation)
 		},
 	}
 
@@ -328,3 +355,12 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 // 		})
 // 	}
 // }
+
+func contains[T comparable](target T, slices []T) int {
+	for i, s := range slices {
+		if s == target {
+			return i
+		}
+	}
+	return -1
+}

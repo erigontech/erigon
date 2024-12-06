@@ -45,7 +45,7 @@ type Attestation struct {
 	CommitteeBits   *BitVector        `json:"committee_bits,omitempty"` // Electra EIP-7549
 }
 
-func (a *Attestation) ElectraSingleCommitteeIndex() (uint64, error) {
+func (a *Attestation) GetCommitteeIndexFromBits() (uint64, error) {
 	bits := a.CommitteeBits.GetOnIndices()
 	if len(bits) == 0 {
 		return 0, errors.New("no committee bits set in electra attestation")
@@ -72,9 +72,9 @@ func (a *Attestation) Copy() *Attestation {
 func (a *Attestation) EncodingSizeSSZ() (size int) {
 	if a.CommitteeBits != nil {
 		// Electra case
-		return 4 + AttestationDataSize + length.Bytes96 + 4 +
-			a.AggregationBits.EncodingSizeSSZ() +
-			a.CommitteeBits.EncodingSizeSSZ()
+		return 4 + AttestationDataSize + length.Bytes96 +
+			a.CommitteeBits.EncodingSizeSSZ() +
+			a.AggregationBits.EncodingSizeSSZ()
 	}
 	// Deneb case
 	size = AttestationDataSize + length.Bytes96
@@ -150,6 +150,7 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 		a.Data = temp.Data
 		a.Signature = temp.Signature
 		a.CommitteeBits = temp.CommitteeBits
+		return nil
 	}
 
 	// Deneb case
@@ -163,4 +164,55 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 	a.Data = temp.Data
 	a.Signature = temp.Signature
 	return nil
+}
+
+// class SingleAttestation(Container):
+//
+//	committee_index: CommitteeIndex
+//	attester_index: ValidatorIndex
+//	data: AttestationData
+//	signature: BLSSignature
+type SingleAttestation struct {
+	CommitteeIndex uint64            `json:"committee_index"`
+	AttesterIndex  uint64            `json:"attester_index"`
+	Data           *AttestationData  `json:"data"`
+	Signature      libcommon.Bytes96 `json:"signature"`
+}
+
+func (s *SingleAttestation) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
+}
+
+func (s *SingleAttestation) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
+}
+
+func (s *SingleAttestation) EncodingSizeSSZ() (size int) {
+	return 8 + 8 + AttestationDataSize + length.Bytes96
+}
+
+func (s *SingleAttestation) HashSSZ() (o [32]byte, err error) {
+	return merkle_tree.HashTreeRoot(&s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
+}
+
+func (s *SingleAttestation) Clone() clonable.Clonable {
+	return &SingleAttestation{
+		Data: &AttestationData{},
+	}
+}
+
+func (s *SingleAttestation) Static() bool {
+	return true
+}
+
+func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int) *Attestation {
+	committeeBits := NewBitVector(maxCommitteesPerSlot)
+	aggregationBits := NewBitList(0, aggregationBitsSizeElectra)
+	aggregationBits.SetOnBit(maxValidatorsPerCommittee*int(s.CommitteeIndex) + memberIndexInCommittee)
+	return &Attestation{
+		AggregationBits: aggregationBits,
+		Data:            s.Data,
+		Signature:       s.Signature,
+		CommitteeBits:   committeeBits,
+	}
 }

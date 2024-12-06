@@ -75,6 +75,11 @@ func ProcessEpoch(s abstract.BeaconState) error {
 	}
 
 	ProcessEth1DataReset(s)
+	if s.Version() >= clparams.ElectraVersion {
+		ProcessPendingDeposits(s)
+		ProcessPendingConsolidations(s)
+	}
+
 	if err := ProcessEffectiveBalanceUpdates(s); err != nil {
 		return err
 	}
