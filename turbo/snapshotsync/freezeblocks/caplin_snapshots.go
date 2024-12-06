@@ -84,7 +84,7 @@ type CaplinSnapshots struct {
 //   - segment have [from:to) semantic
 func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.Logger) *CaplinSnapshots {
 	if cfg.ChainName == "" {
-		panic("ChainName is empty")
+		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName")
 	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg,
 		dirty:   make([]*btree.BTreeG[*snapshotsync.DirtySegment], snaptype.MaxEnum),
@@ -162,8 +162,6 @@ func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
-
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -196,7 +194,7 @@ Loop:
 					snaptype.BeaconBlocks,
 					f.Version,
 					f.From, f.To,
-					snConfig.IsFrozen(f))
+					snapcfg.IsFrozen(s.cfg.ChainName, f))
 			}
 			if err := sn.Open(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -252,7 +250,7 @@ Loop:
 					snaptype.BlobSidecars,
 					f.Version,
 					f.From, f.To,
-					snConfig.IsFrozen(f))
+					snapcfg.IsFrozen(s.cfg.ChainName, f))
 			}
 			if err := sn.Open(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
