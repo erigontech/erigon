@@ -546,6 +546,11 @@ var (
 		Usage: "Block seal time. Defaults to 6s",
 		Value: "6s",
 	}
+	SequencerEmptyBlockSealTime = cli.StringFlag{
+		Name:  "zkevm.sequencer-empty-block-seal-time",
+		Usage: "Empty block seal time. Defaults to zkevm.sequencer-block-seal-time",
+		Value: "",
+	}
 	SequencerBatchSealTime = cli.StringFlag{
 		Name:  "zkevm.sequencer-batch-seal-time",
 		Usage: "Batch seal time. Defaults to 12s",

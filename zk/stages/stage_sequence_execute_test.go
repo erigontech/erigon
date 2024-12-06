@@ -143,10 +143,11 @@ func TestSpawnSequencingStage(t *testing.T) {
 		AnyTimes()
 
 	zkCfg := &ethconfig.Zk{
-		SequencerResequence:    false,
-		SequencerBatchSealTime: 10 * time.Second,
-		SequencerBlockSealTime: 10 * time.Second,
-		InfoTreeUpdateInterval: 10 * time.Second,
+		SequencerResequence:         false,
+		SequencerBatchSealTime:      10 * time.Second,
+		SequencerBlockSealTime:      10 * time.Second,
+		SequencerEmptyBlockSealTime: 10 * time.Second,
+		InfoTreeUpdateInterval:      10 * time.Second,
 	}
 
 	legacyVerifier := verifier.NewLegacyExecutorVerifier(*zkCfg, nil, db1, nil, nil)

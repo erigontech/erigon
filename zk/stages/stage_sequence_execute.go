@@ -217,10 +217,11 @@ func sequencingBatchStep(
 		}
 	}
 
-	batchTicker, logTicker, blockTicker, infoTreeTicker := prepareTickers(batchContext.cfg)
+	batchTicker, logTicker, blockTicker, emptyBlockTicker, infoTreeTicker := prepareTickers(batchContext.cfg)
 	defer batchTicker.Stop()
 	defer logTicker.Stop()
 	defer blockTicker.Stop()
+	defer emptyBlockTicker.Stop()
 	defer infoTreeTicker.Stop()
 
 	log.Info(fmt.Sprintf("[%s] Starting batch %d...", logPrefix, batchState.batchNumber))
@@ -236,6 +237,7 @@ func sequencingBatchStep(
 		log.Info(fmt.Sprintf("[%s] Starting block %d (forkid %v)...", logPrefix, blockNumber, batchState.forkId))
 		logTicker.Reset(10 * time.Second)
 		blockTicker.Reset(cfg.zk.SequencerBlockSealTime)
+		emptyBlockTicker.Reset(cfg.zk.SequencerEmptyBlockSealTime)
 
 		if batchState.isL1Recovery() {
 			blockNumbersInBatchSoFar, err := batchContext.sdb.hermezDb.GetL2BlockNosByBatch(batchState.batchNumber)
@@ -322,7 +324,12 @@ func sequencingBatchStep(
 					log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
 				}
 			case <-blockTicker.C:
-				if !batchState.isAnyRecovery() {
+				if len(batchState.blockState.builtBlockElements.transactions) > 0 && !batchState.isAnyRecovery() {
+					break OuterLoopTransactions
+				}
+
+			case <-emptyBlockTicker.C:
+				if len(batchState.blockState.builtBlockElements.transactions) == 0 && !batchState.isAnyRecovery() {
 					break OuterLoopTransactions
 				}
 			case <-batchTicker.C:
