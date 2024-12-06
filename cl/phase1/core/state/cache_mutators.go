@@ -82,10 +82,6 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 	if err := IncreaseBalance(b, proposerInd, proposerReward); err != nil {
 		return 0, err
 	}
-	//rewardWhist := whistleBlowerReward - proposerReward
-	//if whistleblowerInd == nil {
-	//	proposerReward += rewardWhist
-	//}
 	return proposerReward, IncreaseBalance(b, *whistleblowerInd, whistleBlowerReward-proposerReward)
 }
 
