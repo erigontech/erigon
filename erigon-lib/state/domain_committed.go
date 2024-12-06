@@ -158,7 +158,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 // If file is not found anywhere, returns nil
 func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*filesItem, error) {
 	for _, f := range dt.files {
-		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil && f.src.bindex != nil {
+		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil {
 			return f.src, nil // found in visible files
 		}
 	}
