@@ -167,7 +167,7 @@ type SnapshotTypes struct {
 //   - segment have [from:to) semantic
 func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
 	if cfg.ChainName == "" {
-		panic("ChainName is empty")
+		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
 
 	// BeaconBlocks := &segments{
