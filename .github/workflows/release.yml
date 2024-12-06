@@ -158,7 +158,7 @@ jobs:
   build-debian-pkg:
     name: Debian packages
     needs: [ build-release ]
-    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@feature/issue-12891 #### !!!! FIX-IT-BEFORE-MERGE !!!!
+    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
     with:
       application: ${{ needs.build-release.outputs.application }}
       version: ${{ needs.build-release.outputs.parsed-version }}
