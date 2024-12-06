@@ -248,7 +248,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	logger := log.New("app", "caplin")
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, logger)
+	config.NetworkId = clparams.CustomNetwork // Force custom network
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.ChainName = beaconConfig.ConfigName
+	csn := freezeblocks.NewCaplinSnapshots(freezeCfg, beaconConfig, dirs, logger)
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
 	pool := pool.NewOperationsPool(beaconConfig)

@@ -542,6 +542,9 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 }
 
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+	if cfg.ChainName == "" {
+		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
+	}
 	enums := make([]snaptype.Enum, len(types))
 	for i, t := range types {
 		enums[i] = t.Enum()

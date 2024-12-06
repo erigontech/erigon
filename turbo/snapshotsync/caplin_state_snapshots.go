@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -166,6 +167,10 @@ type SnapshotTypes struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
+	if cfg.ChainName == "" {
+		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
+	}
+
 	// BeaconBlocks := &segments{
 	// 	DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 	// }
@@ -269,8 +274,6 @@ func (s *CaplinStateSnapshots) OpenList(fileNames []string, optimistic bool) err
 	s.dirtySegmentsLock.Lock()
 	defer s.dirtySegmentsLock.Unlock()
 
-	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
-
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -305,7 +308,7 @@ Loop:
 				// segType: f.Type, Unsupported
 				version:  f.Version,
 				Range:    Range{f.From, f.To},
-				frozen:   snConfig.IsFrozen(f),
+				frozen:   snapcfg.IsFrozen(s.cfg.ChainName, f),
 				filePath: filePath,
 			}
 		}

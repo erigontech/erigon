@@ -146,7 +146,9 @@ func (c *Chain) Run(ctx *Context) error {
 
 	dirs := datadir.New(c.Datadir)
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
@@ -434,7 +436,9 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -519,7 +523,9 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -562,7 +568,9 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, 0, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = r.Chain
+	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, 0, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
@@ -573,7 +581,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil, nil, nil)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -584,7 +592,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	}
 
 	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
@@ -914,7 +922,9 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	}
 	defer db.Close()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = b.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1029,7 +1039,9 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1090,7 +1102,9 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1157,7 +1171,9 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1218,13 +1234,16 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 		return
 	})
 
+	freezingCfg := ethconfig.Defaults.Snapshot
+	freezingCfg.ChainName = c.Chain
+
 	salt, err := snaptype.GetIndexSalt(dirs.Snap)
 
 	if err != nil {
 		return err
 	}
 	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snTypes, log.Root())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}

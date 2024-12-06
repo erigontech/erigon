@@ -1870,6 +1870,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
 	cfg.Snapshot.Verify = ctx.Bool(DownloaderVerifyFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
+	cfg.Snapshot.ChainName = chain
 	if cfg.Snapshot.DownloaderAddr == "" {
 		downloadRateStr := ctx.String(TorrentDownloadRateFlag.Name)
 		uploadRateStr := ctx.String(TorrentUploadRateFlag.Name)
