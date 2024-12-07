@@ -17,6 +17,8 @@
 package statechange
 
 import (
+	"runtime"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/monitor"
