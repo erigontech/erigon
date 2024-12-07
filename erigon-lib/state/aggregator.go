@@ -909,7 +909,7 @@ func (ac *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
 		return 0, err
 	}
 	if minUnwindale == math.MaxUint64 { // no unwindable block found
-		stateVal, _, _, err := ac.d[kv.CommitmentDomain].GetLatest(keyCommitmentState, nil, tx)
+		stateVal, _, _, err := ac.d[kv.CommitmentDomain].GetLatest(keyCommitmentState, tx)
 		if err != nil {
 			return 0, err
 		}
@@ -1853,8 +1853,8 @@ func (ac *AggregatorRoTx) getAsOfFile(name kv.Domain, key []byte, ts uint64) (v 
 func (ac *AggregatorRoTx) GetAsOf(tx kv.Tx, name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	return ac.d[name].GetAsOf(k, ts, tx)
 }
-func (ac *AggregatorRoTx) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
-	return ac.d[domain].GetLatest(k, k2, tx)
+func (ac *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
+	return ac.d[domain].GetLatest(k, tx)
 }
 
 // search key in all files of all domains and print file names

@@ -193,7 +193,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			account.CodeHash = hexutility.Bytes(acc.CodeHash.Bytes())
 
 			if !excludeCode {
-				r, _, err := ttx.GetLatest(kv.CodeDomain, k, nil)
+				r, _, err := ttx.GetLatest(kv.CodeDomain, k)
 				if err != nil {
 					return nil, err
 				}
