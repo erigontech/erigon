@@ -293,8 +293,10 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 			return count
 		}()
 
-		multiplierForAdaptableTraffic := (float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8
-
+		multiplierForAdaptableTraffic := 1.0
+		if s.cfg.AdaptableTrafficRequirements {
+			multiplierForAdaptableTraffic = ((float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+		}
 		select {
 		case <-ctx.Done():
 			return
