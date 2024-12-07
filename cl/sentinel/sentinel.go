@@ -253,7 +253,7 @@ func New(
 		return nil, err
 	}
 	s.host = host
-	go s.observeBandwidth(ctx, bwc)
+	//go s.observeBandwidth(ctx, bwc)
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
