@@ -273,28 +273,29 @@ func New(
 }
 
 func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthCounter) {
-	countSubnetsSubscribed := func() int {
-		count := 0
-		if s.subManager == nil {
-			return count
-		}
-		s.GossipManager().subscriptions.Range(func(key, value any) bool {
-			sub := value.(*GossipSubscription)
-			if sub.topic == nil {
-				return true
-			}
-			if strings.Contains(sub.topic.String(), "beacon_attestation") {
-				count++
-			}
-			return true
-		})
-		return count
-	}()
-
-	multiplierForAdaptableTraffic := (float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8
 
 	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
+		countSubnetsSubscribed := func() int {
+			count := 0
+			if s.subManager == nil {
+				return count
+			}
+			s.GossipManager().subscriptions.Range(func(key, value any) bool {
+				sub := value.(*GossipSubscription)
+				if sub.topic == nil {
+					return true
+				}
+				if strings.Contains(sub.topic.String(), "beacon_attestation") {
+					count++
+				}
+				return true
+			})
+			return count
+		}()
+
+		multiplierForAdaptableTraffic := (float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8
+
 		select {
 		case <-ctx.Done():
 			return
