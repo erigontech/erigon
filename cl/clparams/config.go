@@ -60,16 +60,17 @@ type CaplinConfig struct {
 	CustomGenesisStatePath string
 
 	// Network stuff
-	CaplinDiscoveryAddr       string
-	CaplinDiscoveryPort       uint64
-	CaplinDiscoveryTCPPort    uint64
-	SentinelAddr              string
-	SentinelPort              uint64
-	SubscribeAllTopics        bool
-	MaxPeerCount              uint64
-	EnableUPnP                bool
-	MaxInboundTrafficPerPeer  datasize.ByteSize
-	MaxOutboundTrafficPerPeer datasize.ByteSize
+	CaplinDiscoveryAddr         string
+	CaplinDiscoveryPort         uint64
+	CaplinDiscoveryTCPPort      uint64
+	SentinelAddr                string
+	SentinelPort                uint64
+	SubscribeAllTopics          bool
+	MaxPeerCount                uint64
+	EnableUPnP                  bool
+	MaxInboundTrafficPerPeer    datasize.ByteSize
+	MaxOutboundTrafficPerPeer   datasize.ByteSize
+	AdptableTrafficRequirements bool
 	// Erigon Sync
 	LoopBlockLimit uint64
 	// Beacon API router configuration
