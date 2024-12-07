@@ -26,6 +26,7 @@ jobs:
       TRACKING_TIME_SECONDS: 14400 # 4 hours
       TOTAL_TIME_SECONDS: 28800 # 8 hours
       CHAIN: ${{ matrix.chain }}
+      CGROUP_NAME: ${{ matrix.cgroup_name }}
 
     steps:
     - name: Check out repository
@@ -54,7 +55,7 @@ jobs:
         set +e # Disable exit on error
         
         # Run Erigon under memory constraints, wait sync and check ability to maintain sync
-        cgexec -g memory:$cgroup_name python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+        cgexec -g memory:$CGROUP_NAME python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
           ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN standard_node statistics
   
         # Capture monitoring script exit status
@@ -104,14 +105,14 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: test-results
+        name: test-results-${{ env.CHAIN }}
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload Erigon full log
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: erigon-log
+        name: erigon-log-${{ env.CHAIN }}
         path: |
           ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
           ${{ env.ERIGON_TESTBED_DATA_DIR }}/proc_stat.log
