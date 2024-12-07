@@ -32,7 +32,6 @@ package contracts
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build poly.sol
 //go:generate abigen -abi build/Poly.abi -bin build/Poly.bin -pkg contracts -type poly -out ./gen_poly.go
 
-
 // revive2.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build revive2.sol
 //go:generate abigen -abi build/Revive2.abi -bin build/Revive2.bin -pkg contracts -type revive2 -out ./gen_revive2.go
