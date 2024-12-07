@@ -157,7 +157,7 @@ func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, m
 			}
 
 			switch protocols[protocolIndex] {
-			case 66, 67:
+			case 67:
 				if i > prevI {
 					req := &sentryproto.SendMessageToRandomPeersRequest{
 						Data: &sentryproto.OutboundMessageData{

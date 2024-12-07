@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -109,14 +110,16 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
 	return caplin1.RunCaplinService(ctx, executionEngine, clparams.CaplinConfig{
-		CaplinDiscoveryAddr:    cfg.Addr,
-		CaplinDiscoveryPort:    uint64(cfg.Port),
-		CaplinDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-		BeaconAPIRouter:        rcfg,
-		NetworkId:              networkId,
-		MevRelayUrl:            cfg.MevRelayUrl,
-		CustomConfigPath:       cfg.CustomConfig,
-		CustomGenesisStatePath: cfg.CustomGenesisState,
-		MaxPeerCount:           cfg.MaxPeerCount,
+		CaplinDiscoveryAddr:       cfg.Addr,
+		CaplinDiscoveryPort:       uint64(cfg.Port),
+		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),
+		BeaconAPIRouter:           rcfg,
+		NetworkId:                 networkId,
+		MevRelayUrl:               cfg.MevRelayUrl,
+		CustomConfigPath:          cfg.CustomConfig,
+		CustomGenesisStatePath:    cfg.CustomGenesisState,
+		MaxPeerCount:              cfg.MaxPeerCount,
+		MaxInboundTrafficPerPeer:  datasize.MB,
+		MaxOutboundTrafficPerPeer: datasize.MB,
 	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
 }

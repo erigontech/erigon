@@ -57,6 +57,8 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 		startState.BeaconConfig().CapellaForkEpoch = meta.ForkEpoch
 	case clparams.DenebVersion:
 		startState.BeaconConfig().DenebForkEpoch = meta.ForkEpoch
+	case clparams.ElectraVersion:
+		startState.BeaconConfig().ElectraForkEpoch = meta.ForkEpoch
 	}
 	startSlot := startState.Slot()
 	blockIndex := 0

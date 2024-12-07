@@ -254,7 +254,8 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		return err
 	}
 	withdrawals := []*types.Withdrawal{}
-	for _, w := range state.ExpectedWithdrawals(s, epoch) {
+	expWithdrawals, _ := state.ExpectedWithdrawals(s, epoch)
+	for _, w := range expWithdrawals {
 		withdrawals = append(withdrawals, &types.Withdrawal{
 			Amount:    w.Amount,
 			Index:     w.Index,
@@ -317,6 +318,10 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
 	if err != nil {
 		return fmt.Errorf("failed to get state at block root: %w", err)
+	}
+	// fail-safe check§
+	if headState == nil {
+		return nil
 	}
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)

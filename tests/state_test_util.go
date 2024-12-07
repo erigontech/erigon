@@ -44,7 +44,6 @@ import (
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/wrap"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
@@ -80,10 +79,10 @@ type stJSON struct {
 }
 
 type stPostState struct {
-	Root            common.UnprefixedHash `json:"hash"`
-	Logs            common.UnprefixedHash `json:"logs"`
-	Tx              hexutility.Bytes      `json:"txbytes"`
-	ExpectException string                `json:"expectException"`
+	Root            libcommon.UnprefixedHash `json:"hash"`
+	Logs            libcommon.UnprefixedHash `json:"logs"`
+	Tx              hexutility.Bytes         `json:"txbytes"`
+	ExpectException string                   `json:"expectException"`
 	Indexes         struct {
 		Data  int `json:"data"`
 		Gas   int `json:"gas"`
@@ -120,7 +119,7 @@ type stEnv struct {
 }
 
 type stEnvMarshaling struct {
-	Coinbase      common.UnprefixedAddress
+	Coinbase      libcommon.UnprefixedAddress
 	Difficulty    *math.HexOrDecimal256
 	Random        *math.HexOrDecimal256
 	GasLimit      math.HexOrDecimal64

@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -138,17 +137,19 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests []hexutility.Bytes) error {
-	if !s.config.IsPrague(time) {
+func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutility.Bytes) error {
+	if version < clparams.ElectraVersion {
 		if executionRequests != nil {
-			return &rpc.InvalidParamsError{Message: "requests before Prague"}
+			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
+		}
+	} else {
+		if executionRequests == nil {
+			return &rpc.InvalidParamsError{Message: "missing requests list"}
+		}
+		if len(executionRequests) != len(types.KnownRequestTypes) {
+			return &rpc.InvalidParamsError{Message: "invalid requests lists"}
 		}
 	}
-	// if s.config.IsPrague(time) {
-	//   if len(executionRequests) < 3 {
-	// 		return &rpc.InvalidParamsError{Message: "missing requests list"}
-	// 	}
-	// }
 	return nil
 }
 
@@ -204,7 +205,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var requests types.FlatRequests
-	if err := s.checkRequestsPresence(header.Time, executionRequests); err != nil {
+	if err := s.checkRequestsPresence(version, executionRequests); err != nil {
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
@@ -255,7 +256,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	for _, txn := range req.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
-			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
+			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", libcommon.Bytes2Hex(txn))
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
