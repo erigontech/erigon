@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -776,7 +775,7 @@ func TestBadBlocks(t *testing.T) {
 		return r
 	}
 
-	putBlock := func(number uint64) common.Hash {
+	putBlock := func(number uint64) libcommon.Hash {
 		// prepare db so it works with our test
 		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
 		body := &types.Body{

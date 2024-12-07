@@ -31,7 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -374,7 +373,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 2", create2address.String())
 		}
-		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6002ff")) {
+		if !bytes.Equal(st.GetCode(create2address), libcommon.FromHex("6002ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", st.GetCode(create2address))
 		}
 		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
@@ -408,7 +407,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 4", create2address.String())
 		}
-		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6004ff")) {
+		if !bytes.Equal(st.GetCode(create2address), libcommon.FromHex("6004ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", st.GetCode(create2address))
 		}
 		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
@@ -429,7 +428,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 5", create2address.String())
 		}
-		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6005ff")) {
+		if !bytes.Equal(st.GetCode(create2address), libcommon.FromHex("6005ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", st.GetCode(create2address))
 		}
 
@@ -1419,7 +1418,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
 			var codeHash libcommon.Hash
-			if codeHash, err = libcommon.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+			if codeHash, err = libcommon.HashData(libcommon.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
@@ -1481,7 +1480,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
 			var codeHash libcommon.Hash
-			if codeHash, err = libcommon.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+			if codeHash, err = libcommon.HashData(libcommon.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())

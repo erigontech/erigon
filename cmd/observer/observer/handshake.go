@@ -25,7 +25,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/direct"
@@ -248,7 +247,7 @@ func readMessage(conn *rlpx.Conn, expectedMessageID uint64, decodeError Handshak
 
 func makeOurHelloMessage(myPrivateKey *ecdsa.PrivateKey) HelloMessage {
 	version := params.VersionWithCommit(params.GitCommit)
-	clientID := common.MakeName("observer", version)
+	clientID := libcommon.MakeName("observer", version)
 
 	caps := []p2p.Cap{
 		{Name: eth.ProtocolName, Version: direct.ETH67},

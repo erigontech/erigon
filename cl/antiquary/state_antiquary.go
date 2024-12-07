@@ -25,7 +25,6 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/etl"
@@ -312,10 +311,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			return stateAntiquaryCollector.collectFlattenedProposers(epoch, getProposerDutiesValue(s.currentState))
 		},
-		OnNewBlockRoot: func(index int, root common.Hash) error {
+		OnNewBlockRoot: func(index int, root libcommon.Hash) error {
 			return stateAntiquaryCollector.collectBlockRoot(s.currentState.Slot(), root)
 		},
-		OnNewStateRoot: func(index int, root common.Hash) error {
+		OnNewStateRoot: func(index int, root libcommon.Hash) error {
 			return stateAntiquaryCollector.collectStateRoot(s.currentState.Slot(), root)
 		},
 		OnNewNextSyncCommittee: func(committee *solid.SyncCommittee) error {
@@ -472,7 +471,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err = validator.WriteTo(buf); err != nil {
 			return false
 		}
-		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(buf.Bytes())); err != nil {
+		if err = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), libcommon.Copy(buf.Bytes())); err != nil {
 			return false
 		}
 		return true
