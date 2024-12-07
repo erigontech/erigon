@@ -203,7 +203,7 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		sf.decompressor.EnableMadvNormal()
 		cf.decompressor.EnableMadvNormal()
 
-		err := func() error {
+		err = func() error {
 			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
 			compression := commitment.d.compression
 			if steps < DomainMinStepsToCompress {
