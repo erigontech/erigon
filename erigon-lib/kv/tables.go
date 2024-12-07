@@ -60,6 +60,8 @@ const (
 	ContractCode = "HashedCodeHash"
 )
 
+const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness
+
 // Mapping [block number] => [Verkle Root]
 const VerkleRoots = "VerkleRoots"
 
@@ -127,6 +129,8 @@ const (
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
+
+	PreimagePrefix = "SecureKey" // preimagePrefix + hash -> preima
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
@@ -455,7 +459,7 @@ var ChaindataTables = []string{
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
-
+	// Witnesses,
 	AccountChangeSetDeprecated,
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,

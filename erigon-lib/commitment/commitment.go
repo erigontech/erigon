@@ -138,7 +138,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	default:
 
 		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
-		tree := NewUpdates(mode, tmpdir, trie.hashAndNibblizeKey)
+		tree := NewUpdates(mode, tmpdir, trie.HashAndNibblizeKey)
 		return trie, tree
 	}
 }

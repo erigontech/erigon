@@ -28,7 +28,7 @@ func TestValue(t *testing.T) {
 
 	h := newHasher(false)
 	var hn libcommon.Hash
-	h.hash(valueNode("BLAH"), false, hn[:])
+	h.hash(ValueNode("BLAH"), false, hn[:])
 	expected := "0x0"
 	actual := fmt.Sprintf("0x%x", hn[:])
 	if actual != expected {

@@ -429,7 +429,6 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 		bi.count++
 		return
 	}
-
 	stateObject := sdb.GetOrNewStateObject(addr)
 	stateObject.AddBalance(amount, reason)
 }
