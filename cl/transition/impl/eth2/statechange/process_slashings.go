@@ -70,7 +70,7 @@ func processSlashingsElectra(s abstract.BeaconState) error {
 	cfg := s.BeaconConfig()
 	increment := cfg.EffectiveBalanceIncrement
 	penaltyPerEffectiveBalanceIncr := adjustTotalSlashingBalance / (totalBalance / increment)
-	return threading.ParallellForLoop(runtime.NumCPU(), 0, s.ValidatorSet().Length(), func(i int) error {
+	return threading.ParallellForLoop(1, 0, s.ValidatorSet().Length(), func(i int) error {
 		v := s.ValidatorSet().Get(i)
 		if !v.Slashed() || epoch+cfg.EpochsPerSlashingsVector/2 != v.WithdrawableEpoch() {
 			return nil
