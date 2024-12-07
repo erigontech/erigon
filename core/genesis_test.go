@@ -154,10 +154,12 @@ func TestAllocConstructor(t *testing.T) {
 	reader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, genSpec.Config.ChainName)
 	require.NoError(err)
 	state := state.New(reader)
-	balance := state.GetBalance(address)
+	balance, err := state.GetBalance(address)
+	assert.NoError(err)
 	assert.Equal(funds, balance.ToBig())
-	code := state.GetCode(address)
-	assert.Equal(libcommon.FromHex("5f355f55"), code)
+	code, err := state.GetCode(address)
+	assert.NoError(err)
+	assert.Equal(common.FromHex("5f355f55"), code)
 
 	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}
