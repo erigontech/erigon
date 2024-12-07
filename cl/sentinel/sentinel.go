@@ -285,7 +285,7 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 				if sub.topic == nil {
 					return true
 				}
-				if strings.Contains(sub.topic.String(), "beacon_attestation") {
+				if strings.Contains(sub.topic.String(), "beacon_attestation") && sub.subscribed.Load() {
 					count++
 				}
 				return true
