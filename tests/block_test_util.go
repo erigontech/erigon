@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -64,13 +63,13 @@ func (bt *BlockTest) UnmarshalJSON(in []byte) error {
 }
 
 type btJSON struct {
-	Blocks     []btBlock             `json:"blocks"`
-	Genesis    btHeader              `json:"genesisBlockHeader"`
-	Pre        types.GenesisAlloc    `json:"pre"`
-	Post       types.GenesisAlloc    `json:"postState"`
-	BestBlock  common.UnprefixedHash `json:"lastblockhash"`
-	Network    string                `json:"network"`
-	SealEngine string                `json:"sealEngine"`
+	Blocks     []btBlock                `json:"blocks"`
+	Genesis    btHeader                 `json:"genesisBlockHeader"`
+	Pre        types.GenesisAlloc       `json:"pre"`
+	Post       types.GenesisAlloc       `json:"postState"`
+	BestBlock  libcommon.UnprefixedHash `json:"lastblockhash"`
+	Network    string                   `json:"network"`
+	SealEngine string                   `json:"sealEngine"`
 }
 
 type btBlock struct {

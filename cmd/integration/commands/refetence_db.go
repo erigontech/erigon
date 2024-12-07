@@ -30,13 +30,12 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	common2 "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/backup"
 	mdbx2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/turbo/debug"
 )
 
@@ -58,7 +57,7 @@ var stateBuckets = []string{
 var cmdMdbxTopDup = &cobra.Command{
 	Use: "mdbx_top_dup",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common2.RootContext()
+		ctx, _ := libcommon.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		err := mdbxTopDup(ctx, chaindata, bucket, logger)
 		if err != nil {
@@ -73,7 +72,7 @@ var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common2.RootContext()
+		ctx, _ := libcommon.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
@@ -92,7 +91,7 @@ var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
 	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common2.RootContext()
+		ctx, _ := libcommon.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
@@ -111,7 +110,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Use:   "mdbx_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common2.RootContext()
+		ctx, _ := libcommon.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		from, to := backup.OpenPair(chaindata, toChaindata, kv.ChainDB, 0, logger)
 		err := backup.Kv2kv(ctx, from, to, nil, backup.ReadAheadThreads, logger)
@@ -128,7 +127,7 @@ var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common2.RootContext()
+		ctx, _ := libcommon.RootContext()
 		logger := debug.SetupCobra(cmd, "integration")
 		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -392,16 +391,16 @@ MainLoop:
 			if !fileScanner.Scan() {
 				break MainLoop
 			}
-			k := common2.CopyBytes(fileScanner.Bytes())
+			k := libcommon.CopyBytes(fileScanner.Bytes())
 			if bytes.Equal(k, endData) {
 				break
 			}
-			k = common.FromHex(string(k[1:]))
+			k = libcommon.FromHex(string(k[1:]))
 			if !fileScanner.Scan() {
 				break MainLoop
 			}
-			v := common2.CopyBytes(fileScanner.Bytes())
-			v = common.FromHex(string(v[1:]))
+			v := libcommon.CopyBytes(fileScanner.Bytes())
+			v = libcommon.FromHex(string(v[1:]))
 
 			if casted, ok := c.(kv.RwCursorDupSort); ok {
 				if err = casted.AppendDup(k, v); err != nil {

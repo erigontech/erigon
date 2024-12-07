@@ -24,7 +24,6 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -41,7 +40,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 
 	// Gather headers until the fetch or network limits is reached
 	var (
-		bytes   common.StorageSize
+		bytes   libcommon.StorageSize
 		headers []*types.Header
 		unknown bool
 		err     error
