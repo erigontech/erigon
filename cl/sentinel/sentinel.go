@@ -309,7 +309,7 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
 			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
 			peers := s.host.Network().Peers()
-			maxPeersToBan := int(s.cfg.MaxPeerCount) / 8
+			maxPeersToBan := 16
 			// do not ban peers if we have less than 1/8 of max peer count
 			if len(peers) <= maxPeersToBan {
 				continue
