@@ -28,7 +28,7 @@ type serialExecutor struct {
 	execStage          *StageState
 	agg                *state2.Aggregator
 	rs                 *state.StateV3
-	doms               *state2.SharedDomains
+	doms               state2.JointDomains
 	accumulator        *shards.Accumulator
 	u                  Unwinder
 	isMining           bool
@@ -163,7 +163,7 @@ func (se *serialExecutor) readState() *state.StateV3 {
 	return se.rs
 }
 
-func (se *serialExecutor) domains() *state2.SharedDomains {
+func (se *serialExecutor) domains() state2.JointDomains {
 	return se.doms
 }
 
@@ -186,6 +186,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 
 	if !useExternalTx {
 		tt := time.Now()
+		fmt.Println("[dbg] commit applyTx via serialExecutor")
 		if err = se.applyTx.Commit(); err != nil {
 			return 0, err
 		}
@@ -198,7 +199,9 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 			return t2, err
 		}
 	}
+	fmt.Println("JG NewSharedDomains exec3_serial")
 	se.doms, err = state2.NewSharedDomains(se.applyTx, se.logger)
+	defer fmt.Println("exec3 serial closing", se.doms.ObjectInfo())
 	if err != nil {
 		return t2, err
 	}

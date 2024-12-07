@@ -180,12 +180,18 @@ func ExecV3(ctx context.Context,
 
 	var err error
 	inMemExec := txc.Doms != nil
-	var doms *state2.SharedDomains
+	var doms state2.JointDomains
 	if inMemExec {
 		doms = txc.Doms
 	} else {
 		var err error
+
+		fmt.Println("JG NewSharedDomains exec3")
 		doms, err = state2.NewSharedDomains(applyTx, log.New())
+
+		// fmt.Println("JG NewDirectAccessDomains exec3")
+		// doms, err = state2.NewDirectAccessDomains(applyTx, log.New())
+
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
 		if errors.Is(err, state2.ErrBehindCommitment) {
@@ -672,11 +678,13 @@ Loop:
 					t1, t3 time.Duration
 				)
 
+				fmt.Printf("[dbg] commit block %d\n", blockNum)
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
 				}
+				fmt.Print("[dbg] commit done\n")
 
 				t1 = time.Since(tt) + ts
 
@@ -728,6 +736,7 @@ Loop:
 	//dumpPlainStateDebug(executor.tx(), executor.domains())
 
 	if !useExternalTx && executor.tx() != nil {
+		fmt.Println("[dbg] commit applyTx")
 		if err = executor.tx().Commit(); err != nil {
 			return err
 		}
@@ -790,14 +799,17 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms state2.JointDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
+		fmt.Println("[dbg] update stage")
 		if err := e.Update(applyTx, maxBlockNum); err != nil {
 			return false, err
 		}
+		fmt.Println("[dbg] increament state version")
+
 		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
 			return false, fmt.Errorf("writing plain state version: %w", err)
 		}
@@ -814,16 +826,21 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
+	fmt.Println("[dbg] compute commitment")
+
 	rh, err := doms.ComputeCommitment(ctx, true, header.Number.Uint64(), e.LogPrefix())
 	if err != nil {
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
+	header.Root = common.BytesToHash(rh) //JG
 	if cfg.blockProduction {
 		header.Root = common.BytesToHash(rh)
 		return true, nil
 	}
 	if bytes.Equal(rh, header.Root.Bytes()) {
-		if !inMemExec {
+		if !inMemExec && cfg.silkworm == nil {
+			fmt.Println("[dbg] flush doms")
+
 			if err := doms.Flush(ctx, applyTx); err != nil {
 				return false, err
 			}

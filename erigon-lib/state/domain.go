@@ -39,6 +39,8 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -459,6 +461,9 @@ func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevS
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("PutWithPrev(%s, txn %d, key[%x][%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, val, preval)
 	}
+
+	// fmt.Println("JG PutWithPrev", hexutility.Encode(key1), hexutility.Encode(key2), hexutility.Encode(val), hexutility.Encode(preval), prevStep, w.valsTable)
+
 	if err := w.h.AddPrevValue(key1, key2, preval, prevStep); err != nil {
 		return err
 	}
@@ -614,6 +619,7 @@ func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
 		if err := w.values.Collect(fullkey, value); err != nil {
 			return err
 		}
+		fmt.Println("JG addValue large", w.valsTable, hexutility.Encode(fullkey), hexutility.Encode(value))
 		return nil
 	}
 
@@ -631,6 +637,7 @@ func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
 	if err := w.values.Collect(w.aux, w.aux2); err != nil {
 		return err
 	}
+	fmt.Println("JG addValue", w.valsTable, hexutility.Encode(w.aux), hexutility.Encode(w.aux2))
 	return nil
 }
 

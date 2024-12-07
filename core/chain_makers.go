@@ -324,7 +324,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
+	fmt.Println("JG NewSharedDomains GenerateChain")
 	domains, err := libstate.NewSharedDomains(tx, logger)
+	defer fmt.Println("generate chain closing", domains.ObjectInfo())
 	if err != nil {
 		return nil, err
 	}
@@ -447,10 +449,12 @@ func hashKeyAndAddIncarnation(k []byte, h *libcommon.Hasher) (newK []byte, err e
 }
 
 func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) (hashRoot libcommon.Hash, err error) {
+	fmt.Println("JG NewSharedDomains CalcHashRootForTests")
 	domains, err := libstate.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return hashRoot, fmt.Errorf("NewSharedDomains: %w", err)
 	}
+	defer fmt.Println("CalcHashRootForTests closing", domains.ObjectInfo())
 	defer domains.Close()
 
 	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {

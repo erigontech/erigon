@@ -263,15 +263,21 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	}
 	if fv.sharedDom != nil {
 		fv.sharedDom.Close()
+		fv.sharedDom = nil
+		defer func() {
+			var err error
+			fmt.Println("JG NewSharedDomains ValidatePayload")
+			fv.sharedDom, err = state.NewSharedDomains(tx, logger)
+			if err != nil {
+				criticalError = fmt.Errorf("failed to create shared domains: %w", err)
+				return
+			}
+		}()
 	}
-	fv.sharedDom, criticalError = state.NewSharedDomains(tx, logger)
-	if criticalError != nil {
-		criticalError = fmt.Errorf("failed to create shared domains: %w", criticalError)
-		return
-	}
+
 	var txc wrap.TxContainer
 	txc.Tx = tx
-	txc.Doms = fv.sharedDom
+	// txc.Doms = fv.sharedDom
 
 	fv.extendingForkNotifications = shards.NewNotifications(nil)
 	return fv.validateAndStorePayload(txc, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)

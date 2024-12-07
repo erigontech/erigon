@@ -35,6 +35,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon-lib/common/cryptozerocopy"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	btree2 "github.com/tidwall/btree"
@@ -81,14 +82,48 @@ type dataWithPrevStep struct {
 	prevStep uint64
 }
 
+type JointDomains interface {
+	SetChangesetAccumulator(acc *StateChangeSet)
+	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *StateChangeSet)
+	GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]DomainEntryDiff, bool, error)
+	AggTx() any
+	Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error
+	DiscardWrites(d kv.Domain)
+	RebuildCommitmentShard(ctx context.Context, next func() (bool, []byte), cfg *RebuiltCommitment) (*RebuiltCommitment, error)
+	SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error)
+	ClearRam(resetCommitment bool)
+	SizeEstimate() uint64
+	LatestCommitment(prefix []byte) ([]byte, uint64, error)
+	ReadsValid(readLists map[string]*KvList) bool
+	IndexAdd(table kv.InvertedIdx, key []byte) (err error) // investigate
+	SetTx(tx kv.Tx)
+	StepSize() uint64
+	SetTxNum(txNum uint64)
+	TxNum() uint64
+	BlockNum() uint64
+	SetBlockNum(blockNum uint64)
+	SetTrace(b bool)
+	ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error)
+	IterateStoragePrefix(prefix []byte, it func(k []byte, v []byte, step uint64) error) error //investigate
+	Close()
+	Flush(ctx context.Context, tx kv.RwTx) error                                           // override
+	GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, step uint64, err error)           // override
+	DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error // override
+	DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error      // override
+	DomainDelPrefix(domain kv.Domain, prefix []byte) error                                 // override
+	Tx() kv.Tx
+	ObjectInfo() string
+}
+
 type SharedDomains struct {
+	JointDomains
 	aggTx  *AggregatorRoTx
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
 	logger log.Logger
 
 	txNum    uint64
-	blockNum atomic.Uint64
+	blockNum uint64
 	estSize  int
 	trace    bool //nolint
 	//muMaps   sync.RWMutex
@@ -97,8 +132,8 @@ type SharedDomains struct {
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
-	domainWriters [kv.DomainLen]*domainBufferedWriter
-	iiWriters     [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
+	domainWriters [kv.DomainLen]*domainBufferedWriter               // not used by reads, only domainWriters[CommitmentDomain] is used by commitment
+	iiWriters     [kv.StandaloneIdxLen]*invertedIndexBufferedWriter // not used by reads
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -112,7 +147,7 @@ type HasAgg interface {
 }
 
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
-
+	fmt.Println("NewSharedDomains")
 	sd := &SharedDomains{
 		logger:  logger,
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
@@ -140,13 +175,19 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	return sd, nil
 }
 
+func (sd *SharedDomains) ObjectInfo() string {
+	return "SharedDomains"
+}
+
 func (sd *SharedDomains) SetChangesetAccumulator(acc *StateChangeSet) {
 	sd.currentChangesAccumulator = acc
 	for idx := range sd.domainWriters {
-		if sd.currentChangesAccumulator == nil {
-			sd.domainWriters[idx].diff = nil
-		} else {
-			sd.domainWriters[idx].diff = &sd.currentChangesAccumulator.Diffs[idx]
+		if sd.domainWriters[idx] != nil {
+			if sd.currentChangesAccumulator == nil {
+				sd.domainWriters[idx].diff = nil
+			} else {
+				sd.domainWriters[idx].diff = &sd.currentChangesAccumulator.Diffs[idx]
+			}
 		}
 	}
 }
@@ -178,6 +219,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 func (sd *SharedDomains) AggTx() any { return sd.aggTx }
 
+// JG not used in Silkworm context
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
 	step := txUnwindTo / sd.aggTx.a.StepSize()
@@ -314,6 +356,7 @@ type RebuiltCommitment struct {
 	Keys     uint64
 }
 
+// JG Not used in Silkworm context
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
 	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, sd.aggTx.d[kv.CommitmentDomain], 0, math.MaxUint64)
@@ -552,6 +595,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 const CodeSizeTableFake = "CodeSize"
 
+// JG Not used in Silkworm context
 func (sd *SharedDomains) ReadsValid(readLists map[string]*KvList) bool {
 	//sd.muMaps.RLock()
 	//defer sd.muMaps.RUnlock()
@@ -606,6 +650,7 @@ func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []b
 	addrS := string(addr)
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, account)
 	sd.put(kv.AccountsDomain, addrS, account)
+	fmt.Println(sd.ObjectInfo())
 	return sd.domainWriters[kv.AccountsDomain].PutWithPrev(addr, nil, account, prevAccount, prevStep)
 }
 
@@ -616,11 +661,13 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep
 	if len(code) == 0 {
 		return sd.domainWriters[kv.CodeDomain].DeleteWithPrev(addr, nil, prevCode, prevStep)
 	}
+	fmt.Println(sd.ObjectInfo())
 	return sd.domainWriters[kv.CodeDomain].PutWithPrev(addr, nil, code, prevCode, prevStep)
 }
 
 func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte, prevStep uint64) error {
 	sd.put(kv.CommitmentDomain, string(prefix), data)
+	fmt.Println(sd.ObjectInfo())
 	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(prefix, nil, data, prev, prevStep)
 }
 
@@ -637,6 +684,7 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error
 
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, nil)
 	sd.put(kv.AccountsDomain, addrS, nil)
+
 	if err := sd.domainWriters[kv.AccountsDomain].DeleteWithPrev(addr, nil, prev, prevStep); err != nil {
 		return err
 	}
@@ -653,6 +701,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	compositeS := string(composite)
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value)
 	sd.put(kv.StorageDomain, compositeS, value)
+	fmt.Println(sd.ObjectInfo())
 	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, nil, value, preVal, prevStep)
 }
 
@@ -721,11 +770,9 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 
-func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
+func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum }
 
-func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
-	sd.blockNum.Store(blockNum)
-}
+func (sd *SharedDomains) SetBlockNum(blockNum uint64) { sd.blockNum = blockNum }
 
 func (sd *SharedDomains) SetTrace(b bool) {
 	sd.trace = b
@@ -736,6 +783,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter b
 	return
 }
 
+// JG investigate
 // IterateStoragePrefix iterates over key-value pairs of the storage domain that start with given prefix
 // Such iteration is not intended to be used in public API, therefore it uses read-write transaction
 // inside the domain. Another version of this for public API use needs to be created, that uses
@@ -879,6 +927,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 }
 
 func (sd *SharedDomains) Close() {
+	fmt.Println("JG", sd.ObjectInfo(), "Close")
 	sd.SetBlockNum(0)
 	if sd.aggTx != nil {
 		sd.SetTxNum(0)
@@ -899,6 +948,7 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+	fmt.Println("JG", sd.ObjectInfo(), "Flush")
 	for key, changeset := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64([]byte(key[:8]))
 		blockHash := common.BytesToHash([]byte(key[8:]))
@@ -958,6 +1008,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 // TemporalDomain satisfaction
 func (sd *SharedDomains) GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
+		fmt.Println("JG GetLatest", domain.String(), "LatestCommitment")
 		return sd.LatestCommitment(k)
 	}
 
@@ -965,12 +1016,15 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, st
 		k = append(k, k2...)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
+		fmt.Println("JG GetLatest", sd.ObjectInfo(), domain.String(), hexutility.Encode(k), hexutility.Encode(v), prevStep)
 		return v, prevStep, nil
 	}
 	v, step, _, err = sd.aggTx.GetLatest(domain, k, nil, sd.roTx)
 	if err != nil {
+		fmt.Println("JG GetLatest", domain.String(), err)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
+	fmt.Println("JG GetLatest", sd.ObjectInfo(), domain.String(), hexutility.Encode(k), hexutility.Encode(v), step)
 	return v, step, nil
 }
 
@@ -1022,12 +1076,14 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 		return sd.updateAccountCode(k1, val, prevVal, prevStep)
 	case kv.CommitmentDomain:
 		sd.put(domain, string(append(k1, k2...)), val)
+		fmt.Println(sd.ObjectInfo())
 		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	default:
 		if bytes.Equal(prevVal, val) {
 			return nil
 		}
 		sd.put(domain, string(append(k1, k2...)), val)
+		fmt.Println(sd.ObjectInfo())
 		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	}
 }
@@ -1363,6 +1419,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 		fmt.Printf("[commitment] store txn %d block %d rootHash %x\n", sdc.sharedDomains.txNum, blockNum, rootHash)
 	}
 	sdc.sharedDomains.put(kv.CommitmentDomain, string(keyCommitmentState), encodedState)
+	fmt.Println(sdc.sharedDomains.ObjectInfo())
 	return sdc.sharedDomains.domainWriters[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
@@ -1458,4 +1515,11 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		return 0, 0, errors.New("state storing is only supported hex patricia trie")
 	}
 	return cs.blockNum, cs.txNum, nil
+}
+
+func example() {
+	var key [40]byte
+	number := uint64(1234)
+	binary.BigEndian.PutUint64(key[:8], number)
+	fmt.Printf("Encoded number: %x\n", key[:8])
 }

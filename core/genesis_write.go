@@ -524,7 +524,9 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		}
 		defer tx.Rollback()
 
+		fmt.Println("JG NewSharedDomains GenesisToBlock")
 		sd, err := state2.NewSharedDomains(tx, logger)
+		defer fmt.Println("genesis to block closing", sd.ObjectInfo())
 		if err != nil {
 			return err
 		}

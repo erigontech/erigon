@@ -70,11 +70,14 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 }
 
 func isDomainAheadOfBlocks(tx kv.RwTx) bool {
+	fmt.Println("JG NewSharedDomains isDomainAheadOfBlocks")
 	doms, err := state.NewSharedDomains(tx, log.New())
 	if err != nil {
 		return errors.Is(err, state.ErrBehindCommitment)
 	}
+	defer fmt.Println("isDomainAheadOfBlocks closing", doms.ObjectInfo())
 	defer doms.Close()
+
 	return false
 }
 

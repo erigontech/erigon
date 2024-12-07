@@ -40,6 +40,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
@@ -734,6 +735,7 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 }
 
 func (db *MdbxKV) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
+	fmt.Println("UpdateNosync")
 	tx, err := db.BeginRwNosync(ctx)
 	if err != nil {
 		return err
@@ -966,10 +968,12 @@ func (tx *MdbxTx) statelessCursor(bucket string) (kv.RwCursor, error) {
 }
 
 func (tx *MdbxTx) Put(table string, k, v []byte) error {
+	fmt.Println("MdbxTx.Put", table, hexutility.Encode(k), hexutility.Encode(v))
 	return tx.tx.Put(mdbx.DBI(tx.db.buckets[table].DBI), k, v, 0)
 }
 
 func (tx *MdbxTx) Delete(table string, k []byte) error {
+	fmt.Println("MdbxTx.Delete", table, hexutility.Encode(k))
 	err := tx.tx.Del(mdbx.DBI(tx.db.buckets[table].DBI), k, nil)
 	if mdbx.IsNotFound(err) {
 		return nil
@@ -1001,6 +1005,7 @@ func (tx *MdbxTx) Has(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *MdbxTx) Append(bucket string, k, v []byte) error {
+	fmt.Println("MdbxTx.Append", bucket, hexutility.Encode(k), hexutility.Encode(v))
 	c, err := tx.statelessCursor(bucket)
 	if err != nil {
 		return err
@@ -1008,6 +1013,7 @@ func (tx *MdbxTx) Append(bucket string, k, v []byte) error {
 	return c.Append(k, v)
 }
 func (tx *MdbxTx) AppendDup(bucket string, k, v []byte) error {
+	fmt.Println("MdbxTx.AppendDup", bucket, hexutility.Encode(k), hexutility.Encode(v))
 	c, err := tx.statelessCursor(bucket)
 	if err != nil {
 		return err
@@ -1209,6 +1215,7 @@ func (c *MdbxCursor) Current() ([]byte, []byte, error) {
 }
 
 func (c *MdbxCursor) Delete(k []byte) error {
+	fmt.Println("MdbxCursor.Delete", c.bucketName, hexutility.Encode(k))
 	_, _, err := c.c.Get(k, nil, mdbx.Set)
 	if err != nil {
 		if mdbx.IsNotFound(err) {
@@ -1229,10 +1236,17 @@ func (c *MdbxCursor) Delete(k []byte) error {
 // can still be used on it.
 // Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
 // this operation.
-func (c *MdbxCursor) DeleteCurrent() error             { return c.c.Del(mdbx.Current) }
-func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error { return c.c.Put(k, v, mdbx.NoOverwrite) }
+func (c *MdbxCursor) DeleteCurrent() error {
+	fmt.Println("MdbxCursor.DeleteCurrent", c.bucketName)
+	return c.c.Del(mdbx.Current)
+}
+func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error {
+	fmt.Println("MdbxCursor.PutNoOverwrite", c.bucketName, hexutility.Encode(k), hexutility.Encode(v))
+	return c.c.Put(k, v, mdbx.NoOverwrite)
+}
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {
+	fmt.Println("MdbxCursor.Put", c.bucketName, hexutility.Encode(key), hexutility.Encode(value))
 	if err := c.c.Put(key, value, 0); err != nil {
 		return fmt.Errorf("label: %s, table: %s, err: %w", c.tx.db.opts.label, c.bucketName, err)
 	}
@@ -1254,6 +1268,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 // Cast your cursor to *MdbxCursor to use this method.
 // Return error - if provided data will not sorted (or bucket have old records which mess with new in sorting manner).
 func (c *MdbxCursor) Append(k []byte, v []byte) error {
+	fmt.Println("MdbxCursor.Append", c.bucketName, hexutility.Encode(k), hexutility.Encode(v))
 	if err := c.c.Put(k, v, mdbx.Append); err != nil {
 		return fmt.Errorf("label: %s, bucket: %s, %w", c.tx.db.opts.label, c.bucketName, err)
 	}
@@ -1274,6 +1289,7 @@ type MdbxDupSortCursor struct {
 
 // DeleteExact - does delete
 func (c *MdbxDupSortCursor) DeleteExact(k1, k2 []byte) error {
+	fmt.Println("MdbxDupSortCursor.DeleteExact", c.bucketName, hexutility.Encode(k1), hexutility.Encode(k2))
 	_, _, err := c.c.Get(k1, k2, mdbx.GetBoth)
 	if err != nil { // if key not found, or found another one - then nothing to delete
 		if mdbx.IsNotFound(err) {
@@ -1375,6 +1391,7 @@ func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
 }
 
 func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
+	fmt.Println("MdbxDupSortCursor.Append", c.bucketName, hexutility.Encode(k), hexutility.Encode(v))
 	if err := c.c.Put(k, v, mdbx.Append|mdbx.AppendDup); err != nil {
 		return fmt.Errorf("label: %s, in Append: bucket=%s, %w", c.tx.db.opts.label, c.bucketName, err)
 	}
@@ -1382,6 +1399,7 @@ func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
 }
 
 func (c *MdbxDupSortCursor) AppendDup(k []byte, v []byte) error {
+	fmt.Println("MdbxDupSortCursor.AppendDup", c.bucketName, hexutility.Encode(k), hexutility.Encode(v))
 	if err := c.c.Put(k, v, mdbx.AppendDup); err != nil {
 		return fmt.Errorf("label: %s, in AppendDup: bucket=%s, %w", c.tx.db.opts.label, c.bucketName, err)
 	}
@@ -1389,6 +1407,7 @@ func (c *MdbxDupSortCursor) AppendDup(k []byte, v []byte) error {
 }
 
 func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
+	fmt.Println("MdbxDupSortCursor.PutNoDupData", c.bucketName, hexutility.Encode(k), hexutility.Encode(v))
 	if err := c.c.Put(k, v, mdbx.NoDupData); err != nil {
 		return fmt.Errorf("label: %s, in PutNoDupData: %w", c.tx.db.opts.label, err)
 	}

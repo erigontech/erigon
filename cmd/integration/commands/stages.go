@@ -661,7 +661,9 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		ac := agg.BeginFilesRo()
 		defer ac.Close()
 
+		fmt.Println("JG NewSharedDomains stageSnapshots")
 		domains, err := libstate.NewSharedDomains(tx, logger)
+		defer fmt.Println("stage snapshot closing", domains.ObjectInfo())
 		if err != nil {
 			return err
 		}
@@ -1125,7 +1127,9 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 				return err
 			}
 			if execProgress == 0 {
+				fmt.Println("JG NewSharedDomains stageExec")
 				doms, err := libstate.NewSharedDomains(tx, log.New())
+				defer fmt.Println("stages closing", doms.ObjectInfo())
 				if err != nil {
 					panic(err)
 				}

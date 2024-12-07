@@ -286,12 +286,12 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.ChaosMonkey = false
 
 	logger := log.Root()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db, agg := temporaltest.NewTestDB(tb, dirs)
 
-	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 
@@ -309,7 +309,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		gspec:          gspec,
 		ChainConfig:    gspec.Config,
 		Key:            key,
-		Notifications:  shards.NewNotifications(erigonGrpcServeer),
+		Notifications:  shards.NewNotifications(erigonGrpcServer),
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		BlockReader:    br,
@@ -352,7 +352,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			tb.Fatal(err)
 		}
 
-		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
+		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
 
 		mock.TxPoolFetch = txpool.NewFetch(mock.Ctx, sentries, mock.TxPool, stateChangesClient, mock.DB, mock.txPoolDB, *chainID, logger)
 		mock.TxPoolFetch.SetWaitGroup(&mock.ReceiveWg)

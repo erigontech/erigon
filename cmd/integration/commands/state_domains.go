@@ -132,7 +132,9 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
+	fmt.Println("JG NewSharedDomains requestDomains")
 	domains, err := state3.NewSharedDomains(stateTx, logger)
+	defer fmt.Println("state domains closing", domains.ObjectInfo())
 	if err != nil {
 		return err
 	}

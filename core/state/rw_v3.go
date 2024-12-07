@@ -41,7 +41,7 @@ import (
 var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 
 type StateV3 struct {
-	domains      *libstate.SharedDomains
+	domains      libstate.JointDomains
 	triggerLock  sync.Mutex
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64
@@ -53,7 +53,7 @@ type StateV3 struct {
 	trace bool
 }
 
-func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
+func NewStateV3(domains libstate.JointDomains, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
 		triggers:            map[uint64]*TxTask{},
@@ -114,7 +114,7 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *QueueWi
 	return count
 }
 
-func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) error {
+func (rs *StateV3) applyState(txTask *TxTask, domains libstate.JointDomains) error {
 	var acc accounts.Account
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
@@ -168,7 +168,7 @@ func (rs *StateV3) applyState(txTask *TxTask, domains *libstate.SharedDomains) e
 	return nil
 }
 
-func (rs *StateV3) Domains() *libstate.SharedDomains {
+func (rs *StateV3) Domains() libstate.JointDomains {
 	return rs.domains
 }
 
@@ -208,7 +208,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedDomains) error {
+func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains libstate.JointDomains) error {
 	shouldPruneNonEssentials := txTask.PruneNonEssentials && txTask.Config != nil
 
 	for addr := range txTask.TraceFroms {
@@ -487,7 +487,7 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	if original.Incarnation > account.Incarnation {
-		//del, before create: to clanup code/storage
+		//del, before create: to cleanup code/storage
 		if err := w.rs.domains.DomainDel(kv.CodeDomain, address[:], nil, nil, 0); err != nil {
 			return err
 		}
@@ -661,14 +661,14 @@ func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error
 type ReaderParallelV3 struct {
 	txNum     uint64
 	trace     bool
-	sd        *libstate.SharedDomains
+	sd        libstate.JointDomains
 	composite []byte
 
 	discardReadList bool
 	readLists       map[string]*libstate.KvList
 }
 
-func NewReaderParallelV3(sd *libstate.SharedDomains) *ReaderParallelV3 {
+func NewReaderParallelV3(sd libstate.JointDomains) *ReaderParallelV3 {
 	return &ReaderParallelV3{
 		//trace:     true,
 		sd:        sd,

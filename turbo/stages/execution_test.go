@@ -75,21 +75,21 @@ func TestBlockExecution1(t *testing.T) {
 		return h
 	}
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		// The chain maker doesn't have access to a chain, so the difficulty will be
 		// lets unset (nil). Set it here to the correct value.
 		block.SetDifficulty(clique.DiffInTurn)
 
 		// We want to simulate an empty middle block, having the same state as the
 		// first one. The last is needs a state change again to force a reorg.
-		if i != 1 {
-			baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), libcommon.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
-			if err != nil {
-				panic(err)
-			}
-			block.AddTxWithChain(getHeader, engine, tx)
+		// if i != 1 {
+		baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
+		tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), libcommon.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
+		if err != nil {
+			panic(err)
 		}
+		block.AddTxWithChain(getHeader, engine, tx)
+		// }
 	})
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -109,14 +109,14 @@ func TestBlockExecution1(t *testing.T) {
 	}
 
 	// Insert the first two blocks and make sure the chain is valid
-	if err := m.InsertChain(chain.Slice(0, 2)); err != nil {
+	if err := m.InsertChain(chain.Slice(0, 3)); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
 	if err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		if head, err1 := m.BlockReader.BlockByHash(m.Ctx, tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
 			t.Errorf("could not read chain head: %v", err1)
-		} else if head.NumberU64() != 2 {
-			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 2)
+		} else if head.NumberU64() != 3 {
+			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 3)
 		}
 		return nil
 	}); err != nil {
@@ -147,84 +147,17 @@ func TestBlockExecution1(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, fcuReceipt)
 	require.Equal(t, execution.ExecutionStatus_Success, fcuReceipt.Status)
-
-	// currentHeadBlock := chain.Blocks[2]
-
-	// chain2, err := core.GenerateChain(m.ChainConfig, currentHeadBlock, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
-	// 	// The chain maker doesn't have access to a chain, so the difficulty will be
-	// 	// lets unset (nil). Set it here to the correct value.
-	// 	block.SetDifficulty(clique.DiffInTurn)
-
-	// 	// We want to simulate an empty middle block, having the same state as the
-	// 	// first one. The last is needs a state change again to force a reorg.
-	// 	if i != 1 {
-	// 		baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
-	// 		tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), libcommon.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
-	// 		if err != nil {
-	// 			panic(err)
-	// 		}
-	// 		block.AddTxWithChain(getHeader, engine, tx)
-	// 	}
-	// })
-	// if err != nil {
-	// 	t.Fatalf("generate blocks: %v", err)
-	// }
-	// for i, block := range chain2.Blocks {
-	// 	header := block.Header()
-	// 	if i > 0 {
-	// 		header.ParentHash = chain.Blocks[i-1].Hash()
-	// 	}
-	// 	header.Extra = make([]byte, clique.ExtraVanity+clique.ExtraSeal)
-	// 	header.Difficulty = clique.DiffInTurn
-
-	// 	sig, _ := crypto.Sign(clique.SealHash(header).Bytes(), key)
-	// 	copy(header.Extra[len(header.Extra)-clique.ExtraSeal:], sig)
-	// 	chain.Headers[i] = header
-	// 	chain.Blocks[i] = block.WithSeal(header)
-	// }
-
-	// insertBlocksRequest2 := &execution.InsertBlocksRequest{
-	// 	Blocks: eth1_utils.ConvertBlocksToRPC(chain2.Blocks),
-	// }
-
-	// newBlock = chain2.Blocks[0]
-
-	// result, err := m.Eth1ExecutionService.InsertBlocks(context.Background(), insertBlocksRequest2)
-	// require.NoError(t, err)
-	// require.NotNil(t, result)
-	// require.Equal(t, result.Result, execution.ExecutionStatus_Success)
-
-	// validationRequest2 := &execution.ValidationRequest{
-	// 	Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
-	// 	Number: newBlock.Number().Uint64(),
-	// }
-
-	// validationResult, err = m.Eth1ExecutionService.ValidateChain(context.Background(), validationRequest2)
-	// require.NoError(t, err)
-	// require.NotNil(t, validationResult)
-	// require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
-
-	// forkchoiceRequest2 := &execution.ForkChoice{
-	// 	HeadBlockHash:      gointerfaces.ConvertHashToH256(newBlock.Hash()),
-	// 	Timeout:            10_000,
-	// 	FinalizedBlockHash: gointerfaces.ConvertHashToH256(m.Genesis.Hash()),
-	// 	SafeBlockHash:      gointerfaces.ConvertHashToH256(m.Genesis.Hash()),
-	// }
-
-	// fcuReceipt, err = m.Eth1ExecutionService.UpdateForkChoice(context.Background(), forkchoiceRequest2)
-	// require.NoError(t, err)
-	// require.NotNil(t, fcuReceipt)
-	// require.Equal(t, execution.ExecutionStatus_Success, fcuReceipt.Status)
-
 }
 
 func TestBlockExecution2(t *testing.T) {
 	// Initialize a Clique chain with a single signer
+	logger := log.Root()
+	logger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler))
 	var (
 		cliqueDB = memdb.NewTestDB(t, kv.ConsensusDB)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
-		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB, log.New())
+		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB, logger)
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &types.Genesis{
@@ -291,7 +224,7 @@ func TestBlockExecution2(t *testing.T) {
 
 	newBlock := chain.Blocks[0]
 
-	result, err := m.Eth1ExecutionService.InsertBlocks(m.Ctx, insertBlocksRequest)
+	result, err := m.Eth1ExecutionService.InsertBlocks(context.Background(), insertBlocksRequest)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, result.Result, execution.ExecutionStatus_Success)
@@ -301,14 +234,14 @@ func TestBlockExecution2(t *testing.T) {
 		Number: newBlock.Number().Uint64(),
 	}
 
-	validationResult, err := m.Eth1ExecutionService.ValidateChain(m.Ctx, validationRequest)
+	validationResult, err := m.Eth1ExecutionService.ValidateChain(context.Background(), validationRequest)
 	require.NoError(t, err)
 	require.NotNil(t, validationResult)
 	require.Equal(t, validationResult.ValidationStatus, execution.ExecutionStatus_Success)
 
 	forkchoiceRequest := &execution.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(newBlock.Hash()),
-		Timeout:            10_000,
+		Timeout:            0,
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(m.Genesis.Hash()),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(m.Genesis.Hash()),
 	}

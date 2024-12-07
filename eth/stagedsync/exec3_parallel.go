@@ -75,7 +75,7 @@ type executor interface {
 	//these are reset by commit - so need to be read from the executor once its processing
 	tx() kv.RwTx
 	readState() *state.StateV3
-	domains() *state2.SharedDomains
+	domains() state2.JointDomains
 }
 
 type parallelExecutor struct {
@@ -96,7 +96,7 @@ type parallelExecutor struct {
 	in                       *state.QueueWithRetry
 	rws                      *state.ResultsQueue
 	rs                       *state.StateV3
-	doms                     *state2.SharedDomains
+	doms                     state2.JointDomains
 	agg                      *state2.Aggregator
 	rwsConsumed              chan struct{}
 	isMining                 bool
@@ -118,7 +118,7 @@ func (pe *parallelExecutor) readState() *state.StateV3 {
 	return pe.rs
 }
 
-func (pe *parallelExecutor) domains() *state2.SharedDomains {
+func (pe *parallelExecutor) domains() state2.JointDomains {
 	return pe.doms
 }
 
