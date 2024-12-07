@@ -275,6 +275,9 @@ func New(
 func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthCounter) {
 	countSubnetsSubscribed := func() int {
 		count := 0
+		if s.subManager == nil {
+			return count
+		}
 		s.GossipManager().subscriptions.Range(func(key, value any) bool {
 			sub := value.(*GossipSubscription)
 			if sub.topic == nil {
