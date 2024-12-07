@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/stretchr/testify/require"
@@ -122,7 +121,6 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(context.Background(), tx, block, true))
 		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64))
 	}
-	require.NoError(t, state_accessors.InitializeStaticTables(tx, s))
 
 	require.NoError(t, tx.Commit())
 	return m

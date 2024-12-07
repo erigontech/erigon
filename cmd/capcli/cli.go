@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/metrics"
 
 	"github.com/erigontech/erigon/cl/antiquary"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -152,6 +153,7 @@ func (c *Chain) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+
 	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
 	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
 	if err != nil {
@@ -182,7 +184,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -599,8 +601,15 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
+	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, t).GetLatestBeaconState(ctx)
+	if err != nil {
+		return err
+	}
+	sn := synced_data.NewSyncedDataManager(beaconConfig, true)
+	sn.OnHeadState(bs)
+
 	r.withPPROF.withProfile()
-	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn)
+	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn, sn)
 	start := time.Now()
 	haveState, err := hr.ReadHistoricalState(ctx, tx, r.CompareSlot)
 	if err != nil {
