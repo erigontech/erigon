@@ -885,7 +885,7 @@ var (
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
-		Value: 80,
+		Value: 64,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
