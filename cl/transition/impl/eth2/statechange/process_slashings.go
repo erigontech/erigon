@@ -17,8 +17,6 @@
 package statechange
 
 import (
-	"runtime"
-
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/monitor"
@@ -45,7 +43,7 @@ func ProcessSlashings(s abstract.BeaconState) error {
 	}
 	beaconConfig := s.BeaconConfig()
 	// Apply penalties to validators who have been slashed and reached the withdrawable epoch
-	return threading.ParallellForLoop(runtime.NumCPU(), 0, s.ValidatorSet().Length(), func(i int) error {
+	return threading.ParallellForLoop(1, 0, s.ValidatorSet().Length(), func(i int) error {
 		validator := s.ValidatorSet().Get(i)
 		if !validator.Slashed() || epoch+beaconConfig.EpochsPerSlashingsVector/2 != validator.WithdrawableEpoch() {
 			return nil
@@ -72,7 +70,7 @@ func processSlashingsElectra(s abstract.BeaconState) error {
 	cfg := s.BeaconConfig()
 	increment := cfg.EffectiveBalanceIncrement
 	penaltyPerEffectiveBalanceIncr := adjustTotalSlashingBalance / (totalBalance / increment)
-	return threading.ParallellForLoop(runtime.NumCPU(), 0, s.ValidatorSet().Length(), func(i int) error {
+	return threading.ParallellForLoop(1, 0, s.ValidatorSet().Length(), func(i int) error {
 		v := s.ValidatorSet().Get(i)
 		if !v.Slashed() || epoch+cfg.EpochsPerSlashingsVector/2 != v.WithdrawableEpoch() {
 			return nil
