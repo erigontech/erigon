@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -106,9 +107,14 @@ func (f *ForkChoiceStore) ProcessBlockExecution(ctx context.Context, block *clty
 			return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
 		}
 	}
-	timeStartExec := time.Now()
 
-	payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
+	var executionRequestsList []hexutility.Bytes = nil
+	if block.Version() >= clparams.ElectraVersion {
+		executionRequestsList = block.Block.Body.GetExecutionRequestsList()
+	}
+
+	timeStartExec := time.Now()
+	payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 	switch payloadStatus {
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("OnBlock: block is invalid", "block", libcommon.Hash(blockRoot), "err", err)
@@ -192,6 +198,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}
 
+	var executionRequestsList []hexutility.Bytes = nil
+	if block.Version() >= clparams.ElectraVersion {
+		executionRequestsList = block.Block.Body.GetExecutionRequestsList()
+	}
+
 	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
 	startEngine := time.Now()
 	if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
@@ -201,7 +212,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 		}
 		timeStartExec := time.Now()
-		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes)
+		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 		switch payloadStatus {
 		case execution_client.PayloadStatusNotValidated:
 			log.Debug("OnBlock: block is not validated yet", "block", libcommon.Hash(blockRoot))

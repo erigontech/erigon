@@ -954,18 +954,14 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 // TemporalDomain satisfaction
-func (sd *SharedDomains) GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
-	}
-
-	if k2 != nil {
-		k = append(k, k2...)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
 	}
-	v, step, _, err = sd.aggTx.GetLatest(domain, k, nil, sd.roTx)
+	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -1002,7 +998,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1, k2)
+		prevVal, prevStep, err = sd.GetLatest(domain, k1)
 		if err != nil {
 			return err
 		}
@@ -1038,7 +1034,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1, k2)
+		prevVal, prevStep, err = sd.GetLatest(domain, k1)
 		if err != nil {
 			return err
 		}
@@ -1185,7 +1181,7 @@ func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAcco
 		}
 		return encAccount, nil
 	}
-	encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey, nil)
+	encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey)
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount failed: %w", err)
 	}
@@ -1200,7 +1196,7 @@ func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byt
 		}
 		return code, nil
 	}
-	code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey, nil)
+	code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey)
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
 	}
@@ -1214,7 +1210,7 @@ func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []b
 		}
 		return enc, nil
 	}
-	enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey, nil)
+	enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey)
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
 	}

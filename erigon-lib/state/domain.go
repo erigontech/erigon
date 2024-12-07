@@ -1623,7 +1623,7 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		}
 		return v, v != nil, nil
 	}
-	v, _, _, err = dt.GetLatest(key, nil, roTx)
+	v, _, _, err = dt.GetLatest(key, roTx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1759,12 +1759,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
-func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
-	key := key1
-	if len(key2) > 0 {
-		key = append(append(dt.keyBuf[:0], key1...), key2...)
-	}
-
+func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
 	var v []byte
 	var foundStep uint64
 	var found bool

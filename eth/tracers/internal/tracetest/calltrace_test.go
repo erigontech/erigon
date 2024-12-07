@@ -31,7 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -131,7 +130,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(libcommon.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
@@ -235,7 +234,7 @@ func BenchmarkTracers(b *testing.B) {
 
 func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	// Configure a blockchain with the given prestate
-	tx, err := types.DecodeTransaction(common.FromHex(test.Input))
+	tx, err := types.DecodeTransaction(libcommon.FromHex(test.Input))
 	if err != nil {
 		b.Fatalf("failed to parse testcase input: %v", err)
 	}

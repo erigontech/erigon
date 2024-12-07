@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/metrics"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
@@ -302,7 +301,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		}
 		defer tx.Rollback()
 
-		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
+		stringifiedRoot := libcommon.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
 		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
 		if err != nil {
