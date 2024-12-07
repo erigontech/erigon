@@ -22,9 +22,11 @@ package vm_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -193,12 +195,16 @@ func TestCreateGas(t *testing.T) {
 		var txc wrap.TxContainer
 		txc.Tx = tx
 
-		domains, err := state3.NewSharedDomains(tx, log.New())
+		eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
+		fmt.Printf("init tx %x\n", eface[1])
+
+		domains, err := state3.NewSharedDomains(txc.Tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 		txc.Doms = domains
 
-		stateReader = rpchelper.NewLatestStateReader(tx)
+		//stateReader = rpchelper.NewLatestStateReader(domains)
+		stateReader = rpchelper.NewLatestDomainStateReader(domains)
 		stateWriter = rpchelper.NewLatestStateWriter(txc, nil, 0)
 
 		s := state.New(stateReader)
@@ -226,5 +232,6 @@ func TestCreateGas(t *testing.T) {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
 		tx.Rollback()
+		domains.Close()
 	}
 }

@@ -618,6 +618,53 @@ func TestDomain_ScanFiles(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
+func TestDomainRoTx_CursorParentCheck(t *testing.T) {
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomain(t, logger)
+	ctx, require := context.Background(), require.New(t)
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	val := []byte("value1")
+	writer.SetTxNum(1)
+	writer.addValue([]byte("key1"), nil, val)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(err)
+	err = tx.Commit()
+	require.NoError(err)
+
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	cursor, err := dc.valsCursor(tx)
+	require.NoError(err)
+	require.NotNil(cursor)
+	tx.Rollback()
+
+	otherTx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer otherTx.Rollback()
+
+	defer func() {
+		r := recover()
+		require.NotNil(r)
+		re := r.(error)
+		require.ErrorIs(re, sdTxImmutabilityInvariant)
+	}()
+
+	dc.GetLatest([]byte("key1"), otherTx)
+}
+
 func TestDomain_Delete(t *testing.T) {
 	t.Parallel()
 

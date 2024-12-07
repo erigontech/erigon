@@ -26,7 +26,9 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/metrics"
 	btree2 "github.com/tidwall/btree"
@@ -658,7 +660,8 @@ type DomainRoTx struct {
 	keyBuf [60]byte // 52b key and 8b for inverted step
 	comBuf []byte
 
-	valsC kv.Cursor
+	valsC       kv.Cursor
+	vcParentPtr atomic.Uintptr
 
 	getFromFileCache *DomainGetFromFileCache
 }
@@ -1634,6 +1637,7 @@ func (dt *DomainRoTx) Close() {
 	if dt.files == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
+	dt.closeValsCursor()
 	files := dt.files
 	dt.files = nil
 	for i := range files {
@@ -1701,10 +1705,39 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 	return r
 }
 
-func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
+
+func (dt *DomainRoTx) closeValsCursor() {
 	if dt.valsC != nil {
+		dt.valsC.Close()
+		dt.vcParentPtr.Store(0)
+		dt.valsC = nil
+	}
+}
+func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+	eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
+	if dt.valsC != nil { // run in assert mode only
+		fmt.Printf("cmp e1=%x e2=%x s=%x d=%s\n", eface[0], eface[1], dt.vcParentPtr.Load(), dt.d.filenameBase)
+		if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
+			//if sd, ok := tx.(kv.TemporalPutDel); ok {
+			//	if stx, ok := sd.(*SharedDomains); ok {
+			//		ttx := stx.Tx()
+			//		eface := *(*[2]uintptr)(unsafe.Pointer(&ttx))
+			//		if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
+			//			panic(fmt.Errorf("%w: cursor parent tx %x; current sd tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
+			//		}
+			//	}
+			//} else {
+			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
+			//}
+		}
 		return dt.valsC, nil
 	}
+	// initialise parent pointer tracking
+	if !dt.vcParentPtr.CompareAndSwap(0, eface[1]) {
+		panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
+	}
+	fmt.Printf("set e1=%x e2=%x d=%s\n", eface[0], eface[1], dt.d.filenameBase)
 
 	if dt.d.largeValues {
 		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
