@@ -662,7 +662,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 		require.ErrorIs(re, sdTxImmutabilityInvariant)
 	}()
 
-	dc.GetLatest([]byte("key1"), nil, otherTx)
+	dc.GetLatest([]byte("key1"), otherTx)
 }
 
 func TestDomain_Delete(t *testing.T) {

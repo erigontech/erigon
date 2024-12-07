@@ -157,13 +157,13 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	dc := agg.BeginFilesRo()
 
-	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, nil, roTx)
+	v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, roTx)
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey1)
 
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-	v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, nil, roTx)
+	v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, roTx)
 	require.NoError(t, err)
 	require.Truef(t, ex, "key %x not found", commKey2)
 	dc.Close()
