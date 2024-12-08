@@ -24,11 +24,27 @@ import (
 
 // SaveExecV3PruneProgress saves latest pruned key in given table to the database.
 // nil key also allowed and means that latest pruning run has been finished.
-func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, prunedKey []byte) error {
+func SaveExecV3PruneProgress(db kv.RwTx, prunedTblName string, prunedKey []byte) error {
 	empty := make([]byte, 1)
 	if prunedKey != nil {
 		empty[0] = 1
 	}
+
+	for {
+		ok, err := db.Has(kv.TblPruningProgress, []byte(prunedTblName))
+		if err != nil {
+			return err
+		}
+
+		if !ok {
+			break
+		}
+
+		if err := db.Delete(kv.TblPruningProgress, []byte(prunedTblName)); err != nil {
+			return err
+		}
+	}
+
 	return db.Put(kv.TblPruningProgress, []byte(prunedTblName), append(empty, prunedKey...))
 }
 
