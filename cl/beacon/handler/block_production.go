@@ -265,6 +265,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 
+	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	// builder boost factor controls block choice between local execution node or builder
 	var builderBoostFactor uint64
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
@@ -285,6 +286,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			errors.New("node is syncing"),
 		)
 	}
+
+	start := time.Now()
 	sourceBlock, err := a.blockReader.ReadBlockByRoot(ctx, tx, baseBlockRoot)
 	if err != nil {
 		log.Warn("Failed to get source block", "err", err, "root", baseBlockRoot)
@@ -312,22 +315,27 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
+	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
 	block, err := a.produceBlock(ctx, builderBoostFactor, sourceBlock.Block, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
 		log.Warn("Failed to produce block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
 
+	startConsensusProcessing := time.Now()
 	// do state transition
 	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToGeneric()); err != nil {
 		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
+	log.Info("[Beacon API] Built block consensus-state", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
+	startConsensusProcessing = time.Now()
 	block.StateRoot, err = baseState.HashSSZ()
 	if err != nil {
 		log.Warn("Failed to get state root", "err", err)
 		return nil, err
 	}
+	log.Info("[Beacon API] Computed state root while producing slot", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 
 	log.Info("BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
@@ -336,6 +344,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"execution_value", block.GetExecutionValue().Uint64(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
+		"took", time.Since(start),
 	)
 
 	// todo: consensusValue
