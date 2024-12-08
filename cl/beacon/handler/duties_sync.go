@@ -103,7 +103,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	// Now we have the sync committee, we can initialize our response set
 	dutiesSet := map[uint64]*syncDutyResponse{}
 	for _, idx := range idxs {
-		publicKey, err := state_accessors.ReadPublicKeyByIndex(tx, idx)
+		publicKey, err := a.syncedData.ValidatorPublicKeyByIndex(int(idx))
 		if err != nil {
 			return nil, err
 		}
@@ -117,12 +117,9 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	}
 	// Now we can iterate over the sync committee and fill the response
 	for idx, committeeParticipantPublicKey := range syncCommittee.GetCommittee() {
-		committeeParticipantIndex, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, committeeParticipantPublicKey)
+		committeeParticipantIndex, _, err := a.syncedData.ValidatorIndexByPublicKey(committeeParticipantPublicKey)
 		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x", committeeParticipantPublicKey))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x: %s", committeeParticipantPublicKey, err))
 		}
 		if _, ok := dutiesSet[committeeParticipantIndex]; !ok {
 			continue
