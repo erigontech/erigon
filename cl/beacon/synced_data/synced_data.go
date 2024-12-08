@@ -175,7 +175,7 @@ func (s *SyncedDataManager) HistoricalRootElementAtIndex(index int) (common.Hash
 		return common.Hash{}, ErrNotSynced
 	}
 	if s.headState.HistoricalRootsLength() <= uint64(index) {
-		return common.Hash{}, fmt.Errorf("HistoricalRootElementAtIndex: index out of range")
+		return common.Hash{}, errors.New("HistoricalRootElementAtIndex: index out of range")
 	}
 
 	return s.headState.HistoricalRoot(index), nil
@@ -188,7 +188,7 @@ func (s *SyncedDataManager) HistoricalSummaryElementAtIndex(index int) (*cltypes
 		return nil, ErrNotSynced
 	}
 	if s.headState.HistoricalSummariesLength() <= uint64(index) {
-		return nil, fmt.Errorf("HistoricalSummaryElementAtIndex: index out of range")
+		return nil, errors.New("HistoricalSummaryElementAtIndex: index out of range")
 	}
 
 	return s.headState.HistoricalSummary(index), nil
