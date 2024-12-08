@@ -159,7 +159,7 @@ func TestAllocConstructor(t *testing.T) {
 	assert.Equal(funds, balance.ToBig())
 	code, err := state.GetCode(address)
 	assert.NoError(err)
-	assert.Equal(common.FromHex("5f355f55"), code)
+	assert.Equal(libcommon.FromHex("5f355f55"), code)
 
 	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}
