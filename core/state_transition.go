@@ -278,7 +278,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			if err != nil {
 				return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
-			if ok {
+			if !ok {
 				return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
 					st.msg.From().Hex(), codeHash)
 			}
