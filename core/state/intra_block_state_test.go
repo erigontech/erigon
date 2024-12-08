@@ -323,17 +323,77 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			return true
 		}
 		// Check basic accessor methods.
-		if !checkeq("Exist", state.Exist(addr), checkstate.Exist(addr)) {
+		se, err := state.Exist(addr)
+		if err != nil {
 			return err
 		}
-		checkeq("HasSelfdestructed", state.HasSelfdestructed(addr), checkstate.HasSelfdestructed(addr))
-		checkeqBigInt("GetBalance", state.GetBalance(addr).ToBig(), checkstate.GetBalance(addr).ToBig())
-		checkeq("GetNonce", state.GetNonce(addr), checkstate.GetNonce(addr))
-		checkeq("GetCode", state.GetCode(addr), checkstate.GetCode(addr))
-		checkeq("GetCodeHash", state.GetCodeHash(addr), checkstate.GetCodeHash(addr))
-		checkeq("GetCodeSize", state.GetCodeSize(addr), checkstate.GetCodeSize(addr))
+		ce, err := checkstate.Exist(addr)
+		if err != nil {
+			return err
+		}
+		if !checkeq("Exist", se, ce) {
+			return err
+		}
+		ssd, err := state.HasSelfdestructed(addr)
+		if err != nil {
+			return err
+		}
+		csd, err := checkstate.HasSelfdestructed(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("HasSelfdestructed", ssd, csd)
+		sb, err := state.GetBalance(addr)
+		if err != nil {
+			return err
+		}
+		cb, err := checkstate.GetBalance(addr)
+		if err != nil {
+			return err
+		}
+		checkeqBigInt("GetBalance", sb.ToBig(), cb.ToBig())
+		sn, err := state.GetNonce(addr)
+		if err != nil {
+			return err
+		}
+		cn, err := checkstate.GetNonce(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("GetNonce", sn, cn)
+		sc, err := state.GetCode(addr)
+		if err != nil {
+			return err
+		}
+		cc, err := checkstate.GetCode(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("GetCode", sc, cc)
+		sch, err := state.GetCodeHash(addr)
+		if err != nil {
+			return err
+		}
+		cch, err := checkstate.GetCodeHash(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("GetCodeHash", sch, cch)
+		scs, err := state.GetCodeSize(addr)
+		if err != nil {
+			return err
+		}
+		ccs, err := checkstate.GetCodeSize(addr)
+		if err != nil {
+			return err
+		}
+		checkeq("GetCodeSize", scs, ccs)
 		// Check storage.
-		if obj := state.getStateObject(addr); obj != nil {
+		obj, err := state.getStateObject(addr)
+		if err != nil {
+			return err
+		}
+		if obj != nil {
 			for key, value := range obj.dirtyStorage {
 				var out uint256.Int
 				checkstate.GetState(addr, &key, &out)
@@ -342,7 +402,11 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 				}
 			}
 		}
-		if obj := checkstate.getStateObject(addr); obj != nil {
+		obj, err = checkstate.getStateObject(addr)
+		if err != nil {
+			return err
+		}
+		if obj != nil {
 			for key, value := range obj.dirtyStorage {
 				var out uint256.Int
 				state.GetState(addr, &key, &out)

@@ -391,11 +391,21 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 		address        = libcommon.Address(stack.Back(1).Bytes20())
 	)
 	if evm.ChainRules().IsSpuriousDragon {
-		if transfersValue && evm.IntraBlockState().Empty(address) {
+		empty, err := evm.IntraBlockState().Empty(address)
+		if err != nil {
+			return 0, err
+		}
+		if transfersValue && empty {
 			gas += params.CallNewAccountGas
 		}
-	} else if !evm.IntraBlockState().Exist(address) {
-		gas += params.CallNewAccountGas
+	} else {
+		exists, err := evm.IntraBlockState().Exist(address)
+		if err != nil {
+			return 0, err
+		}
+		if !exists {
+			gas += params.CallNewAccountGas
+		}
 	}
 	if transfersValue {
 		gas += params.CallValueTransferGas
@@ -499,15 +509,33 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value
-			if evm.IntraBlockState().Empty(address) && !evm.IntraBlockState().GetBalance(contract.Address()).IsZero() {
+			empty, err := evm.IntraBlockState().Empty(address)
+			if err != nil {
+				return 0, err
+			}
+			balance, err := evm.IntraBlockState().GetBalance(contract.Address())
+			if err != nil {
+				return 0, err
+			}
+			if empty && !balance.IsZero() {
 				gas += params.CreateBySelfdestructGas
 			}
-		} else if !evm.IntraBlockState().Exist(address) {
-			gas += params.CreateBySelfdestructGas
+		} else {
+			exist, err := evm.IntraBlockState().Exist(address)
+			if err != nil {
+				return 0, err
+			}
+			if !exist {
+				gas += params.CreateBySelfdestructGas
+			}
 		}
 	}
 
-	if !evm.IntraBlockState().HasSelfdestructed(contract.Address()) {
+	hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(contract.Address())
+	if err != nil {
+		return 0, err
+	}
+	if !hasSelfdestructed {
 		evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
 	}
 	return gas, nil

@@ -55,7 +55,11 @@ func (ct *OverlayCreateTracer) CaptureEnter(typ vm.OpCode, from libcommon.Addres
 		if err != nil {
 			ct.err = err
 		} else {
-			ct.resultCode = ct.evm.IntraBlockState().GetCode(ct.contractAddress)
+			if result, err := ct.evm.IntraBlockState().GetCode(ct.contractAddress); err != nil {
+				ct.resultCode = result
+			} else {
+				ct.err = err
+			}
 		}
 	}
 }
