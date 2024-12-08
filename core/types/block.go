@@ -964,6 +964,11 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash libcommon.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
+	if header.WithdrawalsHash == nil && len(withdrawals) == 0 {
+		// Hack for Issue 12297
+		// Apparently some snapshots have pre-Shappella blocks with empty rather than nil withdrawals
+		b.withdrawals = nil
+	}
 	b.hash.Store(hash)
 	return b
 }
