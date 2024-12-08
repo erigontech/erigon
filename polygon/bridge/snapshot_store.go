@@ -223,11 +223,11 @@ func (s *SnapshotStore) EventTxnToBlockNum(ctx context.Context, txnHash libcommo
 	return blockNum, true, nil
 }
 
-func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, error) {
+func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, bool, error) {
 	maxBlockNumInFiles := s.snapshots.VisibleBlocksAvailable(heimdall.Events.Enum())
 	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		return s.Store.(interface {
-			blockEventIdsRange(context.Context, uint64, uint64) (uint64, uint64, error)
+			blockEventIdsRange(context.Context, uint64, uint64) (uint64, uint64, bool, error)
 		}).blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
 	}
 
@@ -258,12 +258,12 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 					}
 					end = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 				}
-				return start, end, nil
+				return start, end, true, nil
 			}
 		}
 	}
 
-	return 0, 0, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
+	return 0, 0, false, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
 }
 
 func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
@@ -342,15 +342,18 @@ func (s *SnapshotStore) borBlockByEventHash(txnHash libcommon.Hash, segments []*
 }
 
 func (s *SnapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
-	startEventId, _, err := s.BlockEventIdsRange(ctx, blockHeight)
-	if err != nil {
+	startEventId, _, ok, err := s.BlockEventIdsRange(ctx, blockHeight)
+	if !ok || err != nil {
 		return 0, err
 	}
 	return startEventId, nil
 }
 
 func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	startEventId, endEventId, err := s.BlockEventIdsRange(ctx, blockHeight)
+	startEventId, endEventId, ok, err := s.BlockEventIdsRange(ctx, blockHeight)
+	if !ok {
+		return []rlp.RawValue{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
