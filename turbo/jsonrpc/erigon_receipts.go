@@ -24,7 +24,6 @@ import (
 	"github.com/RoaringBitmap/roaring"
 
 	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -117,7 +116,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, fmt.Errorf("end (%d) > MaxUint32", end)
 	}
 
-	return api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
+	return api.getLogsV3(ctx, tx, begin, end, crit)
 }
 
 // GetLatestLogs implements erigon_getLatestLogs.
@@ -139,13 +138,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		logOptions = filters.DefaultLogFilterOptions()
 	}
 	erigonLogs := types.ErigonLogs{}
-	dbTx, beginErr := api.db.BeginTemporalRo(ctx)
+	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
 		return erigonLogs, beginErr
 	}
-	defer dbTx.Rollback()
-
-	tx := dbTx.(kv.TemporalTx)
+	defer tx.Rollback()
 
 	var err error
 	var begin, end uint64 // Filter range: begin-end(from-to). Two limits are included in the filter

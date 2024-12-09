@@ -338,7 +338,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
-	return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
+	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {

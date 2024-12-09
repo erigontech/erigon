@@ -205,7 +205,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	}
 	defer dbtx.Rollback()
 
-	return api.searchTransactionsBeforeV3(dbtx.(kv.TemporalTx), ctx, addr, blockNum, pageSize)
+	return api.searchTransactionsBeforeV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
 // Search transactions that touch a certain address.
@@ -227,7 +227,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
-	return api.searchTransactionsAfterV3(dbtx.(kv.TemporalTx), ctx, addr, blockNum, pageSize)
+	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
 func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Address, chainConfig *chain.Config, pageSize, resultCount uint16, callFromToProvider BlockProvider) ([]*TransactionsWithReceipts, bool, error) {

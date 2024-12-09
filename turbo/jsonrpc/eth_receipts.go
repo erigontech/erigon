@@ -132,7 +132,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = latest
 	}
 
-	erigonLogs, err := api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
+	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit)
 	if err != nil {
 		return nil, err
 	}
