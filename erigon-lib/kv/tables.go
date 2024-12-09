@@ -287,8 +287,6 @@ const (
 	InactivityScores     = "InactivityScores"
 	NextSyncCommittee    = "NextSyncCommittee"
 	CurrentSyncCommittee = "CurrentSyncCommittee"
-	HistoricalRoots      = "HistoricalRoots"
-	HistoricalSummaries  = "HistoricalSummaries"
 	Eth1DataVotes        = "Eth1DataVotes"
 
 	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
@@ -430,8 +428,6 @@ var ChaindataTables = []string{
 	// Blob Storage
 	BlockRootToKzgCommitments,
 	// State Reconstitution
-	ValidatorPublicKeys,
-	InvertedValidatorPublicKeys,
 	ValidatorEffectiveBalance,
 	ValidatorBalance,
 	ValidatorSlashings,
@@ -448,8 +444,6 @@ var ChaindataTables = []string{
 	InactivityScores,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
-	HistoricalRoots,
-	HistoricalSummaries,
 	Eth1DataVotes,
 	IntraRandaoMixes,
 	ActiveValidatorIndicies,
@@ -582,7 +576,6 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesFromIdx:         {Flags: DupSort},
 	TblTracesToKeys:          {Flags: DupSort},
 	TblTracesToIdx:           {Flags: DupSort},
-	TblPruningProgress:       {Flags: DupSort},
 }
 
 var BorTablesCfg = TableCfg{
