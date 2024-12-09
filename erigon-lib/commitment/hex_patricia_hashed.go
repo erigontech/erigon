@@ -1150,6 +1150,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("\n")
 }
 
+// this function is only related to the witness
 func (hph *HexPatriciaHashed) createAccountNode(c *cell, row int, hashedKey []byte, codeReads map[libcommon.Hash]witnesstypes.CodeWithHash) (*trie.AccountNode, error) {
 	_, storageIsSet, storageRootHash, err := hph.computeCellHashWithStorage(c, hph.depths[row], nil)
 	if err != nil {
