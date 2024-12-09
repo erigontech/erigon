@@ -374,6 +374,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	if err != nil {
 		return err
 	}
+	if toBlock > 0 {
+		toBlock-- // [fromBlock,toBlock)
+	}
 	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
 		return err
