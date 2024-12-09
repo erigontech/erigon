@@ -71,6 +71,8 @@ type EngineServer struct {
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
 	lock    sync.Mutex
 	logger  log.Logger
+
+	engineLogSpamer *engine_logs_pammer.EngineLogsSpammer
 }
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
@@ -88,6 +90,7 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 		proposing:        proposing,
 		hd:               hd,
 		caplin:           caplin,
+		engineLogSpamer:  engine_logs_pammer.NewEngineLogsSpammer(logger, config),
 	}
 }
 
@@ -103,6 +106,9 @@ func (e *EngineServer) Start(
 	txPool txpool.TxpoolClient,
 	mining txpool.MiningClient,
 ) {
+	if !e.caplin {
+		e.engineLogSpamer.Start(ctx)
+	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil)
 
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, txPool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
@@ -161,6 +167,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		s.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled
 	}
+	s.engineLogSpamer.RecordRequest()
 
 	if len(req.LogsBloom) != types.BloomByteLength {
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid logsBloom length: %d", len(req.LogsBloom))}
@@ -459,6 +466,8 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		s.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
 	}
+	s.engineLogSpamer.RecordRequest()
+
 	if !s.proposing {
 		return nil, errors.New("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
@@ -527,6 +536,8 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		s.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
 	}
+	s.engineLogSpamer.RecordRequest()
+
 	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
 	if err != nil {
 		return nil, err
@@ -630,6 +641,8 @@ func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []lib
 	if len(request) > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
+	s.engineLogSpamer.RecordRequest()
+
 	bodies, err := s.chainRW.GetBodiesByHashes(ctx, request)
 	if err != nil {
 		return nil, err
@@ -682,6 +695,8 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutility.By
 		e.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled
 	}
+	e.engineLogSpamer.RecordRequest()
+
 	decodedPayloadId := binary.BigEndian.Uint64(payloadId)
 	e.logger.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
 
@@ -794,6 +809,8 @@ var ourCapabilities = []string{
 }
 
 func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
+	e.engineLogSpamer.RecordRequest()
+
 	missingOurs := compareCapabilities(fromCl, ourCapabilities)
 	missingCl := compareCapabilities(ourCapabilities, fromCl)
 
@@ -828,6 +845,8 @@ func (e *EngineServer) HandleNewPayload(
 	block *types.Block,
 	versionedHashes []libcommon.Hash,
 ) (*engine_types.PayloadStatus, error) {
+	e.engineLogSpamer.RecordRequest()
+
 	header := block.Header()
 	headerNumber := header.Number.Uint64()
 	headerHash := block.Hash()
@@ -937,6 +956,8 @@ func (e *EngineServer) HandlesForkChoice(
 	forkChoice *engine_types.ForkChoiceState,
 	requestId int,
 ) (*engine_types.PayloadStatus, error) {
+	e.engineLogSpamer.RecordRequest()
+
 	headerHash := forkChoice.HeadHash
 
 	e.logger.Debug(fmt.Sprintf("[%s] Handling fork choice", logPrefix), "headerHash", headerHash)
