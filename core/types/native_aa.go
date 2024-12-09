@@ -2,25 +2,22 @@ package types
 
 import (
 	"bytes"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
+	"strings"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	emath "github.com/erigontech/erigon-lib/common/math"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
 	libcommon "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	types "github.com/erigontech/erigon/core/types/aa"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/params"
 
 	"github.com/erigontech/erigon/rlp"
 )
@@ -250,168 +247,134 @@ func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	return tx.EncodeRLP(w)
 }
 
-func (tx *AccountAbstractionTransaction) ValidateAATransaction(
-	ibs *state.IntraBlockState,
-	gasPool *core.GasPool,
-	header *Header,
-	evm *vm.EVM,
-	chainConfig *chain.Config,
-) (paymasterContext []byte, validationGasUsed uint64, err error) {
-	senderCodeSize := ibs.GetCodeSize(*tx.SenderAddress)
-	paymasterCodeSize := ibs.GetCodeSize(*tx.Paymaster)
-	deployerCodeSize := ibs.GetCodeSize(*tx.Deployer)
-	if err := performStaticValidation(tx, senderCodeSize, paymasterCodeSize, deployerCodeSize); err != nil {
-		return nil, 0, err
+func (tx *AccountAbstractionTransaction) PreTransactionGasCost() (uint64, error) {
+	var authorizationsBytes bytes.Buffer
+	b := make([]byte, authorizationsSize(tx.AuthorizationData)) // NOTE: may be wrong??
+	if err := encodeAuthorizations(tx.AuthorizationData, &authorizationsBytes, b); err != nil {
+		return 0, err
 	}
 
-	validationGasUsed = 0
-
-	//baseFee := uint256.MustFromBig(header.BaseFee)
-
-	//effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
-	//gasLimit, preCharge, err := BuyGasRip7560Transaction(tx, statedb, effectiveGasPrice, gasPool)
-
-	// TODO: configure tracer
-
-	// TODO: Nonce manager frame
-	// applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
-
-	// Deployer frame
-	msg := tx.deployerFrame()
-	validateDeployer := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
-		if ibs.GetCodeSize(*tx.SenderAddress) == 0 {
-			return wrapError(fmt.Errorf(
-				"sender not deployed by the deployer, sender:%s deployer:%s",
-				tx.SenderAddress.String(), tx.Deployer.String(),
-			))
-		}
-		return nil
-	}
-	applyRes, err := core.ApplyFrame(evm, msg, gasPool, validateDeployer)
-	if err != nil {
-		return nil, 0, err
-	}
-	if applyRes.Failed() {
-		return nil, 0, newValidationPhaseError(
-			applyRes.Err,
-			applyRes.ReturnData,
-			"deployer",
-			true,
-		)
-	}
-
-	deploymentGasUsed := applyRes.UsedGas
-
-	// Validation frame
-	msg, err = tx.validationFrame(chainConfig.ChainID, deploymentGasUsed)
-	if err != nil {
-		return nil, 0, err
-	}
-	validateValidation := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
-		if epc.Error != nil {
-			return epc.Error
-		}
-		if epc.Input == nil {
-			return errors.New("account validation did not call the EntryPoint 'acceptAccount' callback")
-		}
-		if bytes.Compare(epc.From[:], tx.SenderAddress[:]) == 0 {
-			return errors.New("invalid call to EntryPoint contract from a wrong account address")
-		}
-
-		validityTimeRange, err := types.AbiDecodeAcceptAccount(epc.Input, false)
-		if err != nil {
-			return err
-		}
-		return validateValidityTimeRange(header.Time, validityTimeRange.ValidAfter.Uint64(), validityTimeRange.ValidUntil.Uint64())
-	}
-	applyRes, err = core.ApplyFrame(evm, msg, gasPool, validateValidation)
-	if err != nil {
-		return nil, 0, err
-	}
-	if applyRes.Failed() {
-		return nil, 0, newValidationPhaseError(
-			applyRes.Err,
-			applyRes.ReturnData,
-			"account",
-			true,
-		)
-	}
-	validationGasUsed += applyRes.UsedGas
-
-	// Paymaster frame
-	msg, err = tx.paymasterFrame(chainConfig.ChainID)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	if msg != nil {
-		validatePaymaster := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
-			if epc.Error != nil {
-				return epc.Error
-			}
-			if epc.Input == nil {
-				return errors.New("paymaster validation did not call the EntryPoint 'acceptPaymaster' callback")
-			}
-
-			if bytes.Compare(epc.From[:], tx.Paymaster[:]) != 0 {
-				return errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
-			}
-			paymasterValidity, err := types.AbiDecodeAcceptPaymaster(epc.Input, false) // TODO: find better name
-			if err != nil {
-				return err
-			}
-
-			if err = validateValidityTimeRange(header.Time, paymasterValidity.ValidAfter.Uint64(), paymasterValidity.ValidUntil.Uint64()); err != nil {
-				return err
-			}
-
-			if len(paymasterValidity.Context) > 0 && tx.PostOpGasLimit == 0 {
-				return wrapError(
-					fmt.Errorf(
-						"paymaster returned a context of size %d but the paymasterPostOpGasLimit is 0",
-						len(paymasterValidity.Context),
-					),
-				)
-			}
-
-			paymasterContext = paymasterValidity.Context
-			return nil
-		}
-		applyRes, err = core.ApplyFrame(evm, msg, gasPool, validatePaymaster)
-		if err != nil {
-			return nil, 0, err
-		}
-		if applyRes.Failed() {
-			return nil, 0, newValidationPhaseError(
-				applyRes.Err,
-				applyRes.ReturnData,
-				"paymaster",
-				true,
-			)
-		}
-		validationGasUsed += applyRes.UsedGas
-	}
-
-	return paymasterContext, validationGasUsed, nil
+	// data should have tx.AuthorizationData, tx.DeployerData, tx.ExecutionData, tx.PaymasterData
+	data := make([]byte, len(authorizationsBytes.Bytes())+len(tx.DeployerData)+len(tx.ExecutionData)+len(tx.PaymasterData))
+	data = append(data, authorizationsBytes.Bytes()...)
+	data = append(data, tx.DeployerData...)
+	data = append(data, tx.ExecutionData...)
+	data = append(data, tx.PaymasterData...)
+	return IntrinsicGas(data, tx.AccessList, false, true, true, true, true, uint64(len(tx.AuthorizationData))) // NOTE: should read homestead and 2028 config from chainconfig
 }
 
-func validateValidityTimeRange(time uint64, validAfter uint64, validUntil uint64) error {
-	if validUntil == 0 && validAfter == 0 {
-		return nil
+// TODO: remove this, it is a duplicate from core package
+func IntrinsicGas(data []byte, accessList AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860, isAATxn bool, authorizationsLen uint64) (uint64, error) {
+	// Zero and non-zero bytes are priced differently
+	dataLen := uint64(len(data))
+	dataNonZeroLen := uint64(0)
+	for _, byt := range data {
+		if byt != 0 {
+			dataNonZeroLen++
+		}
 	}
-	if validUntil < validAfter {
-		return errors.New("RIP-7560 transaction validity range invalid")
-	}
-	if time > validUntil {
-		return errors.New("RIP-7560 transaction validity expired")
-	}
-	if time < validAfter {
-		return errors.New("RIP-7560 transaction validity not reached yet")
-	}
-	return nil
+
+	gas := CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860, isAATxn)
+	return gas, nil
 }
 
-func (tx *AccountAbstractionTransaction) deployerFrame() *Message {
+// TODO: remove this, it is a duplicate from txpoolcfg package
+func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai, isAATxn bool) uint64 {
+	// Set the starting gas for the raw transaction
+	var gas uint64
+	if isContractCreation && isHomestead {
+		gas = fixedgas.TxGasContractCreation
+	} else if isAATxn {
+		gas = fixedgas.TxAAGas
+	} else {
+		gas = fixedgas.TxGas
+	}
+	// Bump the required gas by the amount of transactional data
+	if dataLen > 0 {
+		// Zero and non-zero bytes are priced differently
+		nz := dataNonZeroLen
+		// Make sure we don't exceed uint64 for all data combinations
+		nonZeroGas := fixedgas.TxDataNonZeroGasFrontier
+		if isEIP2028 {
+			nonZeroGas = fixedgas.TxDataNonZeroGasEIP2028
+		}
+
+		product, overflow := emath.SafeMul(nz, nonZeroGas)
+		if overflow {
+			return 0
+		}
+		gas, overflow = emath.SafeAdd(gas, product)
+		if overflow {
+			return 0
+		}
+
+		z := dataLen - nz
+
+		product, overflow = emath.SafeMul(z, fixedgas.TxDataZeroGas)
+		if overflow {
+			return 0
+		}
+		gas, overflow = emath.SafeAdd(gas, product)
+		if overflow {
+			return 0
+		}
+
+		if isContractCreation && isShanghai {
+			numWords := toWordSize(dataLen)
+			product, overflow = emath.SafeMul(numWords, fixedgas.InitCodeWordGas)
+			if overflow {
+				return 0
+			}
+			gas, overflow = emath.SafeAdd(gas, product)
+			if overflow {
+				return 0
+			}
+		}
+	}
+	if accessList != nil {
+		product, overflow := emath.SafeMul(uint64(len(accessList)), fixedgas.TxAccessListAddressGas)
+		if overflow {
+			return 0
+		}
+		gas, overflow = emath.SafeAdd(gas, product)
+		if overflow {
+			return 0
+		}
+
+		product, overflow = emath.SafeMul(uint64(accessList.StorageKeys()), fixedgas.TxAccessListStorageKeyGas)
+		if overflow {
+			return 0
+		}
+		gas, overflow = emath.SafeAdd(gas, product)
+		if overflow {
+			return 0
+		}
+	}
+
+	// Add the cost of authorizations
+	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerEmptyAccountCost)
+	if overflow {
+		return 0
+	}
+
+	gas, overflow = emath.SafeAdd(gas, product)
+	if overflow {
+		return 0
+	}
+
+	return gas
+}
+
+// TODO: remove this, it is a duplicate from txpoolcfg package
+// toWordSize returns the ceiled word size required for memory expansion.
+func toWordSize(size uint64) uint64 {
+	if size > math.MaxUint64-31 {
+		return math.MaxUint64/32 + 1
+	}
+	return (size + 31) / 32
+}
+
+func (tx *AccountAbstractionTransaction) DeployerFrame() *Message {
 	intrinsicGas, _ := tx.PreTransactionGasCost()
 	deployerGasLimit := tx.ValidationGasLimit - intrinsicGas
 	return &Message{
@@ -422,26 +385,50 @@ func (tx *AccountAbstractionTransaction) deployerFrame() *Message {
 	}
 }
 
-func (tx *AccountAbstractionTransaction) validationFrame(chainID *big.Int, deploymentUsedGas uint64) (*Message, error) {
+func (tx *AccountAbstractionTransaction) ExecutionFrame() *Message {
+	return &Message{
+		to:       tx.SenderAddress,
+		from:     AA_ENTRY_POINT,
+		gasLimit: tx.Gas,
+		data:     tx.ExecutionData,
+	}
+}
+
+func (tx *AccountAbstractionTransaction) PaymasterPostOp(paymasterContext []byte, gasUsed uint64, executionSuccess bool) (*Message, error) {
+	postOpData, err := AccountAbstractionABI.Pack("postPaymasterTransaction", executionSuccess, big.NewInt(int64(gasUsed)), paymasterContext)
+	if err != nil {
+		return nil, errors.New("unable to encode postPaymasterTransaction")
+	}
+
+	return &Message{
+		to:       tx.Paymaster,
+		from:     AA_SENDER_CREATOR,
+		gasLimit: tx.PostOpGasLimit,
+		data:     postOpData,
+	}, nil
+}
+
+func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Message, error) {
+	zeroAddress := common.Address{}
+	if tx.Paymaster == nil || bytes.Compare(zeroAddress[:], tx.Paymaster[:]) == 0 {
+		return nil, nil
+	}
+
 	signingHash := tx.SigningHash(chainID)
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {
 		return nil, err
 	}
 
-	validateTransactionData, err := types.AccountAbstractionABI.Pack("validateTransaction", big.NewInt(types.AccountAbstractionABIVersion), signingHash, txAbiEncoding)
+	validatePaymasterData, err := AccountAbstractionABI.Pack("validatePaymasterTransaction", big.NewInt(AccountAbstractionABIVersion), signingHash, txAbiEncoding)
 	if err != nil {
 		return nil, err
 	}
-
-	intrinsicGas, _ := tx.PreTransactionGasCost()
-	accountGasLimit := tx.ValidationGasLimit - intrinsicGas - deploymentUsedGas
-
 	return &Message{
-		to:       tx.SenderAddress,
+		to:       tx.Paymaster,
 		from:     AA_ENTRY_POINT,
-		gasLimit: accountGasLimit,
-		data:     validateTransactionData,
+		gasLimit: tx.PaymasterValidationGasLimit,
+		data:     validatePaymasterData,
 	}, nil
 }
 
@@ -484,7 +471,7 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 		return nil, err
 	}
 
-	record := &types.ABIAccountAbstractTxn{
+	record := &ABIAccountAbstractTxn{
 		Sender:                      *tx.SenderAddress,
 		NonceKey:                    tx.NonceKey,
 		Nonce:                       uint256.NewInt(tx.Nonce),
@@ -506,387 +493,142 @@ func (tx *AccountAbstractionTransaction) AbiEncode() ([]byte, error) {
 	return packed, err
 }
 
-func (tx *AccountAbstractionTransaction) paymasterFrame(chainID *big.Int) (*Message, error) {
-	zeroAddress := common.Address{}
-	if tx.Paymaster == nil || bytes.Compare(zeroAddress[:], tx.Paymaster[:]) == 0 {
-		return nil, nil
-	}
-
+func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentUsedGas uint64) (*Message, error) {
 	signingHash := tx.SigningHash(chainID)
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {
 		return nil, err
 	}
 
-	validatePaymasterData, err := types.AccountAbstractionABI.Pack("validatePaymasterTransaction", big.NewInt(types.AccountAbstractionABIVersion), signingHash, txAbiEncoding)
+	validateTransactionData, err := AccountAbstractionABI.Pack("validateTransaction", big.NewInt(AccountAbstractionABIVersion), signingHash, txAbiEncoding)
 	if err != nil {
 		return nil, err
 	}
-	return &Message{
-		to:       tx.Paymaster,
-		from:     AA_ENTRY_POINT,
-		gasLimit: tx.PaymasterValidationGasLimit,
-		data:     validatePaymasterData,
-	}, nil
-}
 
-func (tx *AccountAbstractionTransaction) ExecuteAATransaction(
-	paymasterContext []byte,
-	validationGasUsed uint64,
-	gasPool *core.GasPool,
-	evm *vm.EVM,
-) (executionStatus uint64, executionReturnData []byte, postOpReturnData []byte, err error) {
-	executionStatus = ExecutionStatusSuccess
+	intrinsicGas, _ := tx.PreTransactionGasCost()
+	accountGasLimit := tx.ValidationGasLimit - intrinsicGas - deploymentUsedGas
 
-	// Execution frame
-	msg := tx.executionFrame()
-	applyRes, err := core.ApplyFrame(evm, msg, gasPool, nil)
-	if err != nil {
-		return 0, nil, nil, err
-	}
-
-	if applyRes.Failed() {
-		executionStatus = ExecutionStatusExecutionFailure
-	}
-	executionReturnData = applyRes.ReturnData
-
-	executionGasPenalty := (tx.Gas - applyRes.UsedGas) * AA_GAS_PENALTY_PCT / 100
-	gasUsed := validationGasUsed + applyRes.UsedGas + executionGasPenalty
-	gasRefund := capRefund(applyRes.UsedGas+validationGasUsed, gasUsed) // TODO: check correctness, i think this should be moved into statetransition
-	finalGasUsed := gasUsed - gasRefund
-
-	// Paymaster post-op frame
-	msg, err = tx.paymasterPostOp(paymasterContext, finalGasUsed, !applyRes.Failed())
-	if err != nil {
-		return 0, nil, nil, err
-	}
-
-	applyRes, err = core.ApplyFrame(evm, msg, gasPool, nil)
-	if err != nil {
-		return 0, nil, nil, err
-	}
-	if applyRes.Failed() {
-		if executionStatus == ExecutionStatusExecutionFailure {
-			executionStatus = ExecutionStatusExecutionFailure
-		} else {
-			executionStatus = ExecutionStatusPostOpFailure
-		}
-
-		// TODO: cap refund, unused gas penalty
-
-		return 0, nil, nil, errors.New("paymaster post-op failed")
-	}
-	postOpReturnData = applyRes.ReturnData
-
-	return executionStatus, executionReturnData, postOpReturnData, nil
-}
-
-func (tx *AccountAbstractionTransaction) paymasterPostOp(paymasterContext []byte, gasUsed uint64, executionSuccess bool) (*Message, error) {
-	postOpData, err := types.AccountAbstractionABI.Pack("postPaymasterTransaction", executionSuccess, big.NewInt(int64(gasUsed)), paymasterContext)
-	if err != nil {
-		return nil, errors.New("unable to encode postPaymasterTransaction")
-	}
-
-	return &Message{
-		to:       tx.Paymaster,
-		from:     AA_SENDER_CREATOR,
-		gasLimit: tx.PostOpGasLimit,
-		data:     postOpData,
-	}, nil
-}
-
-// TODO: get rid of?
-func capRefund(getRefund uint64, gasUsed uint64) uint64 {
-	refund := gasUsed / params.RefundQuotientEIP3529
-	if refund > getRefund {
-		return getRefund
-	}
-	return refund
-}
-
-func (tx *AccountAbstractionTransaction) executionFrame() *Message {
 	return &Message{
 		to:       tx.SenderAddress,
 		from:     AA_ENTRY_POINT,
-		gasLimit: tx.Gas,
-		data:     tx.ExecutionData,
-	}
+		gasLimit: accountGasLimit,
+		data:     validateTransactionData,
+	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) InjectAALogs(executionStatus, blockNum uint64, execReturnData, postOpReturnData []byte, ibs *state.IntraBlockState) error {
-	err := injectRIP7560TransactionEvent(tx, executionStatus, blockNum, ibs)
+// ABIAccountAbstractTxn an equivalent of a solidity struct only used to encode the 'transaction' parameter
+type ABIAccountAbstractTxn struct {
+	// NOTE: these were big.Int and were changed to uint256
+	Sender                      common.Address
+	NonceKey                    *uint256.Int
+	Nonce                       *uint256.Int
+	ValidationGasLimit          *uint256.Int
+	PaymasterValidationGasLimit *uint256.Int
+	PostOpGasLimit              *uint256.Int
+	CallGasLimit                *uint256.Int
+	MaxFeePerGas                *uint256.Int
+	MaxPriorityFeePerGas        *uint256.Int
+	BuilderFee                  *uint256.Int
+	Paymaster                   common.Address
+	PaymasterData               []byte
+	Deployer                    common.Address
+	DeployerData                []byte
+	ExecutionData               []byte
+	AuthorizationData           []byte
+}
+
+const AccountAbstractionABIJSON = `[{"type":"function","name":"validateTransaction","inputs":[{"name":"version","type":"uint256"},{"name":"txHash","type":"bytes32"},{"name":"transaction","type":"bytes"}]},{"type":"function","name":"validatePaymasterTransaction","inputs":[{"name":"version","type":"uint256"},{"name":"txHash","type":"bytes32"},{"name":"transaction","type":"bytes"}]},{"type":"function","name":"postPaymasterTransaction","inputs":[{"name":"success","type":"bool"},{"name":"actualGasCost","type":"uint256"},{"name":"context","type":"bytes"}]},{"type":"function","name":"acceptAccount","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"}]},{"type":"function","name":"acceptPaymaster","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"},{"name":"context","type":"bytes"}]},{"type":"function","name":"sigFailAccount","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"}]},{"type":"function","name":"sigFailPaymaster","inputs":[{"name":"validAfter","type":"uint256"},{"name":"validUntil","type":"uint256"},{"name":"context","type":"bytes"}]},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":true,"internalType":"address","name":"paymaster","type":"address"},{"indexed":false,"internalType":"uint256","name":"nonceKey","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nonceSequence","type":"uint256"},{"indexed":false,"internalType":"bool","name":"executionStatus","type":"uint256"}],"name":"RIP7560TransactionEvent","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":false,"internalType":"uint256","name":"nonceKey","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nonceSequence","type":"uint256"},{"indexed":false,"internalType":"bytes","name":"revertReason","type":"bytes"}],"name":"RIP7560TransactionRevertReason","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":true,"internalType":"address","name":"paymaster","type":"address"},{"indexed":false,"internalType":"uint256","name":"nonceKey","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nonceSequence","type":"uint256"},{"indexed":false,"internalType":"bytes","name":"revertReason","type":"bytes"}],"name":"RIP7560TransactionPostOpRevertReason","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"sender","type":"address"},{"indexed":true,"internalType":"address","name":"paymaster","type":"address"},{"indexed":true,"internalType":"address","name":"deployer","type":"address"}],"name":"RIP7560AccountDeployed","type":"event"}]`
+const AccountAbstractionABIVersion = 0
+const PaymasterMaxContextSize = 65536
+
+var AccountAbstractionABI, _ = abi.JSON(strings.NewReader(AccountAbstractionABIJSON))
+
+func decodeMethodParamsToInterface(output interface{}, methodName string, input []byte) error {
+	m, err := AccountAbstractionABI.MethodById(input)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to decode %s: %w", methodName, err)
 	}
-	if tx.Deployer != nil {
-		err = injectRIP7560AccountDeployedEvent(tx, blockNum, ibs)
-		if err != nil {
-			return err
-		}
+	if methodName != m.Name {
+		return fmt.Errorf("unable to decode %s: got wrong method %s", methodName, m.Name)
 	}
-	if executionStatus == ExecutionStatusExecutionFailure || executionStatus == ExecutionStatusExecutionAndPostOpFailure {
-		err = injectRIP7560TransactionRevertReasonEvent(tx, execReturnData, blockNum, ibs)
-		if err != nil {
-			return err
-		}
+	params, err := m.Inputs.Unpack(input[4:])
+	if err != nil {
+		return fmt.Errorf("unable to decode %s: %w", methodName, err)
 	}
-	if executionStatus == ExecutionStatusPostOpFailure || executionStatus == ExecutionStatusExecutionAndPostOpFailure {
-		err = injectRIP7560TransactionPostOpRevertReasonEvent(tx, postOpReturnData, blockNum, ibs)
-		if err != nil {
-			return err
-		}
+	err = m.Inputs.Copy(output, params)
+	if err != nil {
+		return fmt.Errorf("unable to decode %s: %v", methodName, err)
 	}
 	return nil
 }
 
-func injectRIP7560AccountDeployedEvent(
-	txn *AccountAbstractionTransaction,
-	blockNum uint64,
-	ibs *state.IntraBlockState,
-) error {
-	topics, data, err := txn.AbiEncodeRIP7560AccountDeployedEvent()
-	if err != nil {
-		return err
-	}
-	err = injectEvent(topics, data, blockNum, ibs)
-	if err != nil {
-		return err
-	}
-	return nil
+type AcceptAccountData struct {
+	ValidAfter *uint256.Int
+	ValidUntil *uint256.Int
 }
 
-func injectRIP7560TransactionRevertReasonEvent(
-	txn *AccountAbstractionTransaction,
-	revertData []byte,
-	blockNum uint64,
-	ibs *state.IntraBlockState,
-) error {
-	topics, data, err := txn.AbiEncodeRIP7560TransactionRevertReasonEvent(revertData)
-	if err != nil {
-		return err
-	}
-	err = injectEvent(topics, data, blockNum, ibs)
-	if err != nil {
-		return err
-	}
-	return nil
+type AcceptPaymasterData struct {
+	ValidAfter *uint256.Int
+	ValidUntil *uint256.Int
+	Context    []byte
 }
 
-func injectRIP7560TransactionPostOpRevertReasonEvent(
-	txn *AccountAbstractionTransaction,
-	revertData []byte,
-	blockNum uint64,
-	ibs *state.IntraBlockState,
-) error {
-	topics, data, err := txn.AbiEncodeRIP7560TransactionPostOpRevertReasonEvent(revertData)
-	if err != nil {
-		return err
+func AbiDecodeAcceptAccount(input []byte, allowSigFail bool) (*AcceptAccountData, error) {
+	acceptAccountData := &AcceptAccountData{}
+	err := decodeMethodParamsToInterface(acceptAccountData, "acceptAccount", input)
+	if err != nil && allowSigFail {
+		err = decodeMethodParamsToInterface(acceptAccountData, "sigFailAccount", input)
 	}
-	err = injectEvent(topics, data, blockNum, ibs)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return acceptAccountData, nil
 }
 
-func injectRIP7560TransactionEvent(
-	txn *AccountAbstractionTransaction,
+func AbiDecodeAcceptPaymaster(input []byte, allowSigFail bool) (*AcceptPaymasterData, error) {
+	acceptPaymasterData := &AcceptPaymasterData{}
+	err := decodeMethodParamsToInterface(acceptPaymasterData, "acceptPaymaster", input)
+	if err != nil && allowSigFail {
+		err = decodeMethodParamsToInterface(acceptPaymasterData, "sigFailPaymaster", input)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(acceptPaymasterData.Context) > PaymasterMaxContextSize {
+		return nil, errors.New("paymaster return data: context too large")
+	}
+	return acceptPaymasterData, err
+}
+
+func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionEvent(
 	executionStatus uint64,
-	blockNum uint64,
-	ibs *state.IntraBlockState,
-) error {
-	topics, data, err := types.AbiEncodeRIP7560TransactionEvent(txn, executionStatus)
-	if err != nil {
-		return err
+) (topics []common.Hash, data []byte, error error) {
+	id := AccountAbstractionABI.Events["RIP7560TransactionEvent"].ID
+	paymaster := tx.Paymaster
+	if paymaster == nil {
+		paymaster = &common.Address{}
 	}
-	err = injectEvent(topics, data, blockNum, ibs)
-	if err != nil {
-		return err
+	deployer := tx.Deployer
+	if deployer == nil {
+		deployer = &common.Address{}
 	}
-	return nil
-}
-
-func injectEvent(topics []common.Hash, data []byte, blockNumber uint64, ibs *state.IntraBlockState) error {
-	transactionLog := &Log{
-		Address:     AA_ENTRY_POINT,
-		Topics:      topics,
-		Data:        data,
-		BlockNumber: blockNumber,
+	inputs := AccountAbstractionABI.Events["RIP7560TransactionEvent"].Inputs
+	data, error = inputs.NonIndexed().Pack(
+		tx.NonceKey,
+		big.NewInt(int64(tx.Nonce)),
+		big.NewInt(int64(executionStatus)),
+	)
+	if error != nil {
+		return nil, nil, error
 	}
-	ibs.AddLog(transactionLog)
-	return nil
-}
-
-func (tx *AccountAbstractionTransaction) PreTransactionGasCost() (uint64, error) {
-	var authorizationsBytes bytes.Buffer
-	b := make([]byte, authorizationsSize(tx.AuthorizationData)) // NOTE: may be wrong??
-	if err := encodeAuthorizations(tx.AuthorizationData, &authorizationsBytes, b); err != nil {
-		return 0, err
-	}
-
-	// data should have tx.AuthorizationData, tx.DeployerData, tx.ExecutionData, tx.PaymasterData
-	data := make([]byte, len(authorizationsBytes.Bytes())+len(tx.DeployerData)+len(tx.ExecutionData)+len(tx.PaymasterData))
-	data = append(data, authorizationsBytes.Bytes()...)
-	data = append(data, tx.DeployerData...)
-	data = append(data, tx.ExecutionData...)
-	data = append(data, tx.PaymasterData...)
-	return core.IntrinsicGas(data, tx.AccessList, false, true, true, true, true, uint64(len(tx.AuthorizationData))) // NOTE: should read homestead and 2028 config from chainconfig
-}
-
-func performStaticValidation(
-	txn *AccountAbstractionTransaction,
-	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
-) error {
-	hasPaymaster := txn.Paymaster != nil
-	hasPaymasterData := txn.PaymasterData != nil && len(txn.PaymasterData) != 0
-	hasPaymasterGasLimit := txn.PaymasterValidationGasLimit != 0
-	hasDeployer := txn.Deployer != nil
-	hasDeployerData := txn.DeployerData != nil && len(txn.DeployerData) != 0
-	hasCodeSender := senderCodeSize != 0
-	hasCodeDeployer := deployerCodeSize != 0
-
-	if !hasDeployer && hasDeployerData {
-		return wrapError(
-			fmt.Errorf(
-				"deployer data of size %d is provided but deployer address is not set",
-				len(txn.DeployerData),
-			),
-		)
-	}
-	if !hasPaymaster && (hasPaymasterData || hasPaymasterGasLimit) {
-		return wrapError(
-			fmt.Errorf(
-				"paymaster data of size %d (or a gas limit: %d) is provided but paymaster address is not set",
-				len(txn.DeployerData),
-				txn.PaymasterValidationGasLimit,
-			),
-		)
-	}
-
-	if hasPaymaster {
-		if !hasPaymasterGasLimit {
-			return wrapError(
-				fmt.Errorf(
-					"paymaster address  %s is provided but 'paymasterVerificationGasLimit' is zero",
-					txn.Paymaster.String(),
-				),
-			)
-		}
-		hasCodePaymaster := paymasterCodeSize != 0
-		if !hasCodePaymaster {
-			return wrapError(
-				fmt.Errorf(
-					"paymaster address %s is provided but contract has no code deployed",
-					txn.Paymaster.String(),
-				),
-			)
-		}
-	}
-
-	if hasDeployer {
-		if !hasCodeDeployer {
-			return wrapError(
-				fmt.Errorf(
-					"deployer address %s is provided but contract has no code deployed",
-					txn.Deployer.String(),
-				),
-			)
-		}
-		if hasCodeSender {
-			return wrapError(
-				fmt.Errorf(
-					"sender address %s and deployer address %s are provided but sender is already deployed",
-					txn.SenderAddress.String(),
-					txn.Deployer.String(),
-				))
-		}
-	}
-
-	preTransactionGasCost, _ := txn.PreTransactionGasCost() // might not be needed: this is checked when we do ApplyMessage
-	if preTransactionGasCost > txn.ValidationGasLimit {
-		return wrapError(
-			fmt.Errorf(
-				"insufficient ValidationGasLimit(%d) to cover PreTransactionGasCost(%d)",
-				txn.ValidationGasLimit, preTransactionGasCost,
-			),
-		)
-	}
-
-	if !hasDeployer && !hasCodeSender {
-		return wrapError(
-			fmt.Errorf(
-				"account is not deployed and no deployer is specified, account:%s", txn.SenderAddress.String(),
-			),
-		)
-	}
-
-	return nil
-}
-
-// ValidationPhaseError is an API error that encompasses an EVM revert with JSON error
-// code and a binary data blob.
-type ValidationPhaseError struct {
-	error
-	reason string // revert reason hex encoded
-
-	revertEntityName string
-	frameReverted    bool
-}
-
-func (v *ValidationPhaseError) ErrorData() interface{} {
-	return v.reason
-}
-
-// wrapError creates a revertError instance for validation errors not caused by an on-chain revert
-func wrapError(
-	innerErr error,
-) *ValidationPhaseError {
-	return newValidationPhaseError(innerErr, nil, "", false)
-}
-
-// newValidationPhaseError creates a revertError instance with the provided revert data.
-func newValidationPhaseError(
-	innerErr error,
-	revertReason []byte,
-	revertEntityName string,
-	frameReverted bool,
-) *ValidationPhaseError {
-	var vpeCast *ValidationPhaseError
-	if errors.As(innerErr, &vpeCast) {
-		return vpeCast
-	}
-	var errorMessage string
-	contractSubst := ""
-	if revertEntityName != "" {
-		contractSubst = fmt.Sprintf(" in contract %s", revertEntityName)
-	}
-	if innerErr != nil {
-		errorMessage = fmt.Sprintf(
-			"validation phase failed%s with exception: %s",
-			contractSubst,
-			innerErr.Error(),
-		)
-	} else {
-		errorMessage = fmt.Sprintf("validation phase failed%s", contractSubst)
-	}
-	// TODO: use "vm.ErrorX" for RIP-7560 specific errors as well!
-	err := errors.New(errorMessage)
-
-	reason, errUnpack := abi.UnpackRevert(revertReason)
-	if errUnpack == nil {
-		err = fmt.Errorf("%w: %v", err, reason)
-	}
-	return &ValidationPhaseError{
-		error:  err,
-		reason: hex.EncodeToString(revertReason),
-
-		frameReverted:    frameReverted,
-		revertEntityName: revertEntityName,
-	}
+	topics = []common.Hash{id, {}, {}}
+	topics[1] = [32]byte(libcommon.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
+	topics[2] = [32]byte(libcommon.LeftPadBytes(paymaster.Bytes()[:], 32))
+	return topics, data, nil
 }
 
 func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560AccountDeployedEvent() (topics []common.Hash, data []byte, err error) {
-	id := types.AccountAbstractionABI.Events["RIP7560AccountDeployed"].ID
+	id := AccountAbstractionABI.Events["RIP7560AccountDeployed"].ID
 	paymaster := tx.Paymaster
 	if paymaster == nil {
 		paymaster = &common.Address{}
@@ -905,8 +647,8 @@ func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560AccountDeployedEvent() 
 func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionRevertReasonEvent(
 	revertData []byte,
 ) (topics []common.Hash, data []byte, error error) {
-	id := types.AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].ID
-	inputs := types.AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].Inputs
+	id := AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].ID
+	inputs := AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].Inputs
 	data, error = inputs.NonIndexed().Pack(
 		tx.NonceKey,
 		big.NewInt(int64(tx.Nonce)),
@@ -923,12 +665,12 @@ func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionRevertReason
 func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionPostOpRevertReasonEvent(
 	revertData []byte,
 ) (topics []common.Hash, data []byte, error error) {
-	id := types.AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].ID
+	id := AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].ID
 	paymaster := tx.Paymaster
 	if paymaster == nil {
 		paymaster = &common.Address{}
 	}
-	inputs := types.AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].Inputs
+	inputs := AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].Inputs
 	data, error = inputs.NonIndexed().Pack(
 		tx.NonceKey,
 		big.NewInt(int64(tx.Nonce)),

@@ -259,19 +259,19 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		ibs.SetTxContext(txTask.TxIndex)
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
 			aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction)
-			paymasterContext, validationGasUsed, err := aaTxn.ValidateAATransaction(ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
+			paymasterContext, validationGasUsed, err := core.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
 			if err != nil {
 				txTask.Error = err
 				break
 			}
 
-			execStatus, execReturnData, postOpReturnData, err := aaTxn.ExecuteAATransaction(paymasterContext, validationGasUsed, rw.taskGasPool, rw.evm)
+			execStatus, execReturnData, postOpReturnData, err := core.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, rw.taskGasPool, rw.evm)
 			if err != nil {
 				txTask.Error = err
 				break
 			}
 
-			err = aaTxn.InjectAALogs(execStatus, header.Number.Uint64(), execReturnData, postOpReturnData, ibs)
+			err = core.InjectAALogs(aaTxn, execStatus, header.Number.Uint64(), execReturnData, postOpReturnData, ibs)
 			if err != nil {
 				txTask.Error = err
 				break
