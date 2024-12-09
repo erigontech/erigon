@@ -398,6 +398,10 @@ func (a *ApiHandler) produceBlock(
 		kzgProofs      []libcommon.Bytes48
 	)
 	go func() {
+		start := time.Now()
+		defer func() {
+			a.logger.Debug("Produced BeaconBody", "slot", targetSlot, "duration", time.Since(start))
+		}()
 		defer wg.Done()
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlock, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
@@ -425,6 +429,10 @@ func (a *ApiHandler) produceBlock(
 		builderErr    error
 	)
 	go func() {
+		start := time.Now()
+		defer func() {
+			a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
+		}()
 		defer wg.Done()
 		if a.routerCfg.Builder && a.builderClient != nil {
 			builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
