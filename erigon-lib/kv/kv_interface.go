@@ -513,6 +513,7 @@ type TemporalPutDel interface {
 
 type TemporalRoDB interface {
 	RoDB
+	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
 }
 type TemporalRwDB interface {

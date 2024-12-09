@@ -190,7 +190,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
+func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
 		return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
@@ -201,7 +201,7 @@ func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *s
 func (b *SimulatedBackend) CodeAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +214,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract libcommon.Addres
 func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) (*uint256.Int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +227,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract libcommon.Add
 func (b *SimulatedBackend) NonceAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return 0, err
 	}
@@ -241,7 +241,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract libcommon.Addre
 func (b *SimulatedBackend) StorageAt(ctx context.Context, contract libcommon.Address, key libcommon.Hash, blockNumber *big.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
