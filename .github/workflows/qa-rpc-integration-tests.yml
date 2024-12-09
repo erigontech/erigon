@@ -32,7 +32,7 @@ jobs:
       - name: Checkout RPC Tests Repository & Install Requirements
         run: |
           rm -rf ${{ runner.workspace }}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.22.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch feature/add_creationMethod_for_parity_traces https://github.com/jsvisa/erigon-rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{ runner.workspace }}/rpc-tests
           pip3 install -r requirements.txt
 
