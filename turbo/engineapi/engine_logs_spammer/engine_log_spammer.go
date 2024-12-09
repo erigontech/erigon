@@ -1,4 +1,4 @@
-package engine_logs_pammer
+package engine_logs_spammer
 
 import (
 	"context"
@@ -27,8 +27,7 @@ func NewEngineLogsSpammer(logger log.Logger, chainConfig *chain.Config) *EngineL
 
 func (e *EngineLogsSpammer) Start(ctx context.Context) {
 	e.lastRequestTime.Store(time.Now())
-	logSpamInterval := 15 * time.Second
-	offlineTimeThreshold := 30 * time.Second
+	logSpamInterval := 5 * time.Second
 	if !e.chainConfig.TerminalTotalDifficultyPassed {
 		return
 	}
@@ -40,7 +39,7 @@ func (e *EngineLogsSpammer) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-intervalSpam.C:
-				if time.Since(e.lastRequestTime.Load().(time.Time)) > offlineTimeThreshold {
+				if time.Since(e.lastRequestTime.Load().(time.Time)) > logSpamInterval {
 					e.logger.Warn("flag --externalcl was provided, but no CL seems to be connected.")
 				}
 			}

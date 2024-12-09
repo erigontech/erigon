@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/turbo/engineapi/engine_logs_spammer"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
@@ -72,7 +73,7 @@ type EngineServer struct {
 	lock    sync.Mutex
 	logger  log.Logger
 
-	engineLogSpamer *engine_logs_pammer.EngineLogsSpammer
+	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 }
 
 const fcuTimeout = 1000 // according to mathematics: 1000 millisecods = 1 second
@@ -90,7 +91,7 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 		proposing:        proposing,
 		hd:               hd,
 		caplin:           caplin,
-		engineLogSpamer:  engine_logs_pammer.NewEngineLogsSpammer(logger, config),
+		engineLogSpamer:  engine_logs_spammer.NewEngineLogsSpammer(logger, config),
 	}
 }
 
