@@ -42,7 +42,7 @@ import (
 func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
 	receipts, ok := api.getCachedReceipts(ctx, hash)
 	if !ok {
-		tx, err := api.db.BeginRo(ctx)
+		tx, err := api.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +72,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	var begin, end uint64
 	erigonLogs := types.ErigonLogs{}
 
-	tx, beginErr := api.db.BeginRo(ctx)
+	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
 		return erigonLogs, beginErr
 	}
@@ -139,7 +139,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		logOptions = filters.DefaultLogFilterOptions()
 	}
 	erigonLogs := types.ErigonLogs{}
-	dbTx, beginErr := api.db.BeginRo(ctx)
+	dbTx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
 		return erigonLogs, beginErr
 	}
@@ -329,7 +329,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 }
 
 func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

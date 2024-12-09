@@ -55,7 +55,7 @@ type OverlayAPI interface {
 // OverlayAPIImpl is implementation of the OverlayAPIImpl interface based on remote Db access
 type OverlayAPIImpl struct {
 	*BaseAPI
-	db                        kv.RoDB
+	db                        kv.TemporalRoDB
 	GasCap                    uint64
 	OverlayGetLogsTimeout     time.Duration
 	OverlayReplayBlockTimeout time.Duration
@@ -78,7 +78,7 @@ type blockReplayResult struct {
 }
 
 // NewOverlayAPI returns OverlayAPIImpl instance
-func NewOverlayAPI(base *BaseAPI, db kv.RoDB, gascap uint64, overlayGetLogsTimeout time.Duration, overlayReplayBlockTimeout time.Duration, otsApi OtterscanAPI) *OverlayAPIImpl {
+func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64, overlayGetLogsTimeout time.Duration, overlayReplayBlockTimeout time.Duration, otsApi OtterscanAPI) *OverlayAPIImpl {
 	return &OverlayAPIImpl{
 		BaseAPI:                   base,
 		db:                        db,
@@ -98,7 +98,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		overrideBlockHash  map[uint64]common.Hash
 	)
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +264,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

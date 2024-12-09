@@ -71,11 +71,11 @@ type OtterscanAPI interface {
 
 type OtterscanAPIImpl struct {
 	*BaseAPI
-	db          kv.RoDB
+	db          kv.TemporalRoDB
 	maxPageSize uint64
 }
 
-func NewOtterscanAPI(base *BaseAPI, db kv.RoDB, maxPageSize uint64) *OtterscanAPIImpl {
+func NewOtterscanAPI(base *BaseAPI, db kv.TemporalRoDB, maxPageSize uint64) *OtterscanAPIImpl {
 	return &OtterscanAPIImpl{
 		BaseAPI:     base,
 		db:          db,
@@ -172,7 +172,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 }
 
 func (api *OtterscanAPIImpl) GetInternalOperations(ctx context.Context, hash common.Hash) ([]*InternalOperation, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 		return nil, fmt.Errorf("max allowed page size: %v", api.maxPageSize)
 	}
 
-	dbtx, err := api.db.BeginRo(ctx)
+	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 		return nil, fmt.Errorf("max allowed page size: %v", api.maxPageSize)
 	}
 
-	dbtx, err := api.db.BeginRo(ctx)
+	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +375,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 }
 
 func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

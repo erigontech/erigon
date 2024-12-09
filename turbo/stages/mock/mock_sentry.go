@@ -102,7 +102,7 @@ type MockSentry struct {
 	Log                  log.Logger
 	tb                   testing.TB
 	cancel               context.CancelFunc
-	DB                   kv.RwDB
+	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
 	gspec                *types.Genesis

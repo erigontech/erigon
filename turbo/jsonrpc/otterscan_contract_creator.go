@@ -39,7 +39,7 @@ type ContractCreatorData struct {
 }
 
 func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	}
 
 	var acc accounts.Account
-	ttx := tx.(kv.TemporalTx)
+	ttx := tx
 
 	// Contract; search for creation tx; navigate forward on AccountsHistory/ChangeSets
 	//

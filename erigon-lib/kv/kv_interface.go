@@ -511,6 +511,15 @@ type TemporalPutDel interface {
 	DomainDelPrefix(domain Domain, prefix []byte) error
 }
 
+type TemporalRoDB interface {
+	RoDB
+	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+}
+type TemporalRwDB interface {
+	RwDB
+	TemporalRoDB
+}
+
 // ---- non-importnt utilites
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum

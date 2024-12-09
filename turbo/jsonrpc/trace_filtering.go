@@ -56,7 +56,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
-	tx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
-	tx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +311,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		//nolint
 		gasBailOut = new(bool) // false by default
 	}
-	dbtx, err1 := api.kv.BeginRo(ctx)
+	dbtx, err1 := api.kv.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
 	}

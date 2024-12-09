@@ -94,7 +94,7 @@ func NewEngineServer(logger log.Logger, config *chain.Config, executionService e
 func (e *EngineServer) Start(
 	ctx context.Context,
 	httpConfig *httpcfg.HttpCfg,
-	db kv.RoDB,
+	db kv.TemporalRoDB,
 	blockReader services.FullBlockReader,
 	filters *rpchelper.Filters,
 	stateCache kvcache.Cache,
