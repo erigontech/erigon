@@ -258,7 +258,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}

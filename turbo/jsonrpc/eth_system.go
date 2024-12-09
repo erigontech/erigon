@@ -248,11 +248,11 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 }
 
 type GasPriceOracleBackend struct {
-	tx      kv.Tx
+	tx      kv.TemporalTx
 	baseApi *BaseAPI
 }
 
-func NewGasPriceOracleBackend(tx kv.Tx, baseApi *BaseAPI) *GasPriceOracleBackend {
+func NewGasPriceOracleBackend(tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
 	return &GasPriceOracleBackend{tx: tx, baseApi: baseApi}
 }
 

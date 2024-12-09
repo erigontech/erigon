@@ -713,7 +713,7 @@ func filterTrace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toA
 
 func (api *TraceAPIImpl) callManyTransactions(
 	ctx context.Context,
-	dbtx kv.Tx,
+	dbtx kv.TemporalTx,
 	block *types.Block,
 	traceTypes []string,
 	txIndex int,
