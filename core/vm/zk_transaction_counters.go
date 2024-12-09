@@ -52,11 +52,19 @@ func NewTransactionCounter(transaction types.Transaction, smtMaxLevel int, forkI
 
 func (tc *TransactionCounter) CombineCounters() Counters {
 	combined := NewCounters()
+
+	_ = tc.CombineCountersInto(&combined)
+
+	return combined
+}
+
+func (tc *TransactionCounter) CombineCountersInto(combined *Counters) *Counters {
 	for k := range tc.rlpCounters.counters {
 		val := tc.rlpCounters.counters[k].used + tc.executionCounters.counters[k].used + tc.processingCounters.counters[k].used
-		combined[k] = &Counter{
-			used: val,
+		if (*combined)[k] == nil {
+			(*combined)[k] = &Counter{used: 0}
 		}
+		(*combined)[k].used = val
 	}
 
 	return combined

@@ -275,12 +275,15 @@ func (bcc *BatchCounterCollector) CombineCollectorsNoChanges() Counters {
 		}
 	}
 
+	txCounters := NewCounters()
 	for _, tx := range bcc.transactions {
-		txCounters := tx.CombineCounters()
+		_ = tx.CombineCountersInto(&txCounters)
 		for k, v := range txCounters {
 			combined[k].used += v.used
 			combined[k].remaining -= v.used
 		}
+
+		txCounters.NullateUsed()
 	}
 
 	return combined

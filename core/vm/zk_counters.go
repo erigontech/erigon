@@ -83,6 +83,12 @@ func NewCountersFromUsedArray(used []int) *Counters {
 	return &res
 }
 
+func (c Counters) NullateUsed() {
+	for _, v := range c {
+		v.used = 0
+	}
+}
+
 func (c Counters) UsedAsString() string {
 	res := fmt.Sprintf("[%s: %v]", CounterKeyNames[SHA], c[SHA].used)
 	res += fmt.Sprintf("[%s: %v]", CounterKeyNames[A], c[A].used)
