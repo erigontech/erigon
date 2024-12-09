@@ -301,16 +301,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	// make a simple copy to the current head state
-	var baseState *state.CachingBeaconState
-	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		baseState, err = headState.Copy()
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
+	baseState, err := a.forkchoiceStore.GetStateAtBlockRoot(
+		baseBlockRoot,
+		true,
+	) // we start the block production from this state
 
 	if err != nil {
 		return nil, err
