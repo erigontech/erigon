@@ -595,7 +595,7 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFr
 		start = binary.BigEndian.Uint64(v) + 1
 	}
 
-	return start, end, false, nil
+	return start, end, true, nil
 }
 
 func (s txStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, blockHeight uint64) (uint64, error) {
@@ -608,11 +608,11 @@ func (s txStore) BorStartEventId(ctx context.Context, hash libcommon.Hash, block
 
 func (s txStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	startEventId, endEventId, ok, err := s.blockEventIdsRange(ctx, blockHeight, 0)
-	if !ok {
-		return []rlp.RawValue{}, nil
-	}
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return []rlp.RawValue{}, nil
 	}
 	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
 	if err != nil {
