@@ -27,7 +27,7 @@ func NewEngineLogsSpammer(logger log.Logger, chainConfig *chain.Config) *EngineL
 
 func (e *EngineLogsSpammer) Start(ctx context.Context) {
 	e.lastRequestTime.Store(time.Now())
-	logSpamInterval := 5 * time.Second
+	logSpamInterval := 20 * time.Second
 	if !e.chainConfig.TerminalTotalDifficultyPassed {
 		return
 	}
