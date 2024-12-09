@@ -152,18 +152,20 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	return nil, false
 }
 
-func (dt *DomainRoTx) lookupVisibleFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
-	var item *filesItem
+// rawLookupFileByRange searches for a file that contains the given range of tx numbers.
+// Given range should exactly match the range of some file, so expected to be multiple of aggregationStep.
+// At first it checks range among visible files, then among dirty files.
+// If file is not found anywhere, returns nil
+func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*filesItem, error) {
 	for _, f := range dt.files {
-		if f.startTxNum == txFrom && f.endTxNum == txTo {
-			item = f.src
-			break
+		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil {
+			return f.src, nil // found in visible files
 		}
 	}
-	if item == nil || item.bindex == nil {
-		return nil
+	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
+		return dirty, nil
 	}
-	return item
+	return nil, fmt.Errorf("file v1-%s.%d-%d.kv was not found", dt.d.filenameBase, txFrom/dt.d.aggregationStep, txFrom/dt.d.aggregationStep)
 }
 
 func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
@@ -230,36 +232,19 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) (valueTransformer, error) {
+	var err error
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
-		mergedStorage = storage.lookupVisibleFileByItsRange(rng.from, rng.to)
-		if mergedStorage == nil {
-			visibleFiles := ""
-			for _, f := range dt.files {
-				visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
-			}
-
-			dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file not found",
-				"stepFrom", rng.from/dt.d.aggregationStep, "stepTo", rng.to/dt.d.aggregationStep,
-				"_visible", visibleFiles, "visibleFilesCount", len(dt.files))
-
+		if mergedStorage, err = storage.rawLookupFileByRange(rng.from, rng.to); err != nil {
 			// TODO may allow to merge, but storage keys will be stored as plainkeys
-			return nil, fmt.Errorf("merged v1-storage.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
+			return nil, err
 		}
 	}
+
 	hadToLookupAccount := mergedAccount == nil
 	if mergedAccount == nil {
-		mergedAccount = accounts.lookupVisibleFileByItsRange(rng.from, rng.to)
-		if mergedAccount == nil {
-			visibleFiles := ""
-			for _, f := range dt.files {
-				visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
-			}
-
-			dt.d.logger.Warn("[agg] lookupVisibleFileByItsRange: file not found",
-				"stepFrom", rng.from/dt.d.aggregationStep, "stepTo", rng.to/dt.d.aggregationStep,
-				"_visible", visibleFiles, "visibleFilesCount", len(dt.files))
-			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
+		if mergedAccount, err = accounts.rawLookupFileByRange(rng.from, rng.to); err != nil {
+			return nil, err
 		}
 	}
 

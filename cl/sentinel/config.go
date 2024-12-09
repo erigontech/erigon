@@ -42,8 +42,9 @@ type SentinelConfig struct {
 	Port          int
 	TCPPort       uint
 
-	MaxInboundTrafficPerPeer  datasize.ByteSize
-	MaxOutboundTrafficPerPeer datasize.ByteSize
+	MaxInboundTrafficPerPeer     datasize.ByteSize
+	MaxOutboundTrafficPerPeer    datasize.ByteSize
+	AdaptableTrafficRequirements bool
 	// Optional
 	LocalIP        string
 	EnableUPnP     bool
