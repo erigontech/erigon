@@ -100,7 +100,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 		return nil, err
 	}
 
-	if err := bs.DecodeCaches(cacheFile); err != nil {
+	if err := bs.DecodeCaches(b); err != nil {
 		return nil, err
 	}
 
