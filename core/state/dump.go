@@ -36,7 +36,7 @@ import (
 
 type Dumper struct {
 	blockNumber  uint64
-	db           kv.TemporalTx
+	tx           kv.TemporalTx
 	hashedState  bool
 	txNumsReader rawdbv3.TxNumsReader
 }
@@ -128,7 +128,7 @@ func (d iterativeDump) OnRoot(root libcommon.Hash) {
 
 func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) *Dumper {
 	return &Dumper{
-		db:           db,
+		tx:           db,
 		blockNumber:  blockNumber,
 		hashedState:  false,
 		txNumsReader: txNumsReader,
@@ -150,7 +150,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 	c.OnRoot(emptyHash) // We do not calculate the root
 
-	ttx := d.db.(kv.TemporalTx)
+	ttx := d.tx
 	txNum, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
