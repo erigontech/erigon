@@ -1194,13 +1194,15 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if headState == nil {
 		return errors.New("failed to get head state")
 	}
-	a.syncedData.OnHeadState(headState)
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
 		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot, 0)
 		return err
 	}); err != nil {
 		return err
+	}
+	if err := a.syncedData.OnHeadState(headState); err != nil {
+		return fmt.Errorf("failed to update synced data: %w", err)
 	}
 
 	return nil
