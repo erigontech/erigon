@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -155,6 +156,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		witnessInclusion = append(witnessInclusion, libcommon.HexToAddress(s))
 	}
 
+	logLevel := os.Getenv("LOG_LEVEL")
+
 	cfg.Zk = &ethconfig.Zk{
 		L2ChainId:                              ctx.Uint64(utils.L2ChainIdFlag.Name),
 		L2RpcUrl:                               ctx.String(utils.L2RpcUrlFlag.Name),
@@ -237,6 +240,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		MockWitnessGeneration:                  ctx.Bool(utils.MockWitnessGeneration.Name),
 		WitnessCacheLimit:                      witnessCacheLimit,
 		WitnessContractInclusion:               witnessInclusion,
+		LogLevel:                               utils2.LogLevel(logLevel),
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)

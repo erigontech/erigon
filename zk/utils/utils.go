@@ -3,6 +3,7 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -87,7 +88,7 @@ type DbReader interface {
 	GetHighestBlockInBatch(batchNo uint64) (uint64, bool, error)
 }
 
-func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix string) error {
+func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix string, shouldPrintTrace bool) error {
 	var lastSetBlockNum uint64 = 0
 	var foundAny bool = false
 
@@ -101,10 +102,14 @@ func UpdateZkEVMBlockCfg(cfg ForkConfigWriter, hermezDb ForkReader, logPrefix st
 			lastSetBlockNum = blockNum
 			foundAny = true
 		} else if !foundAny {
-			log.Trace(fmt.Sprintf("[%s] No block number found for fork id %v and no previous block number set", logPrefix, forkId))
+			if shouldPrintTrace {
+				log.Trace(fmt.Sprintf("[%s] No block number found for fork id %v and no previous block number set", logPrefix, forkId))
+			}
 			continue
 		} else {
-			log.Trace(fmt.Sprintf("[%s] No block number found for fork id %v, using last set block number: %v", logPrefix, forkId, lastSetBlockNum))
+			if shouldPrintTrace {
+				log.Trace(fmt.Sprintf("[%s] No block number found for fork id %v, using last set block number: %v", logPrefix, forkId, lastSetBlockNum))
+			}
 		}
 
 		if err := cfg.SetForkIdBlock(forkId, lastSetBlockNum); err != nil {
@@ -226,4 +231,14 @@ func CalculateBatchData(batchBlockData []BatchBlockData) (batchL2Data []byte, er
 	}
 
 	return batchL2Data, err
+}
+
+type LogLevel string
+
+// function to check if log level is trace
+func (ll *LogLevel) IsTraceLogLevelSet() bool {
+	if ll == nil {
+		return false
+	}
+	return strings.ToLower(string(*ll)) == "trace"
 }

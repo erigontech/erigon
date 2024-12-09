@@ -5,6 +5,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 type Zk struct {
@@ -98,6 +99,7 @@ type Zk struct {
 	WitnessCacheEnabled            bool
 	WitnessCacheLimit              uint64
 	WitnessContractInclusion       []common.Address
+	LogLevel                       utils.LogLevel
 }
 
 var DefaultZkConfig = &Zk{}

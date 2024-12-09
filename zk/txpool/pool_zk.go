@@ -31,6 +31,12 @@ func calcProtocolBaseFee(baseFee uint64) uint64 {
 	return 0
 }
 
+func (p *TxPool) Trace(msg string, ctx ...interface{}) {
+	if p.logLevel.IsTraceLogLevelSet() {
+		log.Trace(msg, ctx...)
+	}
+}
+
 // onSenderStateChange is the function that recalculates ephemeral fields of transactions and determines
 // which sub pool they will need to go to. Sice this depends on other transactions from the same sender by with lower
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
@@ -154,13 +160,13 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	defer p.lock.Unlock()
 
 	if p.isDeniedYieldingTransactions() {
-		log.Trace("Denied yielding transactions, cannot proceed")
+		p.Trace("Denied yielding transactions, cannot proceed")
 		return false, 0, nil
 	}
 
 	// First wait for the corresponding block to arrive
 	if p.lastSeenBlock.Load() < onTopOf {
-		log.Trace("Block not yet arrived, too early to process", "lastSeenBlock", p.lastSeenBlock.Load(), "requiredBlock", onTopOf)
+		p.Trace("Block not yet arrived, too early to process", "lastSeenBlock", p.lastSeenBlock.Load(), "requiredBlock", onTopOf)
 		return false, 0, nil
 	}
 
@@ -182,10 +188,10 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		}
 
 		mt := best.ms[i]
-		log.Trace("Processing transaction", "txID", mt.Tx.IDHash)
+		p.Trace("Processing transaction", "txID", mt.Tx.IDHash)
 
 		if toSkip.Contains(mt.Tx.IDHash) {
-			log.Trace("Skipping transaction, already in toSkip", "txID", mt.Tx.IDHash)
+			p.Trace("Skipping transaction, already in toSkip", "txID", mt.Tx.IDHash)
 			continue
 		}
 
@@ -193,31 +199,31 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			// remove ldn txs when not in london
 			toRemove = append(toRemove, mt)
 			toSkip.Add(mt.Tx.IDHash)
-			log.Trace("Removing London transaction in non-London environment", "txID", mt.Tx.IDHash)
+			p.Trace("Removing London transaction in non-London environment", "txID", mt.Tx.IDHash)
 			continue
 		}
 
 		if mt.Tx.Gas > transactionGasLimit {
 			// Skip transactions with very large gas limit, these shouldn't enter the pool at all
 			log.Debug("found a transaction in the pending pool with too high gas for tx - clear the tx pool")
-			log.Trace("Skipping transaction with too high gas", "txID", mt.Tx.IDHash, "gas", mt.Tx.Gas)
+			p.Trace("Skipping transaction with too high gas", "txID", mt.Tx.IDHash, "gas", mt.Tx.Gas)
 			continue
 		}
 		rlpTx, sender, isLocal, err := p.getRlpLocked(tx, mt.Tx.IDHash[:])
 		if err != nil {
-			log.Trace("Error getting RLP of transaction", "txID", mt.Tx.IDHash, "error", err)
+			p.Trace("Error getting RLP of transaction", "txID", mt.Tx.IDHash, "error", err)
 			return false, count, err
 		}
 		if len(rlpTx) == 0 {
 			toRemove = append(toRemove, mt)
-			log.Trace("Removing transaction with empty RLP", "txID", mt.Tx.IDHash)
+			p.Trace("Removing transaction with empty RLP", "txID", mt.Tx.IDHash)
 			continue
 		}
 
 		// Skip transactions that require more blob gas than is available
 		blobCount := uint64(len(mt.Tx.BlobHashes))
 		if blobCount*fixedgas.BlobGasPerBlob > availableBlobGas {
-			log.Trace("Skipping transaction due to insufficient blob gas", "txID", mt.Tx.IDHash, "requiredBlobGas", blobCount*fixedgas.BlobGasPerBlob, "availableBlobGas", availableBlobGas)
+			p.Trace("Skipping transaction due to insufficient blob gas", "txID", mt.Tx.IDHash, "requiredBlobGas", blobCount*fixedgas.BlobGasPerBlob, "availableBlobGas", availableBlobGas)
 			continue
 		}
 		availableBlobGas -= blobCount * fixedgas.BlobGasPerBlob
@@ -228,7 +234,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		intrinsicGas, _ := CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), nil, mt.Tx.Creation, true, true, isShanghai)
 		if intrinsicGas > availableGas {
 			// we might find another TX with a low enough intrinsic gas to include so carry on
-			log.Trace("Skipping transaction due to insufficient gas", "txID", mt.Tx.IDHash, "intrinsicGas", intrinsicGas, "availableGas", availableGas)
+			p.Trace("Skipping transaction due to insufficient gas", "txID", mt.Tx.IDHash, "intrinsicGas", intrinsicGas, "availableGas", availableGas)
 			continue
 		}
 
@@ -236,7 +242,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			availableGas -= intrinsicGas
 		}
 
-		log.Trace("Including transaction", "txID", mt.Tx.IDHash)
+		p.Trace("Including transaction", "txID", mt.Tx.IDHash)
 		txs.Txs[count] = rlpTx
 		txs.TxIds[count] = mt.Tx.IDHash
 		copy(txs.Senders.At(count), sender.Bytes())
@@ -249,7 +255,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	if len(toRemove) > 0 {
 		for _, mt := range toRemove {
 			p.pending.Remove(mt)
-			log.Trace("Removed transaction from pending pool", "txID", mt.Tx.IDHash)
+			p.Trace("Removed transaction from pending pool", "txID", mt.Tx.IDHash)
 		}
 	}
 	return true, count, nil
