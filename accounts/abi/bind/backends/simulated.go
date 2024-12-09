@@ -127,7 +127,7 @@ func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, c
 	t.Cleanup(b.Close)
 	return b
 }
-func (b *SimulatedBackend) DB() kv.RwDB                           { return b.m.DB }
+func (b *SimulatedBackend) DB() kv.TemporalRwDB                   { return b.m.DB }
 func (b *SimulatedBackend) Agg() *state2.Aggregator               { return b.m.HistoryV3Components() }
 func (b *SimulatedBackend) HistoryV3() bool                       { return b.m.HistoryV3 }
 func (b *SimulatedBackend) Engine() consensus.Engine              { return b.m.Engine }
