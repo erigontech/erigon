@@ -445,7 +445,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	if err != nil {
 		return err
 	}
-	historyTx, err1 := historyDb.BeginRo(context.Background())
+	historyTx, err1 := historyDb.BeginTemporalRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
