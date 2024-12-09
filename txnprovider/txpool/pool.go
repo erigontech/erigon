@@ -707,7 +707,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// not an exact science using intrinsic gas but as close as we could hope for at
 		// this stage
 		authorizationLen := uint64(len(mt.TxnSlot.Authorizations))
-		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, nil, mt.TxnSlot.Creation, true, true, isShanghai)
+		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
+		intrinsicGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, nil, mt.TxnSlot.Creation, true, true, isShanghai, isAATxn)
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
@@ -883,7 +884,8 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.UnderPriced
 	}
-	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), nil, txn.Creation, true, true, isShanghai)
+	isAATxn := txn.Type == types.AccountAbstractionTxType
+	gas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), nil, txn.Creation, true, true, isShanghai, isAATxn)
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
