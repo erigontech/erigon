@@ -15,6 +15,7 @@ import (
 	reflect "reflect"
 
 	common "github.com/erigontech/erigon-lib/common"
+	hexutility "github.com/erigontech/erigon-lib/common/hexutility"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	types "github.com/erigontech/erigon/core/types"
 	engine_types "github.com/erigontech/erigon/turbo/engineapi/engine_types"
@@ -473,18 +474,18 @@ func (c *MockExecutionEngineIsCanonicalHashCall) DoAndReturn(f func(context.Cont
 }
 
 // NewPayload mocks base method.
-func (m *MockExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, versionedHashes []common.Hash) (PayloadStatus, error) {
+func (m *MockExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, versionedHashes []common.Hash, executionRequestsList []hexutility.Bytes) (PayloadStatus, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "NewPayload", ctx, payload, beaconParentRoot, versionedHashes)
+	ret := m.ctrl.Call(m, "NewPayload", ctx, payload, beaconParentRoot, versionedHashes, executionRequestsList)
 	ret0, _ := ret[0].(PayloadStatus)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // NewPayload indicates an expected call of NewPayload.
-func (mr *MockExecutionEngineMockRecorder) NewPayload(ctx, payload, beaconParentRoot, versionedHashes any) *MockExecutionEngineNewPayloadCall {
+func (mr *MockExecutionEngineMockRecorder) NewPayload(ctx, payload, beaconParentRoot, versionedHashes, executionRequestsList any) *MockExecutionEngineNewPayloadCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewPayload", reflect.TypeOf((*MockExecutionEngine)(nil).NewPayload), ctx, payload, beaconParentRoot, versionedHashes)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewPayload", reflect.TypeOf((*MockExecutionEngine)(nil).NewPayload), ctx, payload, beaconParentRoot, versionedHashes, executionRequestsList)
 	return &MockExecutionEngineNewPayloadCall{Call: call}
 }
 
@@ -500,13 +501,13 @@ func (c *MockExecutionEngineNewPayloadCall) Return(arg0 PayloadStatus, arg1 erro
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineNewPayloadCall) Do(f func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash) (PayloadStatus, error)) *MockExecutionEngineNewPayloadCall {
+func (c *MockExecutionEngineNewPayloadCall) Do(f func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutility.Bytes) (PayloadStatus, error)) *MockExecutionEngineNewPayloadCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineNewPayloadCall) DoAndReturn(f func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash) (PayloadStatus, error)) *MockExecutionEngineNewPayloadCall {
+func (c *MockExecutionEngineNewPayloadCall) DoAndReturn(f func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutility.Bytes) (PayloadStatus, error)) *MockExecutionEngineNewPayloadCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -228,7 +228,7 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	validatorIndex, err := parseQueryValidatorIndex(tx, validatorId)
+	validatorIndex, err := parseQueryValidatorIndex(a.syncedData, validatorId)
 	if err != nil {
 		return nil, err
 	}

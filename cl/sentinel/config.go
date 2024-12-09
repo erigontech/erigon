@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/c2h5oh/datasize"
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 
 	"github.com/libp2p/go-libp2p"
@@ -40,6 +41,10 @@ type SentinelConfig struct {
 	IpAddr        string
 	Port          int
 	TCPPort       uint
+
+	MaxInboundTrafficPerPeer     datasize.ByteSize
+	MaxOutboundTrafficPerPeer    datasize.ByteSize
+	AdaptableTrafficRequirements bool
 	// Optional
 	LocalIP        string
 	EnableUPnP     bool

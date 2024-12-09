@@ -17,8 +17,6 @@
 package statechange
 
 import (
-	"runtime"
-
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -32,7 +30,7 @@ func ProcessInactivityScores(s abstract.BeaconState, eligibleValidatorsIndicies 
 		return nil
 	}
 
-	return threading.ParallellForLoop(runtime.NumCPU(), 0, len(eligibleValidatorsIndicies), func(i int) error {
+	return threading.ParallellForLoop(1, 0, len(eligibleValidatorsIndicies), func(i int) error {
 		validatorIndex := eligibleValidatorsIndicies[i]
 
 		// retrieve validator inactivity score index.

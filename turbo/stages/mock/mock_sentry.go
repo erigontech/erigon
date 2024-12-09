@@ -284,6 +284,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.Dirs = dirs
 	cfg.AlwaysGenerateChangesets = true
 	cfg.ChaosMonkey = false
+	cfg.Snapshot.ChainName = gspec.Config.ChainName
 
 	logger := log.Root()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
