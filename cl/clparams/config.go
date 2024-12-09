@@ -105,11 +105,12 @@ const (
 )
 
 const (
-	MaxDialTimeout               = 15 * time.Second
-	VersionLength  int           = 4
-	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
-	ReqTimeout     time.Duration = 10 * time.Second
-	RespTimeout    time.Duration = 15 * time.Second
+	MaxDialTimeout     = 15 * time.Second
+	VersionLength  int = 4
+	// 15 MiB
+	MaxChunkSize uint64        = 15728640
+	ReqTimeout   time.Duration = 10 * time.Second
+	RespTimeout  time.Duration = 15 * time.Second
 )
 
 const (
@@ -210,8 +211,8 @@ type NetworkConfig struct {
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
 	MainnetNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
+		GossipMaxSize:                   15728640,
+		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    MaxChunkSize,
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
@@ -229,9 +230,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	SepoliaNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		GossipMaxSize:                   15728640,
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    15728640,
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
@@ -248,9 +249,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	GnosisNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		GossipMaxSize:                   15728640, // 1 MiB
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    15728640, // 1 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
@@ -267,9 +268,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	ChiadoNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		GossipMaxSize:                   15728640, // 1 MiB
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    15728640, // 1 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
@@ -286,9 +287,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	HoleskyNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		GossipMaxSize:                   15728640, // 1 MiB
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    15728640, // 1 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
