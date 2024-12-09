@@ -365,12 +365,9 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 	}
 	for i, publicKey := range committee {
 		// get the validator index of the committee
-		validatorIndex, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, publicKey)
+		validatorIndex, _, err := a.syncedData.ValidatorIndexByPublicKey(publicKey)
 		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("could not read validator index: %x", publicKey)
+			return nil, fmt.Errorf("could not read validator index: %x. %s", publicKey, err)
 		}
 		idx := strconv.FormatInt(int64(validatorIndex), 10)
 		response.Validators[i] = idx

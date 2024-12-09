@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -305,7 +306,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 	queryFilters []string,
 ) {
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
-	filterIndicies, err := parseQueryValidatorIndicies(tx, validatorIds)
+	filterIndicies, err := parseQueryValidatorIndicies(a.syncedData, validatorIds)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -381,7 +382,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 	responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
 }
 
-func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
+func parseQueryValidatorIndex(syncedData synced_data.SyncedData, id string) (uint64, error) {
 	isPublicKey, err := checkValidValidatorId(id)
 	if err != nil {
 		return 0, err
@@ -391,19 +392,12 @@ func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
 		if err := b48.UnmarshalText([]byte(id)); err != nil {
 			return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
-		has, err := tx.Has(kv.InvertedValidatorPublicKeys, b48[:])
+		idx, has, err := syncedData.ValidatorIndexByPublicKey(b48)
 		if err != nil {
-			return 0, err
+			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found: %s", err))
 		}
 		if !has {
 			return math.MaxUint64, nil
-		}
-		idx, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, b48)
-		if err != nil {
-			return 0, err
-		}
-		if !ok {
-			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validator not found"))
 		}
 		return idx, nil
 	}
@@ -415,11 +409,11 @@ func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
 
 }
 
-func parseQueryValidatorIndicies(tx kv.Tx, ids []string) ([]uint64, error) {
+func parseQueryValidatorIndicies(syncedData synced_data.SyncedData, ids []string) ([]uint64, error) {
 	filterIndicies := make([]uint64, 0, len(ids))
 
 	for _, id := range ids {
-		idx, err := parseQueryValidatorIndex(tx, id)
+		idx, err := parseQueryValidatorIndex(syncedData, id)
 		if err != nil {
 			return nil, err
 		}
@@ -454,7 +448,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	validatorIndex, err := parseQueryValidatorIndex(tx, validatorId)
+	validatorIndex, err := parseQueryValidatorIndex(a.syncedData, validatorId)
 	if err != nil {
 		return nil, err
 	}
@@ -585,7 +579,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 		return
 	}
 
-	filterIndicies, err := parseQueryValidatorIndicies(tx, validatorIds)
+	filterIndicies, err := parseQueryValidatorIndicies(a.syncedData, validatorIds)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
