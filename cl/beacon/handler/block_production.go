@@ -1179,6 +1179,22 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
 		return err
 	}
+	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)
+	if err != nil {
+		return err
+	}
+	if headState == nil {
+		return errors.New("failed to get head state")
+	}
+	a.syncedData.OnHeadState(headState)
+
+	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
+		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot, 0)
+		return err
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
