@@ -868,7 +868,7 @@ var (
 		Value: cli.NewStringSlice(),
 	}
 	CaplinSubscribeAllTopicsFlag = cli.BoolFlag{
-		Name:  "caplin.subscibe-all-topics",
+		Name:  "caplin.subscribe-all-topics",
 		Usage: "Subscribe to all gossip topics",
 		Value: false,
 	}
