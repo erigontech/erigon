@@ -248,7 +248,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	logger := log.New("app", "caplin")
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, logger)
+	config.NetworkId = clparams.CustomNetwork // Force custom network
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.ChainName = beaconConfig.ConfigName
+	csn := freezeblocks.NewCaplinSnapshots(freezeCfg, beaconConfig, dirs, logger)
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
 	pool := pool.NewOperationsPool(beaconConfig)
@@ -288,17 +291,20 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:             config.CaplinDiscoveryAddr,
-		Port:               int(config.CaplinDiscoveryPort),
-		TCPPort:            uint(config.CaplinDiscoveryTCPPort),
-		EnableUPnP:         config.EnableUPnP,
-		SubscribeAllTopics: config.SubscribeAllTopics,
-		NetworkConfig:      networkConfig,
-		BeaconConfig:       beaconConfig,
-		TmpDir:             dirs.Tmp,
-		EnableBlocks:       true,
-		ActiveIndicies:     uint64(len(activeIndicies)),
-		MaxPeerCount:       config.MaxPeerCount,
+		IpAddr:                       config.CaplinDiscoveryAddr,
+		Port:                         int(config.CaplinDiscoveryPort),
+		TCPPort:                      uint(config.CaplinDiscoveryTCPPort),
+		EnableUPnP:                   config.EnableUPnP,
+		MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
+		MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
+		AdaptableTrafficRequirements: config.AdptableTrafficRequirements,
+		SubscribeAllTopics:           config.SubscribeAllTopics,
+		NetworkConfig:                networkConfig,
+		BeaconConfig:                 beaconConfig,
+		TmpDir:                       dirs.Tmp,
+		EnableBlocks:                 true,
+		ActiveIndicies:               uint64(len(activeIndicies)),
+		MaxPeerCount:                 config.MaxPeerCount,
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network: "tcp",
 		Addr:    fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),

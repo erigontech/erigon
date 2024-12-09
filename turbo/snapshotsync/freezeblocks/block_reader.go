@@ -865,32 +865,23 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		}
 		return
 	}
-	if txCount == 0 {
-		block = types.NewBlockFromStorage(hash, h, nil, b.Uncles, b.Withdrawals)
-		if len(senders) != block.Transactions().Len() {
-			if dbgLogs {
-				log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))
-			}
-			return block, senders, nil // no senders is fine - will recover them on the fly
-		}
-		block.SendersToTxs(senders)
-		return block, senders, nil
-	}
 
-	txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
-	if !ok {
-		if dbgLogs {
-			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable())
-		}
-		return
-	}
-	defer release()
 	var txs []types.Transaction
-	txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
-	if err != nil {
-		return nil, nil, err
+	if txCount != 0 {
+		txnSeg, ok, release := r.sn.ViewSingleFile(coresnaptype.Transactions, blockHeight)
+		if !ok {
+			if dbgLogs {
+				log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable())
+			}
+			return
+		}
+		defer release()
+		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
+		if err != nil {
+			return nil, nil, err
+		}
+		release()
 	}
-	release()
 
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 	if len(senders) != block.Transactions().Len() {

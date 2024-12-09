@@ -71,7 +71,7 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 		attVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetEpochAtSlot(atts[i].Data.Slot))
 		cIndex := atts[i].Data.CommitteeIndex
 		if attVersion.AfterOrEqual(clparams.ElectraVersion) {
-			index, err := atts[i].ElectraSingleCommitteeIndex()
+			index, err := atts[i].GetCommitteeIndexFromBits()
 			if err != nil {
 				log.Warn("[Beacon REST] failed to get committee bits", "err", err)
 				continue
@@ -109,7 +109,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		)
 
 		if attClVersion.AfterOrEqual(clparams.ElectraVersion) {
-			index, err := attestation.ElectraSingleCommitteeIndex()
+			index, err := attestation.GetCommitteeIndexFromBits()
 			if err != nil {
 				failures = append(failures, poolingFailure{
 					Index:   i,

@@ -42,7 +42,7 @@ func (b *BitVector) BitCap() int {
 }
 
 func (b *BitVector) Static() bool {
-	return false
+	return true
 }
 
 func (b *BitVector) GetBitAt(i int) bool {
@@ -117,27 +117,26 @@ func (b *BitVector) EncodingSizeSSZ() int {
 }
 
 func (b *BitVector) DecodeSSZ(buf []byte, _ int) error {
-	b.bitLen = len(buf) * 8
-	b.container = make([]byte, len(buf))
+	b.bitLen = b.bitCap // bitCap must be set before decoding by NewBitVector
+	b.container = make([]byte, b.EncodingSizeSSZ())
 	copy(b.container, buf)
 	return nil
 }
 
 func (b *BitVector) EncodeSSZ(dst []byte) ([]byte, error) {
 	// allocate enough space
-	if cap(dst) < b.EncodingSizeSSZ() {
-		dst = make([]byte, 0, b.EncodingSizeSSZ())
+	if len(dst) < b.EncodingSizeSSZ() {
+		dst = append(dst, make([]byte, b.EncodingSizeSSZ()-len(dst))...)
 	}
-	dst = append(dst, b.container...)
-	// pad with zeros
-	for i := len(b.container); i < (b.bitCap+7)/8; i++ {
-		dst = append(dst, 0)
-	}
+	copy(dst, b.container)
 	return dst, nil
 }
 
 func (b *BitVector) HashSSZ() ([32]byte, error) {
-	return merkle_tree.BitvectorRootWithLimit(b.container, uint64(b.bitCap))
+	// zero padding
+	buf := make([]byte, b.EncodingSizeSSZ())
+	copy(buf, b.container)
+	return merkle_tree.BitvectorRootWithLimit(buf, uint64(b.bitCap))
 }
 
 func (b *BitVector) MarshalJSON() ([]byte, error) {
@@ -151,6 +150,7 @@ func (b *BitVector) UnmarshalJSON(data []byte) error {
 	}
 	b.container = hex
 	b.bitLen = len(hex) * 8
+	b.bitCap = b.bitLen
 	return nil
 }
 
