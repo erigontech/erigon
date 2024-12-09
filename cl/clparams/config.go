@@ -249,9 +249,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	GnosisNetwork: {
-		GossipMaxSize:                   15728640, // 1 MiB
+		GossipMaxSize:                   15728640, // 15 MiB
 		GossipMaxSizeBellatrix:          15728640,
-		MaxChunkSize:                    15728640, // 1 MiB
+		MaxChunkSize:                    15728640, // 15 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
@@ -268,9 +268,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	ChiadoNetwork: {
-		GossipMaxSize:                   15728640, // 1 MiB
+		GossipMaxSize:                   15728640, // 15 MiB
 		GossipMaxSizeBellatrix:          15728640,
-		MaxChunkSize:                    15728640, // 1 MiB
+		MaxChunkSize:                    15728640, // 15 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
@@ -287,9 +287,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	HoleskyNetwork: {
-		GossipMaxSize:                   15728640, // 1 MiB
+		GossipMaxSize:                   15728640, // 15 MiB
 		GossipMaxSizeBellatrix:          15728640,
-		MaxChunkSize:                    15728640, // 1 MiB
+		MaxChunkSize:                    15728640, // 15 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
