@@ -39,7 +39,10 @@ import (
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
@@ -63,6 +66,32 @@ func TestBlockExecution1(t *testing.T) {
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
 	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot)
+
+	//**********************************
+	// Start the private RPC server
+	backend := eth.NewEthereum(
+		m.Ctx,
+		m.Cancel,
+		m.EthConfig,
+		m.DB,
+		m.Log)
+	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
+	ethBackendRPC := privateapi.NewEthBackendServer(context.Background(), backend, m.DB, m.Notifications, m.BlockReader, m.Log, latestBlockBuiltStore)
+	privateRpcApi, err := privateapi.StartGrpc(
+		m.RemoteKvServer,
+		ethBackendRPC,
+		nil,              //backend.txPoolGrpcServer,
+		nil,              //miningRPC,
+		nil,              //bridgeRPC,
+		nil,              //heimdallRPC,
+		"127.0.0.1:9090", //stack.Config().PrivateApiAddr,
+		1,                //stack.Config().PrivateApiRateLimit,
+		nil,              //creds,
+		true,             //stack.Config().HealthCheck,
+		m.Log)
+	require.NoError(t, err)
+	require.NotNil(t, privateRpcApi)
+	//**********************************
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash libcommon.Hash, number uint64) (h *types.Header) {
@@ -147,6 +176,19 @@ func TestBlockExecution1(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, fcuReceipt)
 	require.Equal(t, execution.ExecutionStatus_Success, fcuReceipt.Status)
+
+	// ****** HTTP Test
+	// req, err := http.NewRequest(http.MethodGet, "http://localhost:9090", nil)
+	// require.NoError(t, err)
+	// // req.Header.Add("X-ERIGON-HEALTHCHECK", "synced")
+	// response, err := http.DefaultClient.Do(req)
+	// require.NoError(t, err)
+	// require.NotNil(t, response)
+	// require.Equal(t, http.StatusOK, response.StatusCode)
+	// out, err := io.ReadAll(response.Body)
+	// require.NoError(t, err)
+	// fmt.Println(string(out))
+	// ******
 }
 
 func TestBlockExecution2(t *testing.T) {

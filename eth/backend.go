@@ -274,19 +274,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
-	backend := &Ethereum{
-		sentryCtx:            ctx,
-		sentryCancel:         ctxCancel,
-		config:               config,
-		chainDB:              chainKv,
-		networkID:            config.NetworkID,
-		etherbase:            config.Miner.Etherbase,
-		waitForStageLoopStop: make(chan struct{}),
-		waitForMiningStop:    make(chan struct{}),
-		logger:               logger,
-		stopNode: func() error {
-			return stack.Close()
-		},
+	backend := NewEthereum(ctx, ctxCancel, config, chainKv, logger)
+
+	backend.stopNode = func() error {
+		return stack.Close()
 	}
 
 	var chainConfig *chain.Config
@@ -1043,6 +1034,21 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	return backend, nil
+}
+
+func NewEthereum(ctx context.Context, ctxCancel context.CancelFunc, config *ethconfig.Config, chainKv kv.RwDB, logger log.Logger) *Ethereum {
+	backend := &Ethereum{
+		sentryCtx:            ctx,
+		sentryCancel:         ctxCancel,
+		config:               config,
+		chainDB:              chainKv,
+		networkID:            config.NetworkID,
+		etherbase:            config.Miner.Etherbase,
+		waitForStageLoopStop: make(chan struct{}),
+		waitForMiningStop:    make(chan struct{}),
+		logger:               logger,
+	}
+	return backend
 }
 
 func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {

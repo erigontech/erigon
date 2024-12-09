@@ -101,7 +101,8 @@ type MockSentry struct {
 	Ctx                  context.Context
 	Log                  log.Logger
 	tb                   testing.TB
-	cancel               context.CancelFunc
+	Cancel               context.CancelFunc
+	EthConfig            *ethconfig.Config
 	DB                   kv.RwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
@@ -122,6 +123,7 @@ type MockSentry struct {
 	ReceiveWg            sync.WaitGroup
 	Address              libcommon.Address
 	Eth1ExecutionService *eth1.EthereumExecutionModule
+	RemoteKvServer       *remotedbserver.KvServer
 
 	Notifications *shards.Notifications
 
@@ -142,7 +144,7 @@ type MockSentry struct {
 }
 
 func (ms *MockSentry) Close() {
-	ms.cancel()
+	ms.Cancel()
 	if ms.txPoolDB != nil {
 		ms.txPoolDB.Close()
 	}
@@ -291,9 +293,9 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	db, agg := temporaltest.NewTestDB(tb, dirs)
 
-	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, 0, logger)
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, allSnapshots, allBorSnapshots, agg, logger)
 
 	bridgeStore := bridge.NewSnapshotStore(bridge.NewDbStore(db), allBorSnapshots, gspec.Config.Bor)
 	heimdallStore := heimdall.NewSnapshotStore(heimdall.NewDbStore(db), allBorSnapshots)
@@ -301,7 +303,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 
 	mock := &MockSentry{
-		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
+		Ctx: ctx, Cancel: ctxCancel, DB: db, agg: agg,
+		EthConfig:      &cfg,
 		tb:             tb,
 		Log:            logger,
 		Dirs:           dirs,
@@ -315,6 +318,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		BlockReader:    br,
 		ReceiptsReader: receipts.NewGenerator(16, br, engine),
 		HistoryV3:      true,
+		RemoteKvServer: erigonGrpcServer,
 	}
 
 	if tb != nil {
