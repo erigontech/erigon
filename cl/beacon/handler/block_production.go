@@ -299,10 +299,19 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("block not found %x", baseBlockRoot),
 		)
 	}
-	baseState, err := a.forkchoiceStore.GetStateAtBlockRoot(
-		baseBlockRoot,
-		true,
-	) // we start the block production from this state
+
+	// make a simple copy to the current head state
+	var baseState *state.CachingBeaconState
+	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		baseState, err = headState.Copy()
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
 	if err != nil {
 		return nil, err
 	}
