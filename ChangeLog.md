@@ -36,6 +36,7 @@ ChangeLog
 ### New features:
 
 - Reduced `.idx` and `.efi` files size by 25% (require re-sync)
+- Support: `debug_getRawReceipts`
 - debian packages
 - `--externalcl` support
 - bor-mainnet can work on 32G machine
