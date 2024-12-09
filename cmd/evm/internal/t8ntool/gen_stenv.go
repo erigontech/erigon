@@ -9,7 +9,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
-	common0 "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -18,7 +17,7 @@ var _ = (*stEnvMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (s stEnv) MarshalJSON() ([]byte, error) {
 	type stEnv struct {
-		Coinbase         common0.UnprefixedAddress           `json:"currentCoinbase"   gencodec:"required"`
+		Coinbase         common.UnprefixedAddress            `json:"currentCoinbase"   gencodec:"required"`
 		Difficulty       *math.HexOrDecimal256               `json:"currentDifficulty"`
 		Random           *math.HexOrDecimal256               `json:"currentRandom"`
 		MixDigest        common.Hash                         `json:"mixHash,omitempty"`
@@ -37,7 +36,7 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 		RequestsHash     *common.Hash                        `json:"requestsHash,omitempty"`
 	}
 	var enc stEnv
-	enc.Coinbase = common0.UnprefixedAddress(s.Coinbase)
+	enc.Coinbase = common.UnprefixedAddress(s.Coinbase)
 	enc.Difficulty = (*math.HexOrDecimal256)(s.Difficulty)
 	enc.Random = (*math.HexOrDecimal256)(s.Random)
 	enc.MixDigest = s.MixDigest
@@ -60,7 +59,7 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (s *stEnv) UnmarshalJSON(input []byte) error {
 	type stEnv struct {
-		Coinbase         *common0.UnprefixedAddress          `json:"currentCoinbase"   gencodec:"required"`
+		Coinbase         *common.UnprefixedAddress           `json:"currentCoinbase"   gencodec:"required"`
 		Difficulty       *math.HexOrDecimal256               `json:"currentDifficulty"`
 		Random           *math.HexOrDecimal256               `json:"currentRandom"`
 		MixDigest        *common.Hash                        `json:"mixHash,omitempty"`
