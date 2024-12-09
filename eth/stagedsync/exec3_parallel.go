@@ -713,7 +713,6 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 			//	return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hashk mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
 			//}
 		}
-		//triggers += pe.rs.CommitTxNum(txTask.Sender, txTask.TxNum, pe.in)
 		outputTxNum++
 		if backPressure != nil {
 			select {

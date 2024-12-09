@@ -94,22 +94,6 @@ func Report(d state.DAG, stats map[int]ExecutionStat, out func(string)) {
 		time.Duration(serialWeight), fmt.Sprintf("%.1f", float64(weight)*100.0/float64(serialWeight))))
 }
 
-func newStatusManager(numTasks int) (t execStatusManager) {
-	t.pending = make([]int, numTasks)
-	for i := 0; i < numTasks; i++ {
-		t.pending[i] = i
-	}
-
-	t.dependency = make(map[int]map[int]bool, numTasks)
-	t.blocker = make(map[int]map[int]bool, numTasks)
-
-	for i := 0; i < numTasks; i++ {
-		t.blocker[i] = make(map[int]bool)
-	}
-
-	return
-}
-
 type execStatusManager struct {
 	pending    []int
 	inProgress []int
@@ -230,7 +214,7 @@ func (m *execStatusManager) addDependencies(blocker int, dependent int) bool {
 	}
 
 	m.dependency[blocker][dependent] = true
-	
+
 	if curblockers == nil {
 		curblockers = map[int]bool{}
 		if m.blocker == nil {
