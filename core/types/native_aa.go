@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	rlp2 "github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
+	libcommon "github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	types "github.com/erigontech/erigon/core/types/aa"
@@ -643,7 +644,7 @@ func injectRIP7560AccountDeployedEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := types.AbiEncodeRIP7560AccountDeployedEvent(txn)
+	topics, data, err := txn.AbiEncodeRIP7560AccountDeployedEvent()
 	if err != nil {
 		return err
 	}
@@ -660,7 +661,7 @@ func injectRIP7560TransactionRevertReasonEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := types.AbiEncodeRIP7560TransactionRevertReasonEvent(txn, revertData)
+	topics, data, err := txn.AbiEncodeRIP7560TransactionRevertReasonEvent(revertData)
 	if err != nil {
 		return err
 	}
@@ -677,7 +678,7 @@ func injectRIP7560TransactionPostOpRevertReasonEvent(
 	blockNum uint64,
 	ibs *state.IntraBlockState,
 ) error {
-	topics, data, err := types.AbiEncodeRIP7560TransactionPostOpRevertReasonEvent(txn, revertData)
+	topics, data, err := txn.AbiEncodeRIP7560TransactionPostOpRevertReasonEvent(revertData)
 	if err != nil {
 		return err
 	}
@@ -882,4 +883,62 @@ func newValidationPhaseError(
 		frameReverted:    frameReverted,
 		revertEntityName: revertEntityName,
 	}
+}
+
+func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560AccountDeployedEvent() (topics []common.Hash, data []byte, err error) {
+	id := types.AccountAbstractionABI.Events["RIP7560AccountDeployed"].ID
+	paymaster := tx.Paymaster
+	if paymaster == nil {
+		paymaster = &common.Address{}
+	}
+	deployer := tx.Deployer
+	if deployer == nil {
+		deployer = &common.Address{}
+	}
+	topics = []common.Hash{id, {}, {}, {}}
+	topics[1] = [32]byte(libcommon.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
+	topics[2] = [32]byte(libcommon.LeftPadBytes(paymaster.Bytes()[:], 32))
+	topics[3] = [32]byte(libcommon.LeftPadBytes(deployer.Bytes()[:], 32))
+	return topics, make([]byte, 0), nil
+}
+
+func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionRevertReasonEvent(
+	revertData []byte,
+) (topics []common.Hash, data []byte, error error) {
+	id := types.AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].ID
+	inputs := types.AccountAbstractionABI.Events["RIP7560TransactionRevertReason"].Inputs
+	data, error = inputs.NonIndexed().Pack(
+		tx.NonceKey,
+		big.NewInt(int64(tx.Nonce)),
+		revertData,
+	)
+	if error != nil {
+		return nil, nil, error
+	}
+	topics = []common.Hash{id, {}}
+	topics[1] = [32]byte(libcommon.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
+	return topics, data, nil
+}
+
+func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionPostOpRevertReasonEvent(
+	revertData []byte,
+) (topics []common.Hash, data []byte, error error) {
+	id := types.AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].ID
+	paymaster := tx.Paymaster
+	if paymaster == nil {
+		paymaster = &common.Address{}
+	}
+	inputs := types.AccountAbstractionABI.Events["RIP7560TransactionPostOpRevertReason"].Inputs
+	data, error = inputs.NonIndexed().Pack(
+		tx.NonceKey,
+		big.NewInt(int64(tx.Nonce)),
+		revertData,
+	)
+	if error != nil {
+		return nil, nil, error
+	}
+	topics = []common.Hash{id, {}, {}}
+	topics[1] = [32]byte(libcommon.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
+	topics[2] = [32]byte(libcommon.LeftPadBytes(paymaster.Bytes()[:], 32))
+	return topics, data, nil
 }
