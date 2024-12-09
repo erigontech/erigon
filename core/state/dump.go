@@ -36,7 +36,7 @@ import (
 
 type Dumper struct {
 	blockNumber  uint64
-	db           kv.Tx
+	db           kv.TemporalTx
 	hashedState  bool
 	txNumsReader rawdbv3.TxNumsReader
 }
@@ -126,7 +126,7 @@ func (d iterativeDump) OnRoot(root libcommon.Hash) {
 	}{root})
 }
 
-func NewDumper(db kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) *Dumper {
+func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) *Dumper {
 	return &Dumper{
 		db:           db,
 		blockNumber:  blockNumber,
