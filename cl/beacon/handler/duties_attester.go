@@ -194,7 +194,8 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 				if _, ok := idxSet[int(idx)]; !ok {
 					continue
 				}
-				publicKey, err := state_accessors.ReadPublicKeyByIndex(tx, idx)
+
+				publicKey, err := a.syncedData.ValidatorPublicKeyByIndex(int(idx))
 				if err != nil {
 					return nil, err
 				}

@@ -42,4 +42,4 @@ package contracts
 
 // faucet.sol
 //go:generate solc --evm-version paris --allow-paths ., --abi --bin --overwrite --optimize -o build faucet.sol
-//go:generate abigen -abi build/Faucet.abi -bin build/Faucet.bin -pkg contracts -type Faucet -out ./gen_faucet.go
+//go:generate abigen -abi build/faucet.abi -bin build/faucet.bin -pkg contracts -type Faucet -out ./gen_faucet.go

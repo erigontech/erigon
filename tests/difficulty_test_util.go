@@ -47,7 +47,7 @@ type difficultyTestMarshaling struct {
 	ParentDifficulty   *math.HexOrDecimal256
 	CurrentTimestamp   math.HexOrDecimal64
 	CurrentDifficulty  *math.HexOrDecimal256
-	ParentUncles       uint64
+	ParentUncles       math.HexOrDecimal64
 	CurrentBlockNumber math.HexOrDecimal64
 }
 

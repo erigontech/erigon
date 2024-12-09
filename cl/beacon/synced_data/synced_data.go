@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
@@ -44,6 +45,8 @@ type SyncedDataManager struct {
 
 	headState *state.CachingBeaconState
 
+	accessLock sync.RWMutex // lock used for accessing atomic methods
+
 	mu sync.RWMutex
 }
 
@@ -61,6 +64,8 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.accessLock.Lock()
+	defer s.accessLock.Unlock()
 
 	var blkRoot common.Hash
 
@@ -137,7 +142,54 @@ func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
 func (s *SyncedDataManager) UnsetHeadState() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.accessLock.Lock()
+	defer s.accessLock.Unlock()
 	s.headRoot = atomic.Value{}
 	s.headSlot.Store(uint64(0))
 	s.headState = nil
+}
+
+func (s *SyncedDataManager) ValidatorPublicKeyByIndex(index int) (common.Bytes48, error) {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return common.Bytes48{}, ErrNotSynced
+	}
+	return s.headState.ValidatorPublicKey(index)
+}
+
+func (s *SyncedDataManager) ValidatorIndexByPublicKey(pubkey common.Bytes48) (uint64, bool, error) {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return 0, false, ErrNotSynced
+	}
+	ret, found := s.headState.ValidatorIndexByPubkey(pubkey)
+	return ret, found, nil
+}
+
+func (s *SyncedDataManager) HistoricalRootElementAtIndex(index int) (common.Hash, error) {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return common.Hash{}, ErrNotSynced
+	}
+	if s.headState.HistoricalRootsLength() <= uint64(index) {
+		return common.Hash{}, errors.New("HistoricalRootElementAtIndex: index out of range")
+	}
+
+	return s.headState.HistoricalRoot(index), nil
+}
+
+func (s *SyncedDataManager) HistoricalSummaryElementAtIndex(index int) (*cltypes.HistoricalSummary, error) {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return nil, ErrNotSynced
+	}
+	if s.headState.HistoricalSummariesLength() <= uint64(index) {
+		return nil, errors.New("HistoricalSummaryElementAtIndex: index out of range")
+	}
+
+	return s.headState.HistoricalSummary(index), nil
 }

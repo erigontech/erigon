@@ -37,6 +37,8 @@ import (
 
 //(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
 
+var errShortTypedReceipt = errors.New("typed receipt too short")
+
 var (
 	receiptStatusFailedRLP     = []byte{}
 	receiptStatusSuccessfulRLP = []byte{0x01}
@@ -123,12 +125,71 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := new(bytes.Buffer)
-	buf.WriteByte(r.Type)
-	if err := rlp.Encode(buf, data); err != nil {
+	buf := encodeBufferPool.Get().(*bytes.Buffer)
+	defer encodeBufferPool.Put(buf)
+	buf.Reset()
+	if err := r.encodeTyped(data, buf); err != nil {
 		return err
 	}
 	return rlp.Encode(w, buf.Bytes())
+}
+
+// encodeTyped writes the canonical encoding of a typed receipt to w.
+func (r *Receipt) encodeTyped(data *receiptRLP, w *bytes.Buffer) error {
+	w.WriteByte(r.Type)
+	return rlp.Encode(w, data)
+}
+
+// MarshalBinary returns the consensus encoding of the receipt.
+func (r *Receipt) MarshalBinary() ([]byte, error) {
+	if r.Type == LegacyTxType {
+		return rlp.EncodeToBytes(r)
+	}
+	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
+	var buf bytes.Buffer
+	err := r.encodeTyped(data, &buf)
+	return buf.Bytes(), err
+}
+
+// UnmarshalBinary decodes the consensus encoding of receipts.
+// It supports legacy RLP receipts and EIP-2718 typed receipts.
+func (r *Receipt) UnmarshalBinary(b []byte) error {
+	if len(b) > 0 && b[0] > 0x7f {
+		// It's a legacy receipt decode the RLP
+		var data receiptRLP
+		err := rlp.DecodeBytes(b, &data)
+		if err != nil {
+			return err
+		}
+		r.Type = LegacyTxType
+		return r.setFromRLP(data)
+	}
+	// It's an EIP2718 typed transaction envelope.
+	return r.decodeTyped(b)
+}
+
+func (r *Receipt) setFromRLP(data receiptRLP) error {
+	r.CumulativeGasUsed, r.Bloom, r.Logs = data.CumulativeGasUsed, data.Bloom, data.Logs
+	return r.setStatus(data.PostStateOrStatus)
+}
+
+// decodeTyped decodes a typed receipt from the canonical format.
+func (r *Receipt) decodeTyped(b []byte) error {
+	if len(b) <= 1 {
+		return errShortTypedReceipt
+	}
+	switch b[0] {
+	case DynamicFeeTxType, AccessListTxType, BlobTxType:
+		var data receiptRLP
+		err := rlp.DecodeBytes(b[1:], &data)
+		if err != nil {
+			return err
+		}
+		r.Type = b[0]
+		return r.setFromRLP(data)
+	default:
+		return ErrTxTypeNotSupported
+	}
 }
 
 func (r *Receipt) decodePayload(s *rlp.Stream) error {
