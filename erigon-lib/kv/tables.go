@@ -60,7 +60,7 @@ const (
 	ContractCode = "HashedCodeHash"
 )
 
-const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness
+const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
 
 // Mapping [block number] => [Verkle Root]
 const VerkleRoots = "VerkleRoots"
