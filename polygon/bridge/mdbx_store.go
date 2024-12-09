@@ -55,8 +55,6 @@ var databaseTablesCfg = kv.TableCfg{
 	kv.BorTxLookup:             {},
 }
 
-var ErrEventIdRangeNotFound = errors.New("event id range not found")
-
 type MdbxStore struct {
 	db *polygoncommon.Database
 }
@@ -280,7 +278,6 @@ func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId 
 }
 
 // BlockEventIdsRange returns the [start, end] event Id for the given block number
-// ErrEventIdRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
 func (s *MdbxStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint64, uint64, bool, error) {
 	return s.blockEventIdsRange(ctx, blockNum, s.LastFrozenEventId())
@@ -563,7 +560,6 @@ func (s txStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (uint6
 }
 
 // BlockEventIdsRange returns the [start, end] event Id for the given block number
-// ErrEventIdRangeNotFound is thrown if the block number is not found in the database.
 // If the given block number is the first in the database, then the first uint64 (representing start Id) is 0.
 func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFrozenId uint64) (uint64, uint64, bool, error) {
 	var start, end uint64
@@ -581,7 +577,7 @@ func (s txStore) blockEventIdsRange(ctx context.Context, blockNum uint64, lastFr
 		return start, end, false, err
 	}
 	if v == nil {
-		return start, end, false, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
+		return start, end, false, nil
 	}
 
 	end = binary.BigEndian.Uint64(v)

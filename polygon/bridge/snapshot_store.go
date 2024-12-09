@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -263,7 +262,7 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 		}
 	}
 
-	return 0, 0, false, fmt.Errorf("%w: %d", ErrEventIdRangeNotFound, blockNum)
+	return 0, 0, false, nil
 }
 
 func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
@@ -351,11 +350,11 @@ func (s *SnapshotStore) BorStartEventId(ctx context.Context, hash libcommon.Hash
 
 func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	startEventId, endEventId, ok, err := s.BlockEventIdsRange(ctx, blockHeight)
-	if !ok {
-		return []rlp.RawValue{}, nil
-	}
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return []rlp.RawValue{}, nil
 	}
 	bytevals, err := s.Events(ctx, startEventId, endEventId+1)
 	if err != nil {
@@ -363,7 +362,7 @@ func (s *SnapshotStore) EventsByBlock(ctx context.Context, hash libcommon.Hash, 
 	}
 	result := make([]rlp.RawValue, len(bytevals))
 	for i, byteval := range bytevals {
-		result[i] = rlp.RawValue(byteval)
+		result[i] = byteval
 	}
 	return result, nil
 }
