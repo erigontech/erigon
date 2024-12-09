@@ -265,7 +265,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash libcom
 	defer tx.Rollback()
 
 	// Retrieve the context of the receipt based on the transaction hash
-	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	blockNumber, _, err := rawdb.ReadTxLookupEntry(tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +308,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash libcomm
 	if txn != nil {
 		return txn, true, nil
 	}
-	blockNumber, ok, err := b.BlockReader().TxnLookup(ctx, tx, txHash)
+	blockNumber, _, ok, err := b.BlockReader().TxnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, false, err
 	}

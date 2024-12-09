@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 
@@ -136,7 +137,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 
 // txnLookupTransform - [startKey, endKey)
 func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
-	bigNum := new(big.Int)
+	data := make([]byte, 16)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
@@ -148,9 +149,21 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 			return nil
 		}
 
-		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
-		for _, txn := range body.Transactions {
-			if err := next(k, txn.Hash().Bytes(), blockNumBytes); err != nil {
+		firstTxNumInBlock, err := rawdbv3.TxNums.Min(tx, blocknum)
+		if err != nil {
+			return err
+		}
+
+		if firstTxNumInBlock == 0 {
+			log.Warn(fmt.Sprintf("[%s] transform: empty txnum %d, hash %x", logPrefix, firstTxNumInBlock, v))
+			return nil
+		}
+
+		binary.BigEndian.PutUint64(data[:8], blocknum)
+
+		for i, txn := range body.Transactions {
+			binary.BigEndian.PutUint64(data[8:], firstTxNumInBlock+uint64(i)+1)
+			if err := next(k, txn.Hash().Bytes(), data); err != nil {
 				return err
 			}
 		}
@@ -294,6 +307,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			if err != nil {
 				return fmt.Errorf("prune TxLookUp: %w", err)
 			}
+
 			if cfg.borConfig != nil && pruneBor {
 				if err = deleteBorTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger); err != nil {
 					return fmt.Errorf("prune BorTxLookUp: %w", err)
