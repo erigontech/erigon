@@ -518,6 +518,7 @@ type TemporalRoDB interface {
 type TemporalRwDB interface {
 	RwDB
 	TemporalRoDB
+	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 }
 
 // ---- non-importnt utilites
