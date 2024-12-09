@@ -418,6 +418,24 @@ func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHas
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if chainConfig.Bor != nil {
+		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		if err != nil {
+			return nil, err
+		}
+		if len(events) != 0 {
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+			if err != nil {
+				return nil, err
+			}
+			receipts = append(receipts, borReceipt)
+		}
+	}
+
 	result := make([]hexutility.Bytes, len(receipts))
 	for i, receipt := range receipts {
 		b, err := receipt.MarshalBinary()
