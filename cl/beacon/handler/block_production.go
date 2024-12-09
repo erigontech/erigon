@@ -301,16 +301,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	// make a simple copy to the current head state
-	var baseState *state.CachingBeaconState
-	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		baseState, err = headState.Copy()
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
+	baseState, err := a.forkchoiceStore.GetStateAtBlockRoot(
+		baseBlockRoot,
+		true,
+	) // we start the block production from this state
 
 	if err != nil {
 		return nil, err
@@ -1194,13 +1188,15 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if headState == nil {
 		return errors.New("failed to get head state")
 	}
-	a.syncedData.OnHeadState(headState)
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
 		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot, 0)
 		return err
 	}); err != nil {
 		return err
+	}
+	if err := a.syncedData.OnHeadState(headState); err != nil {
+		return fmt.Errorf("failed to update synced data: %w", err)
 	}
 
 	return nil
