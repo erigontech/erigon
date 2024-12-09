@@ -274,7 +274,7 @@ func New(
 
 func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthCounter) {
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
 		countSubnetsSubscribed := func() int {
 			count := 0
