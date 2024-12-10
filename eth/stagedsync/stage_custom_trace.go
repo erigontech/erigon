@@ -203,15 +203,8 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 					msg := fmt.Sprintf("bad receipts accert stack %s receipt %+v", dbg.Stack(), receipt)
 					panic(msg)
 				}
-				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
+				if err := rawtemporaldb.AppendReceipt(doms, receipt, cumulativeBlobGasUsedInBlock); err != nil {
 					return err
-				}
-				if txTask.TxNum < 1962853462+10 && txTask.TxNum > 1962853352-10 {
-					cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx.(kv.TemporalTx), txTask.TxNum)
-					if err != nil {
-						println("error", err.Error())
-					}
-					println("receipt get:", "cumGasUsed:", cumGasUsed, "firstLogIndex:", firstLogIndex, "txNum:", txTask.TxNum)
 				}
 			}
 
