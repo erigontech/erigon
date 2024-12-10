@@ -37,15 +37,15 @@ import (
 
 func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
 	// Trace block for Txs
-	newdbtx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		log.Error("Search trace error", "err", err)
 		results[idx] = nil
 		return
 	}
-	defer newdbtx.Rollback()
+	defer tx.Rollback()
 
-	_, result, err := api.traceBlock(newdbtx, ctx, bNum, addr, chainConfig)
+	_, result, err := api.traceBlock(tx, ctx, bNum, addr, chainConfig)
 	if err != nil {
 		log.Error("Search trace error", "err", err)
 		results[idx] = nil
@@ -54,7 +54,7 @@ func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.A
 	results[idx] = result
 }
 
-func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNum uint64, searchAddr common.Address, chainConfig *chain.Config) (bool, *TransactionsWithReceipts, error) {
+func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context, blockNum uint64, searchAddr common.Address, chainConfig *chain.Config) (bool, *TransactionsWithReceipts, error) {
 	rpcTxs := make([]*RPCTransaction, 0)
 	receipts := make([]map[string]interface{}, 0)
 

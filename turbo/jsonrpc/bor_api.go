@@ -51,13 +51,13 @@ type spanProducersReader interface {
 // BorImpl is implementation of the BorAPI interface
 type BorImpl struct {
 	*BaseAPI
-	db                     kv.RoDB // the chain db
+	db                     kv.TemporalRoDB // the chain db
 	useSpanProducersReader bool
 	spanProducersReader    spanProducersReader
 }
 
 // NewBorAPI returns BorImpl instance
-func NewBorAPI(base *BaseAPI, db kv.RoDB, spanProducersReader spanProducersReader) *BorImpl {
+func NewBorAPI(base *BaseAPI, db kv.TemporalRoDB, spanProducersReader spanProducersReader) *BorImpl {
 	return &BorImpl{
 		BaseAPI:                base,
 		db:                     db,

@@ -42,11 +42,11 @@ type TxPoolAPI interface {
 type TxPoolAPIImpl struct {
 	*BaseAPI
 	pool proto_txpool.TxpoolClient
-	db   kv.RoDB
+	db   kv.TemporalRoDB
 }
 
 // NewTxPoolAPI returns NetAPIImplImpl instance
-func NewTxPoolAPI(base *BaseAPI, db kv.RoDB, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
+func NewTxPoolAPI(base *BaseAPI, db kv.TemporalRoDB, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
 	return &TxPoolAPIImpl{
 		BaseAPI: base,
 		pool:    pool,
@@ -94,7 +94,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		}
 	}
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +170,7 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr libcommon.Addres
 		}
 	}
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

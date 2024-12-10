@@ -32,7 +32,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	// this has been moved to prior to adding of transactions to capture the
 	// pre state of the db - which is used for logging in the messages below
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return common.Hash{}, err
 	}

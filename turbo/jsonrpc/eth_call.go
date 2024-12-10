@@ -63,7 +63,7 @@ var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutility.Bytes, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		args = *argsOrNil
 	}
 
-	dbtx, err := api.db.BeginRo(ctx)
+	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -348,7 +348,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	return nil, errors.New("not supported by Erigon3")
 	/*
-		tx, err := api.db.BeginRo(ctx)
+		tx, err := api.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -669,7 +669,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		bNrOrHash = *blockNrOrHash
 	}
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

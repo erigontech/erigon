@@ -147,7 +147,7 @@ func (rg *requestGenerator) GetTransactionReceipt(ctx context.Context, hash libc
 		chain: rg.chain,
 	}
 
-	tx, err := rg.sentry.DB.BeginRo(context.Background())
+	tx, err := rg.sentry.DB.BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}

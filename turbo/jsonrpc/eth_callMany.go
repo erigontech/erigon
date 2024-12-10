@@ -98,7 +98,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	)
 
 	overrideBlockHash = make(map[uint64]common.Hash)
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -39,16 +39,10 @@ func NewHistoryReaderV3() *HistoryReaderV3 {
 func (hr *HistoryReaderV3) String() string {
 	return fmt.Sprintf("txNum:%d", hr.txNum)
 }
-func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
-	if ttx, casted := tx.(kv.TemporalTx); casted {
-		hr.ttx = ttx
-	} else {
-		panic(fmt.Sprintf("type %T didn't satisfy interface", tx))
-	}
-}
-func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
-func (hr *HistoryReaderV3) GetTxNum() uint64      { return hr.txNum }
-func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
+func (hr *HistoryReaderV3) SetTx(tx kv.TemporalTx) { hr.ttx = tx }
+func (hr *HistoryReaderV3) SetTxNum(txNum uint64)  { hr.txNum = txNum }
+func (hr *HistoryReaderV3) GetTxNum() uint64       { return hr.txNum }
+func (hr *HistoryReaderV3) SetTrace(trace bool)    { hr.trace = trace }
 
 func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
 func (hr *HistoryReaderV3) ResetReadSet()                     {}
@@ -128,7 +122,7 @@ func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint6
 
 type ResettableStateReader interface {
 	StateReader
-	SetTx(tx kv.Tx)
+	SetTx(tx kv.TemporalTx)
 	SetTxNum(txn uint64)
 	DiscardReadList()
 	ReadSet() map[string]*state.KvList

@@ -180,7 +180,7 @@ func runCmd(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	tx, err := tdb.BeginRw(context.Background())
+	tx, err := tdb.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}
