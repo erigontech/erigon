@@ -1972,6 +1972,9 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Println("LAL deleting N entries", limit, "from key", prunedKey)
+
 	var stepBytes []byte
 	for ; k != nil; k, v, err = valsCursor.Next() {
 		if err != nil {
