@@ -237,7 +237,10 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if err != nil {
 			return nil, err
 		}
-		code := evm.IntraBlockState().GetCode(address)
+		code, err := evm.IntraBlockState().GetCode(address)
+		if err != nil {
+			return nil, err
+		}
 		if len(code) > 0 {
 			c := hexutility.Bytes(code)
 			resultCode.Code = &c
@@ -506,7 +509,16 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			if !contractCreation {
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())
-				statedb.SetNonce(msg.From(), statedb.GetNonce(sender.Address())+1)
+				nonce, err := statedb.GetNonce(sender.Address())
+				if err != nil {
+					log.Error(err.Error())
+					return nil, err
+				}
+				err = statedb.SetNonce(msg.From(), nonce+1)
+				if err != nil {
+					log.Error(err.Error())
+					return nil, err
+				}
 				continue
 			}
 		}

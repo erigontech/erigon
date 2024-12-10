@@ -320,7 +320,7 @@ func TestGetStateFullForkchoice(t *testing.T) {
 func TestGetStateSyncCommittees(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -385,7 +385,7 @@ func TestGetStateSyncCommittees(t *testing.T) {
 func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)

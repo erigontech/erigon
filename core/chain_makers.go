@@ -176,10 +176,18 @@ func (b *BlockGen) AddUncheckedReceipt(receipt *types.Receipt) {
 // TxNonce returns the next valid transaction nonce for the
 // account at addr. It panics if the account does not exist.
 func (b *BlockGen) TxNonce(addr libcommon.Address) uint64 {
-	if !b.ibs.Exist(addr) {
+	exist, err := b.ibs.Exist(addr)
+	if err != nil {
+		panic(fmt.Sprintf("can't get account: %s", err))
+	}
+	if !exist {
 		panic("account does not exist")
 	}
-	return b.ibs.GetNonce(addr)
+	nonce, err := b.ibs.GetNonce(addr)
+	if err != nil {
+		panic(fmt.Sprintf("can't get account: %s", err))
+	}
+	return nonce
 }
 
 // AddUncle adds an uncle header to the generated block.
@@ -358,7 +366,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 		}
 		if b.engine != nil {
-			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger, nil)
+			err := InitializeBlockExecution(b.engine, nil, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}

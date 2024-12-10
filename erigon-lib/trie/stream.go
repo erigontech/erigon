@@ -98,7 +98,7 @@ type StreamIterator interface {
 type Iterator struct {
 	rl           *RetainList
 	hex          []byte
-	nodeStack    []node
+	nodeStack    []Node
 	iStack       []int
 	goDeepStack  []bool
 	lenStack     []int
@@ -112,7 +112,7 @@ func NewIterator(t *Trie, rl *RetainList, trace bool) *Iterator {
 	return &Iterator{
 		rl:           rl,
 		hex:          []byte{},
-		nodeStack:    []node{t.root},
+		nodeStack:    []Node{t.RootNode},
 		iStack:       []int{0},
 		goDeepStack:  []bool{true},
 		lenStack:     []int{0},
@@ -129,7 +129,7 @@ func (it *Iterator) Reset(t *Trie, rl *RetainList, trace bool) {
 	if len(it.nodeStack) > 0 {
 		it.nodeStack = it.nodeStack[:0]
 	}
-	it.nodeStack = append(it.nodeStack, t.root)
+	it.nodeStack = append(it.nodeStack, t.RootNode)
 	if len(it.iStack) > 0 {
 		it.iStack = it.iStack[:0]
 	}
@@ -161,13 +161,13 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 		switch n := nd.(type) {
 		case nil:
 			return NoItem, nil, nil, nil, nil
-		case valueNode:
+		case ValueNode:
 			if it.trace {
 				fmt.Printf("valueNode %x\n", hex)
 			}
 			it.top--
 			return StorageStreamItem, hex, nil, nil, n
-		case *shortNode:
+		case *ShortNode:
 			if it.trace {
 				fmt.Printf("shortNode %x\n", hex)
 			}
@@ -177,20 +177,20 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			}
 			hex = append(hex, nKey...)
 			switch v := n.Val.(type) {
-			case hashNode:
+			case HashNode:
 				it.top--
 				if accounts {
 					return AHashStreamItem, hex, nil, v.hash, nil
 				}
 				return SHashStreamItem, hex, nil, v.hash, nil
-			case valueNode:
+			case ValueNode:
 				it.top--
 				return StorageStreamItem, hex, nil, nil, v
-			case *accountNode:
+			case *AccountNode:
 				if it.trace {
 					fmt.Printf("accountNode %x\n", hex)
 				}
-				if v.storage != nil {
+				if v.Storage != nil {
 					binary.BigEndian.PutUint64(bytes8[:], v.Incarnation)
 					// Add decompressed incarnation to the hex
 					for i, b := range bytes8[:] {
@@ -198,7 +198,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						bytes16[i*2+1] = b % 16
 					}
 					it.hex = append(hex, bytes16[:]...)
-					it.nodeStack[l] = v.storage
+					it.nodeStack[l] = v.Storage
 					it.iStack[l] = 0
 					it.goDeepStack[l] = true
 					it.lenStack[l] = len(it.hex)
@@ -214,7 +214,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			it.goDeepStack[l] = it.rl.Retain(hex)
 			it.lenStack[l] = len(hex)
 			it.accountStack[l] = accounts
-		case *duoNode:
+		case *DuoNode:
 			if it.trace {
 				fmt.Printf("duoNode %x\n", hex)
 			}
@@ -232,12 +232,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				hex = append(hex, i1)
 				var childGoDeep bool
 				switch v := n.child1.(type) {
-				case hashNode:
+				case HashNode:
 					if accounts {
 						return AHashStreamItem, hex, nil, v.hash, nil
 					}
 					return SHashStreamItem, hex, nil, v.hash, nil
-				case *duoNode:
+				case *DuoNode:
 					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						if accounts {
@@ -245,7 +245,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						}
 						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
-				case *fullNode:
+				case *FullNode:
 					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						if accounts {
@@ -274,13 +274,13 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				hex = append(hex, i2)
 				var childGoDeep bool
 				switch v := n.child2.(type) {
-				case hashNode:
+				case HashNode:
 					it.top--
 					if accounts {
 						return AHashStreamItem, hex, nil, v.hash, nil
 					}
 					return SHashStreamItem, hex, nil, v.hash, nil
-				case *duoNode:
+				case *DuoNode:
 					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						it.top--
@@ -289,7 +289,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						}
 						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
-				case *fullNode:
+				case *FullNode:
 					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						it.top--
@@ -306,7 +306,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				it.lenStack[l] = len(hex)
 				it.accountStack[l] = accounts
 			}
-		case *fullNode:
+		case *FullNode:
 			if it.trace {
 				fmt.Printf("fullNode %x\n", hex)
 			}
@@ -338,12 +338,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				hex = append(hex, byte(i1))
 				var childGoDeep bool
 				switch v := n.Children[i1].(type) {
-				case hashNode:
+				case HashNode:
 					if accounts {
 						return AHashStreamItem, hex, nil, v.hash, nil
 					}
 					return SHashStreamItem, hex, nil, v.hash, nil
-				case *duoNode:
+				case *DuoNode:
 					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						if accounts {
@@ -351,7 +351,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						}
 						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
-				case *fullNode:
+				case *FullNode:
 					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						if accounts {
@@ -380,13 +380,13 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				hex = append(hex, byte(i1))
 				var childGoDeep bool
 				switch v := n.Children[i1].(type) {
-				case hashNode:
+				case HashNode:
 					it.top--
 					if accounts {
 						return AHashStreamItem, hex, nil, v.hash, nil
 					}
 					return SHashStreamItem, hex, nil, v.hash, nil
-				case *duoNode:
+				case *DuoNode:
 					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						it.top--
@@ -395,7 +395,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						}
 						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
-				case *fullNode:
+				case *FullNode:
 					childGoDeep = it.rl.Retain(hex)
 					if !childGoDeep {
 						it.top--
@@ -412,11 +412,11 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				it.lenStack[l] = len(hex)
 				it.accountStack[l] = accounts
 			}
-		case *accountNode:
+		case *AccountNode:
 			if it.trace {
 				fmt.Printf("accountNode %x\n", hex)
 			}
-			if n.storage != nil {
+			if n.Storage != nil {
 				binary.BigEndian.PutUint64(bytes8[:], n.Incarnation)
 				// Add decompressed incarnation to the hex
 				for i, b := range bytes8[:] {
@@ -424,7 +424,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					bytes16[i*2+1] = b % 16
 				}
 				it.hex = append(hex, bytes16[:]...)
-				it.nodeStack[l] = n.storage
+				it.nodeStack[l] = n.Storage
 				it.iStack[l] = 0
 				it.goDeepStack[l] = true
 				it.lenStack[l] = len(it.hex)
@@ -433,7 +433,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				it.top--
 			}
 			return AccountStreamItem, hex, &n.Account, nil, nil
-		case hashNode:
+		case HashNode:
 			if it.trace {
 				fmt.Printf("hashNode %x\n", hex)
 			}
@@ -772,7 +772,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	}
 	if trace {
 		tt := New(common.Hash{})
-		tt.root = hb.root()
+		tt.RootNode = hb.root()
 		filename := "root.txt"
 		f, err1 := os.Create(filename)
 		if err1 == nil {

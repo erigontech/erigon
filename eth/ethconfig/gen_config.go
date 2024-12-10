@@ -10,14 +10,13 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // MarshalTOML marshals as TOML.
@@ -32,7 +31,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		BadBlockHash                   common.Hash
 		Snapshot                       BlocksFreezing
 		Downloader                     *downloadercfg.Cfg
-		BeaconRouter                   beacon_router_configuration.RouterConfiguration
 		CaplinConfig                   clparams.CaplinConfig
 		Dirs                           datadir.Dirs
 		ExternalSnapshotDownloaderAddr string
@@ -55,11 +53,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		PolygonSyncStage               bool
 		Ethstats                       string
 		InternalCL                     bool
-		CaplinDiscoveryAddr            string
-		CaplinDiscoveryPort            uint64
-		CaplinDiscoveryTCPPort         uint64
-		SentinelAddr                   string
-		SentinelPort                   uint64
 		OverridePragueTime             *big.Int `toml:",omitempty"`
 		SilkwormExecution              bool
 		SilkwormRpcDaemon              bool
@@ -85,7 +78,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.BadBlockHash = c.BadBlockHash
 	enc.Snapshot = c.Snapshot
 	enc.Downloader = c.Downloader
-	enc.CaplinConfig.BeaconAPIRouter = c.CaplinConfig.BeaconAPIRouter
 	enc.CaplinConfig = c.CaplinConfig
 	enc.Dirs = c.Dirs
 	enc.ExternalSnapshotDownloaderAddr = c.ExternalSnapshotDownloaderAddr
@@ -108,11 +100,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.PolygonSyncStage = c.PolygonSyncStage
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
-	enc.CaplinConfig.CaplinDiscoveryAddr = c.CaplinConfig.CaplinDiscoveryAddr
-	enc.CaplinConfig.CaplinDiscoveryPort = c.CaplinConfig.CaplinDiscoveryPort
-	enc.CaplinConfig.CaplinDiscoveryTCPPort = c.CaplinConfig.CaplinDiscoveryTCPPort
-	enc.CaplinConfig.SentinelAddr = c.CaplinConfig.SentinelAddr
-	enc.CaplinConfig.SentinelPort = c.CaplinConfig.SentinelPort
 	enc.OverridePragueTime = c.OverridePragueTime
 	enc.SilkwormExecution = c.SilkwormExecution
 	enc.SilkwormRpcDaemon = c.SilkwormRpcDaemon
@@ -142,7 +129,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		BadBlockHash                   *common.Hash
 		Snapshot                       *BlocksFreezing
 		Downloader                     *downloadercfg.Cfg
-		BeaconRouter                   *beacon_router_configuration.RouterConfiguration
 		CaplinConfig                   *clparams.CaplinConfig
 		Dirs                           *datadir.Dirs
 		ExternalSnapshotDownloaderAddr *string
@@ -165,11 +151,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		PolygonSyncStage               *bool
 		Ethstats                       *string
 		InternalCL                     *bool
-		CaplinDiscoveryAddr            *string
-		CaplinDiscoveryPort            *uint64
-		CaplinDiscoveryTCPPort         *uint64
-		SentinelAddr                   *string
-		SentinelPort                   *uint64
 		OverridePragueTime             *big.Int `toml:",omitempty"`
 		SilkwormExecution              *bool
 		SilkwormRpcDaemon              *bool
@@ -215,9 +196,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.Downloader != nil {
 		c.Downloader = dec.Downloader
-	}
-	if dec.BeaconRouter != nil {
-		c.CaplinConfig.BeaconAPIRouter = *dec.BeaconRouter
 	}
 	if dec.CaplinConfig != nil {
 		c.CaplinConfig = *dec.CaplinConfig
@@ -284,21 +262,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.InternalCL != nil {
 		c.InternalCL = *dec.InternalCL
-	}
-	if dec.CaplinDiscoveryAddr != nil {
-		c.CaplinConfig.CaplinDiscoveryAddr = *dec.CaplinDiscoveryAddr
-	}
-	if dec.CaplinDiscoveryPort != nil {
-		c.CaplinConfig.CaplinDiscoveryPort = *dec.CaplinDiscoveryPort
-	}
-	if dec.CaplinDiscoveryTCPPort != nil {
-		c.CaplinConfig.CaplinDiscoveryTCPPort = *dec.CaplinDiscoveryTCPPort
-	}
-	if dec.SentinelAddr != nil {
-		c.CaplinConfig.SentinelAddr = *dec.SentinelAddr
-	}
-	if dec.SentinelPort != nil {
-		c.CaplinConfig.SentinelPort = *dec.SentinelPort
 	}
 	if dec.OverridePragueTime != nil {
 		c.OverridePragueTime = dec.OverridePragueTime

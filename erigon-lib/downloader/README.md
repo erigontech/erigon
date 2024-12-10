@@ -53,7 +53,7 @@ When a `snapshot-lock` file exists it is used rather than the chain.toml file to
 
 ### Deleting snapshot-lock.json
 
-If the snapshot-lock file is deleted it will be reacreated from the `chain.toml` file embeded in the Erigon process.  If the hashes change then the associated files will be re-downloaded.
+If the snapshot-lock file is deleted it will be recreated from the `chain.toml` file embedded in the Erigon process.  If the hashes change then the associated files will be re-downloaded.
 
 ### How to override downloads
 

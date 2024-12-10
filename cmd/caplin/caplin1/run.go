@@ -273,7 +273,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	doLMDSampling := len(state.GetActiveValidatorsIndices(state.Slot()/beaconConfig.SlotsPerEpoch)) >= 20_000
 
 	// create the public keys registry
-	pksRegistry := public_keys_registry.NewDBPublicKeysRegistry(indexDB)
+	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
 
 	forkChoice, err := forkchoice.NewForkChoiceStore(
 		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconAPIRouter, emitters),
@@ -385,9 +385,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	defer tx.Rollback()
 
-	if err := state_accessors.InitializeStaticTables(tx, state); err != nil {
-		return err
-	}
 	if err := beacon_indicies.WriteHighestFinalized(tx, 0); err != nil {
 		return err
 	}
@@ -403,7 +400,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if err := stateSnapshots.OpenFolder(); err != nil {
 		return err
 	}
-	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, logger, states, backfilling, blobBackfilling, config.SnapshotGenerationEnabled, snBuildSema)
+	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, states, backfilling, blobBackfilling, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
 		if err := antiq.Loop(); err != nil {
@@ -415,7 +412,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 
-	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState, stateSnapshots)
+	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState, stateSnapshots, syncedDataManager)
 	validatorParameters := validator_params.NewValidatorParams()
 	if config.BeaconAPIRouter.Active {
 		apiHandler := handler.NewApiHandler(
