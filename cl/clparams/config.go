@@ -532,11 +532,10 @@ type BeaconChainConfig struct {
 	MinSyncCommitteeParticipants uint64 `yaml:"MIN_SYNC_COMMITTEE_PARTICIPANTS" spec:"true" json:"MIN_SYNC_COMMITTEE_PARTICIPANTS,string"` // MinSyncCommitteeParticipants defines the minimum amount of sync committee participants for which the light client acknowledges the signature.
 
 	// Bellatrix
-	TerminalBlockHash                libcommon.Hash    `yaml:"TERMINAL_BLOCK_HASH" spec:"true" json:"TERMINAL_BLOCK_HASH"`                                          // TerminalBlockHash of beacon chain.
-	TerminalBlockHashActivationEpoch uint64            `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true" json:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH,string"` // TerminalBlockHashActivationEpoch of beacon chain.
-	TerminalTotalDifficulty          string            `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"  json:"TERMINAL_TOTAL_DIFFICULTY"`                             // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
-	DefaultFeeRecipient              libcommon.Address `json:"-"`                                                                                                   // DefaultFeeRecipient where the transaction fee goes to.
-	DefaultBuilderGasLimit           uint64            `json:"-"`                                                                                                   // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
+	TerminalBlockHash                libcommon.Hash `yaml:"TERMINAL_BLOCK_HASH" spec:"true" json:"TERMINAL_BLOCK_HASH"`                                          // TerminalBlockHash of beacon chain.
+	TerminalBlockHashActivationEpoch uint64         `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true" json:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH,string"` // TerminalBlockHashActivationEpoch of beacon chain.
+	TerminalTotalDifficulty          string         `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"  json:"TERMINAL_TOTAL_DIFFICULTY"`                             // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
+	DefaultBuilderGasLimit           uint64         `json:"-"`                                                                                                   // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
 
 	// Mev-boost circuit breaker
 	MaxBuilderConsecutiveMissedSlots uint64 `json:"-"` // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
@@ -805,7 +804,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	TerminalBlockHashActivationEpoch: 18446744073709551615,
 	TerminalBlockHash:                [32]byte{},
 	TerminalTotalDifficulty:          "58750000000000000000000", // Estimated: Sept 15, 2022
-	DefaultBuilderGasLimit:           uint64(30000000),
+	DefaultBuilderGasLimit:           uint64(36000000),
 
 	// Mevboost circuit breaker
 	MaxBuilderConsecutiveMissedSlots: 3,
