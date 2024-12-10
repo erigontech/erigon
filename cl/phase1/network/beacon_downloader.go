@@ -23,6 +23,7 @@ import (
 
 	"golang.org/x/net/context"
 
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/rpc"
 )
@@ -71,6 +72,7 @@ type peerAndBlocks struct {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
+	log.Info("Requesting more beacon blocks")
 	count := uint64(16)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
@@ -89,14 +91,18 @@ Loop:
 					reqSlot = f.highestSlotProcessed - 2
 				}
 				// this is so we do not get stuck on a side-fork
+				log.Info("Requesting beacon blocks by range", "slot", reqSlot, "count", count)
 				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, count)
 				if err != nil {
+					log.Warn("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "count", count)
 					return
 				}
 				if responses == nil {
+					log.Warn("response is nil", "peer", peerId, "slot", reqSlot, "count", count)
 					return
 				}
 				if len(responses) == 0 {
+					log.Warn("response is empty", "peer", peerId, "slot", reqSlot, "count", count)
 					f.rpc.BanPeer(peerId)
 					return
 				}
