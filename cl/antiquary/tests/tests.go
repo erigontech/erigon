@@ -34,6 +34,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+//go:embed test_data/electra/blocks_0.ssz_snappy
+var electra_blocks_0_ssz_snappy []byte
+
+//go:embed test_data/electra/blocks_1.ssz_snappy
+var electra_blocks_1_ssz_snappy []byte
+
+//go:embed test_data/electra/pre.ssz_snappy
+var electra_pre_state_ssz_snappy []byte
+
+//go:embed test_data/electra/post.ssz_snappy
+var electra_post_state_ssz_snappy []byte
+
 //go:embed test_data/capella/blocks_0.ssz_snappy
 var capella_blocks_0_ssz_snappy []byte
 
@@ -126,6 +138,29 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 
 	require.NoError(t, tx.Commit())
 	return m
+}
+
+func GetElectraRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
+	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
+	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
+
+	// Lets do te
+	if err := utils.DecodeSSZSnappy(block1, electra_blocks_0_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
+		panic(err)
+	}
+	if err := utils.DecodeSSZSnappy(block2, electra_blocks_1_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
+		panic(err)
+	}
+	preState := state.New(&clparams.MainnetBeaconConfig)
+	if err := utils.DecodeSSZSnappy(preState, electra_pre_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
+		panic(err)
+
+	}
+	postState := state.New(&clparams.MainnetBeaconConfig)
+	if err := utils.DecodeSSZSnappy(postState, electra_post_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
+		panic(err)
+	}
+	return []*cltypes.SignedBeaconBlock{block1, block2}, preState, postState
 }
 
 func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
