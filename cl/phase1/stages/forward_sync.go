@@ -47,7 +47,7 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		err = fmt.Errorf("failed to get blob identifiers: %w", err)
 		return
 	}
-
+	log.Info("BlobsIdentifiersFromBlocks", "ids", ids.Len())
 	// If there are no blobs to retrieve, return the highest slot processed
 	if ids.Len() == 0 {
 		return highestSlotProcessed, nil
@@ -60,7 +60,7 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		err = fmt.Errorf("failed to get blobs: %w", err)
 		return
 	}
-
+	log.Info("RequestBlobsFrantically", "blobs", len(blobs.Responses))
 	var highestProcessed, inserted uint64
 
 	// Verify and insert blobs into the blob store
@@ -71,7 +71,7 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		err = fmt.Errorf("failed to verify blobs: %w", err)
 		return
 	}
-
+	log.Info("VerifyAgainstIdentifiersAndInsertIntoTheBlobStore", "highestProcessed", highestProcessed, "inserted", inserted)
 	// If all blobs were inserted successfully, return the highest processed slot
 	if inserted == uint64(ids.Len()) {
 		return highestProcessed, nil
