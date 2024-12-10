@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
@@ -56,7 +57,7 @@ func SetStateProcessingProgress(tx kv.RwTx, progress uint64) error {
 	return tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, base_encoding.Encode64ToBytes4(progress))
 }
 
-func ReadSlotData(getFn GetValFn, slot uint64) (*SlotData, error) {
+func ReadSlotData(getFn GetValFn, slot uint64, cfg *clparams.BeaconChainConfig) (*SlotData, error) {
 	sd := &SlotData{}
 	v, err := getFn(kv.SlotData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
@@ -67,7 +68,7 @@ func ReadSlotData(getFn GetValFn, slot uint64) (*SlotData, error) {
 	}
 	buf := bytes.NewBuffer(v)
 
-	return sd, sd.ReadFrom(buf)
+	return sd, sd.ReadFrom(buf, cfg)
 }
 
 func ReadEpochData(getFn GetValFn, slot uint64) (*EpochData, error) {

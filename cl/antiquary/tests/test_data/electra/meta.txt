@@ -1,0 +1,1 @@
+{post_fork: electra, fork_epoch: 2, blocks_count: 2}

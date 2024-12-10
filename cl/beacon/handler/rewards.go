@@ -86,7 +86,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	defer snRoTx.Close()
 
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
-	slotData, err := state_accessors.ReadSlotData(stateGetter, slot)
+	slotData, err := state_accessors.ReadSlotData(stateGetter, slot, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}
