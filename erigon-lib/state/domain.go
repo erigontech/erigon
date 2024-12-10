@@ -1850,6 +1850,8 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		return false, maxStepToPrune
 	}
 
+	fmt.Println("LAL canPruneDomainTables", sm <= min(maxStepToPrune, untilStep), sm, maxStepToPrune, untilStep)
+
 	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
 	switch dt.d.filenameBase {
 	case "account":

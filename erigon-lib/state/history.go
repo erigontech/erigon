@@ -1021,6 +1021,8 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 	}
 
+	fmt.Println("LAL canPruneUntil", minIdxTx < txTo, minIdxTx, txTo)
+
 	switch ht.h.filenameBase {
 	case "accounts":
 		mxPrunableHAcc.Set(float64(txTo - minIdxTx))
