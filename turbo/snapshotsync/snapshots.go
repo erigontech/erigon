@@ -249,6 +249,9 @@ type DirtySegment struct {
 	refcount atomic.Int32
 
 	canDelete atomic.Bool
+
+	// only caplin state
+	filePath string
 }
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
@@ -272,6 +275,28 @@ func (s *VisibleSegment) Src() *DirtySegment {
 
 func (s *VisibleSegment) IsIndexed() bool {
 	return s.src.IsIndexed()
+}
+
+func (v *VisibleSegment) Get(globalId uint64) ([]byte, error) {
+	idxSlot := v.src.Index()
+
+	if idxSlot == nil {
+		return nil, nil
+	}
+	blockOffset := idxSlot.OrdinalLookup(globalId - idxSlot.BaseDataID())
+
+	gg := v.src.MakeGetter()
+	gg.Reset(blockOffset)
+	if !gg.HasNext() {
+		return nil, nil
+	}
+	var buf []byte
+	buf, _ = gg.Next(buf)
+	if len(buf) == 0 {
+		return nil, nil
+	}
+
+	return buf, nil
 }
 
 func DirtySegmentLess(i, j *DirtySegment) bool {
@@ -517,6 +542,9 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 }
 
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+	if cfg.ChainName == "" {
+		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
+	}
 	enums := make([]snaptype.Enum, len(types))
 	for i, t := range types {
 		enums[i] = t.Enum()
@@ -838,7 +866,7 @@ func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 		return 0
 	}
 
-	var max uint64
+	var _max uint64
 
 	dirty.Walk(func(segments []*DirtySegment) bool {
 		for _, seg := range segments {
@@ -846,30 +874,30 @@ func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 				break
 			}
 
-			max = seg.to - 1
+			_max = seg.to - 1
 		}
 
 		return true
 	})
 
-	return max
+	return _max
 }
 
 func (s *RoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) uint64 {
 	tx := s.ViewType(segtype.Type())
 	defer tx.Close()
 
-	var max uint64
+	var _max uint64
 
 	for _, seg := range tx.Segments {
 		if !seg.IsIndexed() {
 			break
 		}
 
-		max = seg.to - 1
+		_max = seg.to - 1
 	}
 
-	return max
+	return _max
 }
 
 func (s *RoSnapshots) Ls() {
@@ -994,8 +1022,12 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
+	wg := &errgroup.Group{}
+	wg.SetLimit(64)
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
+
+	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
 
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
@@ -1029,7 +1061,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.IsFrozen(s.cfg.ChainName, f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snConfig.IsFrozen(f)}
 		}
 
 		if open {
@@ -1056,9 +1088,12 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		}
 
 		if open {
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
-			}
+			wg.Go(func() error {
+				if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+					return err
+				}
+				return nil
+			})
 		}
 
 		if f.To > 0 {
@@ -1070,6 +1105,9 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
+	}
+	if err := wg.Wait(); err != nil {
+		return err
 	}
 
 	return nil
@@ -1253,9 +1291,6 @@ func (s *RoSnapshots) delete(fileName string) error {
 					continue
 				}
 				sn.canDelete.Store(true)
-				if sn.refcount.Load() == 0 {
-					sn.closeAndRemoveFiles()
-				}
 				delSeg = sn
 				dirtySegments = s.dirty[t]
 				findDelSeg = false
@@ -1276,6 +1311,10 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	if s == nil {
 		return nil
 	}
+
+	v := s.View()
+	defer v.Close()
+
 	defer s.recalcVisibleFiles()
 	if err := s.delete(fileName); err != nil {
 		return fmt.Errorf("can't delete file: %w", err)

@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
-	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/threading"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -89,7 +89,7 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	input := shuffling2.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
@@ -105,7 +105,7 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
 	b.proposerIndex = new(uint64)
-	*b.proposerIndex, err = shuffling2.ComputeProposerIndex(b.BeaconState, indices, seedArray)
+	*b.proposerIndex, err = shuffling.ComputeProposerIndex(b.BeaconState, indices, seedArray)
 	return
 }
 
@@ -227,7 +227,7 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 
 	numWorkers := runtime.NumCPU()
 	activeBalanceShards := make([]uint64, numWorkers)
-	wp := threading.CreateWorkerPool(numWorkers)
+	wp := threading.NewParallelExecutor()
 	shardSize := b.ValidatorSet().Length() / numWorkers
 
 	for i := 0; i < numWorkers; i++ {
@@ -247,7 +247,7 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 			return nil
 		})
 	}
-	wp.WaitAndClose()
+	wp.Execute()
 
 	for _, shard := range activeBalanceShards {
 		*b.totalActiveBalanceCache += shard
@@ -273,7 +273,6 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	b._refreshActiveBalancesIfNeeded()
 
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
-
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		b.publicKeyIndicies[validator.PublicKey()] = uint64(i)
 
@@ -287,6 +286,7 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	if b.Version() >= clparams.Phase0Version {
 		return b._initializeValidatorsPhase0()
 	}
+
 	return nil
 }
 

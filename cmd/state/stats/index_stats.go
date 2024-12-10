@@ -32,8 +32,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-
-	"github.com/erigontech/erigon/common"
 )
 
 func IndexStats(chaindata string, indexBucket string, statsFile string) error {
@@ -131,7 +129,7 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 			}{
 				Address:      libcommon.BytesToAddress(p).String(),
 				NumOfIndexes: v,
-				Hash:         common.Bytes2Hex([]byte(hash)),
+				Hash:         libcommon.Bytes2Hex([]byte(hash)),
 			})
 
 		}

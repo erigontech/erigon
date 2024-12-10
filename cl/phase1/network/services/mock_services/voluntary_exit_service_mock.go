@@ -42,7 +42,7 @@ func (m *MockVoluntaryExitService) EXPECT() *MockVoluntaryExitServiceMockRecorde
 }
 
 // ProcessMessage mocks base method.
-func (m *MockVoluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedVoluntaryExit) error {
+func (m *MockVoluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SignedVoluntaryExitWithGossipData) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
@@ -68,13 +68,13 @@ func (c *MockVoluntaryExitServiceProcessMessageCall) Return(arg0 error) *MockVol
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockVoluntaryExitServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SignedVoluntaryExit) error) *MockVoluntaryExitServiceProcessMessageCall {
+func (c *MockVoluntaryExitServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SignedVoluntaryExitWithGossipData) error) *MockVoluntaryExitServiceProcessMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockVoluntaryExitServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedVoluntaryExit) error) *MockVoluntaryExitServiceProcessMessageCall {
+func (c *MockVoluntaryExitServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedVoluntaryExitWithGossipData) error) *MockVoluntaryExitServiceProcessMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

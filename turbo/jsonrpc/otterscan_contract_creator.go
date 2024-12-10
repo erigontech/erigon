@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -95,7 +95,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 			continue
 		}
 
-		v, ok, err := ttx.HistorySeek(kv.AccountsHistory, addr[:], txnID)
+		v, ok, err := ttx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("Unexpected error, couldn't find changeset", "txNum", txnID, "addr", addr)
 			return nil, err
@@ -136,7 +136,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
 	idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 		txnID := uint64(i) + prevTxnID
-		v, ok, err := ttx.HistorySeek(kv.AccountsHistory, addr[:], txnID)
+		v, ok, err := ttx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 			panic(err)

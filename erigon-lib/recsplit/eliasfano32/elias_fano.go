@@ -18,7 +18,6 @@ package eliasfano32
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -27,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common/bitutil"
+	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -43,8 +43,6 @@ const (
 	qPerSuperQ uint64 = superQ / q       // 64
 	superQSize uint64 = 1 + qPerSuperQ/2 // 1 + 64/2 = 33
 )
-
-var ErrEliasFanoIterExhausted = errors.New("elias fano iterator exhausted")
 
 // EliasFano can be used to encode one monotone sequence
 type EliasFano struct {
@@ -486,7 +484,7 @@ func (efi *EliasFanoIter) decrement() {
 
 func (efi *EliasFanoIter) Next() (uint64, error) {
 	if !efi.HasNext() {
-		return 0, ErrEliasFanoIterExhausted
+		return 0, stream.ErrIteratorExhausted
 	}
 	idx64, shift := efi.lowerIdx/64, efi.lowerIdx%64
 	lower := efi.lowerBits[idx64] >> shift

@@ -32,9 +32,9 @@ import (
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
@@ -231,8 +231,15 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		return nil, err
 	}
 
-	minTxNum, _ := txNumsReader.Min(tx, blockNumber)
-	it, err := tx.(kv.TemporalTx).HistoryRange(kv.AccountsHistory, int(minTxNum), -1, order.Asc, -1)
+	minTxNum, err := txNumsReader.Min(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	maxTxNum, err := txNumsReader.Max(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	it, err := tx.(kv.TemporalTx).HistoryRange(kv.AccountsDomain, int(minTxNum), int(maxTxNum+1), order.Asc, -1)
 	if err != nil {
 		return nil, err
 	}

@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -50,7 +51,10 @@ func TestPoolAttesterSlashings(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
-	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().HeadState().Return(mockBeaconState, synced_data.EmptyCancel).AnyTimes()
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -103,8 +107,10 @@ func TestPoolProposerSlashings(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
-	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().HeadState().Return(mockBeaconState, synced_data.EmptyCancel).AnyTimes()
-
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
@@ -147,8 +153,10 @@ func TestPoolVoluntaryExits(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
-	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().HeadState().Return(mockBeaconState, synced_data.EmptyCancel).AnyTimes()
-
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
@@ -197,7 +205,10 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
-	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().HeadState().Return(mockBeaconState, synced_data.EmptyCancel).AnyTimes()
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -258,7 +269,10 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
-	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().HeadState().Return(mockBeaconState, synced_data.EmptyCancel).AnyTimes()
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()

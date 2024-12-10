@@ -39,7 +39,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/netutil"
 )
@@ -745,8 +745,8 @@ func contains(ns []*node, id enode.ID) bool {
 }
 
 // pushNode adds n to the front of list, keeping at most max items.
-func pushNode(list []*node, n *node, max int) ([]*node, *node) {
-	if len(list) < max {
+func pushNode(list []*node, n *node, _max int) ([]*node, *node) {
+	if len(list) < _max {
 		list = append(list, nil)
 	}
 	removed := list[len(list)-1]

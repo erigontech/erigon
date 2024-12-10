@@ -26,7 +26,6 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -43,7 +42,7 @@ func importPreSaleKey(keyStore keyStore, keyJSON []byte, password string) (Accou
 	}
 	a := Account{
 		Address: key.Address,
-		URL: accounts.URL{
+		URL: URL{
 			Scheme: KeyStoreScheme,
 			Path:   keyStore.JoinPath(keyFileName(key.Address)),
 		},

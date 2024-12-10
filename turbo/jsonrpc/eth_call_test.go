@@ -37,7 +37,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/turbo/testlog"
 
+	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
@@ -49,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/erigon/turbo/trie"
 )
 
 func TestEstimateGas(t *testing.T) {
@@ -552,34 +553,39 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	assert.NoError(t, err)
 	st := state.New(stateReader)
 	assert.NoError(t, err)
-	assert.False(t, st.Exist(contractAddr), "Contract should not exist at block #1")
+	exist, err := st.Exist(contractAddr)
+	assert.NoError(t, err)
+	assert.False(t, exist, "Contract should not exist at block #1")
 
 	stateReader, err = rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 2, 0, "")
 	assert.NoError(t, err)
 	st = state.New(stateReader)
 	assert.NoError(t, err)
-	assert.True(t, st.Exist(contractAddr), "Contract should exist at block #2")
+	exist, err = st.Exist(contractAddr)
+	assert.NoError(t, err)
+	assert.True(t, exist, "Contract should exist at block #2")
 
 	return m, bankAddress, contractAddr
 }
 
 func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	ctx := context.Background()
+	logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
 	assert.NoError(t, err)
 
 	logEvery := time.NewTicker(20 * time.Second)
 
-	err = rawdb.PruneTableDupSort(tx, kv.AccountChangeSet, "", pruneTo, logEvery, ctx)
+	err = rawdb.PruneTableDupSort(tx, kv.TblAccountVals, "", pruneTo, logEvery, ctx)
 	assert.NoError(t, err)
 
-	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSet, "", pruneTo, logEvery, ctx)
+	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSetDeprecated, "", pruneTo, logEvery, ctx)
 	assert.NoError(t, err)
 
-	err = rawdb.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32, time.Hour)
+	err = rawdb.PruneTable(tx, kv.Receipts, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
 	assert.NoError(t, err)
 
-	err = rawdb.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32, time.Hour)
+	err = rawdb.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
 	assert.NoError(t, err)
 
 	err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, "", pruneTo, logEvery, ctx)

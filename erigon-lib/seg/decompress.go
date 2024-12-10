@@ -23,17 +23,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon-lib/common/assert"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/mmap"
 )
 
@@ -1063,4 +1063,29 @@ func (g *Getter) FastNext(buf []byte) ([]byte, uint64) {
 	g.dataP = postLoopPos
 	g.dataBit = 0
 	return buf[:wordLen], postLoopPos
+}
+
+// BinarySearch - !expecting sorted file - does Seek `g` to key which >= `fromPrefix` by using BinarySearch - means unoptimal and touching many places in file
+// use `.Next` to read found
+// at `ok = false` leaving `g` in unpredictible state
+func (g *Getter) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool) {
+	var key []byte
+	foundItem := sort.Search(count, func(i int) bool {
+		offset := getOffset(uint64(i))
+		g.Reset(offset)
+		if g.HasNext() {
+			key, _ = g.Next(key[:0])
+			return bytes.Compare(key, seek) >= 0
+		}
+		return false
+	})
+	if foundItem == count { // `Search` returns `n` if not found
+		return 0, false
+	}
+	foundOffset = getOffset(uint64(foundItem))
+	g.Reset(foundOffset)
+	if !g.HasNext() {
+		return 0, false
+	}
+	return foundOffset, true
 }

@@ -32,7 +32,6 @@ import (
 
 	txpool_proto "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -111,7 +110,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, bloc
 	if acc == nil || err != nil {
 		return hexutility.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(address, acc.Incarnation, acc.CodeHash)
+	res, _ := reader.ReadAccountCode(address, acc.Incarnation)
 	if res == nil {
 		return hexutility.Bytes(""), nil
 	}
@@ -124,17 +123,17 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address,
 
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
-		return hexutility.Encode(common.LeftPadBytes(empty, 32)), err1
+		return hexutility.Encode(libcommon.LeftPadBytes(empty, 32)), err1
 	}
 	defer tx.Rollback()
 
 	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, "")
 	if err != nil {
-		return hexutility.Encode(common.LeftPadBytes(empty, 32)), err
+		return hexutility.Encode(libcommon.LeftPadBytes(empty, 32)), err
 	}
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
-		return hexutility.Encode(common.LeftPadBytes(empty, 32)), err
+		return hexutility.Encode(libcommon.LeftPadBytes(empty, 32)), err
 	}
 
 	location := libcommon.HexToHash(index)
@@ -142,7 +141,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address,
 	if err != nil {
 		res = empty
 	}
-	return hexutility.Encode(common.LeftPadBytes(res, 32)), err
+	return hexutility.Encode(libcommon.LeftPadBytes(res, 32)), err
 }
 
 // Exist returns whether an account for a given address exists in the database.

@@ -102,8 +102,6 @@ func (NoopEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPo
 
 func (ns NoopEntityStore[TEntity]) SnapType() snaptype.Type { return ns.Type }
 
-type RangeIndexFactory func(ctx context.Context) (*RangeIndex, error)
-
 type mdbxEntityStore[TEntity Entity] struct {
 	db                *polygoncommon.Database
 	table             string

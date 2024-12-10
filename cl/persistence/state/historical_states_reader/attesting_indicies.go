@@ -19,13 +19,11 @@ package historical_states_reader
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
@@ -104,18 +102,12 @@ func (r *HistoricalStatesReader) ComputeCommittee(mix libcommon.Hash, indicies [
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64
-	epoch := slot / cfg.SlotsPerEpoch
-	/*
-	   mixPosition := (epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) % cfg.EpochsPerHistoricalVector
-	*/
-	if shuffledIndicesInterface, ok := r.shuffledSetsCache.Get(epoch); ok {
-		shuffledIndicies = shuffledIndicesInterface
-	} else {
+
+	shuffledIndicies, ok := r.shuffledIndiciesCache.Get(slot / cfg.SlotsPerEpoch)
+	if !ok {
 		shuffledIndicies = make([]uint64, lenIndicies)
-		start := time.Now()
 		shuffledIndicies = shuffling.ComputeShuffledIndicies(cfg, mix, shuffledIndicies, indicies, slot)
-		shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
-		r.shuffledSetsCache.Add(epoch, shuffledIndicies)
+		r.shuffledIndiciesCache.Add(slot/cfg.SlotsPerEpoch, shuffledIndicies)
 	}
 
 	return shuffledIndicies[start:end], nil
@@ -132,7 +124,7 @@ func committeeCount(cfg *clparams.BeaconChainConfig, epoch uint64, idxs []uint64
 	return committeCount
 }
 
-func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index uint64) (libcommon.Hash, error) {
+func (r *HistoricalStatesReader) readHistoricalBlockRoot(kvGetter state_accessors.GetValFn, slot, index uint64) (libcommon.Hash, error) {
 	slotSubIndex := slot % r.cfg.SlotsPerHistoricalRoot
 	needFromGenesis := true
 
@@ -152,7 +144,7 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index u
 	if needFromGenesis {
 		return r.genesisState.GetBlockRootAtSlot(slot)
 	}
-	br, err := tx.GetOne(kv.BlockRoot, base_encoding.Encode64ToBytes4(slotLookup))
+	br, err := kvGetter(kv.BlockRoot, base_encoding.Encode64ToBytes4(slotLookup))
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -163,8 +155,9 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index u
 
 }
 
-func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
-	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
+func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, getter state_accessors.GetValFn, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
+
+	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(getter, r.cfg.RoundSlotToEpoch(stateSlot))
 	if err != nil {
 		return nil, err
 	}
@@ -186,13 +179,13 @@ func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.T
 		return nil, errors.New("GetAttestationParticipationFlagIndicies: source does not match.")
 	}
 	i := (data.Target.Epoch * r.cfg.SlotsPerEpoch) % r.cfg.SlotsPerHistoricalRoot
-	targetRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
+	targetRoot, err := r.readHistoricalBlockRoot(getter, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}
 
 	i = data.Slot % r.cfg.SlotsPerHistoricalRoot
-	headRoot, err := r.readHistoricalBlockRoot(tx, stateSlot, i)
+	headRoot, err := r.readHistoricalBlockRoot(getter, stateSlot, i)
 	if err != nil {
 		return nil, err
 	}

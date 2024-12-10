@@ -236,9 +236,6 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 		for _, delSeg := range delSegs {
 			dirtySegments.Delete(delSeg)
 			delSeg.canDelete.Store(true)
-			if delSeg.refcount.Load() == 0 {
-				delSeg.closeAndRemoveFiles()
-			}
 		}
 	}
 }

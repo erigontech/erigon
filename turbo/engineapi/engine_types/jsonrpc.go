@@ -100,11 +100,11 @@ type ForkChoiceUpdatedResponse struct {
 }
 
 type GetPayloadResponse struct {
-	ExecutionPayload      *ExecutionPayload `json:"executionPayload" gencodec:"required"`
-	BlockValue            *hexutil.Big      `json:"blockValue"`
-	BlobsBundle           *BlobsBundleV1    `json:"blobsBundle"`
-	ExecutionRequests     [][]byte          `json:"executionRequests"`
-	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
+	ExecutionPayload      *ExecutionPayload  `json:"executionPayload" gencodec:"required"`
+	BlockValue            *hexutil.Big       `json:"blockValue"`
+	BlobsBundle           *BlobsBundleV1     `json:"blobsBundle"`
+	ExecutionRequests     []hexutility.Bytes `json:"executionRequests"`
+	ShouldOverrideBuilder bool               `json:"shouldOverrideBuilder"`
 }
 
 type StringifiedError struct{ err error }

@@ -212,13 +212,6 @@ func (f *ForkChoiceStorageMock) GetSyncCommittees(
 		f.GetSyncCommitteesVal[period][1] != nil
 }
 
-func (f *ForkChoiceStorageMock) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	if f.GetBeaconCommitteeMock != nil {
-		return f.GetBeaconCommitteeMock(slot, committeeIndex)
-	}
-	return []uint64{1, 2, 3, 4, 5, 6, 7, 8}, nil
-}
-
 func (f *ForkChoiceStorageMock) Slot() uint64 {
 	return f.SlotVal
 }
@@ -373,4 +366,12 @@ func (f *ForkChoiceStorageMock) IsRootOptimistic(root common.Hash) bool {
 
 func (f *ForkChoiceStorageMock) IsHeadOptimistic() bool {
 	return false
+}
+
+func (f *ForkChoiceStorageMock) ProcessBlockConsensus(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	return nil
+}
+
+func (f *ForkChoiceStorageMock) ProcessBlockExecution(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	return nil
 }

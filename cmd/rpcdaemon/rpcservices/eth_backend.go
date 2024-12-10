@@ -36,13 +36,13 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
@@ -156,6 +156,18 @@ func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error
 	}
 
 	return gointerfaces.ConvertH160toAddress(res.Address), nil
+}
+
+func (back *RemoteBackend) Syncing(ctx context.Context) (*remote.SyncingReply, error) {
+	res, err := back.remoteEthBackend.Syncing(ctx, &emptypb.Empty{})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return nil, errors.New(s.Message())
+		}
+		return nil, err
+	}
+
+	return res, nil
 }
 
 func (back *RemoteBackend) NetVersion(ctx context.Context) (uint64, error) {

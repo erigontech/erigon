@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/rlp"
 )
 
 var (

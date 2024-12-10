@@ -60,5 +60,5 @@ const (
 	// considered immutable (i.e. soft finality). It is used by the downloader as a
 	// hard limit against deep ancestors, by the blockchain against deep reorgs, by
 	// the freezer as the cutoff threshold and by clique as the snapshot trust limit.
-	FullImmutabilityThreshold = 100_000
+	FullImmutabilityThreshold = 10_000
 )

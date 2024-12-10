@@ -77,7 +77,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		return nil
 	}
 
-	if utils.IsOverlappingBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
+	if utils.IsOverlappingSSZBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
 		// the on bit is already set, so ignore
 		return ErrIsSuperset
 	}

@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/state"
 )
 
@@ -51,8 +50,8 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 			return
 		}
 	}
-	resultsKV := mdbx.NewMDBX(logger).Path(tmpDataDir).MustOpen()
-	gethKV := mdbx.NewMDBX(logger).Path(gethDataDir).MustOpen()
+	resultsKV := mdbx.New(kv.ChainDB, logger).Path(tmpDataDir).MustOpen()
+	gethKV := mdbx.New(kv.ChainDB, logger).Path(gethDataDir).MustOpen()
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,
@@ -176,14 +175,14 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 	tgMissed := 0
 	gethMissed := 0
 	for {
-		cmp, br := common.KeyCmp(tgKey, gethKey)
+		cmp, br := libcommon.KeyCmp(tgKey, gethKey)
 		if br {
 			break
 		}
 		if cmp == 0 {
 			if !bytes.Equal(tgVal, gethVal) {
 				errsNum++
-				fmt.Println(common.Bytes2Hex(tgKey))
+				fmt.Println(libcommon.Bytes2Hex(tgKey))
 				fmt.Println(string(tgVal))
 				fmt.Println(string(gethVal))
 			}

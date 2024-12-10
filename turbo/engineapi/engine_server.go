@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/types"
@@ -138,17 +137,19 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(time uint64, executionRequests []hexutility.Bytes) error {
-	if !s.config.IsPrague(time) {
+func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutility.Bytes) error {
+	if version < clparams.ElectraVersion {
 		if executionRequests != nil {
-			return &rpc.InvalidParamsError{Message: "requests before Prague"}
+			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
+		}
+	} else {
+		if executionRequests == nil {
+			return &rpc.InvalidParamsError{Message: "missing requests list"}
+		}
+		if len(executionRequests) != len(types.KnownRequestTypes) {
+			return &rpc.InvalidParamsError{Message: "invalid requests lists"}
 		}
 	}
-	// if s.config.IsPrague(time) {
-	//   if len(executionRequests) < 3 {
-	// 		return &rpc.InvalidParamsError{Message: "missing requests list"}
-	// 	}
-	// }
 	return nil
 }
 
@@ -204,7 +205,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var requests types.FlatRequests
-	if err := s.checkRequestsPresence(header.Time, executionRequests); err != nil {
+	if err := s.checkRequestsPresence(version, executionRequests); err != nil {
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
@@ -255,7 +256,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	for _, txn := range req.Transactions {
 		if types.TypedTransactionMarshalledAsRlpString(txn) {
-			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
+			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", libcommon.Bytes2Hex(txn))
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
@@ -486,9 +487,22 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		return nil, &engine_helpers.UnknownPayloadErr
 
 	}
+
 	data := resp.Data
-	executionRequests := make([][]byte, len(data.Requests.Requests))
-	copy(executionRequests, data.Requests.Requests)
+	var executionRequests []hexutility.Bytes
+	if version >= clparams.ElectraVersion {
+		executionRequests = make([]hexutility.Bytes, len(types.KnownRequestTypes))
+		if len(data.Requests.Requests) != 3 {
+			s.logger.Warn("Error in getPayload - data.Requests.Requests len not 3")
+		}
+		for i := 0; i < len(types.KnownRequestTypes); i++ {
+			if len(data.Requests.Requests) < i+1 || data.Requests.Requests[i] == nil {
+				executionRequests[i] = make(hexutility.Bytes, 0)
+			} else {
+				executionRequests[i] = data.Requests.Requests[i]
+			}
+		}
+	}
 
 	ts := data.ExecutionPayload.Timestamp
 	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
@@ -855,7 +869,6 @@ func (e *EngineServer) HandleNewPayload(
 			if !success {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-
 			status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
 			if err != nil {
 				return nil, err

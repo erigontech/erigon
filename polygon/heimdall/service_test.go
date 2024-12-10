@@ -136,8 +136,8 @@ type ServiceTestSuite struct {
 	ctx                          context.Context
 	cancel                       context.CancelFunc
 	eg                           errgroup.Group
-	client                       *MockHeimdallClient
-	service                      *service
+	client                       *MockClient
+	service                      *Service
 	observedMilestones           []*Milestone
 	observedSpans                []*Span
 	spansTestDataDir             string
@@ -159,11 +159,16 @@ func (suite *ServiceTestSuite) SetupSuite() {
 	suite.checkpointsTestDataDir = filepath.Join(suite.testDataDir, "checkpoints")
 	suite.milestonesTestDataDir = filepath.Join(suite.testDataDir, "milestones")
 	suite.proposerSequencesTestDataDir = filepath.Join(suite.testDataDir, "getSnapshotProposerSequence")
-	suite.client = NewMockHeimdallClient(ctrl)
+	suite.client = NewMockClient(ctrl)
 	suite.setupSpans()
 	suite.setupCheckpoints()
 	suite.setupMilestones()
-	suite.service = newService(borConfig, suite.client, store, logger)
+	suite.service = NewService(ServiceConfig{
+		Store:     store,
+		BorConfig: borConfig,
+		Client:    suite.client,
+		Logger:    logger,
+	})
 
 	err := suite.service.store.Prepare(suite.ctx)
 	require.NoError(suite.T(), err)

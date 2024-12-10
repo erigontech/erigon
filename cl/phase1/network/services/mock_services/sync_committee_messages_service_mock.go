@@ -42,7 +42,7 @@ func (m *MockSyncCommitteeMessagesService) EXPECT() *MockSyncCommitteeMessagesSe
 }
 
 // ProcessMessage mocks base method.
-func (m *MockSyncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessage) error {
+func (m *MockSyncCommitteeMessagesService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.SyncCommitteeMessageWithGossipData) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
 	ret0, _ := ret[0].(error)
@@ -68,13 +68,13 @@ func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) Return(arg0 error) 
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SyncCommitteeMessage) error) *MockSyncCommitteeMessagesServiceProcessMessageCall {
+func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SyncCommitteeMessageWithGossipData) error) *MockSyncCommitteeMessagesServiceProcessMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SyncCommitteeMessage) error) *MockSyncCommitteeMessagesServiceProcessMessageCall {
+func (c *MockSyncCommitteeMessagesServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SyncCommitteeMessageWithGossipData) error) *MockSyncCommitteeMessagesServiceProcessMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

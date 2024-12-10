@@ -67,29 +67,29 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		blocks, preState, postState = tests.GetCapellaRandom()
 	}
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
-	db = memdb.NewTestDB(t)
-	blobDb := memdb.NewTestDB(t)
-	var reader *tests.MockBlockReader
-	reader = tests.LoadChain(blocks, postState, db, t)
+	db = memdb.NewTestDB(t, kv.ChainDB)
+	blobDb := memdb.NewTestDB(t, kv.ChainDB)
+	reader := tests.LoadChain(blocks, postState, db, t)
 	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
 	firstBlockHeader := blocks[0].SignedBeaconBlockHeader()
 
 	bcfg.InitializeForkSchedule()
 
-	ctx := context.Background()
-	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true, false, false, nil)
-	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
-	// historical states reader below
-	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState)
-	opPool = pool.NewOperationsPool(&bcfg)
-	fcu.Pool = opPool
-
 	if useRealSyncDataMgr {
-		syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
+		syncedData = synced_data.NewSyncedDataManager(&bcfg, true)
+		syncedData.OnHeadState(postState)
 	} else {
 		syncedData = sync_mock_services.NewMockSyncedData(ctrl)
 	}
+	ctx := context.Background()
+	vt := state_accessors.NewStaticValidatorTable()
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, nil, reader, syncedData, logger, true, true, false, false, nil)
+	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
+	// historical states reader below
+	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState, nil, syncedData)
+	opPool = pool.NewOperationsPool(&bcfg)
+	fcu.Pool = opPool
+
 	genesis, err := initial_state.GetGenesisState(clparams.MainnetNetwork)
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
@@ -119,19 +119,19 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	mockValidatorMonitor := mockMonitor.NewMockValidatorMonitor(ctrl)
 
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
-	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error {
-		return h.syncMessagePool.AddSyncCommitteeMessage(postState, *subnetID, msg)
+	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessageWithGossipData) error {
+		return h.syncMessagePool.AddSyncCommitteeMessage(postState, *subnetID, msg.SyncCommitteeMessage)
 	}).AnyTimes()
 
-	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedContributionAndProof) error {
-		return h.syncMessagePool.AddSyncContribution(postState, msg.Message.Contribution)
+	syncContributionService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedContributionAndProofWithGossipData) error {
+		return h.syncMessagePool.AddSyncContribution(postState, msg.SignedContributionAndProof.Message.Contribution)
 	}).AnyTimes()
 	aggregateAndProofsService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedAggregateAndProofData) error {
 		opPool.AttestationsPool.Insert(msg.SignedAggregateAndProof.Message.Aggregate.Signature, msg.SignedAggregateAndProof.Message.Aggregate)
 		return nil
 	}).AnyTimes()
-	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExit) error {
-		opPool.VoluntaryExitsPool.Insert(msg.VoluntaryExit.ValidatorIndex, msg)
+	voluntaryExitService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedVoluntaryExitWithGossipData) error {
+		opPool.VoluntaryExitsPool.Insert(msg.SignedVoluntaryExit.VoluntaryExit.ValidatorIndex, msg.SignedVoluntaryExit)
 		return nil
 	}).AnyTimes()
 	blsToExecutionChangeService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *cltypes.SignedBLSToExecutionChangeWithGossipData) error {
@@ -176,6 +176,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		proposerSlashingService,
 		nil,
 		mockValidatorMonitor,
+		nil,
 		false,
 	) // TODO: add tests
 	h.Init()

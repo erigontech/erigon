@@ -87,11 +87,8 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm          *silkworm.Silkworm
-	blockProduction   bool
-	keepAllChangesets bool
-
-	chaosMonkey bool
+	silkworm        *silkworm.Silkworm
+	blockProduction bool
 
 	applyWorker, applyWorkerMining *exec3.Worker
 }
@@ -106,8 +103,6 @@ func StageExecuteBlocksCfg(
 	notifications *shards.Notifications,
 	stateStream bool,
 	badBlockHalt bool,
-	keepAllChangesets bool,
-	chaosMonkey bool,
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -139,8 +134,6 @@ func StageExecuteBlocksCfg(
 		silkworm:          silkworm,
 		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
 		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
-		keepAllChangesets: keepAllChangesets,
-		chaosMonkey:       chaosMonkey,
 	}
 }
 
@@ -389,7 +382,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, logger)
 }
 
-func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context) (err error) {
+func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -398,7 +391,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
-	if s.ForwardProgress > config3.MaxReorgDepthV3 && !cfg.keepAllChangesets {
+	if s.ForwardProgress > config3.MaxReorgDepthV3 && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
@@ -407,15 +400,21 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 			pruneDiffsLimitOnChainTip = math.MaxInt
 			pruneTimeout = time.Hour
 		}
-		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip, pruneTimeout); err != nil {
+		if err := rawdb.PruneTable(
+			tx,
+			kv.ChangeSets3,
+			s.ForwardProgress-config3.MaxReorgDepthV3,
+			ctx,
+			pruneDiffsLimitOnChainTip,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
 			return err
 		}
 	}
 
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
 
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)

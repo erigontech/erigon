@@ -115,6 +115,19 @@ type heimdallObserverRegistrar interface {
 	RegisterMilestoneObserver(callback func(*heimdall.Milestone), opts ...heimdall.ObserverOption) polygoncommon.UnregisterFunc
 }
 
+func NewTipEvents(logger log.Logger, p2pReg p2pObserverRegistrar, heimdallReg heimdallObserverRegistrar) *TipEvents {
+	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlTrace, EventTopicHeimdall.String()))
+	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlTrace, EventTopicP2P.String()))
+	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
+	return &TipEvents{
+		logger:                    logger,
+		events:                    compositeEventsChannel,
+		p2pObserverRegistrar:      p2pReg,
+		heimdallObserverRegistrar: heimdallReg,
+		blockEventsSpamGuard:      newBlockEventsSpamGuard(logger),
+	}
+}
+
 type TipEvents struct {
 	logger                    log.Logger
 	events                    *TipEventsCompositeChannel
@@ -123,29 +136,12 @@ type TipEvents struct {
 	blockEventsSpamGuard      blockEventsSpamGuard
 }
 
-func NewTipEvents(
-	logger log.Logger,
-	p2pObserverRegistrar p2pObserverRegistrar,
-	heimdallObserverRegistrar heimdallObserverRegistrar,
-) *TipEvents {
-	heimdallEventsChannel := NewEventChannel[Event](10, WithEventChannelLogging(logger, log.LvlTrace, EventTopicHeimdall.String()))
-	p2pEventsChannel := NewEventChannel[Event](1000, WithEventChannelLogging(logger, log.LvlTrace, EventTopicP2P.String()))
-	compositeEventsChannel := NewTipEventsCompositeChannel(heimdallEventsChannel, p2pEventsChannel)
-	return &TipEvents{
-		logger:                    logger,
-		events:                    compositeEventsChannel,
-		p2pObserverRegistrar:      p2pObserverRegistrar,
-		heimdallObserverRegistrar: heimdallObserverRegistrar,
-		blockEventsSpamGuard:      newBlockEventsSpamGuard(logger),
-	}
-}
-
 func (te *TipEvents) Events() <-chan Event {
 	return te.events.Events()
 }
 
 func (te *TipEvents) Run(ctx context.Context) error {
-	te.logger.Debug(syncLogPrefix("running tip events component"))
+	te.logger.Info(syncLogPrefix("running tip events component"))
 
 	newBlockObserverCancel := te.p2pObserverRegistrar.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
 		block := message.Decoded.Block

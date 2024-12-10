@@ -26,10 +26,10 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -43,7 +43,7 @@ type HeimdallSimulator struct {
 	logger log.Logger
 }
 
-var _ heimdall.HeimdallClient = (*HeimdallSimulator)(nil)
+var _ heimdall.Client = (*HeimdallSimulator)(nil)
 
 type sprintLengthCalculator struct{}
 
@@ -83,8 +83,8 @@ func (noopBridgeStore) EventTxnToBlockNum(ctx context.Context, borTxHash libcomm
 func (noopBridgeStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	return nil, errors.New("noop")
 }
-func (noopBridgeStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, err error) {
-	return 0, 0, errors.New("noop")
+func (noopBridgeStore) BlockEventIdsRange(ctx context.Context, blockNum uint64) (start uint64, end uint64, ok bool, err error) {
+	return 0, 0, false, errors.New("noop")
 }
 func (noopBridgeStore) PutEventTxnToBlockNum(ctx context.Context, eventTxnToBlockNum map[libcommon.Hash]uint64) error {
 	return nil

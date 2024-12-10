@@ -25,14 +25,13 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon-lib/seg"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/seg"
 )
 
 // nolint
@@ -65,7 +64,7 @@ func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLooku
 // "assert key behind offset == to stored key in bt"
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
-func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []Node) *BpsTree {
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []*Node) *BpsTree {
 	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp, mx: nodes}
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
@@ -81,6 +80,7 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 			}
 		}
 		cachedBytes += nsz + uint64(len(nodes[i].key))
+
 		nodes[i].off = offt.Get(nodes[i].di)
 	}
 
@@ -89,13 +89,16 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 
 type BpsTree struct {
 	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
-	mx    []Node
+	mx    []*Node
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
 
 	dataLookupFunc dataLookupFunc
 	keyCmpFunc     keyCmpFunc
+	cursorGetter   cursorGetter
 }
+
+type cursorGetter func(k, v []byte, di uint64, g *seg.Reader) *Cursor
 
 type BpsTreeIterator struct {
 	t *BpsTree
@@ -179,15 +182,17 @@ func encodeListNodes(nodes []Node, w io.Writer) error {
 	return nil
 }
 
-func decodeListNodes(data []byte) ([]Node, error) {
+func decodeListNodes(data []byte) ([]*Node, error) {
 	count := binary.BigEndian.Uint64(data[:8])
-	nodes := make([]Node, count)
+	nodes := make([]*Node, count)
 	pos := 8
 	for ni := 0; ni < int(count); ni++ {
-		dp, err := (&nodes[ni]).Decode(data[pos:])
+		node := new(Node)
+		dp, err := node.Decode(data[pos:])
 		if err != nil {
 			return nil, fmt.Errorf("decode node %d: %w", ni, err)
 		}
+		nodes[ni] = node
 		pos += int(dp)
 	}
 	return nodes, nil
@@ -221,7 +226,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 	if N == 0 {
 		return nil
 	}
-	b.mx = make([]Node, 0, N/b.M)
+	b.mx = make([]*Node, 0, N/b.M)
 	if b.trace {
 		fmt.Printf("mx cap %d N=%d M=%d\n", cap(b.mx), N, b.M)
 	}
@@ -241,7 +246,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 		if err != nil {
 			return err
 		}
-		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
+		b.mx = append(b.mx, &Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
 		cachedBytes += nsz + uint64(len(key))
 	}
 
@@ -253,9 +258,10 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 }
 
 // bs performs pre-seach over warmed-up list of nodes to figure out left and right bounds on di for key
-func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
+func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
 	dr = b.offt.Count()
 	m, l, r := 0, 0, len(b.mx) //nolint
+
 	for l < r {
 		m = (l + r) >> 1
 		n = b.mx[m]
@@ -272,94 +278,91 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 		case -1:
 			l = m + 1
 			dl = n.di
+			if dl < dr {
+				dl++
+			}
 		}
 	}
 	return n, dl, dr
 }
 
-// Seek returns first key which is >= key.
-// Found is true iff exact key match is found.
-// If key is nil, returns first key and found=true
-// If found item.key has a prefix of key, returns found=false and item.key
-// if key is greater than all keys, returns nil, found=false
-func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (key, value []byte, di uint64, found bool, err error) {
+// Seek returns cursor pointing at first key which is >= seekKey.
+// If key is nil, returns cursor with first key
+// If found item.key has a prefix of key, returns item.key
+// if key is greater than all keys, returns nil
+func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
 	}
+	cur = b.cursorGetter(nil, nil, 0, g)
 	if len(seekKey) == 0 && b.offt.Count() > 0 {
-		key, value, _, err = b.dataLookupFunc(0, g)
-		if err != nil {
-			return nil, nil, 0, false, err
-		}
-		//return key, value, 0, bytes.Compare(key, seekKey) >= 0, nil
-		return key, value, 0, bytes.Equal(key, seekKey), nil
+		cur.Reset(0, g)
+		return cur, nil
 	}
 
+	// check cached nodes and narrow roi
 	n, l, r := b.bs(seekKey) // l===r when key is found
-	if b.trace {
-		fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-		defer func() { fmt.Printf("found=%t %x [%d %d]\n", bytes.Equal(key, seekKey), seekKey, l, r) }()
+	if l == r {
+		cur.Reset(n.di, g)
+		return cur, nil
 	}
+
+	// if b.trace {
+	// 	fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
+	// 	defer func() { fmt.Printf("found=%t %x [%d %d]\n", bytes.Equal(key, seekKey), seekKey, l, r) }()
+	// }
 	var m uint64
 	var cmp int
 	for l < r {
+		m = (l + r) >> 1
 		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
-			cmp, key, err = b.keyCmpFunc(seekKey, l, g, key[:0])
-			if err != nil {
-				return nil, nil, 0, false, err
+			// m = l
+			if cur.d == 0 {
+				cur.Reset(l, g)
+			} else {
+				cur.Next()
 			}
-			if b.trace {
-				fmt.Printf("fs di:[%d %d] k: %x\n", l, r, key)
+
+			if cmp = bytes.Compare(cur.key, seekKey); cmp < 0 {
+				l++
+				continue
 			}
-			//fmt.Printf("N %d l %d cmp %d (found %x want %x)\n", b.offt.Count(), l, cmp, key, seekKey)
-			if cmp == 0 {
-				r = l
-				break
-			} else if cmp < 0 { //found key is greater than seekKey
-				if l+1 < b.offt.Count() {
-					l++
-					continue
-				}
-			}
-			r = l
-			break
+			return cur, err
 		}
 
-		m = (l + r) >> 1
-		cmp, key, err = b.keyCmpFunc(seekKey, m, g, key[:0])
+		cmp, cur.key, err = b.keyCmpFunc(seekKey, m, g, cur.key[:0])
 		if err != nil {
-			return nil, nil, 0, false, err
+			return nil, err
 		}
 		if b.trace {
-			fmt.Printf("fs di:[%d %d] k: %x\n", l, r, key)
+			fmt.Printf("[%d %d] k: %x\n", l, r, cur.key)
 		}
 
 		if cmp == 0 {
-			l, r = m, m
 			break
 		} else if cmp > 0 {
 			r = m
 		} else {
 			l = m + 1
 		}
-
 	}
 
 	if l == r {
 		m = l
 	}
-	key, value, _, err = b.dataLookupFunc(m, g)
-	if err != nil {
-		return nil, nil, 0, false, err
+
+	err = cur.Reset(m, g)
+	if err != nil || bytes.Compare(cur.Key(), seekKey) < 0 {
+		return nil, err
 	}
-	return key, value, l, bytes.Equal(key, seekKey), nil
+	return cur, nil
 }
 
-// returns first key which is >= key.
-// If key is nil, returns first key
-// if key is greater than all keys, returns nil
-func (b *BpsTree) Get(g *seg.Reader, key []byte) (k []byte, ok bool, i uint64, err error) {
+// Get: returns for exact given key, value and offset in file where key starts
+// If given key is nil, returns first key
+// If no exact match found, returns nil values
+func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint64, err error) {
 	if b.trace {
 		fmt.Printf("get   %x\n", key)
 	}
@@ -370,6 +373,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (k []byte, ok bool, i uint64, e
 		}
 		return v0, true, 0, nil
 	}
+
 	n, l, r := b.bs(key) // l===r when key is found
 	if b.trace {
 		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
@@ -380,29 +384,55 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (k []byte, ok bool, i uint64, e
 	var m uint64
 	for l < r {
 		m = (l + r) >> 1
-		cmp, k, err = b.keyCmpFunc(key, m, g, k[:0])
+		if r-l <= DefaultBtreeStartSkip {
+			m = l
+			if offset == 0 {
+				offset = b.offt.Get(m)
+				g.Reset(offset)
+			}
+			v, _ = g.Next(v[:0])
+			if cmp = bytes.Compare(v, key); cmp > 0 {
+				return nil, false, 0, err
+			} else if cmp < 0 {
+				g.Skip()
+				l++
+				continue
+			}
+			v, _ = g.Next(nil)
+			offset = b.offt.Get(m)
+			return v, true, offset, nil
+		}
+
+		cmp, _, err = b.keyCmpFunc(key, m, g, v[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}
-		if b.trace {
-			fmt.Printf("fs [%d %d]\n", l, r)
-		}
-
-		switch cmp {
-		case 0:
-			return k, true, m, nil
-		case 1:
+		if cmp == 0 {
+			offset = b.offt.Get(m)
+			if !g.HasNext() {
+				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
+			}
+			v, _ = g.Next(nil)
+			return v, true, offset, nil
+		} else if cmp > 0 {
 			r = m
-		case -1:
+		} else {
 			l = m + 1
+		}
+		if b.trace {
+			fmt.Printf("narrow [%d %d]\n", l, r)
 		}
 	}
 
-	cmp, k, err = b.keyCmpFunc(key, l, g, k[:0])
+	cmp, _, err = b.keyCmpFunc(key, l, g, v[:0])
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
-	return k, true, l, nil
+	if !g.HasNext() {
+		return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
+	}
+	v, _ = g.Next(nil)
+	return v, true, b.offt.Get(l), nil
 }
 
 func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }

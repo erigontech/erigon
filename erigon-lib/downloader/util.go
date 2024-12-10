@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -77,10 +78,20 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 		return nil, err
 	}
 
+	segConfig := snapcfg.KnownCfg(chainName)
+
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
-
 		_, name := filepath.Split(fPath)
+		// A bit hacky but whatever... basically caplin is incompatible with enums.
+		if strings.HasSuffix(fPath, path.Join("caplin", name)) {
+			res = append(res, path.Join("caplin", name))
+			continue
+		}
+		if strings.HasPrefix(name, "salt") && strings.HasSuffix(name, "txt") {
+			res = append(res, name)
+			continue
+		}
 		if !skipSeedableCheck && !snaptype.IsCorrectFileName(name) {
 			continue
 		}
@@ -88,7 +99,7 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 		if !skipSeedableCheck && (!ok || isStateFile) {
 			continue
 		}
-		if !skipSeedableCheck && !snapcfg.Seedable(chainName, ff) {
+		if !skipSeedableCheck && !segConfig.Seedable(ff) {
 			continue
 		}
 		res = append(res, name)
@@ -268,7 +279,11 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
+	l5, err := dir2.ListFiles(dirs.SnapCaplin, ".torrent")
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
 	return files, nil
 }
 

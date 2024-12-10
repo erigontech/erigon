@@ -45,7 +45,7 @@ func newClient(ctrl *gomock.Controller, i int, caps []string) *direct.MockSentry
 		ListenerAddr: fmt.Sprintf("127.0.0.%d", i),
 	}, nil).AnyTimes()
 
-	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{}, nil).AnyTimes()
+	client.EXPECT().HandShake(gomock.Any(), gomock.Any(), gomock.Any()).Return(&sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH67}, nil).AnyTimes()
 
 	client.EXPECT().Peers(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.PeersReply, error) {
@@ -197,7 +197,7 @@ func TestSend(t *testing.T) {
 	for i := byte(0); i < 10; i++ {
 		sendReply, err = mux.SendMessageById(context.Background(), &sentryproto.SendMessageByIdRequest{
 			Data: &sentryproto.OutboundMessageData{
-				Id: sentryproto.MessageId_BLOCK_BODIES_65,
+				Id: sentryproto.MessageId_BLOCK_BODIES_66,
 			},
 			PeerId: gointerfaces.ConvertHashToH512([64]byte{i}),
 		})
@@ -210,7 +210,7 @@ func TestSend(t *testing.T) {
 
 	sendReply, err = mux.SendMessageToRandomPeers(context.Background(), &sentryproto.SendMessageToRandomPeersRequest{
 		Data: &sentryproto.OutboundMessageData{
-			Id: sentryproto.MessageId_BLOCK_BODIES_65,
+			Id: sentryproto.MessageId_BLOCK_BODIES_66,
 		},
 	})
 	require.NoError(t, err)
@@ -220,7 +220,7 @@ func TestSend(t *testing.T) {
 	statusCount = 0
 
 	sendReply, err = mux.SendMessageToAll(context.Background(), &sentryproto.OutboundMessageData{
-		Id: sentryproto.MessageId_BLOCK_BODIES_65,
+		Id: sentryproto.MessageId_BLOCK_BODIES_66,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, sendReply)

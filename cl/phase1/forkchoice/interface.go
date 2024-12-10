@@ -54,7 +54,6 @@ type ForkChoiceStorageReader interface {
 		blockRoot libcommon.Hash,
 	) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
-	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	Slot() uint64
 	Time() uint64
 	Participation(epoch uint64) (*solid.ParticipationBitList, bool)
@@ -94,4 +93,7 @@ type ForkChoiceStorageWriter interface {
 	OnTick(time uint64)
 	SetSynced(synced bool)
 	ProcessAttestingIndicies(attestation *solid.Attestation, attestionIndicies []uint64)
+
+	ProcessBlockExecution(ctx context.Context, block *cltypes.SignedBeaconBlock) error
+	ProcessBlockConsensus(ctx context.Context, block *cltypes.SignedBeaconBlock) error
 }

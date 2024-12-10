@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/common/bitutil"
 )
 
 // bloomIndexes represents the bit indexes inside the bloom filter that belong
@@ -347,13 +346,13 @@ func (m *Matcher) subMatch(source chan *partialMatches, dist chan *request, bloo
 							andVector = make([]byte, int(m.sectionSize/8))
 							copy(andVector, data)
 						} else {
-							bitutil.ANDBytes(andVector, andVector, data)
+							ANDBytes(andVector, andVector, data)
 						}
 					}
 					if orVector == nil {
 						orVector = andVector
 					} else {
-						bitutil.ORBytes(orVector, orVector, andVector)
+						ORBytes(orVector, orVector, andVector)
 					}
 				}
 
@@ -361,9 +360,9 @@ func (m *Matcher) subMatch(source chan *partialMatches, dist chan *request, bloo
 					orVector = make([]byte, int(m.sectionSize/8))
 				}
 				if subres.bitset != nil {
-					bitutil.ANDBytes(orVector, orVector, subres.bitset)
+					ANDBytes(orVector, orVector, subres.bitset)
 				}
-				if bitutil.TestBytes(orVector) {
+				if TestBytes(orVector) {
 					select {
 					case <-session.quit:
 						return

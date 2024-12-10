@@ -30,19 +30,17 @@ import (
 
 	"github.com/holiman/uint256"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
-	types2 "github.com/erigontech/erigon-lib/types"
-
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/consensus/misc"
@@ -209,7 +207,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract libcommon.Addres
 	}
 	defer tx.Rollback()
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetCode(contract), nil
+	return stateDB.GetCode(contract)
 }
 
 // BalanceAt returns the wei balance of a certain account in the blockchain.
@@ -222,7 +220,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract libcommon.Add
 	}
 	defer tx.Rollback()
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetBalance(contract), nil
+	return stateDB.GetBalance(contract)
 }
 
 // NonceAt returns the nonce of a certain account in the blockchain.
@@ -236,7 +234,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract libcommon.Addre
 	defer tx.Rollback()
 
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetNonce(contract), nil
+	return stateDB.GetNonce(contract)
 }
 
 // StorageAt returns the value of key in the storage of an account in the blockchain.
@@ -520,7 +518,7 @@ func (b *SimulatedBackend) PendingCodeAt(ctx context.Context, contract libcommon
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.pendingState.GetCode(contract), nil
+	return b.pendingState.GetCode(contract)
 }
 
 func newRevertError(result *evmtypes.ExecutionResult) *revertError {
@@ -602,7 +600,7 @@ func (b *SimulatedBackend) PendingNonceAt(ctx context.Context, account libcommon
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.pendingState.GetNonce(account), nil
+	return b.pendingState.GetNonce(account)
 }
 
 // SuggestGasPrice implements ContractTransactor.SuggestGasPrice. Since the simulated
@@ -630,7 +628,10 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	}
 	// Recap the highest gas allowance with account's balance.
 	if call.GasPrice != nil && !call.GasPrice.IsZero() {
-		balance := b.pendingState.GetBalance(call.From) // from can't be nil
+		balance, err := b.pendingState.GetBalance(call.From) // from can't be nil
+		if err != nil {
+			return 0, err
+		}
 		available := balance.ToBig()
 		if call.Value != nil {
 			if call.Value.ToBig().Cmp(available) >= 0 {
@@ -726,7 +727,10 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 		call.Value = new(uint256.Int)
 	}
 	// Set infinite balance to the fake caller account.
-	from := statedb.GetOrNewStateObject(call.From)
+	from, err := statedb.GetOrNewStateObject(call.From)
+	if err != nil {
+		return nil, err
+	}
 	from.SetBalance(uint256.NewInt(0).SetAllOne(), tracing.BalanceChangeUnspecified)
 	// Execute the call.
 	msg := callMsg{call}
@@ -754,7 +758,10 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)
 	}
-	nonce := b.pendingState.GetNonce(sender)
+	nonce, err := b.pendingState.GetNonce(sender)
+	if err != nil {
+		return err
+	}
 	if txn.GetNonce() != nonce {
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", txn.GetNonce(), nonce)
 	}
@@ -846,7 +853,7 @@ func (m callMsg) Tip() *uint256.Int                     { return m.CallMsg.Tip }
 func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
-func (m callMsg) AccessList() types2.AccessList         { return m.CallMsg.AccessList }
+func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
 func (m callMsg) IsFree() bool                          { return false }
 

@@ -2,27 +2,31 @@ name: QA - Constrained Tip tracking
 
 on:
   schedule:
-    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
+    - cron: '0 20 * * 0'  # Run on Sunday at 08:00 PM UTC
   workflow_dispatch:     # Run manually
-  pull_request:
-    branches:
-      - qa_tests_constrained_tip_tracking
-    types:
-      - opened
-      - synchronize
-      - ready_for_review
 
 jobs:
   constrained-tip-tracking-test:
-    runs-on: [self-hosted, Erigon3]
     timeout-minutes: 600
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chain: mainnet
+            backend: Erigon3
+            cgroup_name: constrained_res_32G
+          - chain: bor-mainnet
+            backend: Polygon
+            cgroup_name: constrained_res_64G
+    runs-on: [ self-hosted, "${{ matrix.backend }}" ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 14400 # 4 hours
       TOTAL_TIME_SECONDS: 28800 # 8 hours
-      CHAIN: mainnet
+      CHAIN: ${{ matrix.chain }}
+      CGROUP_NAME: ${{ matrix.cgroup_name }}
 
     steps:
     - name: Check out repository
@@ -51,15 +55,15 @@ jobs:
         set +e # Disable exit on error
         
         # Run Erigon under memory constraints, wait sync and check ability to maintain sync
-        cgexec -g memory:constrained_res_64G python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+        cgexec -g memory:$CGROUP_NAME python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
           ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN standard_node statistics
   
         # Capture monitoring script exit status
         test_exit_status=$?
         
         # Save the subsection reached status
-        echo "::set-output name=test_executed::true"
-    
+        echo "test_executed=true" >> $GITHUB_OUTPUT
+        
         # Clean up Erigon process if it's still running
         if kill -0 $ERIGON_PID 2> /dev/null; then
           echo "Terminating Erigon"
@@ -101,14 +105,14 @@ jobs:
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: test-results
+        name: test-results-${{ env.CHAIN }}
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload Erigon full log
       if: steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v4
       with:
-        name: erigon-log
+        name: erigon-log-${{ env.CHAIN }}
         path: |
           ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
           ${{ env.ERIGON_TESTBED_DATA_DIR }}/proc_stat.log

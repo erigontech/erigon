@@ -45,14 +45,14 @@ func newBlockDownloaderTest(t *testing.T) *blockDownloaderTest {
 func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) *blockDownloaderTest {
 	ctrl := gomock.NewController(t)
 	waypointReader := NewMockwaypointReader(ctrl)
-	p2pService := p2p.NewMockService(ctrl)
+	p2pService := NewMockp2pService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
 	checkpointVerifier := opts.getOrCreateDefaultCheckpointVerifier()
 	milestoneVerifier := opts.getOrCreateDefaultMilestoneVerifier()
 	blocksVerifier := opts.getOrCreateDefaultBlocksVerifier()
 	store := NewMockStore(ctrl)
-	headerDownloader := newBlockDownloader(
+	headerDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
 		waypointReader,
@@ -60,9 +60,9 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 		milestoneVerifier,
 		blocksVerifier,
 		store,
-		time.Millisecond,
-		opts.getOrCreateDefaultMaxWorkers(),
 		opts.getOrCreateDefaultBlockLimit(),
+		WithRetryBackOff(time.Millisecond),
+		WithMaxWorkers(opts.getOrCreateDefaultMaxWorkers()),
 	)
 	return &blockDownloaderTest{
 		waypointReader:  waypointReader,
@@ -124,8 +124,8 @@ func (opts blockDownloaderTestOpts) getOrCreateDefaultBlockLimit() uint {
 
 type blockDownloaderTest struct {
 	waypointReader  *MockwaypointReader
-	p2pService      *p2p.MockService
-	blockDownloader *blockDownloader
+	p2pService      *Mockp2pService
+	blockDownloader *BlockDownloader
 	store           *MockStore
 }
 
@@ -181,7 +181,7 @@ type fetchHeadersMock func(
 ) (p2p.FetcherResponse[[]*types.Header], error)
 
 func (hdt blockDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
-	// p2p.Service.FetchHeaders interface is using [start, end) so we stick to that
+	// FetchHeaders interface is using [start, end) so we stick to that
 	return func(
 		ctx context.Context,
 		start uint64,

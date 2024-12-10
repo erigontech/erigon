@@ -18,6 +18,7 @@ package shards
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -161,6 +162,11 @@ type Notifications struct {
 	Accumulator          *Accumulator // StateAccumulator
 	StateChangesConsumer StateChangeConsumer
 	RecentLogs           *RecentLogs
+	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
+}
+
+func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
+	n.LastNewBlockSeen.Store(blockNum)
 }
 
 func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
@@ -220,7 +226,7 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 
 			for _, l := range receipt.Logs {
 				res := &remote.SubscribeLogsReply{
-					Address:          gointerfaces.ConvertAddressToH160(receipt.ContractAddress),
+					Address:          gointerfaces.ConvertAddressToH160(l.Address),
 					BlockHash:        gointerfaces.ConvertHashToH256(receipt.BlockHash),
 					BlockNumber:      blockNum,
 					Data:             l.Data,

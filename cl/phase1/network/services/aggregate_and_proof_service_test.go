@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -73,7 +74,7 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	ctx, cn := context.WithCancel(context.Background())
 	cn()
 	cfg := &clparams.MainnetBeaconConfig
-	syncedDataManager := synced_data.NewSyncedDataManager(true, cfg)
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	p := pool.OperationsPool{}
 	p.AttestationsPool = pool.NewOperationPool[libcommon.Bytes96, *solid.Attestation](100, "test")
@@ -199,4 +200,16 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	fcu.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	require.NoError(t, aggService.ProcessMessage(context.Background(), nil, agg))
+}
+
+func TestSyncMapRangeDeadlock(t *testing.T) {
+	var m sync.Map
+	m.Store(1, 1)
+	m.Store(2, 2)
+	m.Store(3, 3)
+
+	m.Range(func(key, value any) bool {
+		m.Store(4, 5)
+		return true
+	})
 }

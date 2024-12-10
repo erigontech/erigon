@@ -33,6 +33,7 @@ import (
 	isentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	coretypes "github.com/erigontech/erigon/core/types"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/p2p/discover/v4wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -85,10 +85,12 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 	cfg := snapcfg.KnownCfg(chain)
 	torrentDir := filepath.Join(snapshotLocation, "torrents", chain)
 
-	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		ProduceE2:    false,
-		NoDownloader: true,
-	}, "", 0, logger)
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.NoDownloader = true
+	freezeCfg.ProduceE2 = false
+	freezeCfg.ProduceE3 = false
+	freezeCfg.ChainName = chain
+	knownSnapshots := freezeblocks.NewRoSnapshots(freezeCfg, "", 0, logger)
 
 	files := make([]string, 0, len(cfg.Preverified))
 
@@ -99,10 +101,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 	knownSnapshots.InitSegments(files)
 
 	//s.knownSnapshots.OpenList([]string{ent2.Name()}, false)
-	activeSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		ProduceE2:    false,
-		NoDownloader: true,
-	}, torrentDir, 0, logger)
+	activeSnapshots := freezeblocks.NewRoSnapshots(freezeCfg, torrentDir, 0, logger)
 
 	if err := activeSnapshots.OpenFolder(); err != nil {
 		return nil, err
@@ -227,14 +226,6 @@ func (s *server) sendMessageById(ctx context.Context, peerId [64]byte, messageDa
 	}
 
 	switch messageData.Id {
-	case isentry.MessageId_GET_BLOCK_HEADERS_65:
-		packet := &eth.GetBlockHeadersPacket{}
-		if err := rlp.DecodeBytes(messageData.Data, packet); err != nil {
-			return fmt.Errorf("failed to decode packet: %w", err)
-		}
-
-		go s.processGetBlockHeaders(ctx, peer, 0, packet)
-
 	case isentry.MessageId_GET_BLOCK_HEADERS_66:
 		packet := &eth.GetBlockHeadersPacket66{}
 		if err := rlp.DecodeBytes(messageData.Data, packet); err != nil {
@@ -307,10 +298,9 @@ func (s *server) Messages(request *isentry.MessagesRequest, receiver isentry.Sen
 }
 
 func (s *server) processGetBlockHeaders(ctx context.Context, peer *p2p.Peer, requestId uint64, request *eth.GetBlockHeadersPacket) {
-	r65 := s.messageReceivers[isentry.MessageId_BLOCK_HEADERS_65]
 	r66 := s.messageReceivers[isentry.MessageId_BLOCK_HEADERS_66]
 
-	if len(r65)+len(r66) > 0 {
+	if len(r66) > 0 {
 
 		peerKey := peer.Pubkey()
 		peerId := gointerfaces.ConvertBytesToH512(peerKey[:])
@@ -322,45 +312,24 @@ func (s *server) processGetBlockHeaders(ctx context.Context, peer *p2p.Peer, req
 			return
 		}
 
-		if len(r65) > 0 {
-			var data bytes.Buffer
+		var data bytes.Buffer
 
-			err := rlp.Encode(&data, headers)
+		err = rlp.Encode(&data, &eth.BlockHeadersPacket66{
+			RequestId:          requestId,
+			BlockHeadersPacket: headers,
+		})
 
-			if err != nil {
-				s.logger.Warn("Can't encode headers", "error", err)
-				return
-			}
-
-			for _, receiver := range r65 {
-				receiver.Send(&isentry.InboundMessage{
-					Id:     isentry.MessageId_BLOCK_HEADERS_65,
-					Data:   data.Bytes(),
-					PeerId: peerId,
-				})
-			}
+		if err != nil {
+			fmt.Printf("Error (move to logger): %s", err)
+			return
 		}
 
-		if len(r66) > 0 {
-			var data bytes.Buffer
-
-			err := rlp.Encode(&data, &eth.BlockHeadersPacket66{
-				RequestId:          requestId,
-				BlockHeadersPacket: headers,
+		for _, receiver := range r66 {
+			receiver.Send(&isentry.InboundMessage{
+				Id:     isentry.MessageId_BLOCK_HEADERS_66,
+				Data:   data.Bytes(),
+				PeerId: peerId,
 			})
-
-			if err != nil {
-				fmt.Printf("Error (move to logger): %s", err)
-				return
-			}
-
-			for _, receiver := range r66 {
-				receiver.Send(&isentry.InboundMessage{
-					Id:     isentry.MessageId_BLOCK_HEADERS_66,
-					Data:   data.Bytes(),
-					PeerId: peerId,
-				})
-			}
 		}
 	}
 }
