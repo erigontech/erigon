@@ -217,6 +217,8 @@ func (a *Antiquary) Loop() error {
 		}
 	}
 
+	a.stateSn.OpenFolder()
+
 	frozenSlots := a.sn.BlocksAvailable()
 	if frozenSlots != 0 {
 		if err := beacon_indicies.PruneBlocks(a.ctx, tx, frozenSlots); err != nil {
