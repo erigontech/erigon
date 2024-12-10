@@ -107,6 +107,13 @@ type GetPayloadResponse struct {
 	ShouldOverrideBuilder bool               `json:"shouldOverrideBuilder"`
 }
 
+type ClientVersionV1 struct {
+	Code    string  `json:"code" gencodec:"required"`
+	Name    string  `json:"name" gencodec:"required"`
+	Version string  `json:"version" gencodec:"required"`
+	Commit  [4]byte `json:"commit" gencodec:"required"`
+}
+
 type StringifiedError struct{ err error }
 
 func NewStringifiedError(err error) *StringifiedError {
