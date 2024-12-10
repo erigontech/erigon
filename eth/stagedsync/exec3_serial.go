@@ -7,9 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -19,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
+	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
@@ -132,6 +132,11 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 && !txTask.Final {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
+			}
+			if txTask.TxIndex > 0 && receipt != nil && txTask.BlockReceipts[txTask.TxIndex-1] != nil &&
+				txTask.BlockReceipts[txTask.TxIndex-1].CumulativeGasUsed == receipt.CumulativeGasUsed {
+				msg := fmt.Sprintf("bad receipts accert stack %s receipt %+v", dbg.Stack(), txTask.BlockReceipts[txTask.TxIndex])
+				panic(msg)
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err
