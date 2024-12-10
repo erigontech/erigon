@@ -130,12 +130,12 @@ func (db *RecordingKV) EnableBypass() {
 }
 
 type RecordingChainContext struct {
-	bc                     core.ChainContext
+	bc                     consensus.ChainHeaderReader
 	minBlockNumberAccessed uint64
 	initialBlockNumber     uint64
 }
 
-func newRecordingChainContext(inner core.ChainContext, blocknumber uint64) *RecordingChainContext {
+func newRecordingChainContext(inner consensus.ChainHeaderReader, blocknumber uint64) *RecordingChainContext {
 	return &RecordingChainContext{
 		bc:                     inner,
 		minBlockNumberAccessed: blocknumber,
@@ -250,7 +250,7 @@ func (r *RecordingDatabase) addStateVerify(statedb *state.StateDB, expected comm
 	return state.New(result, statedb.Database(), nil)
 }
 
-func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeader *types.Header, logFunc StateBuildingLogFunction) (*state.StateDB, core.ChainContext, *RecordingKV, error) {
+func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeader *types.Header, logFunc StateBuildingLogFunction) (*state.StateDB, consensus.ChainHeaderReader, *RecordingKV, error) {
 	_, err := r.GetOrRecreateState(ctx, lastBlockHeader, logFunc)
 	if err != nil {
 		return nil, nil, nil, err
@@ -280,7 +280,7 @@ func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeade
 	return recordingStateDb, recordingChainContext, recordingKeyValue, nil
 }
 
-func (r *RecordingDatabase) PreimagesFromRecording(chainContextIf core.ChainContext, recordingDb *RecordingKV) (map[common.Hash][]byte, error) {
+func (r *RecordingDatabase) PreimagesFromRecording(chainContextIf consensus.ChainHeaderReader, recordingDb *RecordingKV) (map[common.Hash][]byte, error) {
 	entries := recordingDb.GetRecordedEntries()
 	recordingChainContext, ok := chainContextIf.(*RecordingChainContext)
 	if (recordingChainContext == nil) || (!ok) {

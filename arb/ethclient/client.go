@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/url"
 )
-"
 
 // Client defines typed wrappers for the Ethereum RPC API.
 type Client struct {
