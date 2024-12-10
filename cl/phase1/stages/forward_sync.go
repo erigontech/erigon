@@ -178,24 +178,27 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 
 	// Set the function to process downloaded blocks
 	downloader.SetProcessFunction(func(initialHighestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, err error) {
+		log.Info("Processing block batch", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
 		highestSlotProcessed, err := processDownloadedBlockBatches(ctx, cfg, initialHighestSlotProcessed, shouldInsert, blocks)
 		if err != nil {
 			logger.Warn("[Caplin] Failed to process block batch", "err", err)
 			return initialHighestSlotProcessed, err
 		}
-
+		log.Info("after processDownloadedBlockBatches", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 		// Exit if we are pre-EIP-4844
 		if !shouldProcessBlobs(blocks) {
+			log.Info("shouldProcessBlobs", "false", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 			currentSlot.Store(highestSlotProcessed)
 			return highestSlotProcessed, nil
 		}
-
+		log.Info("before downloadAndProcessEip4844DA", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 		// Process blobs for EIP-4844
 		highestBlobSlotProcessed, err := downloadAndProcessEip4844DA(ctx, logger, cfg, initialHighestSlotProcessed, blocks)
 		if err != nil {
 			logger.Warn("[Caplin] Failed to process blobs", "err", err)
 			return initialHighestSlotProcessed, err
 		}
+		log.Info("after downloadAndProcessEip4844DA", "highestBlobSlotProcessed", highestBlobSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 		if highestBlobSlotProcessed <= initialHighestSlotProcessed {
 			return initialHighestSlotProcessed, nil
 		}
