@@ -84,15 +84,17 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 				s.logger.Error("Failed to read historical processing progress", "err", err)
 				continue
 			}
+			if s.sn == nil || s.syncedData.Syncing() {
+				continue
+			}
+
 			// We wait for updated finality.
 			if finalized == beforeFinalized {
 				fmt.Println(finalized, beforeFinalized)
 				continue
 			}
 			beforeFinalized = finalized
-			if s.sn == nil || s.syncedData.Syncing() {
-				continue
-			}
+
 			if err := s.IncrementBeaconState(ctx, finalized); err != nil {
 				if s.currentState != nil {
 					s.logger.Warn("Could not to increment beacon state, trying again later", "err", err, "slot", s.currentState.Slot())
