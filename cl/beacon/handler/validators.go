@@ -178,10 +178,6 @@ func parseStatuses(s []string) ([]validatorStatus, error) {
 	seenAlready := make(map[validatorStatus]struct{})
 	statuses := make([]validatorStatus, 0, len(s))
 
-	if len(s) > maxValidatorsLookupFilter {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("too many statuses requested"))
-	}
-
 	for _, status := range s {
 		s, err := validatorStatusFromString(status)
 		if err != nil {
