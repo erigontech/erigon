@@ -787,11 +787,11 @@ func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *en
 		copy(commitBytes[:], c[0:4])
 	}
 	result := make([]engine_types.ClientVersionV1, 1)
-	result[0] =engine_types.ClientVersionV1{
-		Code: "EG", 
-		Name: "erigon", 
-		Version: params.Version, 
-		Commit: commitBytes}
+	result[0] = engine_types.ClientVersionV1{
+		Code:    "EG",
+		Name:    "erigon",
+		Version: params.Version,
+		Commit:  commitBytes}
 	return result, nil
 }
 
