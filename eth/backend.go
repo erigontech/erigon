@@ -1502,7 +1502,15 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 	}
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
+	if snConfig.ExperimentalEFOptimization {
+		logger.Info("**************************************************")
+		logger.Info("****** USING EXPERIMENTAL .EF OPTIMIZATIONS ******")
+		logger.Info("******                                      ******")
+		logger.Info("****** NEW .EF FILES ARE -NOT- BACKWARDS    ******")
+		logger.Info("****** COMPATIBLE                           ******")
+		logger.Info("**************************************************")
+	}
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger, snConfig.ExperimentalEFOptimization)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

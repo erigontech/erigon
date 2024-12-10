@@ -102,7 +102,7 @@ func testTemporalDB(t *testing.T) *temporal.DB {
 
 	t.Cleanup(db.Close)
 
-	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New())
+	agg, err := state3.NewAggregator(context.Background(), datadir.New(t.TempDir()), 16, db, log.New(), false)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 
