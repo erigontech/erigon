@@ -142,14 +142,14 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	blocksAvaiable := stateSn.BlocksAvailable()
 	stateSnRoTx := stateSn.View()
 	defer stateSnRoTx.Close()
-	log.Info("[Caplin] filling validators table", "from", 0, "to", stateSn.BlocksAvailable())
+	log.Info("[Caplin-Archive] filling validators table", "from", 0, "to", stateSn.BlocksAvailable())
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
 	start := time.Now()
 	for slot := uint64(0); slot <= stateSn.BlocksAvailable(); slot++ {
 		select {
 		case <-logTicker.C:
-			log.Info("[Caplin] Filled validators table", "progress", fmt.Sprintf("%d/%d", slot, stateSn.BlocksAvailable()))
+			log.Info("[Caplin-Archive] Filled validators table", "progress", fmt.Sprintf("%d/%d", slot, stateSn.BlocksAvailable()))
 		default:
 		}
 		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
@@ -446,7 +446,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// We now do some post-processing on the state.
 		select {
 		case <-progressTimer.C:
-			log.Log(logLvl, "State processing progress", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
+			log.Log(logLvl, "[Caplin-Archive] Historical States reconstruction", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
 			prevSlot = slot
 		default:
 		}
@@ -500,7 +500,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 
-	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
+	log.Info("[Caplin-Archive] Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
 	if s.stateSn != nil {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
