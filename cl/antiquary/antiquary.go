@@ -217,6 +217,11 @@ func (a *Antiquary) Loop() error {
 		}
 	}
 
+	if err := a.stateSn.OpenFolder(); err != nil {
+		return err
+	}
+	log.Info("[Caplin] Stat", "blocks-static", a.sn.BlocksAvailable(), "states-static", a.stateSn.BlocksAvailable(), "blobs-static", a.sn.FrozenBlobs())
+
 	frozenSlots := a.sn.BlocksAvailable()
 	if frozenSlots != 0 {
 		if err := beacon_indicies.PruneBlocks(a.ctx, tx, frozenSlots); err != nil {
