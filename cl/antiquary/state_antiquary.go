@@ -146,7 +146,7 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	blocksAvaiable := stateSn.BlocksAvailable()
 	stateSnRoTx := stateSn.View()
 	defer stateSnRoTx.Close()
-	log.Info("[Caplin]", "filling validators table", "from", 0, "to", stateSn.BlocksAvailable())
+	log.Info("[Caplin] filling validators table", "from", 0, "to", stateSn.BlocksAvailable())
 	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
 	start := time.Now()
