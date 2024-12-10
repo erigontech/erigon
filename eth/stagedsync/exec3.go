@@ -615,37 +615,35 @@ Loop:
 			se.usedGas = 0
 			se.blobGasUsed = 0
 
+			mxExecBlocks.Add(1)
+
 			if !continueLoop {
 				break Loop
 			}
-		}
 
-		mxExecBlocks.Add(1)
-
-		if shouldGenerateChangesets {
-			aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
-			aggTx.RestrictSubsetFileDeletions(true)
-			start := time.Now()
-			rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
-			if err != nil {
-				return err
-			}
-			if !bytes.Equal(rh, header.Root.Bytes()) {
-				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-				return errors.New("wrong trie root")
-			}
-			ts += time.Since(start)
-			aggTx.RestrictSubsetFileDeletions(false)
-			executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
-			if !inMemExec {
-				if err := state2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
+			if shouldGenerateChangesets {
+				aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
+				aggTx.RestrictSubsetFileDeletions(true)
+				start := time.Now()
+				rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix())
+				if err != nil {
 					return err
 				}
+				if !bytes.Equal(rh, header.Root.Bytes()) {
+					logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+					return errors.New("wrong trie root")
+				}
+				ts += time.Since(start)
+				aggTx.RestrictSubsetFileDeletions(false)
+				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)
+				if !inMemExec {
+					if err := state2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeset); err != nil {
+						return err
+					}
+				}
+				executor.domains().SetChangesetAccumulator(nil)
 			}
-			executor.domains().SetChangesetAccumulator(nil)
 		}
-
-		mxExecBlocks.Add(1)
 
 		if offsetFromBlockBeginning > 0 {
 			// after history execution no offset will be required

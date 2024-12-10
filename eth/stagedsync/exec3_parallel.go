@@ -89,12 +89,14 @@ type executor interface {
 	domains() *state2.SharedDomains
 }
 
-type executorResult struct {
-	BlockNum uint64
-	TxIO     *state.VersionedIO
-	Stats    *map[int]ExecutionStat
-	Deps     *state.DAG
-	AllDeps  map[int]map[int]bool
+type blockResult struct {
+	BlockNum  uint64
+	lastTxNum uint64
+	complete  bool
+	TxIO      *state.VersionedIO
+	Stats     *map[int]ExecutionStat
+	Deps      *state.DAG
+	AllDeps   map[int]map[int]bool
 }
 
 type execTask struct {
@@ -166,7 +168,9 @@ func (task *execTask) execute(
 	result.Task = task
 
 	if task.statedb.HadInvalidRead() || result.Err != nil {
-		result.Err = exec.ErrExecAbortError{Dependency: task.statedb.DepTxIndex(), OriginError: result.Err}
+		if err, ok := result.Err.(exec.ErrExecAbortError); !ok {
+			result.Err = exec.ErrExecAbortError{Dependency: task.statedb.DepTxIndex(), OriginError: err}
+		}
 	}
 
 	//TODO this should already be handled ?
@@ -179,7 +183,7 @@ func (task *execTask) applyMessage(evm *vm.EVM, msg core.Message, gp *core.GasPo
 	if task.shouldDelayFeeCalc {
 		result, err := core.ApplyMessageNoFeeBurnOrTip(evm, task.TxAsMessage, gp, true, false)
 
-		if task.result == nil || err != nil {
+		if result == nil || err != nil {
 			return nil, exec.ErrExecAbortError{Dependency: task.statedb.DepTxIndex(), OriginError: err}
 		}
 
@@ -462,21 +466,33 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, bloc
 				return err
 			}
 
-			processedTxNum, conflicts, triggers, _ /*processedBlockNum*/, stoppedAtBlockEnd, err :=
-				pe.processResults(ctx, pe.outputTxNum.Load(), pe.rwsConsumed, true, false)
+			blockResult, err := pe.processResults(ctx, pe.rwsConsumed)
 			if err != nil {
 				return err
 			}
-			//fmt.Println("QR", processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err)
-			mxExecRepeats.AddInt(conflicts)
-			mxExecTriggers.AddInt(triggers)
+			//TODO
+			//mxExecRepeats.AddInt(conflicts)
+			//mxExecTriggers.AddInt(triggers)
 
-			if processedTxNum > 0 {
-				pe.outputTxNum.Store(processedTxNum)
-				blockComplete.Store(stoppedAtBlockEnd)
-				// TODO update logGas here
+			if blockResult.complete {
+				blockComplete.Store(blockResult.complete)
+				pe.outputTxNum.Store(blockResult.lastTxNum)
+				if blockStatus, ok := pe.blockStatus[blockResult.BlockNum+1]; ok {
+					nextTx := blockStatus.execTasks.takeNextPending()
+
+					if nextTx == -1 {
+						return fmt.Errorf("block exec %d failed: no executable transactions: bad dependency", blockResult.BlockNum+1)
+					}
+					
+					pe.lastBlockNum.Store(blockResult.BlockNum + 1)
+					blockStatus.cntExec++
+					pe.in.Add(ctx,
+						&taskVersion{
+							execTask:   blockStatus.tasks[nextTx],
+							version:    state.Version{TxIndex: nextTx, Incarnation: 0},
+							versionMap: blockStatus.versionMap})
+				}
 			}
-
 		}
 		return nil
 	}(ctx)
@@ -571,20 +587,20 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 					pe.rws.DrainNonBlocking(ctx)
 					pe.applyWorker.ResetTx(tx)
 
-					processedTxNum, conflicts, triggers, processedBlockNum, stoppedAtBlockEnd, err :=
-						pe.processResults(ctx, pe.outputTxNum.Load(), nil, false, true)
+					blockResult, err := pe.processResults(ctx, nil)
+
 					if err != nil {
 						return err
 					}
 
-					mxExecRepeats.AddInt(conflicts)
-					mxExecTriggers.AddInt(triggers)
-					if processedBlockNum > 0 {
-						pe.outputBlockNum.SetUint64(processedBlockNum)
-					}
-					if processedTxNum > 0 {
-						pe.outputTxNum.Store(processedTxNum)
-						blockComplete.Store(stoppedAtBlockEnd)
+					//TODO
+					//mxExecRepeats.AddInt(conflicts)
+					//mxExecTriggers.AddInt(triggers)
+
+					if blockResult.complete && blockResult.BlockNum > 0 {
+						pe.outputBlockNum.SetUint64(blockResult.BlockNum)
+						pe.outputTxNum.Store(blockResult.lastTxNum)
+						blockComplete.Store(blockResult.complete)
 					}
 				}
 				t0 = time.Since(commitStart)
@@ -665,55 +681,54 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 	return nil
 }
 
-func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint64, backPressure chan<- struct{}, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func (pe *parallelExecutor) processResults(ctx context.Context, backPressure chan<- struct{}) (result blockResult, err error) {
 	rwsIt := pe.rws.Iter()
 	defer rwsIt.Close()
 	//defer fmt.Println("PRQ", "Done")
 
-	outputTxNum = inputTxNum
-	for rwsIt.HasNext(outputTxNum) {
-		result := rwsIt.PopNext()
-		txTask := result.Task.(*taskVersion)
+	for rwsIt.HasNext() && !result.complete {
+		txResult := rwsIt.PopNext()
+		txTask := txResult.Task.(*taskVersion)
 		//fmt.Println("PRQ", txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
 		if pe.cfg.syncCfg.ChaosMonkey {
-			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, result.Err)
+			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, pe.cfg.badBlockHalt, txResult.Err)
 			if chaosErr != nil {
 				log.Warn("Monkey in consensus")
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, chaosErr
+				return result, chaosErr
 			}
 		}
 
-		_, err := pe.nextResult(ctx, pe.lastBlockNum.Load(), result)
+		result, err = pe.nextResult(ctx, pe.lastBlockNum.Load(), txResult)
 
 		if err != nil {
-			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
+			return result, err
 		}
 
-		if txTask.IsBlockEnd() {
+		if result.complete {
 			pe.rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
 
 			err := pe.rs.ApplyState4(ctx,
 				txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
-				txTask.BalanceIncreaseSet, txTask.Logs, result.TraceFroms, result.TraceTos,
+				txTask.BalanceIncreaseSet, txTask.Logs, txResult.TraceFroms, txResult.TraceTos,
 				txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution)
 
 			if err != nil {
-				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
+				return result, fmt.Errorf("StateV3.Apply: %w", err)
 			}
 			txTask.ReadLists, txTask.WriteLists = nil, nil
 
-			if processedBlockNum > pe.lastBlockNum.Load() {
+			if result.BlockNum > pe.lastBlockNum.Load() {
 				pe.doms.SetTxNum(txTask.TxNum)
-				pe.doms.SetBlockNum(processedBlockNum)
-				pe.outputBlockNum.SetUint64(processedBlockNum)
-				pe.lastBlockNum.Store(processedBlockNum)
+				pe.doms.SetBlockNum(result.BlockNum)
+				pe.outputBlockNum.SetUint64(result.BlockNum)
+				pe.lastBlockNum.Store(result.BlockNum)
 			}
 			//if !bytes.Equal(rh, txTask.BlockRoot[:]) {
 			//	log.Error("block hash mismatch", "rh", hex.EncodeToString(rh), "blockRoot", hex.EncodeToString(txTask.BlockRoot[:]), "bn", txTask.BlockNum, "txn", txTask.TxNum)
 			//	return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hashk mismatch: %x != %x bn =%d, txn= %d", rh, txTask.BlockRoot[:], txTask.BlockNum, txTask.TxNum)
 			//}
 		}
-		outputTxNum++
+
 		if backPressure != nil {
 			select {
 			case backPressure <- struct{}{}:
@@ -721,22 +736,16 @@ func (pe *parallelExecutor) processResults(ctx context.Context, inputTxNum uint6
 			}
 		}
 		if err := pe.rs.ApplyLogsAndTraces4(
-			txTask.Logs, result.TraceFroms, result.TraceTos,
+			txTask.Logs, txResult.TraceFroms, txResult.TraceTos,
 			pe.rs.Domains(), txTask.PruneNonEssentials, txTask.Config); err != nil {
-			return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
-		}
-		processedBlockNum = txTask.BlockNum
-		if !stopedAtBlockEnd {
-			stopedAtBlockEnd = txTask.IsBlockEnd()
-		}
-		if forceStopAtBlockEnd && txTask.IsBlockEnd() {
-			break
+			return result, fmt.Errorf("ApplyLogsAndTraces4: %w", err)
 		}
 	}
-	return
+
+	return result, nil
 }
 
-func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res *exec.Result) (result executorResult, err error) {
+func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res *exec.Result) (result blockResult, err error) {
 	tx := res.Version().TxIndex
 
 	blockStatus, ok := pe.blockStatus[blockNum]
@@ -829,7 +838,6 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 
 	// do validations ...
 	maxComplete := blockStatus.execTasks.maxAllComplete()
-
 	toValidate := make([]int, 0, 2)
 
 	for blockStatus.validateTasks.minPending() <= maxComplete && blockStatus.validateTasks.minPending() >= 0 {
@@ -862,9 +870,9 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 	}
 
 	maxValidated := blockStatus.validateTasks.maxAllComplete()
-
 	if blockStatus.validateTasks.countComplete() == len(blockStatus.tasks) && blockStatus.execTasks.countComplete() == len(blockStatus.tasks) {
 		pe.logger.Debug("exec summary", "block", blockNum, "execs", blockStatus.cntExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail, "#tasks/#execs", fmt.Sprintf("%.2f%%", float64(len(blockStatus.tasks))/float64(blockStatus.cntExec)*100))
+		fmt.Println("exec summary", "block", blockNum, "execs", blockStatus.cntExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail, "#tasks/#execs", fmt.Sprintf("%.2f%%", float64(len(blockStatus.tasks))/float64(blockStatus.cntExec)*100))
 
 		var allDeps map[int]map[int]bool
 
@@ -875,7 +883,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 			deps = state.BuildDAG(*blockStatus.blockIO, pe.logger)
 		}
 
-		return executorResult{blockNum, blockStatus.blockIO, &blockStatus.stats, &deps, allDeps}, err
+		return blockResult{blockNum, blockStatus.tasks[len(blockStatus.tasks)-1].TxNum, true, blockStatus.blockIO, &blockStatus.stats, &deps, allDeps}, nil
 	}
 
 	// Send the next immediate pending transaction to be executed
@@ -886,10 +894,17 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 
 			blockStatus.skipCheck[nextTx] = true
 
-			pe.in.ReTry(&taskVersion{
-				execTask:   blockStatus.tasks[nextTx],
-				version:    state.Version{TxIndex: nextTx, Incarnation: blockStatus.txIncarnations[nextTx]},
-				versionMap: blockStatus.versionMap})
+			if incarnation := blockStatus.txIncarnations[nextTx]; incarnation == 0 {
+				pe.in.Add(ctx, &taskVersion{
+					execTask:   blockStatus.tasks[nextTx],
+					version:    state.Version{TxIndex: nextTx, Incarnation: incarnation},
+					versionMap: blockStatus.versionMap})
+			} else {
+				pe.in.ReTry(&taskVersion{
+					execTask:   blockStatus.tasks[nextTx],
+					version:    state.Version{TxIndex: nextTx, Incarnation: incarnation},
+					versionMap: blockStatus.versionMap})
+			}
 		}
 	}
 
@@ -899,7 +914,6 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 
 		if nextTx != -1 {
 			blockStatus.cntExec++
-
 			pe.in.Add(ctx, &taskVersion{
 				execTask:   blockStatus.tasks[nextTx],
 				version:    state.Version{TxIndex: nextTx, Incarnation: blockStatus.txIncarnations[nextTx]},
@@ -907,7 +921,12 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 		}
 	}
 
-	return
+	var lastTxNum uint64
+	if maxValidated >= 0 {
+		lastTxNum = blockStatus.tasks[maxValidated].TxNum
+	}
+
+	return blockResult{blockNum, lastTxNum, false, blockStatus.blockIO, &blockStatus.stats, nil, nil}, nil
 }
 
 func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log.Logger) context.CancelFunc {
@@ -1068,13 +1087,14 @@ func (pe *parallelExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (
 			prevSenderTx[*t.Sender] = i
 		}
 
-		if t.IsBlockEnd() {
+		if t.IsBlockEnd() && pe.lastBlockNum.Load() == t.BlockNum {
 			nextTx := blockStatus.execTasks.takeNextPending()
 
 			if nextTx == -1 {
 				return false, errors.New("no executable transactions: bad dependency")
 			}
-
+			
+			blockStatus.cntExec++
 			pe.in.Add(ctx,
 				&taskVersion{
 					execTask:   blockStatus.tasks[nextTx],

@@ -588,9 +588,15 @@ type ResultsQueueIter struct {
 func (q *ResultsQueueIter) Close() {
 	q.q.Unlock()
 }
-func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
-	return len(*q.q.results) > 0 && (*q.q.results)[0].txNum() == outputTxNum
+
+func (q *ResultsQueueIter) HasNext() bool {
+	return len(*q.q.results) > 0
 }
+
+func (q *ResultsQueueIter) Has(outputTxNum uint64) bool {
+	return q.HasNext() && (*q.q.results)[0].txNum() == outputTxNum
+}
+
 func (q *ResultsQueueIter) PopNext() *Result {
 	return heap.Pop(q.q.results).(*Result)
 }

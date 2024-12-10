@@ -346,7 +346,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *exec.ResultsQueue
 
 	var i int
 	outputTxNum = outputTxNumIn
-	for rwsIt.HasNext(outputTxNum) {
+	for rwsIt.Has(outputTxNum) {
 		result := rwsIt.PopNext()
 		if result.Err != nil {
 			return outputTxNum, false, err
