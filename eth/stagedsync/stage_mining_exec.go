@@ -277,11 +277,12 @@ func getNextTransactions(
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
 	}
 
-	txns, err := cfg.txnProvider.Yield(ctx, yieldOpts...)
+	yieldResult, err := cfg.txnProvider.Yield(ctx, yieldOpts...)
 	if err != nil {
 		return nil, err
 	}
 
+	txns := yieldResult.Transactions
 	blockNum := executionAt + 1
 	txns, err = filterBadTransactions(txns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger)
 	if err != nil {

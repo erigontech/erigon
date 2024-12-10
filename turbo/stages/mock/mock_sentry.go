@@ -364,7 +364,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		mock.StreamWg.Add(1)
 		mock.TxPoolFetch.ConnectSentries()
 		mock.StreamWg.Wait()
-		mock.TxnProvider = txnprovider.NewOrderedTxnPoolProvider(mock.TxPool)
+		mock.TxnProvider = txpool.NewOrderedTxnProvider(mock.TxPool)
 
 		go txpool.MainLoop(mock.Ctx, mock.TxPool, newTxs, mock.TxPoolSend, mock.TxPoolGrpcServer.NewSlotsStreams, func() {})
 	}

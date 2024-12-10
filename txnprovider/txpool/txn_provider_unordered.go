@@ -14,28 +14,27 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package txnprovider
+package txpool
 
 import (
 	"context"
 
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
-var _ TxnProvider = UnorderedTxnPoolProvider{}
+var _ txnprovider.TxnProvider = UnorderedTxnProvider{}
 
-// UnorderedTxnPoolProvider provides all the available transactions in the devp2p transaction pool without any ordering.
-type UnorderedTxnPoolProvider struct {
-	txnPool *txpool.TxPool
+// UnorderedTxnProvider provides all the available transactions in the devp2p transaction pool without any ordering.
+type UnorderedTxnProvider struct {
+	pool *TxPool
 }
 
-func (t UnorderedTxnPoolProvider) Priority() uint64 {
+func (p UnorderedTxnProvider) Priority() int {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (t UnorderedTxnPoolProvider) Yield(_ context.Context, _ ...YieldOption) ([]types.Transaction, error) {
+func (p UnorderedTxnProvider) Yield(_ context.Context, _ ...txnprovider.YieldOption) (txnprovider.YieldResult, error) {
 	//TODO implement me
 	//     for this we can implement a function YieldAllTxns in txpool.TxPool which uses the p.all attribute
 	//     data structure

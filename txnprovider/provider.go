@@ -26,43 +26,49 @@ import (
 )
 
 type TxnProvider interface {
-	Priority() uint64
-	Yield(ctx context.Context, opts ...YieldOption) ([]types.Transaction, error)
+	Priority() int
+	Yield(ctx context.Context, opts ...YieldOption) (YieldResult, error)
 }
 
-type YieldOption func(opt *yieldParams)
+type YieldResult struct {
+	Transactions []types.Transaction
+	TotalGas     uint64
+	TotalBlobGas uint64
+}
+
+type YieldOption func(opt *YieldParams)
 
 func WithParentBlockNum(blockNum uint64) YieldOption {
-	return func(opt *yieldParams) {
+	return func(opt *YieldParams) {
 		opt.ParentBlockNum = blockNum
 	}
 }
 
 func WithAmount(amount int) YieldOption {
-	return func(opt *yieldParams) {
+	return func(opt *YieldParams) {
 		opt.Amount = amount
 	}
 }
 
 func WithGasTarget(gasTarget uint64) YieldOption {
-	return func(opt *yieldParams) {
+	return func(opt *YieldParams) {
 		opt.GasTarget = gasTarget
 	}
 }
 
 func WithBlobGasTarget(blobGasTarget uint64) YieldOption {
-	return func(opt *yieldParams) {
+	return func(opt *YieldParams) {
 		opt.BlobGasTarget = blobGasTarget
 	}
 }
 
 func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) YieldOption {
-	return func(opt *yieldParams) {
+	return func(opt *YieldParams) {
 		opt.TxnIdsFilter = txnIdsFilter
 	}
 }
 
-type yieldParams struct {
+type YieldParams struct {
 	ParentBlockNum uint64
 	Amount         int
 	GasTarget      uint64
@@ -70,7 +76,7 @@ type yieldParams struct {
 	TxnIdsFilter   mapset.Set[[32]byte]
 }
 
-func yieldParamsFromOptions(opts ...YieldOption) yieldParams {
+func YieldParamsFromOptions(opts ...YieldOption) YieldParams {
 	config := defaultYieldParams
 	for _, opt := range opts {
 		opt(&config)
@@ -78,10 +84,10 @@ func yieldParamsFromOptions(opts ...YieldOption) yieldParams {
 	return config
 }
 
-var defaultYieldParams = yieldParams{
+var defaultYieldParams = YieldParams{
 	ParentBlockNum: 0,                         // no parent block to wait for by default
 	Amount:         math.MaxInt,               // all transactions by default
 	GasTarget:      math.MaxUint64,            // all transactions by default
 	BlobGasTarget:  math.MaxUint64,            // all transactions by default
-	TxnIdsFilter:   mapset.NewSet[[32]byte](), // no filter by default
+	TxnIdsFilter:   mapset.NewSet[[32]byte](), // empty filter by default
 }

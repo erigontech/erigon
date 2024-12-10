@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	rlp "github.com/erigontech/erigon-lib/rlp2"
+	"github.com/erigontech/erigon/core/types"
 )
 
 const (
@@ -763,9 +764,11 @@ func (h Addresses) Len() int {
 }
 
 type TxnsRlp struct {
-	Txns    [][]byte
-	Senders Addresses
-	IsLocal []bool
+	Txns         [][]byte
+	Senders      Addresses
+	IsLocal      []bool
+	TotalGas     uint64
+	TotalBlobGas uint64
 }
 
 // Resize internal arrays to len=targetSize, shrinks if need. It rely on `append` algorithm to realloc
@@ -783,6 +786,23 @@ func (r *TxnsRlp) Resize(targetSize uint) {
 	r.Txns = r.Txns[:targetSize]
 	r.Senders = r.Senders[:length.Addr*targetSize]
 	r.IsLocal = r.IsLocal[:targetSize]
+}
+
+func (r *TxnsRlp) Transactions() ([]types.Transaction, error) {
+	txns := make([]types.Transaction, len(r.Txns))
+	for i := range r.Txns {
+		txn, err := types.DecodeWrappedTransaction(r.Txns[i])
+		if err != nil {
+			return nil, err
+		}
+
+		var sender common.Address
+		copy(sender[:], r.Senders.At(i))
+		txn.SetSender(sender)
+		txns[i] = txn
+	}
+
+	return txns, nil
 }
 
 var addressesGrowth = make([]byte, length.Addr)

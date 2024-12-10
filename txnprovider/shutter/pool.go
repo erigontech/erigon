@@ -1,13 +1,15 @@
 package shutter
 
-import "github.com/erigontech/erigon/core/types"
+import (
+	"github.com/erigontech/erigon/txnprovider"
+)
 
 type Pool struct {
 }
 
-func (p Pool) Yield() ([]types.Transaction, error) {
+func (p Pool) Yield() (txnprovider.YieldResult, error) {
 	//
 	// TODO
 	//
-	return nil, nil
+	return txnprovider.YieldResult{}, nil
 }

@@ -663,7 +663,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return nil, err
 		}
 
-		backend.txnProvider = txnprovider.NewOrderedTxnPoolProvider(backend.txPool)
+		backend.txnProvider = txpool.NewOrderedTxnProvider(backend.txPool)
 	}
 
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)

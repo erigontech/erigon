@@ -14,27 +14,26 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package txnprovider
+package shutter
 
 import (
 	"context"
 
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/txnprovider/shutter"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 const shutterProviderPriority = 110
 
-var _ TxnProvider = ShutterTxnProvider{}
+var _ txnprovider.TxnProvider = TxnProvider{}
 
-type ShutterTxnProvider struct {
-	shutterPool *shutter.Pool
+type TxnProvider struct {
+	pool *Pool
 }
 
-func (s ShutterTxnProvider) Priority() uint64 {
+func (p TxnProvider) Priority() int {
 	return shutterProviderPriority
 }
 
-func (s ShutterTxnProvider) Yield(_ context.Context, _ ...YieldOption) ([]types.Transaction, error) {
-	return s.shutterPool.Yield()
+func (p TxnProvider) Yield(_ context.Context, _ ...txnprovider.YieldOption) (txnprovider.YieldResult, error) {
+	return p.pool.Yield()
 }

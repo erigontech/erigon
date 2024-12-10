@@ -642,7 +642,7 @@ func (p *TxPool) Started() bool {
 	return p.started.Load()
 }
 
-func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (bool, int, error) {
+func (p *TxPool) best(ctx context.Context, n int, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (TxnsRlp, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -655,6 +655,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 	isShanghai := p.isShanghai() || p.isAgra()
 
+	var txns TxnsRlp
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
 	count := 0
@@ -666,7 +667,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 	tx, err := p.poolDB.BeginRo(ctx)
 	if err != nil {
-		return false, 0, err
+		return txns, err
 	}
 
 	defer tx.Rollback()
@@ -689,7 +690,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 		rlpTxn, sender, isLocal, err := p.getRlpLocked(tx, mt.TxnSlot.IDHash[:])
 		if err != nil {
-			return false, count, err
+			return txns, err
 		}
 		if len(rlpTxn) == 0 {
 			toRemove = append(toRemove, mt)
@@ -698,10 +699,12 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 		// Skip transactions that require more blob gas than is available
 		blobCount := uint64(len(mt.TxnSlot.BlobHashes))
-		if blobCount*fixedgas.BlobGasPerBlob > availableBlobGas {
+		blobGas := blobCount * fixedgas.BlobGasPerBlob
+		if blobGas > availableBlobGas {
 			continue
 		}
-		availableBlobGas -= blobCount * fixedgas.BlobGasPerBlob
+		availableBlobGas -= blobGas
+		txns.TotalBlobGas += blobGas
 
 		// make sure we have enough gas in the caller to add this transaction.
 		// not an exact science using intrinsic gas but as close as we could hope for at
@@ -713,6 +716,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			continue
 		}
 		availableGas -= intrinsicGas
+		txns.TotalGas += intrinsicGas
 
 		txns.Txns[count] = rlpTxn
 		copy(txns.Senders.At(count), sender.Bytes())
@@ -727,47 +731,17 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			p.pending.Remove(mt, "best", p.logger)
 		}
 	}
-	return true, count, nil
-}
-
-func (p *TxPool) YieldBestTxns(
-	ctx context.Context,
-	amount int,
-	parentBlockNum uint64,
-	gasTarget uint64,
-	blobGasTarget uint64,
-	txnIdsFilter mapset.Set[[32]byte],
-) ([]types.Transaction, error) {
-	var txnsRlp TxnsRlp
-	_, _, err := p.YieldBest(ctx, amount, &txnsRlp, parentBlockNum, gasTarget, blobGasTarget, txnIdsFilter)
-	if err != nil {
-		return nil, err
-	}
-
-	txns := make([]types.Transaction, 0, len(txnsRlp.Txns))
-	for i := range txnsRlp.Txns {
-		txn, err := types.DecodeWrappedTransaction(txnsRlp.Txns[i])
-		if err != nil {
-			return nil, err
-		}
-
-		var sender common.Address
-		copy(sender[:], txnsRlp.Senders.At(i))
-		txn.SetSender(sender)
-		txns = append(txns, txn)
-	}
 
 	return txns, nil
 }
 
-func (p *TxPool) YieldBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
-	return p.best(ctx, n, txns, onTopOf, availableGas, availableBlobGas, toSkip)
+func (p *TxPool) YieldBest(ctx context.Context, n int, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (TxnsRlp, error) {
+	return p.best(ctx, n, onTopOf, availableGas, availableBlobGas, toSkip)
 }
 
-func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
+func (p *TxPool) PeekBest(ctx context.Context, n int, onTopOf, availableGas, availableBlobGas uint64) (TxnsRlp, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.YieldBest(ctx, n, txns, onTopOf, availableGas, availableBlobGas, set)
-	return onTime, err
+	return p.YieldBest(ctx, n, onTopOf, availableGas, availableBlobGas, set)
 }
 
 func (p *TxPool) CountContent() (int, int, int) {
