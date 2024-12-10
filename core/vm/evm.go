@@ -313,7 +313,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		}
 		// TODO: consider clearing up unused snapshots:
 		//} else {
-		//	evm.StateDB.DiscardSnapshot(snapshot)
+		//	evm.IntraBlockState().DiscardSnapshot(snapshot)
 	}
 	return ret, gas, err
 }
