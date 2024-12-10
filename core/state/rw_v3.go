@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
@@ -42,6 +43,7 @@ var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 
 type StateV3 struct {
 	domains      *libstate.SharedDomains
+	arbExtraData *ArbitrumExtraData
 	triggerLock  sync.Mutex
 	triggers     map[uint64]*TxTask
 	senderTxNums map[common.Address]uint64

@@ -86,7 +86,7 @@ func (b *Backend) ResetWithGenesisBlock(gb *types.Block) {
 	b.arb.BlockChain().ResetWithGenesisBlock(gb)
 }
 
-func (b *Backend) EnqueueL2Message(ctx context.Context, tx *types.Transaction, options *arbitrum_types.ConditionalOptions) error {
+func (b *Backend) EnqueueL2Message(ctx context.Context, tx types.Transaction, options *arbitrum_types.ConditionalOptions) error {
 	return b.arb.PublishTransaction(ctx, tx, options)
 }
 

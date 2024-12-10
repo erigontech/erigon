@@ -80,3 +80,17 @@ func Shorten(k []byte, l int) []byte {
 	}
 	return k
 }
+
+type Unsigned interface {
+	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+}
+
+// Todo replace
+// SaturatingUAdd add two integers without overflow
+func SaturatingUAdd[T Unsigned](a, b T) T {
+	sum := a + b
+	if sum < a || sum < b {
+		sum = ^T(0)
+	}
+	return sum
+}

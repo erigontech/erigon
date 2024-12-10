@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/lru"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/ethdb"
+	"github.com/erigontech/erigon/core/types"
 	"math/big"
 	"runtime"
 )
@@ -51,18 +53,18 @@ func NewStylusPrefix(dictionary byte) []byte {
 	return append(prefix, dictionary)
 }
 
-func (s *StateDB) ActivateWasm(moduleHash common.Hash, asmMap map[ethdb.WasmTarget][]byte) {
+func (s *StateV3) ActivateWasm(moduleHash common.Hash, asmMap map[ethdb.WasmTarget][]byte) {
 	_, exists := s.arbExtraData.activatedWasms[moduleHash]
 	if exists {
 		return
 	}
 	s.arbExtraData.activatedWasms[moduleHash] = asmMap
-	s.journal.append(wasmActivation{
-		moduleHash: moduleHash,
-	})
+	//s.journal.append(wasmActivation{
+	//	moduleHash: moduleHash,
+	//})
 }
 
-func (s *StateDB) TryGetActivatedAsm(target ethdb.WasmTarget, moduleHash common.Hash) ([]byte, error) {
+func (s *StateV3) TryGetActivatedAsm(target ethdb.WasmTarget, moduleHash common.Hash) ([]byte, error) {
 	asmMap, exists := s.arbExtraData.activatedWasms[moduleHash]
 	if exists {
 		if asm, exists := asmMap[target]; exists {
@@ -72,7 +74,7 @@ func (s *StateDB) TryGetActivatedAsm(target ethdb.WasmTarget, moduleHash common.
 	return s.db.ActivatedAsm(target, moduleHash)
 }
 
-func (s *StateDB) TryGetActivatedAsmMap(targets []ethdb.WasmTarget, moduleHash common.Hash) (map[ethdb.WasmTarget][]byte, error) {
+func (s *StateV3) TryGetActivatedAsmMap(targets []ethdb.WasmTarget, moduleHash common.Hash) (map[ethdb.WasmTarget][]byte, error) {
 	asmMap := s.arbExtraData.activatedWasms[moduleHash]
 	if asmMap != nil {
 		for _, target := range targets {
@@ -95,42 +97,42 @@ func (s *StateDB) TryGetActivatedAsmMap(targets []ethdb.WasmTarget, moduleHash c
 	return asmMap, err
 }
 
-func (s *StateDB) GetStylusPages() (uint16, uint16) {
+func (s *StateV3) GetStylusPages() (uint16, uint16) {
 	return s.arbExtraData.openWasmPages, s.arbExtraData.everWasmPages
 }
 
-func (s *StateDB) GetStylusPagesOpen() uint16 {
+func (s *StateV3) GetStylusPagesOpen() uint16 {
 	return s.arbExtraData.openWasmPages
 }
 
-func (s *StateDB) SetStylusPagesOpen(open uint16) {
+func (s *StateV3) SetStylusPagesOpen(open uint16) {
 	s.arbExtraData.openWasmPages = open
 }
 
 // Tracks that `new` additional pages have been opened, returning the previous counts
-func (s *StateDB) AddStylusPages(new uint16) (uint16, uint16) {
+func (s *StateV3) AddStylusPages(new uint16) (uint16, uint16) {
 	open, ever := s.GetStylusPages()
 	s.arbExtraData.openWasmPages = common.SaturatingUAdd(open, new)
-	s.arbExtraData.everWasmPages = common.MaxInt(ever, s.arbExtraData.openWasmPages)
+	s.arbExtraData.everWasmPages = max(ever, s.arbExtraData.openWasmPages)
 	return open, ever
 }
 
-func (s *StateDB) AddStylusPagesEver(new uint16) {
+func (s *StateV3) AddStylusPagesEver(new uint16) {
 	s.arbExtraData.everWasmPages = common.SaturatingUAdd(s.arbExtraData.everWasmPages, new)
 }
 
-func NewDeterministic(root common.Hash, db Database) (*StateDB, error) {
-	sdb, err := New(root, db, nil)
-	if err != nil {
-		return nil, err
-	}
-	sdb.deterministic = true
-	return sdb, nil
-}
+//func NewDeterministic(root common.Hash, db Database) (*StateDB, error) {
+//	sdb, err := New(root, db, nil)
+//	if err != nil {
+//		return nil, err
+//	}
+//	sdb.deterministic = true
+//	return sdb, nil
+//}
 
-func (s *StateDB) Deterministic() bool {
-	return s.deterministic
-}
+//func (s *StateV3) Deterministic() bool {
+//	return s.deterministic
+//}
 
 type ArbitrumExtraData struct {
 	unexpectedBalanceDelta *big.Int                      // total balance change across all accounts
@@ -141,84 +143,88 @@ type ArbitrumExtraData struct {
 	recentWasms            RecentWasms
 }
 
-func (s *StateDB) SetArbFinalizer(f func(*ArbitrumExtraData)) {
+func (s *StateV3) SetArbFinalizer(f func(*ArbitrumExtraData)) {
 	runtime.SetFinalizer(s.arbExtraData, f)
 }
 
-func (s *StateDB) GetCurrentTxLogs() []*types.Log {
-	return s.logs[s.thash]
+func (s *StateV3) GetCurrentTxLogs() []*types.Log {
+	return nil
+	//return s.logs[s.thash]
 }
 
 // GetUnexpectedBalanceDelta returns the total unexpected change in balances since the last commit to the database.
-func (s *StateDB) GetUnexpectedBalanceDelta() *big.Int {
+func (s *StateV3) GetUnexpectedBalanceDelta() *big.Int {
 	return new(big.Int).Set(s.arbExtraData.unexpectedBalanceDelta)
 }
 
-func (s *StateDB) GetSelfDestructs() []common.Address {
+// TODO
+func (s *StateV3) GetSelfDestructs() []common.Address {
+	panic("rip it out")
 	selfDestructs := []common.Address{}
-	for addr := range s.journal.dirties {
-		obj, exist := s.stateObjects[addr]
-		if !exist {
-			continue
-		}
-		if obj.selfDestructed {
-			selfDestructs = append(selfDestructs, addr)
-		}
-	}
+	//for addr := range s.journal.dirties {
+	//	obj, exist := s.stateObjects[addr]
+	//	if !exist {
+	//		continue
+	//	}
+	//	if obj.selfDestructed {
+	//		selfDestructs = append(selfDestructs, addr)
+	//	}
+	//}
 	return selfDestructs
 }
 
-// making the function public to be used by external tests
-func ForEachStorage(s *StateDB, addr common.Address, cb func(key, value common.Hash) bool) error {
-	return forEachStorage(s, addr, cb)
-}
-
-// moved here from statedb_test.go
-func forEachStorage(s *StateDB, addr common.Address, cb func(key, value common.Hash) bool) error {
-	so := s.getStateObject(addr)
-	if so == nil {
-		return nil
-	}
-	tr, err := so.getTrie()
-	if err != nil {
-		return err
-	}
-	trieIt, err := tr.NodeIterator(nil)
-	if err != nil {
-		return err
-	}
-	it := trie.NewIterator(trieIt)
-
-	for it.Next() {
-		key := common.BytesToHash(s.trie.GetKey(it.Key))
-		if value, dirty := so.dirtyStorage[key]; dirty {
-			if !cb(key, value) {
-				return nil
-			}
-			continue
-		}
-
-		if len(it.Value) > 0 {
-			_, content, _, err := rlp.Split(it.Value)
-			if err != nil {
-				return err
-			}
-			if !cb(key, common.BytesToHash(content)) {
-				return nil
-			}
-		}
-	}
-	return nil
-}
+//// making the function public to be used by external tests
+//func ForEachStorage(s *StateV3, addr common.Address, cb func(key, value common.Hash) bool) error {
+//	return forEachStorage(s, addr, cb)
+//}
+//
+//// moved here from statedb_test.go
+//func forEachStorage(s *StateV3, addr common.Address, cb func(key, value common.Hash) bool) error {
+//	s.domains.IterateStoragePrefix(addr[:], cb)
+//	so := s.getStateObject(addr)
+//	if so == nil {
+//		return nil
+//	}
+//	tr, err := so.getTrie()
+//	if err != nil {
+//		return err
+//	}
+//	trieIt, err := tr.NodeIterator(nil)
+//	if err != nil {
+//		return err
+//	}
+//	it := trie.NewIterator(trieIt)
+//
+//	for it.Next() {
+//		key := common.BytesToHash(s.trie.GetKey(it.Key))
+//		if value, dirty := so.dirtyStorage[key]; dirty {
+//			if !cb(key, value) {
+//				return nil
+//			}
+//			continue
+//		}
+//
+//		if len(it.Value) > 0 {
+//			_, content, _, err := rlp.Split(it.Value)
+//			if err != nil {
+//				return err
+//			}
+//			if !cb(key, common.BytesToHash(content)) {
+//				return nil
+//			}
+//		}
+//	}
+//	return nil
+//}
 
 // maps moduleHash to activation info
 type UserWasms map[common.Hash]ActivatedWasm
 
-func (s *StateDB) StartRecording() {
+func (s *StateV3) StartRecording() {
 	s.arbExtraData.userWasms = make(UserWasms)
 }
 
-func (s *StateDB) RecordProgram(targets []ethdb.WasmTarget, moduleHash common.Hash) {
+func (s *StateV3) RecordProgram(targets []ethdb.WasmTarget, moduleHash common.Hash) {
 	if len(targets) == 0 {
 		// nothing to record
 		return
@@ -232,19 +238,21 @@ func (s *StateDB) RecordProgram(targets []ethdb.WasmTarget, moduleHash common.Ha
 	}
 }
 
-func (s *StateDB) UserWasms() UserWasms {
+func (s *StateV3) UserWasms() UserWasms {
 	return s.arbExtraData.userWasms
 }
 
-func (s *StateDB) RecordCacheWasm(wasm CacheWasm) {
-	s.journal.entries = append(s.journal.entries, wasm)
+// Deprecated
+func (s *StateV3) RecordCacheWasm(wasm CacheWasm) {
+	panic("")
+	//s.journal.entries = append(s.journal.entries, wasm)
 }
 
-func (s *StateDB) RecordEvictWasm(wasm EvictWasm) {
-	s.journal.entries = append(s.journal.entries, wasm)
+func (s *StateV3) RecordEvictWasm(wasm EvictWasm) {
+	//s.journal.entries = append(s.journal.entries, wasm)
 }
 
-func (s *StateDB) GetRecentWasms() RecentWasms {
+func (s *StateV3) GetRecentWasms() RecentWasms {
 	return s.arbExtraData.recentWasms
 }
 

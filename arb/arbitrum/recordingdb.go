@@ -187,7 +187,7 @@ func NewRecordingDatabase(config *RecordingDatabaseConfig, ethdb ethdb.Database,
 
 // Normal geth state.New + Reference is not atomic vs Dereference. This one is.
 // This function does not recreate a state
-func (r *RecordingDatabase) StateFor(header *types.Header) (*state.StateDB, error) {
+func (r *RecordingDatabase) StateFor(header *types.Header) (*state.StateV3, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -226,7 +226,7 @@ func (r *RecordingDatabase) dereferenceRoot(root common.Hash) {
 	r.db.TrieDB().Dereference(root)
 }
 
-func (r *RecordingDatabase) addStateVerify(statedb *state.StateDB, expected common.Hash, blockNumber uint64) (*state.StateDB, error) {
+func (r *RecordingDatabase) addStateVerify(statedb *state.StateV3, expected common.Hash, blockNumber uint64) (*state.StateV3, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	result, err := statedb.Commit(blockNumber, true)
@@ -247,10 +247,11 @@ func (r *RecordingDatabase) addStateVerify(statedb *state.StateDB, expected comm
 		_, size, _ = r.db.TrieDB().Size()
 		recordingDbSize.Update(int64(size))
 	}
-	return state.New(result, statedb.Database(), nil)
+	return statedb, nil
+	//return state.New(result, statedb.Database(), nil)
 }
 
-func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeader *types.Header, logFunc StateBuildingLogFunction) (*state.StateDB, consensus.ChainHeaderReader, *RecordingKV, error) {
+func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeader *types.Header, logFunc StateBuildingLogFunction) (*state.StateV3, consensus.ChainHeaderReader, *RecordingKV, error) {
 	_, err := r.GetOrRecreateState(ctx, lastBlockHeader, logFunc)
 	if err != nil {
 		return nil, nil, nil, err
@@ -299,8 +300,8 @@ func (r *RecordingDatabase) PreimagesFromRecording(chainContextIf consensus.Chai
 	return entries, nil
 }
 
-func (r *RecordingDatabase) GetOrRecreateState(ctx context.Context, header *types.Header, logFunc StateBuildingLogFunction) (*state.StateDB, error) {
-	stateFor := func(header *types.Header) (*state.StateDB, StateReleaseFunc, error) {
+func (r *RecordingDatabase) GetOrRecreateState(ctx context.Context, header *types.Header, logFunc StateBuildingLogFunction) (*state.StateV3, error) {
+	stateFor := func(header *types.Header) (*state.StateV3, StateReleaseFunc, error) {
 		state, err := r.StateFor(header)
 		// we don't use the release functor pattern here yet
 		return state, NoopStateRelease, err
