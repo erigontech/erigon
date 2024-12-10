@@ -29,13 +29,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	kzg4844 "github.com/crate-crypto/go-kzg-4844"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/core/types"
 	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/holiman/uint256"
 )
 
@@ -142,7 +142,7 @@ func (args *SendTxArgs) ToTransaction() (*types.Transaction, error) {
 	if err := args.validateTxSidecar(); err != nil {
 		return nil, err
 	}
-	var data types.TxData
+	var data types.Transaction
 	switch {
 	case args.BlobHashes != nil:
 		al := types.AccessList{}
@@ -150,17 +150,21 @@ func (args *SendTxArgs) ToTransaction() (*types.Transaction, error) {
 			al = *args.AccessList
 		}
 		data = &types.BlobTx{
-			To:         *to,
-			ChainID:    uint256.MustFromBig((*big.Int)(args.ChainID)),
-			Nonce:      uint64(args.Nonce),
-			Gas:        uint64(args.Gas),
-			GasFeeCap:  uint256.MustFromBig((*big.Int)(args.MaxFeePerGas)),
-			GasTipCap:  uint256.MustFromBig((*big.Int)(args.MaxPriorityFeePerGas)),
-			Value:      uint256.MustFromBig((*big.Int)(&args.Value)),
-			Data:       args.data(),
-			AccessList: al,
-			BlobHashes: args.BlobHashes,
-			BlobFeeCap: uint256.MustFromBig((*big.Int)(args.BlobFeeCap)),
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				ChainID: uint256.MustFromBig((*big.Int)(args.ChainID)),
+				CommonTx: types.CommonTx{
+					To:         to,
+					Nonce:      uint64(args.Nonce),
+					Gas:        uint64(args.Gas),
+					GasFeeCap:  uint256.MustFromBig((*big.Int)(args.MaxFeePerGas)),
+					GasTipCap:  uint256.MustFromBig((*big.Int)(args.MaxPriorityFeePerGas)),
+					Value:      uint256.MustFromBig((*big.Int)(&args.Value)),
+					Data:       args.data(),
+					AccessList: al,
+					BlobHashes: args.BlobHashes,
+					BlobFeeCap: uint256.MustFromBig((*big.Int)(args.BlobFeeCap)),
+				},
+			},
 		}
 		if args.Blobs != nil {
 			data.(*types.BlobTx).Sidecar = &types.BlobTxSidecar{
@@ -240,8 +244,8 @@ func (args *SendTxArgs) validateTxSidecar() error {
 
 	if args.Commitments == nil {
 		// Generate commitment and proof.
-		commitments := make([]kzg4844.Commitment, n)
-		proofs := make([]kzg4844.Proof, n)
+		commitments := make([]kzg4844.KZGCommitment, n)
+		proofs := make([]kzg4844.KZGProof, n)
 		for i, b := range args.Blobs {
 			c, err := kzg4844.BlobToCommitment(b)
 			if err != nil {
