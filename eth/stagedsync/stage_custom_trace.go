@@ -97,8 +97,9 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	}
 	defer cfg.execArgs.BlockReader.Snapshots().(*freezeblocks.RoSnapshots).EnableReadAhead().DisableReadAhead()
 
-	for ; startBlock < endBlock; startBlock += 1_000_000 {
-		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+1_000_000, "custom_trace", logger); err != nil {
+	batchSize := uint64(1_000_000)
+	for ; startBlock < endBlock; startBlock += batchSize {
+		if err := customTraceBatchProduce(ctx, cfg.execArgs, cfg.db, startBlock, startBlock+batchSize, "custom_trace", logger); err != nil {
 			return err
 		}
 	}
