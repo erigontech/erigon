@@ -1975,7 +1975,7 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		return nil, err
 	}
 
-	fmt.Println("LAL deleting N entries", limit, "from key", prunedKey)
+	fmt.Println("LAL deleting N entries", limit, "from key", prunedKey, "table", dt.d.valuesTable)
 
 	var stepBytes []byte
 	for ; k != nil; k, v, err = valsCursor.Next() {
@@ -1994,6 +1994,8 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 			continue
 		}
 		if limit == 0 {
+			fmt.Println("LAL prune needs new iter", "table", dt.d.valuesTable)
+
 			if err := ancientDomainValsCollector.Load(rwTx, dt.d.valuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 				return stat, fmt.Errorf("load domain values: %w", err)
 			}
@@ -2020,6 +2022,9 @@ func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txT
 		default:
 		}
 	}
+
+	fmt.Println("LAL prune finished")
+
 	mxPruneSizeDomain.AddUint64(stat.Values)
 	if err := ancientDomainValsCollector.Load(rwTx, dt.d.valuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return stat, fmt.Errorf("load domain values: %w", err)
