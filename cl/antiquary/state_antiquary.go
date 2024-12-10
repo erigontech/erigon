@@ -75,6 +75,7 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			if !s.backfilled.Load() {
 				continue
 			}
+			fmt.Println("X")
 			// Check if we are behind finalized
 			_, finalized, err := s.readHistoricalProcessingProgress(ctx)
 			if err != nil {
@@ -83,6 +84,7 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			}
 			// We wait for updated finality.
 			if finalized == beforeFinalized {
+				fmt.Println("XA")
 				continue
 			}
 			beforeFinalized = finalized

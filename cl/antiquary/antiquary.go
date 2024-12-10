@@ -18,6 +18,7 @@ package antiquary
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"math"
 	"strings"
@@ -233,6 +234,7 @@ func (a *Antiquary) Loop() error {
 	}
 
 	if a.states {
+		fmt.Println("AA")
 		go a.loopStates(a.ctx)
 	}
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, frozenSlots); err != nil {
