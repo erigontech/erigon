@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
@@ -777,6 +778,23 @@ func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, cou
 	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
 }
 
+// Returns the node's code and commit details in a slice
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md#engine_getclientversionv1
+func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	commitBytes := [4]byte{}
+	c := []byte(params.GitCommit)
+	if len(c) >= 4 {
+		copy(commitBytes[:], c[0:4])
+	}
+	result := make([]engine_types.ClientVersionV1, 1)
+	result[0] =engine_types.ClientVersionV1{
+		Code: "EG", 
+		Name: "erigon", 
+		Version: params.Version, 
+		Commit: commitBytes}
+	return result, nil
+}
+
 var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
 	"engine_forkchoiceUpdatedV2",
@@ -791,6 +809,7 @@ var ourCapabilities = []string{
 	"engine_getPayloadV4",
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",
+	"engine_getClientVersionV1",
 }
 
 func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
