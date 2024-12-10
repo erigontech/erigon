@@ -146,9 +146,16 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	blocksAvaiable := stateSn.BlocksAvailable()
 	stateSnRoTx := stateSn.View()
 	defer stateSnRoTx.Close()
-
+	log.Info("[Caplin]", "filling validators table", "from", 0, "to", stateSn.BlocksAvailable())
+	logTicker := time.NewTicker(10 * time.Second)
+	defer logTicker.Stop()
 	start := time.Now()
 	for slot := uint64(0); slot <= stateSn.BlocksAvailable(); slot++ {
+		select {
+		case <-logTicker.C:
+			log.Info("[Caplin] Filled validators table", "progress", fmt.Sprintf("%d/%d", slot, stateSn.BlocksAvailable()))
+		default:
+		}
 		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
 		if !ok {
 			return false, fmt.Errorf("segment not found for slot %d", slot)
