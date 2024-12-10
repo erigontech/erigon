@@ -73,14 +73,18 @@ type Cfg struct {
 	SamplingFactor uint64
 
 	Workers int
+
+	// EffectiveDictLimit is the maximum number of patterns allowed in reduced dictionary
+	EffectiveDictLimit int
 }
 
 var DefaultCfg = Cfg{
-	MinPatternScore: 1024,
-	MinPatternLen:   5,
-	MaxPatternLen:   128,
-	SamplingFactor:  4,
-	MaxDictPatterns: 64 * 1024,
+	MinPatternScore:    1024,
+	MinPatternLen:      5,
+	MaxPatternLen:      128,
+	SamplingFactor:     4,
+	MaxDictPatterns:    128 * 1024,
+	EffectiveDictLimit: 64 * 1024,
 
 	DictReducerSoftLimit: 1_000_000,
 
