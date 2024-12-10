@@ -46,6 +46,11 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 }
 
+func TestStateAntiquaryElectra(t *testing.T) {
+	blocks, preState, postState := tests.GetElectraRandom()
+	runTest(t, blocks, preState, postState)
+}
+
 func TestStateAntiquaryCapella(t *testing.T) {
 	blocks, preState, postState := tests.GetCapellaRandom()
 	runTest(t, blocks, preState, postState)
