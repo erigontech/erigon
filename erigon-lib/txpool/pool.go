@@ -1997,6 +1997,9 @@ func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err err
 
 func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	for i, mt := range p.deletedTxs {
+		if mt == nil {
+			continue
+		}
 		id := mt.Tx.SenderID
 		idHash := mt.Tx.IDHash[:]
 		if !p.all.hasTxs(id) {
