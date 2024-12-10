@@ -121,50 +121,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if err != nil {
 		return nil, err
 	}
-	println("cum gas used", cumGasUsed, "first log index", firstLogIndex, "txNum", txNum)
-
-	println("let's look around")
-	cumGasUsed1 := cumGasUsed
-	i := uint64(0)
-	for cumGasUsed1 == cumGasUsed {
-		var firstLogIndex1 uint32
-		i++
-		cumGasUsed1, _, firstLogIndex1, err = rawtemporaldb.ReceiptAsOf(tx, txNum-uint64(i))
-		if err != nil {
-			return nil, err
-		}
-		_ = firstLogIndex1
-		//println("cum gas used", cumGasUsed1, "first log index", firstLogIndex1, "txNum", txNum-uint64(i))
-	}
-	firstGoodTxNum := txNum - uint64(i)
-	firstIndex := index - int(i)
-	cumGasUsed1 = cumGasUsed
-	i = 0
-	for cumGasUsed1 == cumGasUsed {
-		i++
-		var firstLogIndex1 uint32
-		cumGasUsed1, _, firstLogIndex1, err = rawtemporaldb.ReceiptAsOf(tx, txNum+uint64(i))
-		if err != nil {
-			return nil, err
-		}
-
-		_ = firstLogIndex1
-		//println("cum gas used", cumGasUsed1, "first log index", firstLogIndex1, "txNum", txNum+uint64(i))
-	}
-	println("first good txnum is", firstGoodTxNum, firstIndex)
-	println("last good txnum is", txNum+uint64(i))
-	println("our txnum is", txNum, index) // 1962853351 1962853463
-	cumGasUsed1, _, firstLogIndex1, err := rawtemporaldb.ReceiptAsOf(tx, firstGoodTxNum)
-	if err != nil {
-		return nil, err
-	}
-	println("cum gas used first", cumGasUsed1, "first log index", firstLogIndex1, "txNum", firstGoodTxNum)
-
-	cumGasUsed1, _, firstLogIndex1, err = rawtemporaldb.ReceiptAsOf(tx, txNum+uint64(i))
-	if err != nil {
-		return nil, err
-	}
-	println("cum gas used last", cumGasUsed1, "first log index", firstLogIndex1, "txNum", txNum+uint64(i))
 
 	receipt, _, err = core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, block.Transactions()[index], genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
 	if err != nil {
@@ -178,8 +134,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	for i := range receipt.Logs {
 		receipt.Logs[i].TxIndex = uint(index)
-		receipt.Logs[i].Index = uint(firstLogIndex)
-		firstLogIndex++
+		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
 	}
 
 	return receipt, nil

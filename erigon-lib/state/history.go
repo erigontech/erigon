@@ -1156,9 +1156,6 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
 	ok, histTxNum, err := ht.iit.seekInFiles(key, txNum)
-	if txNum < 1962853462+10 && txNum > 1962853352-10 && string(key) == string([]byte{0x0}) {
-		println(fmt.Sprintf("history seek histTxNum %d txNum %d", histTxNum, txNum))
-	}
 	if err != nil {
 		return nil, false, err
 	}
