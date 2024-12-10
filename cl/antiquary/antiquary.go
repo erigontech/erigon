@@ -18,8 +18,8 @@ package antiquary
 
 import (
 	"context"
-	"io/ioutil"
 	"math"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -101,7 +101,7 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 // Check if the snapshot directory has beacon blocks files aka "contains beaconblock" and has a ".seg" extension over its first layer
 func doesSnapshotDirHaveBeaconBlocksFiles(snapshotDir string) bool {
 	// Iterate over the files in the snapshot directory
-	files, err := ioutil.ReadDir(snapshotDir)
+	files, err := os.ReadDir(snapshotDir)
 	if err != nil {
 		return false
 	}
