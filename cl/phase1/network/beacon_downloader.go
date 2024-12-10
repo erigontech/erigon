@@ -107,9 +107,11 @@ Loop:
 					return
 				}
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
+					log.Info("Already received blocks", "peer", peerId, "slot", reqSlot, "count", count)
 					return
 				}
 				atomicResp.Store(peerAndBlocks{peerId, responses})
+				log.Info("Received beacon blocks by range", "peer", peerId, "slot", reqSlot, "count", count)
 			}()
 		case <-ctx.Done():
 			return
