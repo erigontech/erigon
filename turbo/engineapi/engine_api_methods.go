@@ -12,6 +12,21 @@ import (
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
 )
 
+var ourCapabilities = []string{
+	"engine_forkchoiceUpdatedV1",
+	"engine_forkchoiceUpdatedV2",
+	"engine_forkchoiceUpdatedV3",
+	"engine_newPayloadV1",
+	"engine_newPayloadV2",
+	"engine_newPayloadV3",
+	"engine_newPayloadV4",
+	"engine_getPayloadV1",
+	"engine_getPayloadV2",
+	"engine_getPayloadV3",
+	"engine_getPayloadV4",
+	"engine_getPayloadBodiesByHashV1",
+	"engine_getPayloadBodiesByRangeV1",
+}
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_getpayloadv1
@@ -125,4 +140,3 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 	return ourCapabilities
 }
-
