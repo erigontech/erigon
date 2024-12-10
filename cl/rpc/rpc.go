@@ -225,7 +225,7 @@ func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req 
 	}
 
 	data := libcommon.CopyBytes(buffer.Bytes())
-	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV2, data, uint64(req.Len()))
+	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, uint64(req.Len()))
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
