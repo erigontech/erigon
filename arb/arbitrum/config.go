@@ -76,8 +76,8 @@ var DefaultConfig = Config{
 	RPCGasCap:               ethconfig.Defaults.RPCGasCap,   // 50,000,000
 	RPCTxFeeCap:             ethconfig.Defaults.RPCTxFeeCap, // 1 ether
 	TxAllowUnprotected:      true,
-	RPCEVMTimeout:           ethconfig.Defaults.RPCEVMTimeout, // 5 seconds
-	BloomBitsBlocks:         params.BloomBitsBlocks * 4,       // we generally have smaller blocks
+	RPCEVMTimeout:           ethconfig.Defaults.ArbRPCEVMTimeout, // 5 seconds
+	BloomBitsBlocks:         params.BloomBitsBlocks * 4,          // we generally have smaller blocks
 	BloomConfirms:           params.BloomConfirms,
 	FilterLogCacheSize:      32,
 	FilterTimeout:           5 * time.Minute,

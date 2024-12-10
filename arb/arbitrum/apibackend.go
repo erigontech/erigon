@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"math/big"
 	"strconv"
 	"strings"
@@ -415,7 +416,7 @@ func (a *APIBackend) HeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc
 }
 
 func (a *APIBackend) CurrentHeader() *types.Header {
-	return a.blockReader.CurrentBlock()
+	//return a.blockReader.CurrentBlock()
 	return a.BlockChain().CurrentHeader()
 }
 
@@ -455,7 +456,7 @@ func (a *APIBackend) BlockByNumberOrHash(ctx context.Context, blockNrOrHash rpc.
 	return nil, errors.New("invalid arguments; neither block nor hash specified")
 }
 
-func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *core.BlockChain, maxRecreateStateDepth int64, header *types.Header, err error) (*state.StateDB, *types.Header, error) {
+func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *core.BlockChain, maxRecreateStateDepth int64, header *types.Header, err error) (*state.IntraBlockState, *types.Header, error) {
 	if err != nil {
 		return nil, header, err
 	}
@@ -465,20 +466,23 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *c
 	if !bc.Config().IsArbitrumNitro(header.Number) {
 		return nil, header, types.ErrUseFallback
 	}
-	stateFor := func(db state.Database, snapshots *snapshot.Tree) func(header *types.Header) (*state.StateDB, StateReleaseFunc, error) {
-		return func(header *types.Header) (*state.StateDB, StateReleaseFunc, error) {
-			if header.Root != (common.Hash{}) {
-				// Try referencing the root, if it isn't in dirties cache then Reference will have no effect
-				db.TrieDB().Reference(header.Root, common.Hash{})
-			}
-			statedb, err := state.New(header.Root, db, snapshots)
+	stateFor := func(db *state2.SharedDomains, snapshots *snapshot.Tree) func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error) {
+		return func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error) {
+			//if header.Root != (common.Hash{}) {
+			//	// Try referencing the root, if it isn't in dirties cache then Reference will have no effect
+			//	db.TrieDB().Reference(header.Root, common.Hash{})
+			//}
+
+			//statedb, err := state.New(header.Root, db, snapshots)
+			statedb := state.New(state.NewReaderV3(db))
+
 			if err != nil {
 				return nil, nil, err
 			}
-			if header.Root != (common.Hash{}) {
-				headerRoot := header.Root
-				return statedb, func() { db.TrieDB().Dereference(headerRoot) }, nil
-			}
+			//if header.Root != (common.Hash{}) {
+			//	headerRoot := header.Root
+			//	return statedb, func() { db.TrieDB().Dereference(headerRoot) }, nil
+			//}
 			return statedb, NoopStateRelease, nil
 		}
 	}

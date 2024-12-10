@@ -1,15 +1,15 @@
 package state
 
 import (
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/rawdb"
 )
 
 type wasmActivation struct {
 	moduleHash common.Hash
 }
 
-func (ch wasmActivation) revert(s *StateDB) {
+func (ch wasmActivation) revert(s *IntraBlockState) {
 	delete(s.arbExtraData.activatedWasms, ch.moduleHash)
 }
 
@@ -28,7 +28,7 @@ type CacheWasm struct {
 	Debug      bool
 }
 
-func (ch CacheWasm) revert(s *StateDB) {
+func (ch CacheWasm) revert(*IntraBlockState) {
 	EvictWasmRust(ch.ModuleHash, ch.Version, ch.Tag, ch.Debug)
 }
 
@@ -43,7 +43,7 @@ type EvictWasm struct {
 	Debug      bool
 }
 
-func (ch EvictWasm) revert(s *StateDB) {
+func (ch EvictWasm) revert(s *IntraBlockState) {
 	asm, err := s.TryGetActivatedAsm(rawdb.LocalTarget(), ch.ModuleHash) // only happens in native mode
 	if err == nil && len(asm) != 0 {
 		//if we failed to get it - it's not in the current rust cache

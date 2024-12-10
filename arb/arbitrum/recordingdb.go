@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"sync"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -165,37 +166,42 @@ type RecordingDatabaseConfig struct {
 
 type RecordingDatabase struct {
 	config     *RecordingDatabaseConfig
+	sd         *state2.SharedDomains
 	db         state.Database
 	bc         *core.BlockChain
 	mutex      sync.Mutex // protects StateFor and Dereference
 	references int64
 }
 
-func NewRecordingDatabase(config *RecordingDatabaseConfig, ethdb ethdb.Database, blockchain *core.BlockChain) *RecordingDatabase {
+func NewRecordingDatabase(config *RecordingDatabaseConfig, sd *state2.SharedDomains, ethdb ethdb.Database, blockchain *core.BlockChain) *RecordingDatabase {
 	hashConfig := *hashdb.Defaults
 	hashConfig.CleanCacheSize = config.TrieCleanCache
-	trieConfig := triedb.Config{
-		Preimages: false,
-		HashDB:    &hashConfig,
-	}
+	//trieConfig := triedb.Config{
+	//	Preimages: false,
+	//	HashDB:    &hashConfig,
+	//}
 	return &RecordingDatabase{
 		config: config,
-		db:     state.NewDatabaseWithConfig(ethdb, &trieConfig),
-		bc:     blockchain,
+		sd:     sd,
+		//db:     state.NewDatabaseWithConfig(ethdb, &trieConfig),
+		db: state.New(state.NewReaderV3(sd)),
+		bc: blockchain,
 	}
 }
 
 // Normal geth state.New + Reference is not atomic vs Dereference. This one is.
 // This function does not recreate a state
-func (r *RecordingDatabase) StateFor(header *types.Header) (*state.StateV3, error) {
+func (r *RecordingDatabase) StateFor(header *types.Header) (*state.IntraBlockState, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	sdb, err := state.NewDeterministic(header.Root, r.db)
-	if err == nil {
-		r.referenceRootLockHeld(header.Root)
-	}
-	return sdb, err
+	rd := state.NewReaderV3(r.sd)
+	sdb := state.New(rd)
+	//sdb, err := state.NewDeterministic(header.Root, r.db)
+	//if err == nil {
+	//	r.referenceRootLockHeld(header.Root)
+	//}
+	return sdb, nil
 }
 
 func (r *RecordingDatabase) Dereference(header *types.Header) {
@@ -226,7 +232,7 @@ func (r *RecordingDatabase) dereferenceRoot(root common.Hash) {
 	r.db.TrieDB().Dereference(root)
 }
 
-func (r *RecordingDatabase) addStateVerify(statedb *state.StateV3, expected common.Hash, blockNumber uint64) (*state.StateV3, error) {
+func (r *RecordingDatabase) addStateVerify(statedb *state.IntraBlockState, expected common.Hash, blockNumber uint64) (*state.IntraBlockState, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	result, err := statedb.Commit(blockNumber, true)
@@ -251,7 +257,7 @@ func (r *RecordingDatabase) addStateVerify(statedb *state.StateV3, expected comm
 	//return state.New(result, statedb.Database(), nil)
 }
 
-func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeader *types.Header, logFunc StateBuildingLogFunction) (*state.StateV3, consensus.ChainHeaderReader, *RecordingKV, error) {
+func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeader *types.Header, logFunc StateBuildingLogFunction) (*state.IntraBlockState, consensus.ChainHeaderReader, *RecordingKV, error) {
 	_, err := r.GetOrRecreateState(ctx, lastBlockHeader, logFunc)
 	if err != nil {
 		return nil, nil, nil, err
@@ -300,8 +306,8 @@ func (r *RecordingDatabase) PreimagesFromRecording(chainContextIf consensus.Chai
 	return entries, nil
 }
 
-func (r *RecordingDatabase) GetOrRecreateState(ctx context.Context, header *types.Header, logFunc StateBuildingLogFunction) (*state.StateV3, error) {
-	stateFor := func(header *types.Header) (*state.StateV3, StateReleaseFunc, error) {
+func (r *RecordingDatabase) GetOrRecreateState(ctx context.Context, header *types.Header, logFunc StateBuildingLogFunction) (*state.IntraBlockState, error) {
+	stateFor := func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error) {
 		state, err := r.StateFor(header)
 		// we don't use the release functor pattern here yet
 		return state, NoopStateRelease, err

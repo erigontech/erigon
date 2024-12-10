@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
@@ -22,17 +22,16 @@ type StateReleaseFunc tracers.StateReleaseFunc
 var NoopStateRelease StateReleaseFunc = func() {}
 
 type StateBuildingLogFunction func(targetHeader, header *types.Header, hasState bool)
-type StateForHeaderFunction func(header *types.Header) (*state.StateDB, StateReleaseFunc, error)
+type StateForHeaderFunction func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error)
 
 // finds last available state and header checking it first for targetHeader then looking backwards
 // if maxDepthInL2Gas is positive, it constitutes a limit for cumulative l2 gas used of the traversed blocks
 // else if maxDepthInL2Gas is -1, the traversal depth is not limited
 // otherwise only targetHeader state is checked and no search is performed
-func FindLastAvailableState(ctx context.Context, bc *core.BlockChain, stateFor StateForHeaderFunction, targetHeader *types.Header, logFunc StateBuildingLogFunction, maxDepthInL2Gas int64) (*state.StateV3, *types.Header, StateReleaseFunc, error) {
+func FindLastAvailableState(ctx context.Context, bc *core.BlockChain, stateFor StateForHeaderFunction, targetHeader *types.Header, logFunc StateBuildingLogFunction, maxDepthInL2Gas int64) (*state.IntraBlockState, *types.Header, StateReleaseFunc, error) {
 	genesis := bc.Config().ArbitrumChainParams.GenesisBlockNum
 	currentHeader := targetHeader
-	//var statedb *state.StateV3
-	statedb := state.NewStateV3()
+	var statedb *state.IntraBlockState
 	var err error
 	var l2GasUsed uint64
 	release := NoopStateRelease
@@ -70,7 +69,7 @@ func FindLastAvailableState(ctx context.Context, bc *core.BlockChain, stateFor S
 	return statedb, currentHeader, release, ctx.Err()
 }
 
-func AdvanceStateByBlock(ctx context.Context, bc *core.BlockChain, state *state.StateDB, targetHeader *types.Header, blockToRecreate uint64, prevBlockHash common.Hash, logFunc StateBuildingLogFunction) (*state.StateDB, *types.Block, error) {
+func AdvanceStateByBlock(ctx context.Context, bc *core.BlockChain, state *state.IntraBlockState, targetHeader *types.Header, blockToRecreate uint64, prevBlockHash common.Hash, logFunc StateBuildingLogFunction) (*state.IntraBlockState, *types.Block, error) {
 	block := bc.GetBlockByNumber(blockToRecreate)
 	if block == nil {
 		return nil, nil, fmt.Errorf("block not found while recreating: %d", blockToRecreate)
@@ -88,12 +87,12 @@ func AdvanceStateByBlock(ctx context.Context, bc *core.BlockChain, state *state.
 	return state, block, nil
 }
 
-func AdvanceStateUpToBlock(ctx context.Context, bc *core.BlockChain, state *state.StateDB, targetHeader *types.Header, lastAvailableHeader *types.Header, logFunc StateBuildingLogFunction) (*state.StateDB, error) {
+func AdvanceStateUpToBlock(ctx context.Context, bc *core.BlockChain, state *state.IntraBlockState, targetHeader *types.Header, lastAvailableHeader *types.Header, logFunc StateBuildingLogFunction) (*state.IntraBlockState, error) {
 	returnedBlockNumber := targetHeader.Number.Uint64()
 	blockToRecreate := lastAvailableHeader.Number.Uint64() + 1
 	prevHash := lastAvailableHeader.Hash()
 	for ctx.Err() == nil {
-		state, block, err := AdvanceStateByBlock(ctx, bc, state, targetHeader, blockToRecreate, prevHash, logFunc)
+		ibs, block, err := AdvanceStateByBlock(ctx, bc, state, targetHeader, blockToRecreate, prevHash, logFunc)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +101,7 @@ func AdvanceStateUpToBlock(ctx context.Context, bc *core.BlockChain, state *stat
 			if block.Hash() != targetHeader.Hash() {
 				return nil, fmt.Errorf("blockHash doesn't match when recreating number: %d expected: %v got: %v", blockToRecreate, targetHeader.Hash(), block.Hash())
 			}
-			return state, nil
+			return ibs, nil
 		}
 		blockToRecreate++
 	}

@@ -64,6 +64,8 @@ type BalanceIncrease struct {
 type IntraBlockState struct {
 	stateReader StateReader
 
+	arbExtraData *ArbitrumExtraData
+
 	// This map holds 'live' objects, which will get modified while processing a state transition.
 	stateObjects      map[libcommon.Address]*stateObject
 	stateObjectsDirty map[libcommon.Address]struct{}
