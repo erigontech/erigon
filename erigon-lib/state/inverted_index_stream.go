@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 )
 
 // InvertedIdxStreamFiles allows iteration over range of txn numbers
@@ -40,7 +41,7 @@ type InvertedIdxStreamFiles struct {
 	limit                int
 	orderAscend          order.By
 
-	efIt       stream.Uno[uint64]
+	seqIt      stream.Uno[uint64]
 	indexTable string
 	stack      []visibleFile
 
@@ -48,7 +49,7 @@ type InvertedIdxStreamFiles struct {
 	hasNext bool
 	err     error
 
-	ef *eliasfano32.EliasFano
+	seq *multiencseq.SequenceReader
 }
 
 func (it *InvertedIdxStreamFiles) Close() {
@@ -84,7 +85,7 @@ func (it *InvertedIdxStreamFiles) next() uint64 {
 
 func (it *InvertedIdxStreamFiles) advanceInFiles() {
 	for {
-		for it.efIt == nil {
+		for it.seqIt == nil {
 			if len(it.stack) == 0 {
 				it.hasNext = false
 				return
@@ -99,26 +100,23 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()
 			if bytes.Equal(k, it.key) {
-				eliasVal, _ := g.NextUncompressed()
-				it.ef.Reset(eliasVal)
-				var efiter *eliasfano32.EliasFanoIter
+				numSeqVal, _ := g.NextUncompressed()
+				it.seq.Reset(item.startTxNum, numSeqVal)
+				var seqIt stream.Uno[uint64]
 				if it.orderAscend {
-					efiter = it.ef.Iterator()
+					seqIt = it.seq.Iterator(it.startTxNum)
 				} else {
-					efiter = it.ef.ReverseIterator()
+					seqIt = it.seq.ReverseIterator(it.startTxNum)
 				}
-				if it.startTxNum > 0 {
-					efiter.Seek(uint64(it.startTxNum))
-				}
-				it.efIt = efiter
+				it.seqIt = seqIt
 			}
 		}
 
 		//Asc:  [from, to) AND from < to
 		//Desc: [from, to) AND from > to
 		if it.orderAscend {
-			for it.efIt.HasNext() {
-				n, err := it.efIt.Next()
+			for it.seqIt.HasNext() {
+				n, err := it.seqIt.Next()
 				if err != nil {
 					it.err = err
 					return
@@ -137,8 +135,8 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 				return
 			}
 		} else {
-			for it.efIt.HasNext() {
-				n, err := it.efIt.Next()
+			for it.seqIt.HasNext() {
+				n, err := it.seqIt.Next()
 				if err != nil {
 					it.err = err
 					return
@@ -157,7 +155,7 @@ func (it *InvertedIdxStreamFiles) advanceInFiles() {
 				return
 			}
 		}
-		it.efIt = nil // Exhausted this iterator
+		it.seqIt = nil // Exhausted this iterator
 	}
 }
 
