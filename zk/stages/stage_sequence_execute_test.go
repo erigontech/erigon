@@ -108,7 +108,7 @@ func TestSpawnSequencingStage(t *testing.T) {
 
 	dataStreamServerMock.EXPECT().GetHighestBatchNumber().Return(latestBatchNumber, nil).AnyTimes()
 	dataStreamServerMock.EXPECT().GetHighestClosedBatch().Return(latestBatchNumber, nil).AnyTimes()
-	dataStreamServerMock.EXPECT().GetHighestBlockNumber().Return(latestL1BlockNumber.Uint64(), nil).AnyTimes()
+	dataStreamServerMock.EXPECT().GetHighestBlockNumber().Return(latestL2BlockNumber.Uint64(), nil).AnyTimes()
 	dataStreamServerMock.EXPECT().
 		WriteBlockWithBatchStartToStream(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil).
@@ -143,11 +143,12 @@ func TestSpawnSequencingStage(t *testing.T) {
 		AnyTimes()
 
 	zkCfg := &ethconfig.Zk{
-		SequencerResequence:         false,
-		SequencerBatchSealTime:      10 * time.Second,
-		SequencerBlockSealTime:      10 * time.Second,
-		SequencerEmptyBlockSealTime: 10 * time.Second,
-		InfoTreeUpdateInterval:      10 * time.Second,
+		SequencerResequence: false,
+		// lower batch close time ensures only 1 block will be created on 1 turn, as the test expects
+		SequencerBatchSealTime:      4 * time.Second,
+		SequencerBlockSealTime:      5 * time.Second,
+		SequencerEmptyBlockSealTime: 5 * time.Second,
+		InfoTreeUpdateInterval:      5 * time.Second,
 	}
 
 	legacyVerifier := verifier.NewLegacyExecutorVerifier(*zkCfg, nil, db1, nil, nil)
