@@ -63,6 +63,8 @@ type Zk struct {
 	DefaultGasPrice                        uint64
 	MaxGasPrice                            uint64
 	GasPriceFactor                         float64
+	GasPriceCheckFrequency                 time.Duration
+	GasPriceHistoryCount                   uint64
 	DAUrl                                  string
 	DataStreamHost                         string
 	DataStreamPort                         uint
@@ -99,6 +101,8 @@ type Zk struct {
 	WitnessCacheEnabled            bool
 	WitnessCacheLimit              uint64
 	WitnessContractInclusion       []common.Address
+	RejectLowGasPriceTransactions  bool
+	RejectLowGasPriceTolerance     float64
 	LogLevel                       utils.LogLevel
 }
 

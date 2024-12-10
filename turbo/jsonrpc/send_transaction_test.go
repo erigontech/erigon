@@ -89,7 +89,7 @@ func TestSendRawTransaction(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
-	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, logger)
+	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, logger, nil)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
@@ -143,7 +143,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {}, mockSentry.Log)
-	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, logger)
+	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, 1e18, 100_000, &ethconfig.Defaults, false, 100_000, 128, logger, nil)
 
 	// Enable unproteced txs flag
 	api.AllowUnprotectedTxs = true
@@ -178,4 +178,63 @@ func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Tra
 func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {
 	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(big.NewInt(1337)), key)
 	return tx
+}
+
+func Test_RejectLowGasPrice(t *testing.T) {
+	cases := map[string]struct {
+		txPrice   *big.Int
+		lowest    *big.Int
+		tolerance float64
+		rejected  bool
+	}{
+		"no tolerance, no reject": {
+			txPrice:   big.NewInt(100),
+			lowest:    big.NewInt(90),
+			tolerance: 0,
+			rejected:  false,
+		},
+		"no tolerance, exact match is allowed": {
+			txPrice:   big.NewInt(90),
+			lowest:    big.NewInt(90),
+			tolerance: 0,
+			rejected:  false,
+		},
+		"no tolerance, rejects underpriced": {
+			txPrice:   big.NewInt(80),
+			lowest:    big.NewInt(90),
+			tolerance: 0,
+			rejected:  true,
+		},
+		"tolerance, no reject": {
+			txPrice:   big.NewInt(100),
+			lowest:    big.NewInt(90),
+			tolerance: 0.1,
+			rejected:  false,
+		},
+		"tolerance, allows normally underpriced through": {
+			txPrice:   big.NewInt(85),
+			lowest:    big.NewInt(90),
+			tolerance: 0.1,
+			rejected:  false,
+		},
+		"tolerance, after applying tx is rejected": {
+			txPrice:   big.NewInt(80),
+			lowest:    big.NewInt(90),
+			tolerance: 0.1,
+			rejected:  true,
+		},
+		"tolerance, after applying an exact match is allowed": {
+			txPrice:   big.NewInt(81),
+			lowest:    big.NewInt(90),
+			tolerance: 0.1,
+			rejected:  false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tc.rejected, jsonrpc.ShouldRejectLowGasPrice(tc.txPrice, tc.lowest, tc.tolerance))
+		})
+	}
+
 }

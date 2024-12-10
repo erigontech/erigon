@@ -240,6 +240,10 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		MockWitnessGeneration:                  ctx.Bool(utils.MockWitnessGeneration.Name),
 		WitnessCacheLimit:                      witnessCacheLimit,
 		WitnessContractInclusion:               witnessInclusion,
+		GasPriceCheckFrequency:                 ctx.Duration(utils.GasPriceCheckFrequency.Name),
+		GasPriceHistoryCount:                   ctx.Uint64(utils.GasPriceHistoryCount.Name),
+		RejectLowGasPriceTransactions:          ctx.Bool(utils.RejectLowGasPriceTransactions.Name),
+		RejectLowGasPriceTolerance:             ctx.Float64(utils.RejectLowGasPriceTolerance.Name),
 		LogLevel:                               utils2.LogLevel(logLevel),
 	}
 

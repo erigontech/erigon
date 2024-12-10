@@ -38,7 +38,11 @@ func main() {
 		ethConfig := ethconfig.Defaults
 		ethConfig.L2RpcUrl = cfg.L2RpcUrl
 
-		apiList := jsonrpc.APIList(db, backend, txPool, nil, mining, ff, stateCache, blockReader, agg, cfg, engine, &ethConfig, nil, logger, nil)
+		gasTracker := jsonrpc.NewRecurringL1GasPriceTracker(ethConfig.AllowFreeTransactions, ethConfig.GasPriceFactor, ethConfig.DefaultGasPrice, ethConfig.MaxGasPrice, ethConfig.L1RpcUrl, ethConfig.GasPriceCheckFrequency, ethConfig.GasPriceHistoryCount)
+		gasTracker.Start()
+		defer gasTracker.Stop()
+
+		apiList := jsonrpc.APIList(db, backend, txPool, nil, mining, ff, stateCache, blockReader, agg, cfg, engine, &ethConfig, nil, logger, nil, gasTracker)
 		rpc.PreAllocateRPCMetricLabels(apiList)
 		if err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())

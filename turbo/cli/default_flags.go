@@ -295,4 +295,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.WitnessCacheEnable,
 	&utils.WitnessCacheLimit,
 	&utils.WitnessContractInclusion,
+	&utils.GasPriceCheckFrequency,
+	&utils.GasPriceHistoryCount,
+	&utils.RejectLowGasPriceTransactions,
+	&utils.RejectLowGasPriceTolerance,
 }
