@@ -2,9 +2,11 @@ package rawtemporaldb
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -71,7 +73,18 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	return
 }
 
+var prevTxNum uint64
+
 func AppendReceipt(ttx kv.TemporalPutDel, receipt *types.Receipt, cumBlobGasUsed uint64) error {
+	if casted, ok := ttx.(*state.SharedDomains); ok {
+		if prevTxNum > 0 {
+			if prevTxNum >= casted.TxNum() {
+				panic(fmt.Errorf("assert: %d > %d", prevTxNum, casted.TxNum()))
+			} else {
+				prevTxNum = casted.TxNum()
+			}
+		}
+	}
 	var cumGasUsedInBlock uint64
 	var firstLogIndexWithinBlock uint32
 	if receipt != nil {
