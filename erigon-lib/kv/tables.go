@@ -579,6 +579,7 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesFromIdx:         {Flags: DupSort},
 	TblTracesToKeys:          {Flags: DupSort},
 	TblTracesToIdx:           {Flags: DupSort},
+	TblPruningProgress:       {Flags: DupSort},
 }
 
 var BorTablesCfg = TableCfg{
