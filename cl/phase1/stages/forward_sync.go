@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync/atomic"
@@ -59,6 +60,9 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		// Return an error if blobs could not be retrieved
 		err = fmt.Errorf("failed to get blobs: %w", err)
 		return
+	}
+	if blobs == nil {
+		return 0, errors.New("blobs is nil")
 	}
 	log.Info("RequestBlobsFrantically", "blobs", len(blobs.Responses))
 	var highestProcessed, inserted uint64
