@@ -209,9 +209,10 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	prevProgress := currentSlot.Load()
 
 	// Run the log loop until the highest processed slot reaches the chain tip slot
+	log.Warn("Forward sync started", "highest-processed-slot", downloader.GetHighestProcessedSlot(), "chain-tip-slot", chainTipSlot)
 	for downloader.GetHighestProcessedSlot() < chainTipSlot {
 		downloader.RequestMore(ctx)
-
+		log.Info("End of request more")
 		select {
 		case <-ctx.Done():
 			// Return if the context is done
