@@ -30,7 +30,6 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/accounts"
 	"golang.org/x/exp/slices"
 )
 
@@ -40,7 +39,7 @@ import (
 const minReloadInterval = 2 * time.Second
 
 // byURL defines the sorting order for accounts.
-func byURL(a, b accounts.Account) int {
+func byURL(a, b Account) int {
 	return a.URL.Cmp(b.URL)
 }
 
@@ -48,7 +47,7 @@ func byURL(a, b accounts.Account) int {
 // an address for which more than one file exists.
 type AmbiguousAddrError struct {
 	Addr    common.Address
-	Matches []accounts.Account
+	Matches []Account
 }
 
 func (err *AmbiguousAddrError) Error() string {
@@ -67,8 +66,8 @@ type accountCache struct {
 	keydir   string
 	watcher  *watcher
 	mu       sync.Mutex
-	all      []accounts.Account
-	byAddr   map[common.Address][]accounts.Account
+	all      []Account
+	byAddr   map[common.Address][]Account
 	throttle *time.Timer
 	notify   chan struct{}
 	fileC    fileCache
@@ -77,7 +76,7 @@ type accountCache struct {
 func newAccountCache(keydir string) (*accountCache, chan struct{}) {
 	ac := &accountCache{
 		keydir: keydir,
-		byAddr: make(map[common.Address][]accounts.Account),
+		byAddr: make(map[common.Address][]Account),
 		notify: make(chan struct{}, 1),
 		fileC:  fileCache{all: mapset.NewThreadUnsafeSet[string]()},
 	}
@@ -85,11 +84,11 @@ func newAccountCache(keydir string) (*accountCache, chan struct{}) {
 	return ac, ac.notify
 }
 
-func (ac *accountCache) accounts() []accounts.Account {
+func (ac *accountCache) accounts() []Account {
 	ac.maybeReload()
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
-	cpy := make([]accounts.Account, len(ac.all))
+	cpy := make([]Account, len(ac.all))
 	copy(cpy, ac.all)
 	return cpy
 }
@@ -101,7 +100,7 @@ func (ac *accountCache) hasAddress(addr common.Address) bool {
 	return len(ac.byAddr[addr]) > 0
 }
 
-func (ac *accountCache) add(newAccount accounts.Account) {
+func (ac *accountCache) add(newAccount Account) {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 
@@ -110,14 +109,14 @@ func (ac *accountCache) add(newAccount accounts.Account) {
 		return
 	}
 	// newAccount is not in the cache.
-	ac.all = append(ac.all, accounts.Account{})
+	ac.all = append(ac.all, Account{})
 	copy(ac.all[i+1:], ac.all[i:])
 	ac.all[i] = newAccount
 	ac.byAddr[newAccount.Address] = append(ac.byAddr[newAccount.Address], newAccount)
 }
 
 // note: removed needs to be unique here (i.e. both File and Address must be set).
-func (ac *accountCache) delete(removed accounts.Account) {
+func (ac *accountCache) delete(removed Account) {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 
@@ -154,7 +153,7 @@ func (ac *accountCache) watcherStarted() bool {
 	return ac.watcher.running || ac.watcher.runEnded
 }
 
-func removeAccount(slice []accounts.Account, elem accounts.Account) []accounts.Account {
+func removeAccount(slice []Account, elem Account) []Account {
 	for i := range slice {
 		if slice[i] == elem {
 			return append(slice[:i], slice[i+1:]...)
@@ -164,9 +163,9 @@ func removeAccount(slice []accounts.Account, elem accounts.Account) []accounts.A
 }
 
 // find returns the cached account for address if there is a unique match.
-// The exact matching rules are explained by the documentation of accounts.Account.
+// The exact matching rules are explained by the documentation of Account.
 // Callers must hold ac.mu.
-func (ac *accountCache) find(a accounts.Account) (accounts.Account, error) {
+func (ac *accountCache) find(a Account) (Account, error) {
 	// Limit search to address candidates if possible.
 	matches := ac.all
 	if (a.Address != common.Address{}) {
@@ -183,19 +182,19 @@ func (ac *accountCache) find(a accounts.Account) (accounts.Account, error) {
 			}
 		}
 		if (a.Address == common.Address{}) {
-			return accounts.Account{}, ErrNoMatch
+			return Account{}, ErrNoMatch
 		}
 	}
 	switch len(matches) {
 	case 1:
 		return matches[0], nil
 	case 0:
-		return accounts.Account{}, ErrNoMatch
+		return Account{}, ErrNoMatch
 	default:
-		err := &AmbiguousAddrError{Addr: a.Address, Matches: make([]accounts.Account, len(matches))}
+		err := &AmbiguousAddrError{Addr: a.Address, Matches: make([]Account, len(matches))}
 		copy(err.Matches, matches)
 		slices.SortFunc(err.Matches, byURL)
-		return accounts.Account{}, err
+		return Account{}, err
 	}
 }
 
@@ -255,7 +254,7 @@ func (ac *accountCache) scanAccounts() error {
 			Address string `json:"address"`
 		}
 	)
-	readAccount := func(path string) *accounts.Account {
+	readAccount := func(path string) *Account {
 		fd, err := os.Open(path)
 		if err != nil {
 			log.Trace("Failed to open keystore file", "path", path, "err", err)
@@ -273,9 +272,9 @@ func (ac *accountCache) scanAccounts() error {
 		case addr == common.Address{}:
 			log.Debug("Failed to decode keystore key", "path", path, "err", "missing or zero address")
 		default:
-			return &accounts.Account{
+			return &Account{
 				Address: addr,
-				URL:     accounts.URL{Scheme: KeyStoreScheme, Path: path},
+				URL:     URL{Scheme: KeyStoreScheme, Path: path},
 			}
 		}
 		return nil

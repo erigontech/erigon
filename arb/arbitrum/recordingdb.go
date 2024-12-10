@@ -31,7 +31,7 @@ var (
 )
 
 type RecordingKV struct {
-	inner         *triedb.Database
+	//inner         *triedb.Database
 	diskDb        ethdb.KeyValueStore
 	readDbEntries map[common.Hash][]byte
 	enableBypass  bool

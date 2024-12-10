@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/accounts"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/scrypt"
@@ -97,7 +96,7 @@ func (ks keyStorePassphrase) GetKey(addr common.Address, filename, auth string) 
 }
 
 // StoreKey generates a key, encrypts with 'auth' and stores in the given directory
-func StoreKey(dir, auth string, scryptN, scryptP int) (accounts.Account, error) {
+func StoreKey(dir, auth string, scryptN, scryptP int) (Account, error) {
 	_, a, err := storeNewKey(&keyStorePassphrase{dir, scryptN, scryptP, false}, rand.Reader, auth)
 	return a, err
 }

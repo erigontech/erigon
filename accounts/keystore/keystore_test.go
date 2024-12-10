@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/accounts"
 	"github.com/erigontech/erigon/event"
 	"golang.org/x/exp/slices"
 )
@@ -82,7 +81,7 @@ func TestSign(t *testing.T) {
 	if err := ks.Unlock(a1, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ks.SignHash(accounts.Account{Address: a1.Address}, testSigData); err != nil {
+	if _, err := ks.SignHash(Account{Address: a1.Address}, testSigData); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -126,7 +125,7 @@ func TestTimedUnlock(t *testing.T) {
 	}
 
 	// Signing without passphrase fails because account is locked
-	_, err = ks.SignHash(accounts.Account{Address: a1.Address}, testSigData)
+	_, err = ks.SignHash(Account{Address: a1.Address}, testSigData)
 	if err != ErrLocked {
 		t.Fatal("Signing should've failed with ErrLocked before unlocking, got ", err)
 	}
@@ -137,14 +136,14 @@ func TestTimedUnlock(t *testing.T) {
 	}
 
 	// Signing without passphrase works because account is temp unlocked
-	_, err = ks.SignHash(accounts.Account{Address: a1.Address}, testSigData)
+	_, err = ks.SignHash(Account{Address: a1.Address}, testSigData)
 	if err != nil {
 		t.Fatal("Signing shouldn't return an error after unlocking, got ", err)
 	}
 
 	// Signing fails again after automatic locking
 	time.Sleep(250 * time.Millisecond)
-	_, err = ks.SignHash(accounts.Account{Address: a1.Address}, testSigData)
+	_, err = ks.SignHash(Account{Address: a1.Address}, testSigData)
 	if err != ErrLocked {
 		t.Fatal("Signing should've failed with ErrLocked timeout expired, got ", err)
 	}
@@ -166,7 +165,7 @@ func TestOverrideUnlock(t *testing.T) {
 	}
 
 	// Signing without passphrase works because account is temp unlocked
-	_, err = ks.SignHash(accounts.Account{Address: a1.Address}, testSigData)
+	_, err = ks.SignHash(Account{Address: a1.Address}, testSigData)
 	if err != nil {
 		t.Fatal("Signing shouldn't return an error after unlocking, got ", err)
 	}
@@ -177,14 +176,14 @@ func TestOverrideUnlock(t *testing.T) {
 	}
 
 	// Signing without passphrase still works because account is temp unlocked
-	_, err = ks.SignHash(accounts.Account{Address: a1.Address}, testSigData)
+	_, err = ks.SignHash(Account{Address: a1.Address}, testSigData)
 	if err != nil {
 		t.Fatal("Signing shouldn't return an error after unlocking, got ", err)
 	}
 
 	// Signing fails again after automatic locking
 	time.Sleep(250 * time.Millisecond)
-	_, err = ks.SignHash(accounts.Account{Address: a1.Address}, testSigData)
+	_, err = ks.SignHash(Account{Address: a1.Address}, testSigData)
 	if err != ErrLocked {
 		t.Fatal("Signing should've failed with ErrLocked timeout expired, got ", err)
 	}
@@ -206,7 +205,7 @@ func TestSignRace(t *testing.T) {
 	}
 	end := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(end) {
-		if _, err := ks.SignHash(accounts.Account{Address: a1.Address}, testSigData); err == ErrLocked {
+		if _, err := ks.SignHash(Account{Address: a1.Address}, testSigData); err == ErrLocked {
 			return
 		} else if err != nil {
 			t.Errorf("Sign error: %v", err)
@@ -247,7 +246,7 @@ func TestWalletNotifierLifecycle(t *testing.T) {
 		t.Errorf("wallet notifier running without subscribers")
 	}
 	// Subscribe to the wallet feed and ensure the updater boots up
-	updates := make(chan accounts.WalletEvent)
+	updates := make(chan WalletEvent)
 
 	subs := make([]event.Subscription, 2)
 	for i := 0; i < len(subs); i++ {
@@ -276,8 +275,8 @@ func TestWalletNotifierLifecycle(t *testing.T) {
 }
 
 type walletEvent struct {
-	accounts.WalletEvent
-	a accounts.Account
+	WalletEvent
+	a Account
 }
 
 // Tests that wallet notifications and correctly fired when accounts are added
@@ -289,7 +288,7 @@ func TestWalletNotifications(t *testing.T) {
 	// Subscribe to the wallet feed and collect events.
 	var (
 		events  []walletEvent
-		updates = make(chan accounts.WalletEvent)
+		updates = make(chan WalletEvent)
 		sub     = ks.Subscribe(updates)
 	)
 	defer sub.Unsubscribe()
@@ -307,7 +306,7 @@ func TestWalletNotifications(t *testing.T) {
 
 	// Randomly add and remove accounts.
 	var (
-		live       = make(map[common.Address]accounts.Account)
+		live       = make(map[common.Address]Account)
 		wantEvents []walletEvent
 	)
 	for i := 0; i < 1024; i++ {
@@ -318,10 +317,10 @@ func TestWalletNotifications(t *testing.T) {
 				t.Fatalf("failed to create test account: %v", err)
 			}
 			live[account.Address] = account
-			wantEvents = append(wantEvents, walletEvent{accounts.WalletEvent{Kind: accounts.WalletArrived}, account})
+			wantEvents = append(wantEvents, walletEvent{WalletEvent{Kind: WalletArrived}, account})
 		} else {
 			// Delete a random account.
-			var account accounts.Account
+			var account Account
 			for _, a := range live {
 				account = a
 				break
@@ -330,7 +329,7 @@ func TestWalletNotifications(t *testing.T) {
 				t.Fatalf("failed to delete test account: %v", err)
 			}
 			delete(live, account.Address)
-			wantEvents = append(wantEvents, walletEvent{accounts.WalletEvent{Kind: accounts.WalletDropped}, account})
+			wantEvents = append(wantEvents, walletEvent{WalletEvent{Kind: WalletDropped}, account})
 		}
 	}
 
@@ -422,12 +421,12 @@ func TestImportRace(t *testing.T) {
 }
 
 // checkAccounts checks that all known live accounts are present in the wallet list.
-func checkAccounts(t *testing.T, live map[common.Address]accounts.Account, wallets []accounts.Wallet) {
+func checkAccounts(t *testing.T, live map[common.Address]Account, wallets []Wallet) {
 	if len(live) != len(wallets) {
 		t.Errorf("wallet list doesn't match required accounts: have %d, want %d", len(wallets), len(live))
 		return
 	}
-	liveList := make([]accounts.Account, 0, len(live))
+	liveList := make([]Account, 0, len(live))
 	for _, account := range live {
 		liveList = append(liveList, account)
 	}

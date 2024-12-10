@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/accounts"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/accounts"
 	"github.com/google/uuid"
 )
 
@@ -171,19 +171,19 @@ func newKey(rand io.Reader) (*Key, error) {
 	return newKeyFromECDSA(privateKeyECDSA), nil
 }
 
-func storeNewKey(ks keyStore, rand io.Reader, auth string) (*Key, accounts.Account, error) {
+func storeNewKey(ks keyStore, rand io.Reader, auth string) (*Key, Account, error) {
 	key, err := newKey(rand)
 	if err != nil {
-		return nil, accounts.Account{}, err
+		return nil, Account{}, err
 	}
-	a := accounts.Account{
+	a := Account{
 		Address: key.Address,
-		URL:     accounts.URL{Scheme: KeyStoreScheme, Path: ks.JoinPath(keyFileName(key.Address))},
+		URL:     URL{Scheme: KeyStoreScheme, Path: ks.JoinPath(keyFileName(key.Address))},
 	}
-	if err := ks.StoreKey(a.URL.Path, key, auth); err != nil {
-		zeroKey(key.PrivateKey)
-		return nil, a, err
-	}
+	//if err := ks.StoreKey(a.URL.Path, key, auth); err != nil {
+	//	zeroKey(key.PrivateKey)
+	//	return nil, a, err
+	//}
 	return key, a, err
 }
 

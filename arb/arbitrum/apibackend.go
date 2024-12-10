@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/core/bloombits"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/state/snapshot"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -33,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/eth/tracers"
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/triedb"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 )
 
@@ -466,7 +464,7 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *c
 	if !bc.Config().IsArbitrumNitro(header.Number) {
 		return nil, header, types.ErrUseFallback
 	}
-	stateFor := func(db *state2.SharedDomains, snapshots *snapshot.Tree) func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error) {
+	stateFor := func(db *state2.SharedDomains) func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error) {
 		return func(header *types.Header) (*state.IntraBlockState, StateReleaseFunc, error) {
 			//if header.Root != (common.Hash{}) {
 			//	// Try referencing the root, if it isn't in dirties cache then Reference will have no effect
@@ -486,7 +484,7 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *c
 			return statedb, NoopStateRelease, nil
 		}
 	}
-	liveState, liveStateRelease, err := stateFor(bc.StateCache(), bc.Snapshots())(header)
+	liveState, liveStateRelease, err := stateFor(bc.StateCache())(header)
 	if err == nil {
 		liveStatesReferencedCounter.Inc(1)
 		liveState.SetArbFinalizer(func(*state.ArbitrumExtraData) {
@@ -501,8 +499,9 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *c
 	// note: triedb cleans cache is disabled in trie.HashDefaults
 	// note: only states committed to diskdb can be found as we're creating new triedb
 	// note: snapshots are not used here
-	ephemeral := state.NewDatabaseWithConfig(chainDb, triedb.HashDefaults)
-	lastState, lastHeader, lastStateRelease, err := FindLastAvailableState(ctx, bc, stateFor(ephemeral, nil), header, nil, maxRecreateStateDepth)
+	//ephemeral := state.NewDatabaseWithConfig(chainDb)
+	ephemeral := new(state2.SharedDomains)
+	lastState, lastHeader, lastStateRelease, err := FindLastAvailableState(ctx, bc, stateFor(ephemeral), header, nil, maxRecreateStateDepth)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -540,12 +539,12 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *c
 	return statedb, header, err
 }
 
-func (a *APIBackend) StateAndHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*state.StateDB, *types.Header, error) {
+func (a *APIBackend) StateAndHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*state.IntraBlockState, *types.Header, error) {
 	header, err := a.HeaderByNumber(ctx, number)
 	return StateAndHeaderFromHeader(ctx, a.ChainDb(), a.b.arb.BlockChain(), a.b.config.MaxRecreateStateDepth, header, err)
 }
 
-func (a *APIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*state.StateDB, *types.Header, error) {
+func (a *APIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*state.IntraBlockState, *types.Header, error) {
 	header, err := a.HeaderByNumberOrHash(ctx, blockNrOrHash)
 	hash, ishash := blockNrOrHash.Hash()
 	bc := a.BlockChain()
@@ -556,7 +555,7 @@ func (a *APIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockNrOr
 	return StateAndHeaderFromHeader(ctx, a.ChainDb(), a.b.arb.BlockChain(), a.b.config.MaxRecreateStateDepth, header, err)
 }
 
-func (a *APIBackend) StateAtBlock(ctx context.Context, block *types.Block, reexec uint64, base *state.StateDB, checkLive bool, preferDisk bool) (statedb *state.StateDB, release tracers.StateReleaseFunc, err error) {
+func (a *APIBackend) StateAtBlock(ctx context.Context, block *types.Block, reexec uint64, base *state.IntraBlockState, checkLive bool, preferDisk bool) (statedb *state.IntraBlockState, release tracers.StateReleaseFunc, err error) {
 	if !a.BlockChain().Config().IsArbitrumNitro(block.Number()) {
 		return nil, nil, types.ErrUseFallback
 	}

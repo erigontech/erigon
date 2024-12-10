@@ -28,25 +28,24 @@ import (
 
 	"github.com/cespare/cp"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/erigontech/erigon-lib/common"
 	"golang.org/x/exp/slices"
 )
 
 var (
 	cachetestDir, _   = filepath.Abs(filepath.Join("testdata", "keystore"))
-	cachetestAccounts = []accounts.Account{
+	cachetestAccounts = []Account{
 		{
 			Address: common.HexToAddress("7ef5a6135f1fd6a02593eedc869c6d41d934aef8"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Join(cachetestDir, "UTC--2016-03-22T12-57-55.920751759Z--7ef5a6135f1fd6a02593eedc869c6d41d934aef8")},
+			URL:     URL{Scheme: KeyStoreScheme, Path: filepath.Join(cachetestDir, "UTC--2016-03-22T12-57-55.920751759Z--7ef5a6135f1fd6a02593eedc869c6d41d934aef8")},
 		},
 		{
 			Address: common.HexToAddress("f466859ead1932d743d622cb74fc058882e8648a"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Join(cachetestDir, "aaa")},
+			URL:     URL{Scheme: KeyStoreScheme, Path: filepath.Join(cachetestDir, "aaa")},
 		},
 		{
 			Address: common.HexToAddress("289d485d9771714cce91d3393d764e1311907acc"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Join(cachetestDir, "zzz")},
+			URL:     URL{Scheme: KeyStoreScheme, Path: filepath.Join(cachetestDir, "zzz")},
 		},
 	}
 )
@@ -66,8 +65,8 @@ func waitWatcherStart(ks *KeyStore) bool {
 	return false
 }
 
-func waitForAccounts(wantAccounts []accounts.Account, ks *KeyStore) error {
-	var list []accounts.Account
+func waitForAccounts(wantAccounts []Account, ks *KeyStore) error {
+	var list []Account
 	for t0 := time.Now(); time.Since(t0) < 5*time.Second; time.Sleep(100 * time.Millisecond) {
 		list = ks.Accounts()
 		if reflect.DeepEqual(list, wantAccounts) {
@@ -94,18 +93,18 @@ func TestWatchNewFile(t *testing.T) {
 		t.Fatal("keystore watcher didn't start in time")
 	}
 	// Move in the files.
-	wantAccounts := make([]accounts.Account, len(cachetestAccounts))
+	wantAccounts := make([]Account, len(cachetestAccounts))
 	for i := range cachetestAccounts {
-		wantAccounts[i] = accounts.Account{
+		wantAccounts[i] = Account{
 			Address: cachetestAccounts[i].Address,
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, filepath.Base(cachetestAccounts[i].URL.Path))},
+			URL:     URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, filepath.Base(cachetestAccounts[i].URL.Path))},
 		}
 		if err := cp.CopyFile(wantAccounts[i].URL.Path, cachetestAccounts[i].URL.Path); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// ks should see the accounts.
+	// ks should see the
 	if err := waitForAccounts(wantAccounts, ks); err != nil {
 		t.Error(err)
 	}
@@ -133,8 +132,8 @@ func TestWatchNoDir(t *testing.T) {
 	}
 
 	// ks should see the account.
-	wantAccounts := []accounts.Account{cachetestAccounts[0]}
-	wantAccounts[0].URL = accounts.URL{Scheme: KeyStoreScheme, Path: file}
+	wantAccounts := []Account{cachetestAccounts[0]}
+	wantAccounts[0].URL = URL{Scheme: KeyStoreScheme, Path: file}
 	for d := 200 * time.Millisecond; d < 8*time.Second; d *= 2 {
 		list = ks.Accounts()
 		if reflect.DeepEqual(list, wantAccounts) {
@@ -165,34 +164,34 @@ func TestCacheAddDeleteOrder(t *testing.T) {
 	cache, _ := newAccountCache("testdata/no-such-dir")
 	cache.watcher.running = true // prevent unexpected reloads
 
-	accs := []accounts.Account{
+	accs := []Account{
 		{
 			Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: "-309830980"},
+			URL:     URL{Scheme: KeyStoreScheme, Path: "-309830980"},
 		},
 		{
 			Address: common.HexToAddress("2cac1adea150210703ba75ed097ddfe24e14f213"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: "ggg"},
+			URL:     URL{Scheme: KeyStoreScheme, Path: "ggg"},
 		},
 		{
 			Address: common.HexToAddress("8bda78331c916a08481428e4b07c96d3e916d165"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: "zzzzzz-the-very-last-one.keyXXX"},
+			URL:     URL{Scheme: KeyStoreScheme, Path: "zzzzzz-the-very-last-one.keyXXX"},
 		},
 		{
 			Address: common.HexToAddress("d49ff4eeb0b2686ed89c0fc0f2b6ea533ddbbd5e"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: "SOMETHING.key"},
+			URL:     URL{Scheme: KeyStoreScheme, Path: "SOMETHING.key"},
 		},
 		{
 			Address: common.HexToAddress("7ef5a6135f1fd6a02593eedc869c6d41d934aef8"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: "UTC--2016-03-22T12-57-55.920751759Z--7ef5a6135f1fd6a02593eedc869c6d41d934aef8"},
+			URL:     URL{Scheme: KeyStoreScheme, Path: "UTC--2016-03-22T12-57-55.920751759Z--7ef5a6135f1fd6a02593eedc869c6d41d934aef8"},
 		},
 		{
 			Address: common.HexToAddress("f466859ead1932d743d622cb74fc058882e8648a"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: "aaa"},
+			URL:     URL{Scheme: KeyStoreScheme, Path: "aaa"},
 		},
 		{
 			Address: common.HexToAddress("289d485d9771714cce91d3393d764e1311907acc"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: "zzz"},
+			URL:     URL{Scheme: KeyStoreScheme, Path: "zzz"},
 		},
 	}
 	for _, a := range accs {
@@ -203,7 +202,7 @@ func TestCacheAddDeleteOrder(t *testing.T) {
 	cache.add(accs[2])
 
 	// Check that the account list is sorted by filename.
-	wantAccounts := make([]accounts.Account, len(accs))
+	wantAccounts := make([]Account, len(accs))
 	copy(wantAccounts, accs)
 	slices.SortFunc(wantAccounts, byURL)
 	list := cache.accounts()
@@ -223,10 +222,10 @@ func TestCacheAddDeleteOrder(t *testing.T) {
 	for i := 0; i < len(accs); i += 2 {
 		cache.delete(wantAccounts[i])
 	}
-	cache.delete(accounts.Account{Address: common.HexToAddress("fd9bd350f08ee3c0c19b85a8e16114a11a60aa4e"), URL: accounts.URL{Scheme: KeyStoreScheme, Path: "something"}})
+	cache.delete(Account{Address: common.HexToAddress("fd9bd350f08ee3c0c19b85a8e16114a11a60aa4e"), URL: URL{Scheme: KeyStoreScheme, Path: "something"}})
 
 	// Check content again after deletion.
-	wantAccountsAfterDelete := []accounts.Account{
+	wantAccountsAfterDelete := []Account{
 		wantAccounts[1],
 		wantAccounts[3],
 		wantAccounts[5],
@@ -251,60 +250,60 @@ func TestCacheFind(t *testing.T) {
 	cache, _ := newAccountCache(dir)
 	cache.watcher.running = true // prevent unexpected reloads
 
-	accs := []accounts.Account{
+	accs := []Account{
 		{
 			Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "a.key")},
+			URL:     URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "a.key")},
 		},
 		{
 			Address: common.HexToAddress("2cac1adea150210703ba75ed097ddfe24e14f213"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "b.key")},
+			URL:     URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "b.key")},
 		},
 		{
 			Address: common.HexToAddress("d49ff4eeb0b2686ed89c0fc0f2b6ea533ddbbd5e"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "c.key")},
+			URL:     URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "c.key")},
 		},
 		{
 			Address: common.HexToAddress("d49ff4eeb0b2686ed89c0fc0f2b6ea533ddbbd5e"),
-			URL:     accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "c2.key")},
+			URL:     URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "c2.key")},
 		},
 	}
 	for _, a := range accs {
 		cache.add(a)
 	}
 
-	nomatchAccount := accounts.Account{
+	nomatchAccount := Account{
 		Address: common.HexToAddress("f466859ead1932d743d622cb74fc058882e8648a"),
-		URL:     accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "something")},
+		URL:     URL{Scheme: KeyStoreScheme, Path: filepath.Join(dir, "something")},
 	}
 	tests := []struct {
-		Query      accounts.Account
-		WantResult accounts.Account
+		Query      Account
+		WantResult Account
 		WantError  error
 	}{
 		// by address
-		{Query: accounts.Account{Address: accs[0].Address}, WantResult: accs[0]},
+		{Query: Account{Address: accs[0].Address}, WantResult: accs[0]},
 		// by file
-		{Query: accounts.Account{URL: accs[0].URL}, WantResult: accs[0]},
+		{Query: Account{URL: accs[0].URL}, WantResult: accs[0]},
 		// by basename
-		{Query: accounts.Account{URL: accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Base(accs[0].URL.Path)}}, WantResult: accs[0]},
+		{Query: Account{URL: URL{Scheme: KeyStoreScheme, Path: filepath.Base(accs[0].URL.Path)}}, WantResult: accs[0]},
 		// by file and address
 		{Query: accs[0], WantResult: accs[0]},
 		// ambiguous address, tie resolved by file
 		{Query: accs[2], WantResult: accs[2]},
 		// ambiguous address error
 		{
-			Query: accounts.Account{Address: accs[2].Address},
+			Query: Account{Address: accs[2].Address},
 			WantError: &AmbiguousAddrError{
 				Addr:    accs[2].Address,
-				Matches: []accounts.Account{accs[2], accs[3]},
+				Matches: []Account{accs[2], accs[3]},
 			},
 		},
 		// no match error
 		{Query: nomatchAccount, WantError: ErrNoMatch},
-		{Query: accounts.Account{URL: nomatchAccount.URL}, WantError: ErrNoMatch},
-		{Query: accounts.Account{URL: accounts.URL{Scheme: KeyStoreScheme, Path: filepath.Base(nomatchAccount.URL.Path)}}, WantError: ErrNoMatch},
-		{Query: accounts.Account{Address: nomatchAccount.Address}, WantError: ErrNoMatch},
+		{Query: Account{URL: nomatchAccount.URL}, WantError: ErrNoMatch},
+		{Query: Account{URL: URL{Scheme: KeyStoreScheme, Path: filepath.Base(nomatchAccount.URL.Path)}}, WantError: ErrNoMatch},
+		{Query: Account{Address: nomatchAccount.Address}, WantError: ErrNoMatch},
 	}
 	for i, test := range tests {
 		a, err := cache.find(test.Query)
@@ -346,8 +345,8 @@ func TestUpdatedKeyfileContents(t *testing.T) {
 	}
 
 	// ks should see the account.
-	wantAccounts := []accounts.Account{cachetestAccounts[0]}
-	wantAccounts[0].URL = accounts.URL{Scheme: KeyStoreScheme, Path: file}
+	wantAccounts := []Account{cachetestAccounts[0]}
+	wantAccounts[0].URL = URL{Scheme: KeyStoreScheme, Path: file}
 	if err := waitForAccounts(wantAccounts, ks); err != nil {
 		t.Error(err)
 		return
@@ -360,8 +359,8 @@ func TestUpdatedKeyfileContents(t *testing.T) {
 		t.Fatal(err)
 		return
 	}
-	wantAccounts = []accounts.Account{cachetestAccounts[1]}
-	wantAccounts[0].URL = accounts.URL{Scheme: KeyStoreScheme, Path: file}
+	wantAccounts = []Account{cachetestAccounts[1]}
+	wantAccounts[0].URL = URL{Scheme: KeyStoreScheme, Path: file}
 	if err := waitForAccounts(wantAccounts, ks); err != nil {
 		t.Errorf("First replacement failed")
 		t.Error(err)
@@ -376,8 +375,8 @@ func TestUpdatedKeyfileContents(t *testing.T) {
 		t.Fatal(err)
 		return
 	}
-	wantAccounts = []accounts.Account{cachetestAccounts[2]}
-	wantAccounts[0].URL = accounts.URL{Scheme: KeyStoreScheme, Path: file}
+	wantAccounts = []Account{cachetestAccounts[2]}
+	wantAccounts[0].URL = URL{Scheme: KeyStoreScheme, Path: file}
 	if err := waitForAccounts(wantAccounts, ks); err != nil {
 		t.Errorf("Second replacement failed")
 		t.Error(err)
@@ -392,7 +391,7 @@ func TestUpdatedKeyfileContents(t *testing.T) {
 		t.Fatal(err)
 		return
 	}
-	if err := waitForAccounts([]accounts.Account{}, ks); err != nil {
+	if err := waitForAccounts([]Account{}, ks); err != nil {
 		t.Errorf("Emptying account file failed")
 		t.Error(err)
 		return
