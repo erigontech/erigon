@@ -29,13 +29,20 @@ const (
 	ExecutionStatusExecutionAndPostOpFailure = uint64(3)
 )
 
+const AA_GAS_PENALTY_PCT = 10
+
 var AA_ENTRY_POINT = common.HexToAddress("0x0000000000000000000000000000000000007560")
 var AA_SENDER_CREATOR = common.HexToAddress("0x00000000000000000000000000000000ffff7560")
 
-const AA_GAS_PENALTY_PCT = 10
-
 type AccountAbstractionTransaction struct {
-	DynamicFeeTransaction
+	TransactionMisc
+	Nonce      uint64
+	ChainID    *uint256.Int
+	Tip        *uint256.Int
+	FeeCap     *uint256.Int
+	Gas        uint64
+	AccessList AccessList
+
 	SenderAddress               *common.Address
 	AuthorizationData           []Authorization
 	ExecutionData               []byte
@@ -52,8 +59,106 @@ type AccountAbstractionTransaction struct {
 	NonceKey *uint256.Int // NOTE: this is *big.Int in geth impl
 }
 
+func (tx *AccountAbstractionTransaction) GetData() []byte {
+	return []byte{}
+}
+
+func (tx *AccountAbstractionTransaction) GetAccessList() AccessList {
+	return tx.AccessList
+}
+
+func (tx *AccountAbstractionTransaction) Protected() bool {
+	return true
+}
+
+func (tx *AccountAbstractionTransaction) Sender(signer Signer) (common.Address, error) {
+	return *tx.SenderAddress, nil
+}
+
+func (tx *AccountAbstractionTransaction) cachedSender() (common.Address, bool) {
+	return *tx.SenderAddress, true
+}
+
+func (tx *AccountAbstractionTransaction) GetSender() (common.Address, bool) {
+	return *tx.SenderAddress, true
+}
+
+func (tx *AccountAbstractionTransaction) SetSender(address common.Address) {
+	return
+}
+
+func (tx *AccountAbstractionTransaction) IsContractDeploy() bool {
+	return false
+}
+
+func (tx *AccountAbstractionTransaction) Unwrap() Transaction {
+	return tx
+}
+
+func (tx *AccountAbstractionTransaction) GetChainID() *uint256.Int {
+	return tx.ChainID
+}
+
+func (tx *AccountAbstractionTransaction) GetNonce() uint64 {
+	return tx.Nonce
+}
+func (tx *AccountAbstractionTransaction) GetPrice() *uint256.Int {
+	return tx.Tip
+}
+
+func (tx *AccountAbstractionTransaction) GetTip() *uint256.Int {
+	return tx.Tip
+}
+
+func (tx *AccountAbstractionTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+	if baseFee == nil {
+		return tx.GetTip()
+	}
+	gasFeeCap := tx.GetFeeCap()
+	// return 0 because effectiveFee cant be < 0
+	if gasFeeCap.Lt(baseFee) {
+		return uint256.NewInt(0)
+	}
+	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
+	if tx.GetTip().Lt(effectiveFee) {
+		return tx.GetTip()
+	} else {
+		return effectiveFee
+	}
+}
+
+func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
+	return tx.FeeCap
+}
+
+func (tx *AccountAbstractionTransaction) GetBlobHashes() []common.Hash {
+	return []common.Hash{}
+}
+
+func (tx *AccountAbstractionTransaction) GetGas() uint64 {
+	return tx.Gas
+}
+
+func (tx *AccountAbstractionTransaction) GetBlobGas() uint64 {
+	return 0
+}
+
+func (tx *AccountAbstractionTransaction) GetValue() *uint256.Int {
+	return uint256.NewInt(0)
+}
+
+func (tx *AccountAbstractionTransaction) GetTo() *common.Address {
+	return nil
+}
+
 func (tx *AccountAbstractionTransaction) copy() *AccountAbstractionTransaction {
 	cpy := &AccountAbstractionTransaction{
+		Nonce:                       tx.Nonce,
+		ChainID:                     tx.ChainID,
+		Tip:                         tx.Tip,
+		FeeCap:                      tx.FeeCap,
+		Gas:                         tx.Gas,
+		AccessList:                  tx.AccessList,
 		SenderAddress:               &*tx.SenderAddress,
 		ExecutionData:               common.CopyBytes(tx.ExecutionData),
 		Paymaster:                   &*tx.Paymaster,
@@ -66,7 +171,6 @@ func (tx *AccountAbstractionTransaction) copy() *AccountAbstractionTransaction {
 		PostOpGasLimit:              tx.PostOpGasLimit,
 		NonceKey:                    new(uint256.Int),
 	}
-	cpy.DynamicFeeTransaction = *tx.DynamicFeeTransaction.copy()
 
 	cpy.AuthorizationData = make([]Authorization, len(tx.AuthorizationData))
 	for i, ath := range tx.AuthorizationData {
@@ -86,37 +190,8 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 	return AccountAbstractionTxType
 }
 
-// NOTE: DO NOT USE
 func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg := Message{
-		nonce:      tx.Nonce, // may need 7712 handling
-		gasLimit:   tx.Gas,
-		gasPrice:   *tx.FeeCap,
-		tip:        *tx.Tip,
-		feeCap:     *tx.FeeCap,
-		to:         tx.To,
-		amount:     *tx.Value,
-		data:       tx.Data,
-		accessList: tx.AccessList,
-		checkNonce: true,
-	}
-	if !rules.IsPolygonAA {
-		return msg, errors.New("AccountAbstractionTransaction transactions require AA to be enabled")
-	}
-	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return msg, errors.New("gasPrice higher than 2^256-1")
-		}
-	}
-	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
-	if msg.gasPrice.Gt(tx.FeeCap) {
-		msg.gasPrice.Set(tx.FeeCap)
-	}
-
-	var err error
-	msg.from, err = tx.Sender(s)
-	return msg, err
+	return Message{}, errors.New("do not use")
 }
 
 func (tx *AccountAbstractionTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -170,7 +245,25 @@ func (tx *AccountAbstractionTransaction) RawSignatureValues() (*uint256.Int, *ui
 }
 
 func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen int) {
-	payloadSize, nonceLen, gasLen, accessListLen = tx.DynamicFeeTransaction.payloadSize()
+	payloadSize++
+	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
+	payloadSize += nonceLen
+
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
+
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(tx.Tip)
+
+	payloadSize++
+	payloadSize += rlp.Uint256LenExcludingHead(tx.FeeCap)
+
+	payloadSize++
+	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	payloadSize += gasLen
+
+	accessListLen = accessListSize(tx.AccessList)
+	payloadSize += rlp2.ListPrefixLen(accessListLen) + accessListLen
 
 	payloadSize++
 	if tx.SenderAddress != nil {

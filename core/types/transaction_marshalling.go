@@ -67,6 +67,29 @@ type txJSON struct {
 	Hash libcommon.Hash `json:"hash"`
 }
 
+type aaTxnJSON struct {
+	Nonce      *hexutil.Uint64 `json:"nonce"`
+	ChainID    *hexutil.Big    `json:"chainId"`
+	GasPrice   *hexutil.Big    `json:"gasPrice"`
+	FeeCap     *hexutil.Big    `json:"maxFeePerGas"`
+	Tip        *hexutil.Big    `json:"maxPriorityFeePerGas"`
+	Gas        *hexutil.Uint64 `json:"gas"`
+	AccessList *AccessList     `json:"accessList"`
+
+	SenderAccess                *libcommon.Address   `json:"sender"`
+	AuthorizationData           *[]JsonAuthorization `json:"authorizationData,omitempty"`
+	ExecutionData               *hexutility.Bytes    `json:"executionData"`
+	Paymaster                   *libcommon.Address   `json:"paymaster"`
+	PaymasterData               *hexutility.Bytes    `json:"paymasterData"`
+	Deployer                    *libcommon.Address   `json:"deployer"`
+	DeployerData                *hexutility.Bytes    `json:"deployerData"`
+	BuilderFee                  *hexutil.Big         `json:"builderFee"`
+	ValidationGasLimit          *hexutil.Uint64      `json:"validationGasLimit"`
+	PaymasterValidationGasLimit *hexutil.Uint64      `json:"paymasterValidationGasLimit"`
+	PostOpGasLimit              *hexutil.Uint64      `json:"postOpGasLimit"`
+	NonceKey                    *hexutil.Big         `json:"nonceKey"`
+}
+
 type JsonAuthorization struct {
 	ChainID hexutil.Uint64    `json:"chainId"`
 	Address libcommon.Address `json:"address"`
@@ -251,6 +274,12 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 			return nil, err
 		}
 		return tx, nil
+	case AccountAbstractionTxType:
+		tx := &AccountAbstractionTransaction{}
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+		return tx, nil
 	default:
 		return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}
@@ -420,9 +449,6 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 		return errors.New("missing required field 'nonce' in transaction")
 	}
 	tx.Nonce = uint64(*dec.Nonce)
-	if dec.GasPrice == nil {
-		return errors.New("missing required field 'gasPrice' in transaction")
-	}
 	tx.Tip, overflow = uint256.FromBig(dec.Tip.ToInt())
 	if overflow {
 		return errors.New("'tip' in transaction does not fit in 256 bits")
@@ -505,6 +531,80 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (tx *AccountAbstractionTransaction) UnmarshalJSON(input []byte) error {
+	var dec aaTxnJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+
+	return tx.unmarshalJson(dec)
+}
+
+func (tx *AccountAbstractionTransaction) unmarshalJson(dec aaTxnJSON) error {
+	if dec.Nonce == nil {
+		return errors.New("missing required field 'nonce' in transaction")
+	}
+	tx.Nonce = uint64(*dec.Nonce)
+
+	if dec.ChainID == nil {
+		return errors.New("missing required field 'chainId' in transaction")
+	}
+	var overflow bool
+	tx.ChainID, overflow = uint256.FromBig(dec.ChainID.ToInt())
+	if overflow {
+		return errors.New("'chainId' in transaction does not fit in 256 bits")
+	}
+
+	tx.Tip, overflow = uint256.FromBig(dec.Tip.ToInt())
+	if overflow {
+		return errors.New("'tip' in transaction does not fit in 256 bits")
+	}
+
+	tx.FeeCap, overflow = uint256.FromBig(dec.FeeCap.ToInt())
+	if overflow {
+		return errors.New("'feeCap' in transaction does not fit in 256 bits")
+	}
+
+	if dec.Gas == nil {
+		return errors.New("missing required field 'gas' in transaction")
+	}
+	tx.Gas = uint64(*dec.Gas)
+
+	tx.AccessList = *dec.AccessList
+	tx.SenderAddress = dec.SenderAccess
+
+	tx.AuthorizationData = make([]Authorization, len(*dec.AuthorizationData))
+	for i, auth := range *dec.AuthorizationData {
+		var err error
+		tx.AuthorizationData[i], err = auth.ToAuthorization()
+		if err != nil {
+			return err
+		}
+	}
+
+	tx.ExecutionData = *dec.ExecutionData
+	tx.Paymaster = dec.Paymaster
+	tx.PaymasterData = *dec.PaymasterData
+	tx.Deployer = dec.Deployer
+	tx.DeployerData = *dec.DeployerData
+
+	tx.BuilderFee, overflow = uint256.FromBig(dec.BuilderFee.ToInt())
+	if overflow {
+		return errors.New("'builderFee' in transaction does not fit in 256 bits")
+	}
+
+	tx.ValidationGasLimit = uint64(*dec.ValidationGasLimit)
+	tx.PaymasterValidationGasLimit = uint64(*dec.PaymasterValidationGasLimit)
+	tx.PostOpGasLimit = uint64(*dec.PostOpGasLimit)
+
+	tx.NonceKey, overflow = uint256.FromBig(dec.NonceKey.ToInt())
+	if overflow {
+		return errors.New("'nonceKey' in transaction does not fit in 256 bits")
+	}
+
 	return nil
 }
 
