@@ -76,7 +76,7 @@ type ConditionalOptions struct {
 	TimestampMax   *math.HexOrDecimal64               `json:"timestampMax,omitempty"`
 }
 
-func (o *ConditionalOptions) Check(l1BlockNumber uint64, l2Timestamp uint64, statedb *state.StateDB) error {
+func (o *ConditionalOptions) Check(l1BlockNumber uint64, l2Timestamp uint64, statedb *state.IntraBlockState) error {
 	if o.BlockNumberMin != nil && l1BlockNumber < uint64(*o.BlockNumberMin) {
 		return NewRejectedError("BlockNumberMin condition not met")
 	}

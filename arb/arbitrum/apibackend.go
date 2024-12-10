@@ -563,7 +563,7 @@ func (a *APIBackend) StateAtBlock(ctx context.Context, block *types.Block, reexe
 	return eth.NewArbEthereum(a.b.arb.BlockChain(), a.ChainDb()).StateAtBlock(ctx, block, reexec, base, nil, checkLive, preferDisk)
 }
 
-func (a *APIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*core.Message, evmtypes.BlockContext, *state.StateDB, tracers.StateReleaseFunc, error) {
+func (a *APIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*core.Message, evmtypes.BlockContext, *state.IntraBlockState, tracers.StateReleaseFunc, error) {
 	if !a.BlockChain().Config().IsArbitrumNitro(block.Number()) {
 		return nil, evmtypes.BlockContext{}, nil, nil, types.ErrUseFallback
 	}
@@ -582,7 +582,7 @@ func (a *APIBackend) GetTd(ctx context.Context, hash common.Hash) *big.Int {
 	return nil
 }
 
-func (a *APIBackend) GetEVM(ctx context.Context, msg *core.Message, state *state.StateDB, header *types.Header, vmConfig *vm.Config, blockCtx *evmtypes.BlockContext) *vm.EVM {
+func (a *APIBackend) GetEVM(ctx context.Context, msg *core.Message, state *state.IntraBlockState, header *types.Header, vmConfig *vm.Config, blockCtx *evmtypes.BlockContext) *vm.EVM {
 	if vmConfig == nil {
 		vmConfig = a.BlockChain().GetVMConfig()
 	}
