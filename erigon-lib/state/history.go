@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -340,14 +340,14 @@ func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.P
 	fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
 	idxPath := h.vAccessorFilePath(fromStep, toStep)
 
-	_, err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, ps)
+	_, err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
 	if err != nil {
 		return fmt.Errorf("buildVI: %w", err)
 	}
 	return nil
 }
 
-func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, ps *background.ProgressSet) (string, error) {
+func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) (string, error) {
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   hist.Count(),
 		Enums:      false,
@@ -390,10 +390,10 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
-			ef, _ := eliasfano32.ReadEliasFano(valBuf)
-			efIt := ef.Iterator()
-			for efIt.HasNext() {
-				txNum, err := efIt.Next()
+			seq := multiencseq.ReadMultiEncSeq(efBaseTxNum, valBuf)
+			it := seq.Iterator(0)
+			for it.HasNext() {
+				txNum, err := it.Next()
 				if err != nil {
 					return "", err
 				}
@@ -555,12 +555,14 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
+// TODO: rename ef* fields
 type HistoryCollation struct {
 	historyComp   *seg.Writer
 	efHistoryComp *seg.Writer
 	historyPath   string
 	efHistoryPath string
-	historyCount  int // same as historyComp.Count()
+	efBaseTxNum   uint64 // TODO: is it necessary or using step later is reliable?
+	historyCount  int    // same as historyComp.Count()
 }
 
 func (c HistoryCollation) Close() {
@@ -579,10 +581,10 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	}
 
 	var (
-		historyComp   *seg.Writer
-		efHistoryComp *seg.Writer
-		txKey         [8]byte
-		err           error
+		historyComp *seg.Writer
+		seqWriter   *seg.Writer
+		txKey       [8]byte
+		err         error
 
 		historyPath   = h.vFilePath(step, step+1)
 		efHistoryPath = h.efFilePath(step, step+1)
@@ -595,8 +597,8 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			if historyComp != nil {
 				historyComp.Close()
 			}
-			if efHistoryComp != nil {
-				efHistoryComp.Close()
+			if seqWriter != nil {
+				seqWriter.Close()
 			}
 		}
 	}()
@@ -652,26 +654,28 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		defer cd.Close()
 	}
 
-	efComp, err := seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.compressorCfg, log.LvlTrace, h.logger)
+	seqComp, err := seg.NewCompressor(ctx, "collate idx "+h.filenameBase, efHistoryPath, h.dirs.Tmp, h.compressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 	}
 	if h.noFsync {
-		efComp.DisableFsync()
+		seqComp.DisableFsync()
 	}
 
 	var (
 		keyBuf      = make([]byte, 0, 256)
 		numBuf      = make([]byte, 8)
 		bitmap      = bitmapdb.NewBitmap64()
-		prevEf      []byte
+		prevSeq     []byte
 		prevKey     []byte
 		initialized bool
 	)
-	efHistoryComp = seg.NewWriter(efComp, seg.CompressNone) // coll+build must be fast - no compression
+	seqWriter = seg.NewWriter(seqComp, seg.CompressNone) // coll+build must be fast - no compression
 	collector.SortAndFlushInBackground(true)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
+	baseTxNum := step * h.aggregationStep
+	log.Info("*************", "aggregationStep", h.aggregationStep, "baseTxNum", baseTxNum)
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
 		if !initialized {
@@ -685,7 +689,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			return nil
 		}
 
-		ef := eliasfano32.NewEliasFano(bitmap.GetCardinality(), bitmap.Maximum())
+		seqBuilder := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum(), h.experimentalEFOptimization)
 		it := bitmap.Iterator()
 
 		for it.HasNext() {
@@ -718,17 +722,17 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 				}
 			}
 
-			ef.AddOffset(vTxNum)
+			seqBuilder.AddOffset(vTxNum)
 		}
 		bitmap.Clear()
-		ef.Build()
+		seqBuilder.Build()
 
-		prevEf = ef.AppendBytes(prevEf[:0])
+		prevSeq = seqBuilder.AppendBytes(prevSeq[:0])
 
-		if err = efHistoryComp.AddWord(prevKey); err != nil {
+		if err = seqWriter.AddWord(prevKey); err != nil {
 			return fmt.Errorf("add %s ef history key [%x]: %w", h.filenameBase, prevKey, err)
 		}
-		if err = efHistoryComp.AddWord(prevEf); err != nil {
+		if err = seqWriter.AddWord(prevSeq); err != nil {
 			return fmt.Errorf("add %s ef history val: %w", h.filenameBase, err)
 		}
 
@@ -753,8 +757,9 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 	mxCollationSizeHist.SetUint64(uint64(historyComp.Count()))
 
 	return HistoryCollation{
-		efHistoryComp: efHistoryComp,
+		efHistoryComp: seqWriter,
 		efHistoryPath: efHistoryPath,
+		efBaseTxNum:   step * h.aggregationStep,
 		historyPath:   historyPath,
 		historyComp:   historyComp,
 		historyCount:  historyComp.Count(),
@@ -874,7 +879,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 
 	historyIdxPath := h.vAccessorFilePath(step, step+1)
-	historyIdxPath, err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, ps)
+	historyIdxPath, err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.filenameBase, err)
 	}
