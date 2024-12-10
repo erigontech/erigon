@@ -26,7 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/common/bitutil"
-	"github.com/erigontech/erigon-lib/common/errors"
+	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -484,7 +484,7 @@ func (efi *EliasFanoIter) decrement() {
 
 func (efi *EliasFanoIter) Next() (uint64, error) {
 	if !efi.HasNext() {
-		return 0, errors.ErrIteratorExhausted
+		return 0, stream.ErrIteratorExhausted
 	}
 	idx64, shift := efi.lowerIdx/64, efi.lowerIdx%64
 	lower := efi.lowerBits[idx64] >> shift
