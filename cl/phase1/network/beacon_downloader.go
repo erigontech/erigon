@@ -123,15 +123,19 @@ Loop:
 		}
 	}
 
+	log.Info("before acquiring lock")
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	log.Info("after acquiring lock")
 
 	var highestSlotProcessed uint64
 	var err error
 	blocks := atomicResp.Load().(peerAndBlocks).blocks
 	pid := atomicResp.Load().(peerAndBlocks).peerId
 	if highestSlotProcessed, err = f.process(f.highestSlotProcessed, blocks); err != nil {
+		log.Info("Failed to process downloaded blocks", "err", err)
 		f.rpc.BanPeer(pid)
+		log.Info("Banned peer", "peer", pid)
 		return
 	}
 	f.highestSlotProcessed = highestSlotProcessed
