@@ -160,7 +160,7 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 }
 
 type ReceiptsGetter interface {
-	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error)
+	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error)
 	GetCachedReceipts(ctx context.Context, blockHash libcommon.Hash) (types.Receipts, bool)
 }
 
@@ -206,7 +206,7 @@ func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter Receipt
 	}, needMore, nil
 }
 
-func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.Tx, query GetReceiptsPacket, cachedReceipts *cachedReceipts) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.FullBlockReader, db kv.TemporalTx, query GetReceiptsPacket, cachedReceipts *cachedReceipts) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes        int

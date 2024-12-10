@@ -28,6 +28,7 @@ linters:
     - testifylint #TODO: enable me
     - gocheckcompilerdirectives
     - protogetter
+    - recvcheck #TODO: enable me
   enable:
     - unconvert
     #    - predeclared #TODO: enable me

@@ -42,7 +42,7 @@ import (
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
-func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Block) (types.Receipts, error) {
+func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
 }
 
-func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
+func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, optimize)
 }
 
@@ -64,7 +64,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	var begin, end uint64
 	logs := types.Logs{}
 
-	tx, beginErr := api.db.BeginRo(ctx)
+	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
 		return logs, beginErr
 	}
@@ -132,7 +132,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = latest
 	}
 
-	erigonLogs, err := api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
+	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +401,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -487,7 +487,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 // GetBlockReceipts - receipts for individual block
 func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

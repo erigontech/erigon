@@ -26,7 +26,7 @@ func (api *ErigonImpl) CacheCheck() (*kvcache.CacheValidationResult, error) {
 	cache := api.stateCache
 
 	ctx := context.Background()
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

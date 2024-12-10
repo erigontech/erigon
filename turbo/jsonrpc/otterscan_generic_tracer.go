@@ -34,13 +34,12 @@ type GenericTracer interface {
 	Found() bool
 }
 
-func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum, txnID uint64, txIndex int, chainConfig *chain.Config, tracer GenericTracer) error {
-	ttx := dbtx.(kv.TemporalTx)
-	executor := exec3.NewTraceWorker(ttx, chainConfig, api.engine(), api._blockReader, tracer)
+func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context, blockNum, txnID uint64, txIndex int, chainConfig *chain.Config, tracer GenericTracer) error {
+	executor := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, tracer)
 	defer executor.Close()
 
 	// if block number changed, calculate all related field
-	header, err := api._blockReader.HeaderByNumber(ctx, ttx, blockNum)
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -50,7 +49,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 	}
 	executor.ChangeBlock(header)
 
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, ttx, blockNum, txIndex)
+	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 	if err != nil {
 		return err
 	}
