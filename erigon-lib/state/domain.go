@@ -2076,3 +2076,4 @@ func (dt *DomainRoTx) Files() (res []string) {
 	}
 	return append(res, dt.ht.Files()...)
 }
+func (dt *DomainRoTx) Name() kv.Domain { return dt.name }
