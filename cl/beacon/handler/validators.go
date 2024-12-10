@@ -174,15 +174,9 @@ func (s validatorStatus) String() string {
 	}
 }
 
-const maxValidatorsLookupFilter = 128
-
 func parseStatuses(s []string) ([]validatorStatus, error) {
 	seenAlready := make(map[validatorStatus]struct{})
 	statuses := make([]validatorStatus, 0, len(s))
-
-	if len(s) > maxValidatorsLookupFilter {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("too many statuses requested"))
-	}
 
 	for _, status := range s {
 		s, err := validatorStatusFromString(status)
@@ -248,10 +242,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		return
 	}
 
-	if len(validatorIds) > maxValidatorsLookupFilter {
-		http.Error(w, errors.New("too many validators requested").Error(), http.StatusBadRequest)
-		return
-	}
 	a.writeValidatorsResponse(w, r, tx, blockId, blockRoot, validatorIds, queryFilters)
 }
 
@@ -285,11 +275,6 @@ func (a *ApiHandler) PostEthV1BeaconStatesValidators(w http.ResponseWriter, r *h
 	var req validatorsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if len(req.Ids) > maxValidatorsLookupFilter {
-		http.Error(w, errors.New("too many validators requested").Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -536,11 +521,6 @@ func (a *ApiHandler) PostEthV1BeaconValidatorsBalances(w http.ResponseWriter, r 
 		return
 	}
 
-	if len(validatorIds) > maxValidatorsLookupFilter {
-		http.Error(w, errors.New("too many validators requested").Error(), http.StatusBadRequest)
-		return
-	}
-
 	a.getValidatorBalances(r.Context(), w, blockId, validatorIds)
 }
 
@@ -558,10 +538,6 @@ func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *
 		return
 	}
 
-	if len(validatorIds) > maxValidatorsLookupFilter {
-		http.Error(w, errors.New("too many validators requested").Error(), http.StatusBadRequest)
-		return
-	}
 	a.getValidatorBalances(r.Context(), w, blockId, validatorIds)
 }
 
