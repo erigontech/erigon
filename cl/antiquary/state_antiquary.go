@@ -57,11 +57,13 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 	// Execute this each second
 	reqRetryTimer := time.NewTicker(100 * time.Millisecond)
 	defer reqRetryTimer.Stop()
+	fmt.Println("XH")
+
 	if !initial_state.IsGenesisStateSupported(clparams.NetworkType(s.cfg.DepositNetworkID)) {
 		s.logger.Warn("Genesis state is not supported for this network, no historical states data will be available")
 		return
 	}
-
+	fmt.Println("UH")
 	_, beforeFinalized, err := s.readHistoricalProcessingProgress(ctx)
 	if err != nil {
 		s.logger.Error("Failed to read historical processing progress", "err", err)
@@ -84,7 +86,7 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			}
 			// We wait for updated finality.
 			if finalized == beforeFinalized {
-				fmt.Println("XA")
+				fmt.Println(finalized, beforeFinalized)
 				continue
 			}
 			beforeFinalized = finalized
