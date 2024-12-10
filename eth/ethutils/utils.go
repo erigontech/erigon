@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 )
@@ -61,6 +62,14 @@ func IsLocalBlock(engine consensus.Engine, etherbase libcommon.Address, txPoolLo
 }
 
 func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []libcommon.Hash, transactions *[]types.Transaction) error {
+	return validateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock, expectedBlobHashes, transactions, clparams.DenebVersion)
+}
+
+func ValidateBlobsElectra(expectedBlobHashes []libcommon.Hash, transactions *[]types.Transaction) error {
+	return validateBlobs(0, 0, 0, expectedBlobHashes, transactions, clparams.ElectraVersion)
+}
+
+func validateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBlobHashes []libcommon.Hash, transactions *[]types.Transaction, version clparams.StateVersion) error {
 	if expectedBlobHashes == nil {
 		return ErrNilBlobHashes
 	}
@@ -75,11 +84,11 @@ func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBl
 			}
 		}
 	}
-	if len(actualBlobHashes) > int(maxBlobsPerBlock) || blobGasUsed > maxBlobsGas {
-		return ErrMaxBlobGasUsed
-	}
 	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
 		return ErrMismatchBlobHashes
+	}
+	if version == clparams.ElectraVersion && (len(actualBlobHashes) > int(maxBlobsPerBlock) || blobGasUsed > maxBlobsGas) {
+		return ErrMaxBlobGasUsed
 	}
 	return nil
 }

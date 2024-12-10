@@ -153,6 +153,13 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 	return nil
 }
 
+func (s *EngineServer) notWithinForkWindow(time uint64, version clparams.StateVersion) bool {
+	return (!s.config.IsCancun(time) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(time) && version < clparams.DenebVersion) ||
+		(!s.config.IsPrague(time) && version >= clparams.ElectraVersion) ||
+		(s.config.IsPrague(time) && version < clparams.ElectraVersion)
+}
+
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, executionRequests []hexutility.Bytes, version clparams.StateVersion,
@@ -218,6 +225,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 		rh := requests.Hash()
 		header.RequestsHash = rh
+
+		// EIP-7742
+		header.TargetBlobsPerBlock = (*uint64)(req.TargetBlobsPerBlock)
 	}
 
 	if version <= clparams.CapellaVersion {
@@ -238,10 +248,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
-	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) {
+	if s.notWithinForkWindow(header.Time, version) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -273,8 +280,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}, nil
 	}
 
-	if version >= clparams.DenebVersion {
-		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(), s.config.GetMaxBlobsPerBlock(), expectedBlobHashes, &transactions)
+	if version == clparams.DenebVersion {
+		err = ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(), s.config.GetMaxBlobsPerBlock(), expectedBlobHashes, &transactions)
+	} else if version >= clparams.ElectraVersion {
+		err = ethutils.ValidateBlobsElectra(expectedBlobHashes, &transactions)
+	}
+	if version >= clparams.DenebVersion && err != nil {
 		if errors.Is(err, ethutils.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
@@ -561,6 +572,11 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
+	if version < clparams.ElectraVersion && (payloadAttributes.MaxBlobsPerBlock != nil || payloadAttributes.TargetBlobsPerBlock != nil) ||
+	 version >= clparams.ElectraVersion && (payloadAttributes.MaxBlobsPerBlock == nil || payloadAttributes.TargetBlobsPerBlock == nil) {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr
+	}
+
 	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
 	}
@@ -569,10 +585,8 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)
-	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
-		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-	}
-	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+
+	if s.notWithinForkWindow(timestamp, version) { // V3 before cancun
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -599,6 +613,11 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	if version >= clparams.DenebVersion {
 		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
+	}
+
+	if version >= clparams.ElectraVersion {
+		req.TargetBlobsPerBlock = (*uint64)(payloadAttributes.TargetBlobsPerBlock)
+		req.MaxBlobsPerBlock = (*uint64)(payloadAttributes.MaxBlobsPerBlock)
 	}
 
 	var resp *execution.AssembleBlockResponse
@@ -737,6 +756,12 @@ func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState 
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
 }
 
+// Successor of [ForkchoiceUpdatedV2] post Cancun, with stricter check on params
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3
+func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.ElectraVersion)
+}
+
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
@@ -781,6 +806,7 @@ var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
 	"engine_forkchoiceUpdatedV2",
 	"engine_forkchoiceUpdatedV3",
+	"engine_forkchoiceUpdatedV4",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
@@ -990,6 +1016,8 @@ func (e *EngineServer) HandlesForkChoice(
 	return payloadStatus, nil
 }
 
+// Keep polling the waitCondnF func until it returns true.
+// Meanwhile, return error if an error occurs
 func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {
 	shouldWait, err := waitCondnF()
 	if err != nil || !shouldWait {

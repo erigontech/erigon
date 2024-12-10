@@ -308,6 +308,9 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.RequestsHash != nil {
 		result["requestsHash"] = head.RequestsHash
 	}
+	if head.TargetBlobsPerBlock != nil {
+		result["targetBlobsPerBlock"] = (*hexutil.Uint64)(head.TargetBlobsPerBlock)
+	}
 
 	return result
 }

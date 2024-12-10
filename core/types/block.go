@@ -106,6 +106,8 @@ type Header struct {
 	BlobGasUsed   *uint64 `json:"blobGasUsed"`
 	ExcessBlobGas *uint64 `json:"excessBlobGas"`
 
+	TargetBlobsPerBlock *uint64 `json:"targetBlobsPerBlock"`	// EIP-7742
+
 	ParentBeaconBlockRoot *libcommon.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 
 	RequestsHash *libcommon.Hash `json:"requestsHash"` // EIP-7685

@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
@@ -58,6 +59,7 @@ type MiningExecCfg struct {
 	tmpdir      string
 	interrupt   *int32
 	payloadId   uint64
+	params      *core.BlockBuilderParameters
 	txnProvider txnprovider.TxnProvider
 }
 
@@ -71,6 +73,7 @@ func StageMiningExecCfg(
 	tmpdir string,
 	interrupt *int32,
 	payloadId uint64,
+	params *core.BlockBuilderParameters,
 	txnProvider txnprovider.TxnProvider,
 	blockReader services.FullBlockReader,
 ) MiningExecCfg {
@@ -85,6 +88,7 @@ func StageMiningExecCfg(
 		tmpdir:      tmpdir,
 		interrupt:   interrupt,
 		payloadId:   payloadId,
+		params:      params,
 		txnProvider: txnProvider,
 	}
 }
@@ -152,7 +156,7 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 			const amount = 50
 			for {
-				txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
+				txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, cfg.params.MaxBlobsPerBlock, yielded, simStateReader, simStateWriter, logger)
 				if err != nil {
 					return err
 				}
@@ -258,22 +262,19 @@ func getNextTransactions(
 	header *types.Header,
 	amount int,
 	executionAt uint64,
+	maxBlobPerBlock uint64,
 	alreadyYielded mapset.Set[[32]byte],
 	simStateReader state.StateReader,
 	simStateWriter state.StateWriter,
 	logger log.Logger,
 ) ([]types.Transaction, error) {
 	remainingGas := header.GasLimit - header.GasUsed
-	remainingBlobGas := uint64(0)
-	if header.BlobGasUsed != nil {
-		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
-	}
 
 	yieldOpts := []txnprovider.YieldOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithGasTarget(remainingGas),
-		txnprovider.WithBlobGasTarget(remainingBlobGas),
+		txnprovider.WithBlobGasTarget(maxBlobPerBlock * fixedgas.BlobGasPerBlob),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
 	}
 

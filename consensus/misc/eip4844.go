@@ -32,8 +32,13 @@ import (
 )
 
 // CalcExcessBlobGas implements calc_excess_blob_gas from EIP-4844
+// This was updated later with EIP-7742
 func CalcExcessBlobGas(config *chain.Config, parent *types.Header) uint64 {
-	var excessBlobGas, blobGasUsed uint64
+	var excessBlobGas, blobGasUsed, targetBlobGas uint64
+
+	if parent.TargetBlobsPerBlock != nil {
+		targetBlobGas = *parent.TargetBlobsPerBlock * fixedgas.BlobGasPerBlob
+	}
 	if parent.ExcessBlobGas != nil {
 		excessBlobGas = *parent.ExcessBlobGas
 	}
@@ -41,10 +46,10 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header) uint64 {
 		blobGasUsed = *parent.BlobGasUsed
 	}
 
-	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock() {
+	if excessBlobGas+blobGasUsed < targetBlobGas {
 		return 0
 	}
-	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock()
+	return excessBlobGas + blobGasUsed - targetBlobGas
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion

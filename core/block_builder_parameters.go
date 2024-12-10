@@ -32,4 +32,6 @@ type BlockBuilderParameters struct {
 	SuggestedFeeRecipient libcommon.Address
 	Withdrawals           []*types.Withdrawal // added in Shapella (EIP-4895)
 	ParentBeaconBlockRoot *libcommon.Hash     // added in Dencun (EIP-4788)
+	TargetBlobsPerBlock   uint64
+	MaxBlobsPerBlock      uint64
 }
