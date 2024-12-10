@@ -1,13 +1,12 @@
-name: Integration tests - ERIGON 
+name: Integration tests - ERIGON
 on:
   push:
     branches:
-      - test-integration-michele
       - main
       - 'release/**'
   pull_request:
     branches:
-      - main
+      - main 
     types:
       - opened
       - reopened
@@ -43,7 +42,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
       - name: test-integration
-        run: make test-integration
+        run: GOGC=80 make test-integration
 
   tests-windows:
     strategy:

@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
@@ -972,7 +971,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		}
 
 		integer := new(uint256.Int)
-		scope.Stack.Push(integer.SetBytes(common.RightPadBytes(
+		scope.Stack.Push(integer.SetBytes(libcommon.RightPadBytes(
 			// So it doesn't matter what we push onto the stack.
 			scope.Contract.Code[startMin:endMin], pushByteSize)))
 

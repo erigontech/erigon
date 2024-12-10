@@ -33,6 +33,7 @@ import (
 	isentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	types "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/cmd/snapshots/sync"
 	coresnaptype "github.com/erigontech/erigon/core/snaptype"
 	coretypes "github.com/erigontech/erigon/core/types"
@@ -42,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/p2p/discover/v4wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -85,10 +85,12 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 	cfg := snapcfg.KnownCfg(chain)
 	torrentDir := filepath.Join(snapshotLocation, "torrents", chain)
 
-	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		ProduceE2:    false,
-		NoDownloader: true,
-	}, "", 0, logger)
+	freezeCfg := ethconfig.Defaults.Snapshot
+	freezeCfg.NoDownloader = true
+	freezeCfg.ProduceE2 = false
+	freezeCfg.ProduceE3 = false
+	freezeCfg.ChainName = chain
+	knownSnapshots := freezeblocks.NewRoSnapshots(freezeCfg, "", 0, logger)
 
 	files := make([]string, 0, len(cfg.Preverified))
 
@@ -99,10 +101,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 	knownSnapshots.InitSegments(files)
 
 	//s.knownSnapshots.OpenList([]string{ent2.Name()}, false)
-	activeSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
-		ProduceE2:    false,
-		NoDownloader: true,
-	}, torrentDir, 0, logger)
+	activeSnapshots := freezeblocks.NewRoSnapshots(freezeCfg, torrentDir, 0, logger)
 
 	if err := activeSnapshots.OpenFolder(); err != nil {
 		return nil, err

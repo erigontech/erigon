@@ -67,7 +67,7 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		if err = reset2.ResetState(db, ctx, chain, "", log.Root()); err != nil {
+		if err = reset2.ResetState(db, agg, ctx, chain, "", log.Root()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}

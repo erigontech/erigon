@@ -33,17 +33,17 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // BlockGen creates blocks for testing.
@@ -457,10 +457,10 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	defer fmt.Println("CalcHashRootForTests closing", domains.ObjectInfo())
 	defer domains.Close()
 
-	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
+	if err := tx.ClearBucket(kv.HashedAccountsDeprecated); err != nil {
 		return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 	}
-	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
+	if err := tx.ClearBucket(kv.HashedStorageDeprecated); err != nil {
 		return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 	}
 	if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
@@ -493,7 +493,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		if err != nil {
 			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 		}
-		if err := tx.Put(kv.HashedAccounts, newK, v); err != nil {
+		if err := tx.Put(kv.HashedAccountsDeprecated, newK, v); err != nil {
 			return hashRoot, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 		}
 	}
@@ -512,7 +512,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 		}
 		fmt.Printf("storage %x -> %x\n", k, newK)
-		if err := tx.Put(kv.HashedStorage, newK, v); err != nil {
+		if err := tx.Put(kv.HashedStorageDeprecated, newK, v); err != nil {
 			return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 		}
 
@@ -521,7 +521,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	if trace {
 		if GenerateTrace {
 			fmt.Printf("State after %d================\n", header.Number)
-			it, err := tx.Range(kv.HashedAccounts, nil, nil, order.Asc, kv.Unlim)
+			it, err := tx.Range(kv.HashedAccountsDeprecated, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				return hashRoot, err
 			}
@@ -533,7 +533,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 				fmt.Printf("%x: %x\n", k, v)
 			}
 			fmt.Printf("..................\n")
-			it, err = tx.Range(kv.HashedStorage, nil, nil, order.Asc, kv.Unlim)
+			it, err = tx.Range(kv.HashedStorageDeprecated, nil, nil, order.Asc, kv.Unlim)
 			if err != nil {
 				return hashRoot, err
 			}

@@ -359,11 +359,11 @@ func TestDomain_AfterPrune(t *testing.T) {
 	var v []byte
 	dc = d.BeginFilesRo()
 	defer dc.Close()
-	v, _, found, err := dc.GetLatest(k1, nil, tx)
+	v, _, found, err := dc.GetLatest(k1, tx)
 	require.Truef(t, found, "key1 not found")
 	require.NoError(t, err)
 	require.Equal(t, p1, v)
-	v, _, found, err = dc.GetLatest(k2, nil, tx)
+	v, _, found, err = dc.GetLatest(k2, tx)
 	require.Truef(t, found, "key2 not found")
 	require.NoError(t, err)
 	require.Equal(t, p2, v)
@@ -375,12 +375,12 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, isEmpty)
 
-	v, _, found, err = dc.GetLatest(k1, nil, tx)
+	v, _, found, err = dc.GetLatest(k1, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key1 not found")
 	require.Equal(t, p1, v)
 
-	v, _, found, err = dc.GetLatest(k2, nil, tx)
+	v, _, found, err = dc.GetLatest(k2, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key2 not found")
 	require.Equal(t, p2, v)
@@ -465,7 +465,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 				require.Nil(val, label)
 			}
 			if txNum == txs {
-				val, _, found, err := dc.GetLatest(k[:], nil, roTx)
+				val, _, found, err := dc.GetLatest(k[:], roTx)
 				require.True(found, label)
 				require.NoError(err)
 				require.EqualValues(v[:], val, label)
@@ -635,7 +635,7 @@ func TestDomain_Delete(t *testing.T) {
 	// Put on even txNum, delete on odd txNum
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
 		writer.SetTxNum(txNum)
-		original, originalStep, _, err := dc.GetLatest([]byte("key1"), nil, tx)
+		original, originalStep, _, err := dc.GetLatest([]byte("key1"), tx)
 		require.NoError(err)
 		if txNum%2 == 0 {
 			err = writer.PutWithPrev([]byte("key1"), nil, []byte("value1"), original, originalStep)
@@ -772,7 +772,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount-1, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, _, found, err := dc.GetLatest(k[:], nil, roTx)
+		storedV, _, found, err := dc.GetLatest(k[:], roTx)
 		require.Truef(t, found, label)
 		require.NoError(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
@@ -877,7 +877,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, _, found, err := dc.GetLatest(k[:], nil, tx)
+		storedV, _, found, err := dc.GetLatest(k[:], tx)
 		require.Truef(t, found, label)
 		require.NoErrorf(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
@@ -1088,7 +1088,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	// Check index
 	require.Equal(t, 3, int(sf.valuesBt.KeyCount()))
 	for i := 0; i < len(words); i += 2 {
-		c, _ := sf.valuesBt.Seek(g, []byte(words[i]))
+		c, err := sf.valuesBt.Seek(g, []byte(words[i]))
+		require.NoError(t, err)
+		require.NotNil(t, c)
 		require.Equal(t, words[i], string(c.Key()))
 		require.Equal(t, words[i+1], string(c.Value()))
 	}
@@ -1465,7 +1467,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		if len(updates) == 0 {
 			continue
 		}
-		v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
+		v, _, ok, err := dc.GetLatest([]byte(key), tx)
 		require.NoError(err)
 		require.EqualValuesf(updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(ok)
@@ -1728,7 +1730,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		if len(updates) == 0 {
 			continue
 		}
-		v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
+		v, _, ok, err := dc.GetLatest([]byte(key), tx)
 		require.NoError(t, err)
 		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
@@ -2311,7 +2313,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 
 		dc := d.BeginFilesRo()
-		v, vs, ok, err := dc.GetLatest(pruningKey, nil, rotx)
+		v, vs, ok, err := dc.GetLatest(pruningKey, rotx)
 		require.NoError(t, err)
 		require.True(t, ok)
 		t.Logf("v=%s vs=%d", v, vs)
@@ -2334,7 +2336,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		defer rotx.Rollback()
 		require.NoError(t, err)
 
-		v, vs, ok, err = dc.GetLatest(pruningKey, nil, rotx)
+		v, vs, ok, err = dc.GetLatest(pruningKey, rotx)
 		require.NoError(t, err)
 		require.True(t, ok)
 		t.Logf("v=%s vs=%d", v, vs)

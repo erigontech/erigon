@@ -22,7 +22,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/rlp"
+	rlp "github.com/erigontech/erigon-lib/rlp2"
 )
 
 type NewPooledTransactionHashesPacket [][length.Hash]byte

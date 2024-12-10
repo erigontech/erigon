@@ -154,14 +154,6 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 		return datasize.ByteSize(ai.Size()) - datasize.ByteSize(bi.Size()), 100.0 * (float32(ai.Size()-bi.Size()) / float32(ai.Size())), nil
 	}
 
-	getFile := func(d *DomainRoTx, fromTx, toTx uint64) *filesItem {
-		fi := d.lookupVisibleFileByItsRange(fromTx, toTx)
-		if fi != nil {
-			return fi
-		}
-		return d.lookupDirtyFileByItsRange(fromTx, toTx)
-	}
-
 	ranges := make([]MergeRange, 0)
 	for fi, f := range sf.d[kv.AccountsDomain] {
 		ranges = append(ranges, MergeRange{
@@ -194,24 +186,24 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 	defer logEvery.Stop()
 
 	for ri, r := range ranges {
-		af := getFile(accounts, r.from, r.to)
-		if af == nil {
-			return fmt.Errorf("no account file for range %s", r.String("", ac.a.StepSize()))
+		af, err := accounts.rawLookupFileByRange(r.from, r.to)
+		if err != nil {
+			return err
 		}
-		sf := getFile(storage, r.from, r.to)
-		if af == nil {
-			return fmt.Errorf("no storage file for range %s", r.String("", ac.a.StepSize()))
+		sf, err := storage.rawLookupFileByRange(r.from, r.to)
+		if err != nil {
+			return err
 		}
-		cf := getFile(commitment, r.from, r.to)
-		if af == nil {
-			return fmt.Errorf("no account file for range %s", r.String("", ac.a.StepSize()))
+		cf, err := commitment.rawLookupFileByRange(r.from, r.to)
+		if err != nil {
+			return err
 		}
 
 		af.decompressor.EnableMadvNormal()
 		sf.decompressor.EnableMadvNormal()
 		cf.decompressor.EnableMadvNormal()
 
-		err := func() error {
+		err = func() error {
 			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
 			compression := commitment.d.compression
 			if steps < DomainMinStepsToCompress {

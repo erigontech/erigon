@@ -72,9 +72,8 @@ type Aggregator struct {
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
-	buildingFiles           atomic.Bool
-	mergingFiles            atomic.Bool
-	buildingOptionalIndices atomic.Bool
+	buildingFiles atomic.Bool
+	mergingFiles  atomic.Bool
 
 	//warmupWorking          atomic.Bool
 	ctx       context.Context
@@ -423,6 +422,8 @@ func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
 		d.compressCfg.Workers = i
+		d.History.compressorCfg.Workers = i
+		d.History.InvertedIndex.compressorCfg.Workers = i
 	}
 	for _, ii := range a.iis {
 		ii.compressorCfg.Workers = i
@@ -483,54 +484,6 @@ func (a *Aggregator) LS() {
 	for _, d := range a.iis {
 		doLS(d.dirtyFiles)
 	}
-}
-
-func (a *Aggregator) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
-	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
-		return
-	}
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		defer a.buildingOptionalIndices.Store(false)
-		aggTx := a.BeginFilesRo()
-		defer aggTx.Close()
-		if err := aggTx.buildOptionalMissedIndices(ctx, workers); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
-				return
-			}
-			a.logger.Warn("[snapshots] BuildOptionalMissedIndicesInBackground", "err", err)
-		}
-	}()
-}
-
-func (a *Aggregator) BuildOptionalMissedIndices(ctx context.Context, workers int) error {
-	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
-		return nil
-	}
-	defer a.buildingOptionalIndices.Store(false)
-	filesTx := a.BeginFilesRo()
-	defer filesTx.Close()
-	if err := filesTx.buildOptionalMissedIndices(ctx, workers); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-func (ac *AggregatorRoTx) buildOptionalMissedIndices(ctx context.Context, workers int) error {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(workers)
-	ps := background.NewProgressSet()
-	for _, d := range ac.d {
-		d := d
-		if d != nil {
-			g.Go(func() error { return d.BuildOptionalMissedIndices(ctx, ps) })
-		}
-	}
-	return g.Wait()
 }
 
 func (a *Aggregator) BuildMissedIndices(ctx context.Context, workers int) error {
@@ -778,7 +731,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
 	finished := a.BuildFilesInBackground(toTxNum)
-	if !(a.buildingFiles.Load() || a.mergingFiles.Load() || a.buildingOptionalIndices.Load()) {
+	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
 	}
 
@@ -793,7 +746,7 @@ Loop:
 			fmt.Println("BuildFiles finished")
 			break Loop
 		case <-logEvery.C:
-			if !(a.buildingFiles.Load() || a.mergingFiles.Load() || a.buildingOptionalIndices.Load()) {
+			if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 				break Loop
 			}
 			if a.HasBackgroundFilesBuild() {
@@ -906,6 +859,19 @@ func (a *Aggregator) integrateDirtyFiles(sf AggV3StaticFiles, txNumFrom, txNumTo
 	}
 }
 
+func (a *Aggregator) DomainTables(domains ...kv.Domain) (tables []string) {
+	for _, domain := range domains {
+		tables = append(tables, a.d[domain].Tables()...)
+	}
+	return tables
+}
+func (a *Aggregator) InvertedIndexTables(indices ...kv.InvertedIdxPos) (tables []string) {
+	for _, idx := range indices {
+		tables = append(tables, a.iis[idx].Tables()...)
+	}
+	return tables
+}
+
 type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
@@ -943,7 +909,7 @@ func (ac *AggregatorRoTx) CanUnwindToBlockNum(tx kv.Tx) (uint64, error) {
 		return 0, err
 	}
 	if minUnwindale == math.MaxUint64 { // no unwindable block found
-		stateVal, _, _, err := ac.d[kv.CommitmentDomain].GetLatest(keyCommitmentState, nil, tx)
+		stateVal, _, _, err := ac.d[kv.CommitmentDomain].GetLatest(keyCommitmentState, tx)
 		if err != nil {
 			return 0, err
 		}
@@ -1735,7 +1701,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				break
 			}
 		}
-		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
 		if dbg.NoMerge() {
 			close(fin)
@@ -1759,8 +1724,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 				}
 				a.logger.Warn("[snapshots] merge", "err", err)
 			}
-
-			a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 		}()
 	}()
 	return fin
@@ -1887,11 +1850,11 @@ func (ac *AggregatorRoTx) getAsOfFile(name kv.Domain, key []byte, ts uint64) (v 
 	return ac.d[name].GetAsOfFile(key, ts)
 }
 
-func (ac *AggregatorRoTx) GetAsOf(tx kv.Tx, name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return ac.d[name].GetAsOf(key, ts, tx)
+func (ac *AggregatorRoTx) GetAsOf(tx kv.Tx, name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	return ac.d[name].GetAsOf(k, ts, tx)
 }
-func (ac *AggregatorRoTx) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
-	return ac.d[domain].GetLatest(k, k2, tx)
+func (ac *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
+	return ac.d[domain].GetLatest(k, tx)
 }
 
 // search key in all files of all domains and print file names

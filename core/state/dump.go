@@ -30,9 +30,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 type Dumper struct {
@@ -194,7 +193,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			account.CodeHash = hexutility.Bytes(acc.CodeHash.Bytes())
 
 			if !excludeCode {
-				r, _, err := ttx.GetLatest(kv.CodeDomain, k, nil)
+				r, _, err := ttx.GetLatest(kv.CodeDomain, k)
 				if err != nil {
 					return nil, err
 				}
@@ -229,7 +228,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					continue // Skip deleted entries
 				}
 				loc := k[20:]
-				account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+				account.Storage[libcommon.BytesToHash(loc).String()] = libcommon.Bytes2Hex(vs)
 				h, _ := libcommon.HashData(loc)
 				t.Update(h.Bytes(), libcommon.Copy(vs))
 			}

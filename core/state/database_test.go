@@ -38,7 +38,6 @@ import (
 	state3 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/state/contracts"
@@ -374,7 +373,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 2", create2address.String())
 		}
-		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6002ff")) {
+		if !bytes.Equal(st.GetCode(create2address), libcommon.FromHex("6002ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", st.GetCode(create2address))
 		}
 		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
@@ -408,7 +407,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 4", create2address.String())
 		}
-		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6004ff")) {
+		if !bytes.Equal(st.GetCode(create2address), libcommon.FromHex("6004ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", st.GetCode(create2address))
 		}
 		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
@@ -429,7 +428,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 5", create2address.String())
 		}
-		if !bytes.Equal(st.GetCode(create2address), common.FromHex("6005ff")) {
+		if !bytes.Equal(st.GetCode(create2address), libcommon.FromHex("6005ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", st.GetCode(create2address))
 		}
 
@@ -1274,8 +1273,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	sd.SetTxNum(2)
 	sd.SetBlockNum(1)
 
-	oldCodeHash := libcommon.BytesToHash(crypto.Keccak256(oldCode))
-	trieCode, tcErr := r.ReadAccountCode(contract, 1, oldCodeHash)
+	trieCode, tcErr := r.ReadAccountCode(contract, 1)
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
@@ -1286,8 +1284,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	newCodeHash := libcommon.BytesToHash(crypto.Keccak256(newCode))
-	trieCode, tcErr = r.ReadAccountCode(contract, 1, newCodeHash)
+	trieCode, tcErr = r.ReadAccountCode(contract, 1)
 	assert.NoError(t, tcErr, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 
@@ -1324,12 +1321,11 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	codeHash := libcommon.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
+	codeSize, err := r.ReadAccountCodeSize(contract, 1)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
-	code2, err := r.ReadAccountCode(contract, 1, codeHash)
+	code2, err := r.ReadAccountCode(contract, 1)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
 }
@@ -1368,13 +1364,13 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	require.EqualValues(t, root, libcommon.CastToHash(r2))
 
 	codeHash := libcommon.BytesToHash(crypto.Keccak256(code))
-	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
+	codeSize, err := r.ReadAccountCodeSize(contract, 1)
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
 	assert.NoError(t, tx.Delete(kv.Code, codeHash[:]), nil)
 
-	codeSize2, err := r.ReadAccountCodeSize(contract, 1, codeHash)
+	codeSize2, err := r.ReadAccountCodeSize(contract, 1)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
@@ -1422,7 +1418,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
 			var codeHash libcommon.Hash
-			if codeHash, err = libcommon.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+			if codeHash, err = libcommon.HashData(libcommon.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
@@ -1484,7 +1480,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		case 1:
 			// Calculate the address of the Phoenix and create handle to phoenix contract
 			var codeHash libcommon.Hash
-			if codeHash, err = libcommon.HashData(common.FromHex(contracts.PhoenixBin)); err != nil {
+			if codeHash, err = libcommon.HashData(libcommon.FromHex(contracts.PhoenixBin)); err != nil {
 				panic(err)
 			}
 			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())

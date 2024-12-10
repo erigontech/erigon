@@ -33,10 +33,10 @@ import (
 )
 
 func initializeDbNonDupSort(rwTx kv.RwTx) {
-	rwTx.Put(kv.HashedAccounts, []byte("AAAA"), []byte("value"))
-	rwTx.Put(kv.HashedAccounts, []byte("CAAA"), []byte("value1"))
-	rwTx.Put(kv.HashedAccounts, []byte("CBAA"), []byte("value2"))
-	rwTx.Put(kv.HashedAccounts, []byte("CCAA"), []byte("value3"))
+	rwTx.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value"))
+	rwTx.Put(kv.HeaderNumber, []byte("CAAA"), []byte("value1"))
+	rwTx.Put(kv.HeaderNumber, []byte("CBAA"), []byte("value2"))
+	rwTx.Put(kv.HeaderNumber, []byte("CCAA"), []byte("value3"))
 }
 
 func TestPutAppendHas(t *testing.T) {
@@ -45,28 +45,28 @@ func TestPutAppendHas(t *testing.T) {
 	initializeDbNonDupSort(rwTx)
 
 	batch := NewMemoryBatch(rwTx, "", log.Root())
-	require.NoError(t, batch.Append(kv.HashedAccounts, []byte("AAAA"), []byte("value1.5")))
+	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.5")))
 	//MDBX's APPEND checking only keys, not values
-	require.NoError(t, batch.Append(kv.HashedAccounts, []byte("AAAA"), []byte("value1.3")))
+	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 
-	require.NoError(t, batch.Put(kv.HashedAccounts, []byte("AAAA"), []byte("value1.3")))
-	require.NoError(t, batch.Append(kv.HashedAccounts, []byte("CBAA"), []byte("value3.5")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
+	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("CBAA"), []byte("value3.5")))
 	//MDBX's APPEND checking only keys, not values
-	require.NoError(t, batch.Append(kv.HashedAccounts, []byte("CBAA"), []byte("value3.1")))
-	require.NoError(t, batch.AppendDup(kv.HashedAccounts, []byte("CBAA"), []byte("value3.1")))
-	require.Error(t, batch.Append(kv.HashedAccounts, []byte("AAAA"), []byte("value1.3")))
+	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
+	require.NoError(t, batch.AppendDup(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
+	require.Error(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 
 	require.Nil(t, batch.Flush(context.Background(), rwTx))
 
-	exist, err := batch.Has(kv.HashedAccounts, []byte("AAAA"))
+	exist, err := batch.Has(kv.HeaderNumber, []byte("AAAA"))
 	require.Nil(t, err)
 	require.Equal(t, exist, true)
 
-	val, err := batch.GetOne(kv.HashedAccounts, []byte("AAAA"))
+	val, err := batch.GetOne(kv.HeaderNumber, []byte("AAAA"))
 	require.Nil(t, err)
 	require.Equal(t, val, []byte("value1.3"))
 
-	exist, err = batch.Has(kv.HashedAccounts, []byte("KKKK"))
+	exist, err = batch.Has(kv.HeaderNumber, []byte("KKKK"))
 	require.Nil(t, err)
 	require.Equal(t, exist, false)
 }
@@ -77,10 +77,10 @@ func TestLastMiningDB(t *testing.T) {
 	initializeDbNonDupSort(rwTx)
 
 	batch := NewMemoryBatch(rwTx, "", log.Root())
-	batch.Put(kv.HashedAccounts, []byte("BAAA"), []byte("value4"))
-	batch.Put(kv.HashedAccounts, []byte("BCAA"), []byte("value5"))
+	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
+	batch.Put(kv.HeaderNumber, []byte("BCAA"), []byte("value5"))
 
-	cursor, err := batch.Cursor(kv.HashedAccounts)
+	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
 
 	key, value, err := cursor.Last()
@@ -101,10 +101,10 @@ func TestLastMiningMem(t *testing.T) {
 	initializeDbNonDupSort(rwTx)
 
 	batch := NewMemoryBatch(rwTx, "", log.Root())
-	batch.Put(kv.HashedAccounts, []byte("BAAA"), []byte("value4"))
-	batch.Put(kv.HashedAccounts, []byte("DCAA"), []byte("value5"))
+	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
+	batch.Put(kv.HeaderNumber, []byte("DCAA"), []byte("value5"))
 
-	cursor, err := batch.Cursor(kv.HashedAccounts)
+	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
 
 	key, value, err := cursor.Last()
@@ -124,14 +124,14 @@ func TestDeleteMining(t *testing.T) {
 
 	initializeDbNonDupSort(rwTx)
 	batch := NewMemoryBatch(rwTx, "", log.Root())
-	batch.Put(kv.HashedAccounts, []byte("BAAA"), []byte("value4"))
-	batch.Put(kv.HashedAccounts, []byte("DCAA"), []byte("value5"))
-	batch.Put(kv.HashedAccounts, []byte("FCAA"), []byte("value5"))
+	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
+	batch.Put(kv.HeaderNumber, []byte("DCAA"), []byte("value5"))
+	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
 
-	batch.Delete(kv.HashedAccounts, []byte("BAAA"))
-	batch.Delete(kv.HashedAccounts, []byte("CBAA"))
+	batch.Delete(kv.HeaderNumber, []byte("BAAA"))
+	batch.Delete(kv.HeaderNumber, []byte("CBAA"))
 
-	cursor, err := batch.Cursor(kv.HashedAccounts)
+	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
 
 	key, value, err := cursor.SeekExact([]byte("BAAA"))
@@ -150,17 +150,17 @@ func TestFlush(t *testing.T) {
 
 	initializeDbNonDupSort(rwTx)
 	batch := NewMemoryBatch(rwTx, "", log.Root())
-	batch.Put(kv.HashedAccounts, []byte("BAAA"), []byte("value4"))
-	batch.Put(kv.HashedAccounts, []byte("AAAA"), []byte("value5"))
-	batch.Put(kv.HashedAccounts, []byte("FCAA"), []byte("value5"))
+	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
+	batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value5"))
+	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
 
 	require.NoError(t, batch.Flush(context.Background(), rwTx))
 
-	value, err := rwTx.GetOne(kv.HashedAccounts, []byte("BAAA"))
+	value, err := rwTx.GetOne(kv.HeaderNumber, []byte("BAAA"))
 	require.NoError(t, err)
 	require.Equal(t, value, []byte("value4"))
 
-	value, err = rwTx.GetOne(kv.HashedAccounts, []byte("AAAA"))
+	value, err = rwTx.GetOne(kv.HeaderNumber, []byte("AAAA"))
 	require.NoError(t, err)
 	require.Equal(t, value, []byte("value5"))
 }
@@ -171,12 +171,12 @@ func TestForEach(t *testing.T) {
 	initializeDbNonDupSort(rwTx)
 
 	batch := NewMemoryBatch(rwTx, "", log.Root())
-	batch.Put(kv.HashedAccounts, []byte("FCAA"), []byte("value5"))
+	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
 	require.NoError(t, batch.Flush(context.Background(), rwTx))
 
 	var keys []string
 	var values []string
-	err := batch.ForEach(kv.HashedAccounts, []byte("XYAZ"), func(k, v []byte) error {
+	err := batch.ForEach(kv.HeaderNumber, []byte("XYAZ"), func(k, v []byte) error {
 		keys = append(keys, string(k))
 		values = append(values, string(v))
 		return nil
@@ -185,7 +185,7 @@ func TestForEach(t *testing.T) {
 	require.Nil(t, keys)
 	require.Nil(t, values)
 
-	err = batch.ForEach(kv.HashedAccounts, []byte("CC"), func(k, v []byte) error {
+	err = batch.ForEach(kv.HeaderNumber, []byte("CC"), func(k, v []byte) error {
 		keys = append(keys, string(k))
 		values = append(values, string(v))
 		return nil
@@ -197,7 +197,7 @@ func TestForEach(t *testing.T) {
 	var keys1 []string
 	var values1 []string
 
-	err = batch.ForEach(kv.HashedAccounts, []byte("A"), func(k, v []byte) error {
+	err = batch.ForEach(kv.HeaderNumber, []byte("A"), func(k, v []byte) error {
 		keys1 = append(keys1, string(k))
 		values1 = append(values1, string(v))
 		return nil
@@ -235,14 +235,14 @@ func TestPrefix(t *testing.T) {
 
 	initializeDbNonDupSort(rwTx)
 
-	kvs1, err := rwTx.Prefix(kv.HashedAccounts, []byte("AB"))
+	kvs1, err := rwTx.Prefix(kv.HeaderNumber, []byte("AB"))
 	require.Nil(t, err)
 	defer kvs1.Close()
 	require.False(t, kvs1.HasNext())
 
 	var keys1 []string
 	var values1 []string
-	kvs2, err := rwTx.Prefix(kv.HashedAccounts, []byte("AAAA"))
+	kvs2, err := rwTx.Prefix(kv.HeaderNumber, []byte("AAAA"))
 	require.Nil(t, err)
 	defer kvs2.Close()
 	for kvs2.HasNext() {
@@ -256,7 +256,7 @@ func TestPrefix(t *testing.T) {
 
 	var keys []string
 	var values []string
-	kvs3, err := rwTx.Prefix(kv.HashedAccounts, []byte("C"))
+	kvs3, err := rwTx.Prefix(kv.HeaderNumber, []byte("C"))
 	require.Nil(t, err)
 	defer kvs3.Close()
 	for kvs3.HasNext() {
@@ -279,7 +279,7 @@ func TestForAmount(t *testing.T) {
 
 	var keys []string
 	var values []string
-	err := batch.ForAmount(kv.HashedAccounts, []byte("C"), uint32(3), func(k, v []byte) error {
+	err := batch.ForAmount(kv.HeaderNumber, []byte("C"), uint32(3), func(k, v []byte) error {
 		keys = append(keys, string(k))
 		values = append(values, string(v))
 		return nil
@@ -291,7 +291,7 @@ func TestForAmount(t *testing.T) {
 
 	var keys1 []string
 	var values1 []string
-	err = batch.ForAmount(kv.HashedAccounts, []byte("C"), uint32(10), func(k, v []byte) error {
+	err = batch.ForAmount(kv.HeaderNumber, []byte("C"), uint32(10), func(k, v []byte) error {
 		keys1 = append(keys1, string(k))
 		values1 = append(values1, string(v))
 		return nil
@@ -310,17 +310,17 @@ func TestGetOneAfterClearBucket(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	err := batch.ClearBucket(kv.HashedAccounts)
+	err := batch.ClearBucket(kv.HeaderNumber)
 	require.Nil(t, err)
 
-	cond := batch.isTableCleared(kv.HashedAccounts)
+	cond := batch.isTableCleared(kv.HeaderNumber)
 	require.True(t, cond)
 
-	val, err := batch.GetOne(kv.HashedAccounts, []byte("A"))
+	val, err := batch.GetOne(kv.HeaderNumber, []byte("A"))
 	require.Nil(t, err)
 	require.Nil(t, val)
 
-	val, err = batch.GetOne(kv.HashedAccounts, []byte("AAAA"))
+	val, err = batch.GetOne(kv.HeaderNumber, []byte("AAAA"))
 	require.Nil(t, err)
 	require.Nil(t, val)
 }
@@ -333,13 +333,13 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	err := batch.ClearBucket(kv.HashedAccounts)
+	err := batch.ClearBucket(kv.HeaderNumber)
 	require.Nil(t, err)
 
-	cond := batch.isTableCleared(kv.HashedAccounts)
+	cond := batch.isTableCleared(kv.HeaderNumber)
 	require.True(t, cond)
 
-	cursor, err := batch.RwCursor(kv.HashedAccounts)
+	cursor, err := batch.RwCursor(kv.HeaderNumber)
 	require.NoError(t, err)
 
 	key, val, err := cursor.SeekExact([]byte("AAAA"))
@@ -369,13 +369,13 @@ func TestFirstAfterClearBucket(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	err := batch.ClearBucket(kv.HashedAccounts)
+	err := batch.ClearBucket(kv.HeaderNumber)
 	require.Nil(t, err)
 
-	err = batch.Put(kv.HashedAccounts, []byte("BBBB"), []byte("value5"))
+	err = batch.Put(kv.HeaderNumber, []byte("BBBB"), []byte("value5"))
 	require.Nil(t, err)
 
-	cursor, err := batch.Cursor(kv.HashedAccounts)
+	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
 
 	key, val, err := cursor.First()
@@ -397,19 +397,19 @@ func TestIncReadSequence(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	_, err := batch.IncrementSequence(kv.HashedAccounts, uint64(12))
+	_, err := batch.IncrementSequence(kv.HeaderNumber, uint64(12))
 	require.Nil(t, err)
 
-	val, err := batch.ReadSequence(kv.HashedAccounts)
+	val, err := batch.ReadSequence(kv.HeaderNumber)
 	require.Nil(t, err)
 	require.Equal(t, val, uint64(12))
 }
 
 func initializeDbDupSort(rwTx kv.RwTx) {
-	rwTx.Put(kv.AccountChangeSet, []byte("key1"), []byte("value1.1"))
-	rwTx.Put(kv.AccountChangeSet, []byte("key3"), []byte("value3.1"))
-	rwTx.Put(kv.AccountChangeSet, []byte("key1"), []byte("value1.3"))
-	rwTx.Put(kv.AccountChangeSet, []byte("key3"), []byte("value3.3"))
+	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1"))
+	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.1"))
+	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.3"))
+	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.3"))
 }
 
 func TestNext(t *testing.T) {
@@ -420,9 +420,9 @@ func TestNext(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	batch.Put(kv.AccountChangeSet, []byte("key1"), []byte("value1.2"))
+	batch.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2"))
 
-	cursor, err := batch.CursorDupSort(kv.AccountChangeSet)
+	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
 
 	k, v, err := cursor.First()
@@ -464,10 +464,10 @@ func TestNextNoDup(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	batch.Put(kv.AccountChangeSet, []byte("key2"), []byte("value2.1"))
-	batch.Put(kv.AccountChangeSet, []byte("key2"), []byte("value2.2"))
+	batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.1"))
+	batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.2"))
 
-	cursor, err := batch.CursorDupSort(kv.AccountChangeSet)
+	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
 
 	k, _, err := cursor.First()
@@ -491,7 +491,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	cursor, err := batch.RwCursorDupSort(kv.AccountChangeSet)
+	cursor, err := batch.RwCursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
 
 	require.NoError(t, cursor.Put([]byte("key3"), []byte("value3.2")))
@@ -506,7 +506,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 
 	var keys []string
 	var values []string
-	err = rwTx.ForEach(kv.AccountChangeSet, nil, func(k, v []byte) error {
+	err = rwTx.ForEach(kv.TblAccountVals, nil, func(k, v []byte) error {
 		keys = append(keys, string(k))
 		values = append(values, string(v))
 		return nil
@@ -520,13 +520,13 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 func TestSeekBothRange(t *testing.T) {
 	_, rwTx := memdb.NewTestTx(t)
 
-	rwTx.Put(kv.AccountChangeSet, []byte("key1"), []byte("value1.1"))
-	rwTx.Put(kv.AccountChangeSet, []byte("key3"), []byte("value3.3"))
+	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1"))
+	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.3"))
 
 	batch := NewMemoryBatch(rwTx, "", log.Root())
 	defer batch.Close()
 
-	cursor, err := batch.RwCursorDupSort(kv.AccountChangeSet)
+	cursor, err := batch.RwCursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
 
 	require.NoError(t, cursor.Put([]byte("key3"), []byte("value3.1")))
