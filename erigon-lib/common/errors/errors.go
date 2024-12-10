@@ -18,6 +18,8 @@ package errors
 
 import "errors"
 
+var ErrIteratorExhausted = errors.New("iterator exhausted")
+
 func IsOneOf(err error, targets []error) bool {
 	if err == nil {
 		return false

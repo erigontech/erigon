@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/errors"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv/stream"
 )
@@ -355,7 +356,7 @@ func TestIterator(t *testing.T) {
 			require.NoError(t, err)
 		}
 		_, err := it.Next()
-		require.ErrorIs(t, err, ErrEliasFanoIterExhausted)
+		require.ErrorIs(t, err, errors.ErrIteratorExhausted)
 
 		it = ef.ReverseIterator()
 		for range offsets {
@@ -363,7 +364,7 @@ func TestIterator(t *testing.T) {
 			require.NoError(t, err)
 		}
 		_, err = it.Next()
-		require.ErrorIs(t, err, ErrEliasFanoIterExhausted)
+		require.ErrorIs(t, err, errors.ErrIteratorExhausted)
 	})
 
 	t.Run("article-example1", func(t *testing.T) {
