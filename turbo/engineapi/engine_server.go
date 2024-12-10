@@ -573,7 +573,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	if version < clparams.ElectraVersion && (payloadAttributes.MaxBlobsPerBlock != nil || payloadAttributes.TargetBlobsPerBlock != nil) ||
-	 version >= clparams.ElectraVersion && (payloadAttributes.MaxBlobsPerBlock == nil || payloadAttributes.TargetBlobsPerBlock == nil) {
+		version >= clparams.ElectraVersion && (payloadAttributes.MaxBlobsPerBlock == nil || payloadAttributes.TargetBlobsPerBlock == nil) {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 

@@ -81,7 +81,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		param.ParentBeaconBlockRoot = &pbbr
 	}
 
-	if req.TargetBlobsPerBlock != nil && req.MaxBlobsPerBlock != nil{
+	if req.TargetBlobsPerBlock != nil && req.MaxBlobsPerBlock != nil {
 		param.TargetBlobsPerBlock = *req.MaxBlobsPerBlock
 		param.MaxBlobsPerBlock = *req.MaxBlobsPerBlock
 	}
