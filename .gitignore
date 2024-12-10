@@ -100,3 +100,5 @@ node_modules
 /config.yml
 
 vendor
+
+*.dat

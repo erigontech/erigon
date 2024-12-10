@@ -310,12 +310,18 @@ func handShake(
 			errChan <- nil
 		} else {
 			errChan <- p2p.NewPeerError(p2p.PeerErrorStatusSend, p2p.DiscNetworkError, err, "sentry.handShake failed to send eth Status")
+
 		}
 	}()
 
 	go func() {
 		defer debug.LogPanic()
 		status, err := readAndValidatePeerStatusMessage(rw, status, version, minVersion)
+
+		// TODO @somnathb1
+		// if status != nil {
+		// 	log.Info("[SPIDERMAN]", "status from peer", status)
+		// }
 
 		if err == nil {
 			resultChan <- status
