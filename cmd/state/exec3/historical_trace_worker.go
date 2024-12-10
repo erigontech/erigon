@@ -244,8 +244,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	workers := make([]*HistoricalTraceWorker, workerCount)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
-	resultChannelLimit := workerCount * 128
-	heapLimit := workerCount * 128
+	resultChannelLimit := workerCount * 64
+	heapLimit := workerCount * 64
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // workerCount * 4
 
 	reducerGroup := &errgroup.Group{}
