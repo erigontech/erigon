@@ -1185,7 +1185,6 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	}
 
 	if blockNumPointer != nil && txNumPointer != nil {
-		println("from db")
 		return *blockNumPointer, *txNumPointer, true, nil
 	}
 
@@ -1195,7 +1194,6 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	if err != nil {
 		return 0, 0, false, err
 	}
-	println("from files")
 	return blockNum, txNum, ok, nil
 }
 

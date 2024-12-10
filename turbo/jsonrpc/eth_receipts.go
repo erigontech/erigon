@@ -422,7 +422,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if !ok && chainConfig.Bor == nil {
 		return nil, nil
 	}
-	println("txNum", txNum)
 
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
