@@ -22,6 +22,7 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -398,7 +399,7 @@ func TestCodeNodeGetHashedAccount(t *testing.T) {
 
 	hex := keybytesToHex(crypto.Keccak256(address[:]))
 
-	_, trie.root = trie.insert(trie.root, hex, hashNode{hash: fakeAccountHash[:]})
+	_, trie.RootNode = trie.insert(trie.RootNode, hex, &HashNode{hash: fakeAccountHash[:]})
 
 	value, gotValue := trie.GetAccountCode(crypto.Keccak256(address[:]))
 	assert.False(t, gotValue, "should indicate that account exists but hashed")
@@ -635,3 +636,98 @@ func TestNextSubtreeHex(t *testing.T) {
 		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
 	}
 }
+
+func TestShortNode(t *testing.T) {
+	extensionKeyStr := "0b00000d020809020b080f0d0a090a0a0705070f050d0002090f0d0d0e07080e0402070e010c08030d0e0409060e040b0e0406060b0c080b0503010005"
+	extensionKeyNibbles := make([]byte, len(extensionKeyStr)/2+1)
+	for i := 0; i < len(extensionKeyStr)/2; i++ {
+		c, err := hex.DecodeString(extensionKeyStr[2*i : 2*i+2])
+		if err != nil {
+			t.Errorf("parsing error")
+		}
+		extensionKeyNibbles[i] = c[0]
+	}
+	extensionKeyNibbles[len(extensionKeyNibbles)-1] = 16
+
+	accRlpHex := "f84b08873f54314ab16fd0a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+	accRlp, err := hex.DecodeString(accRlpHex)
+	if err != nil {
+		t.Fatalf("failed to decode rlp from hex")
+	}
+
+	valNode := ValueNode(accRlp)
+
+	shortNode := &ShortNode{Key: extensionKeyNibbles, Val: valNode}
+	trie := NewInMemoryTrieRLPEncoded(shortNode)
+	trie.valueNodesRLPEncoded = true
+	rootHash := trie.Root()
+
+	expectedHashStr := "fa7297cfa8b2d445e356e9f752e23b018ae8717fdf117cbe4fcef1b16217d3c2"
+	expectedHashBytes, err := hex.DecodeString(expectedHashStr)
+	if err != nil {
+		t.Fatalf("unable to decode expected hash %v", err)
+	}
+	if !bytes.Equal(rootHash, expectedHashBytes) {
+		t.Fatalf("rootHash(%x) != expectedHash(%x)", rootHash, expectedHashBytes)
+	}
+}
+
+//func TestIHCursorCanUseNextParent(t *testing.T) {
+//	db, assert := ethdb.NewMemDatabase(), require.New(t)
+//	defer db.Close()
+//	hash := fmt.Sprintf("%064d", 0)
+//
+//	ih := AccTrie(nil, nil, nil, nil)
+//
+//	ih.k[1], ih.v[1], ih.hasTree[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
+//	ih.k[2], ih.v[2], ih.hasTree[2] = common.FromHex("0001"), common.FromHex(hash), 0b1000000000000000
+//	ih.lvl = 2
+//	ih.hashID[2] = 1
+//	ih.hashID[1] = 0
+//	assert.True(ih._nextSiblingOfParentInMem())
+//	assert.Equal(ih.k[ih.lvl], common.FromHex("00"))
+//
+//	ih.k[1], ih.v[1], ih.hasTree[1] = common.FromHex("00"), common.FromHex(hash+hash), 0b0000000000000110
+//	ih.k[3], ih.v[3], ih.hasTree[3] = common.FromHex("000101"), common.FromHex(hash), 0b1000000000000000
+//	ih.lvl = 3
+//	ih.hashID[3] = 1
+//	ih.hashID[1] = 0
+//	assert.True(ih._nextSiblingOfParentInMem())
+//	assert.Equal(ih.k[ih.lvl], common.FromHex("00"))
+//
+//}
+//
+//func _TestEmptyRoot(t *testing.T) {
+//	sc := shards.NewStateCache(32, 64*1024)
+//
+//	sc.SetAccountHashesRead(common.FromHex("00"), 0b111, 0b111, 0b111, []libcommon.Hash{{}, {}, {}})
+//	sc.SetAccountHashesRead(common.FromHex("01"), 0b111, 0b111, 0b111, []libcommon.Hash{{}, {}, {}})
+//	sc.SetAccountHashesRead(common.FromHex("02"), 0b111, 0b111, 0b111, []libcommon.Hash{{}, {}, {}})
+//
+//	rl := NewRetainList(0)
+//	rl.AddHex(common.FromHex("01"))
+//	rl.AddHex(common.FromHex("0101"))
+//	canUse := func(prefix []byte) bool { return !rl.Retain(prefix) }
+//	i := 0
+//	if err := sc.AccountTree([]byte{}, func(ihK []byte, h libcommon.Hash, hasTree, skipState bool) (toChild bool, err error) {
+//		i++
+//		switch i {
+//		case 1:
+//			assert.Equal(t, common.FromHex("0001"), ihK)
+//		case 2:
+//			assert.Equal(t, common.FromHex("0100"), ihK)
+//		case 3:
+//			assert.Equal(t, common.FromHex("0102"), ihK)
+//		case 4:
+//			assert.Equal(t, common.FromHex("0202"), ihK)
+//		}
+//		if ok := canUse(ihK); ok {
+//			return false, nil
+//		}
+//		return hasTree, nil
+//	}, func(cur []byte) {
+//		panic(fmt.Errorf("key %x not found in cache", cur))
+//	}); err != nil {
+//		t.Fatal(err)
+//	}
+//}

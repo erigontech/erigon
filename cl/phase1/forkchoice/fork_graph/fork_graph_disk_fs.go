@@ -86,6 +86,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
 	}
+
 	// decode the cache file
 	cacheFile, err := f.fs.Open(getBeaconStateCacheFilename(blockRoot))
 	if err != nil {
@@ -93,7 +94,13 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	}
 	defer cacheFile.Close()
 
-	if err := bs.DecodeCaches(cacheFile); err != nil {
+	f.sszBuffer = f.sszBuffer[:0]
+	b := bytes.NewBuffer(f.sszBuffer)
+	if _, err := io.Copy(b, cacheFile); err != nil {
+		return nil, err
+	}
+
+	if err := bs.DecodeCaches(b); err != nil {
 		return nil, err
 	}
 

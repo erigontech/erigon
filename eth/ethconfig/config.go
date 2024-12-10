@@ -90,7 +90,7 @@ var Defaults = Config{
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
-		GasLimit: 30_000_000,
+		GasLimit: 36_000_000,
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
 	},
