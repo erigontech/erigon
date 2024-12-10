@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -38,13 +39,16 @@ import (
 	"github.com/erigontech/erigon/consensus/clique"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
 	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/turbo/silkworm"
 	"github.com/erigontech/erigon/turbo/stages/mock"
+	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 func TestBlockExecution1(t *testing.T) {
@@ -85,9 +89,9 @@ func TestBlockExecution1(t *testing.T) {
 		nil,              //bridgeRPC,
 		nil,              //heimdallRPC,
 		"127.0.0.1:9090", //stack.Config().PrivateApiAddr,
-		1,                //stack.Config().PrivateApiRateLimit,
+		100,              //stack.Config().PrivateApiRateLimit,
 		nil,              //creds,
-		true,             //stack.Config().HealthCheck,
+		false,            //stack.Config().HealthCheck,
 		m.Log)
 	require.NoError(t, err)
 	require.NotNil(t, privateRpcApi)
@@ -154,6 +158,8 @@ func TestBlockExecution1(t *testing.T) {
 
 	newBlock := chain.Blocks[1]
 
+	println("newBlock.Hash()", hexutility.Encode(newBlock.Hash().Bytes()))
+
 	validationRequest := &execution.ValidationRequest{
 		Hash:   gointerfaces.ConvertHashToH256(newBlock.Hash()),
 		Number: newBlock.Number().Uint64(),
@@ -176,6 +182,23 @@ func TestBlockExecution1(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, fcuReceipt)
 	require.Equal(t, execution.ExecutionStatus_Success, fcuReceipt.Status)
+
+	silkwormInstance, err := silkworm.New(m.Dirs.DataDir, mdbx.Version(), 1, log.LvlDebug)
+	require.NoError(t, err)
+	require.NotNil(t, silkwormInstance)
+	defer silkwormInstance.Close()
+
+	txn, err := m.DB.BeginRw(context.Background())
+	require.NoError(t, err)
+
+	txTask := state.TxTask{
+		BlockNum: 1,
+		TxIndex:  1,
+	}
+
+	err = silkworm.ExecuteTx(silkwormInstance, txn, &txTask)
+	require.NoError(t, err)
+	txn.Rollback()
 
 	// ****** HTTP Test
 	// req, err := http.NewRequest(http.MethodGet, "http://localhost:9090", nil)

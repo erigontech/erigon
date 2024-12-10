@@ -60,16 +60,13 @@ func (sd *DirectAccessDomains) ObjectInfo() string {
 }
 
 // TemporalDomain satisfaction
-func (sd *DirectAccessDomains) GetLatest(domain kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+func (sd *DirectAccessDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		fmt.Println("JG GetLatest", domain.String(), "LatestCommitment")
 		return sd.SharedDomains.LatestCommitment(k)
 	}
 
-	if k2 != nil {
-		k = append(k, k2...)
-	}
-	v, step, _, err = sd.aggTx.GetLatest(domain, k, nil, sd.roTx)
+	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
 	if err != nil {
 		fmt.Println("JG DAD.GetLatest", domain.String(), err)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
@@ -84,7 +81,7 @@ func (sd *DirectAccessDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, p
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1, k2)
+		prevVal, prevStep, err = sd.GetLatest(domain, k1)
 		if err != nil {
 			return err
 		}
@@ -167,7 +164,7 @@ func (sd *DirectAccessDomains) updateValue(k1 []byte, k2 []byte, val []byte, dom
 func (sd *DirectAccessDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, k1, k2)
+		prevVal, prevStep, err = sd.GetLatest(domain, k1)
 		if err != nil {
 			return err
 		}
