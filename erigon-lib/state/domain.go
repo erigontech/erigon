@@ -1584,11 +1584,12 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 	return nil, false, 0, 0, nil
 }
 
-func (dt *DomainRoTx) StartingTxNum() uint64 {
-	if len(dt.files) == 0 {
+// Returns the first txNum from available history
+func (dt *DomainRoTx) HistoryStartFrom() uint64 {
+	if len(dt.ht.files) == 0 {
 		return 0
 	}
-	return dt.files[0].startTxNum
+	return dt.ht.files[0].startTxNum
 }
 
 func (dt *DomainRoTx) GetAsOfFile(key []byte, txNum uint64) ([]byte, bool, error) {

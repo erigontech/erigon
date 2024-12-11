@@ -464,8 +464,8 @@ type TemporalTx interface {
 	Tx
 	TemporalGetter
 
-	// return the earliest known txnum
-	StartingTxNum() uint64
+	// return the earliest known txnum in state history (excluding commitment and receipt history)
+	StateHistoryStartFrom() uint64
 
 	// DomainGetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it

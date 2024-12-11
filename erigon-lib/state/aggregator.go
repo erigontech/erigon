@@ -1729,16 +1729,23 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return fin
 }
 
-func (ac *AggregatorRoTx) StartingTxNum() uint64 {
+// Returns the earliest txnum across accounts , storage , and code
+func (ac *AggregatorRoTx) StateHistoryStartFrom() uint64 {
 	earliestTxNum := uint64(math.MaxUint64)
-	// get the earliest txnum across all domains
-	for _, domain := range ac.d {
-		domainStartingTxNum := domain.StartingTxNum()
+	// get the minimum txnum across accounts , storage , and code
+	stateDomainNames := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+	for domainName := range stateDomainNames {
+		domainStartingTxNum := ac.HistoryStartFrom(kv.Domain(domainName))
 		if domainStartingTxNum < earliestTxNum {
 			earliestTxNum = domainStartingTxNum
 		}
 	}
 	return earliestTxNum
+}
+
+// Returns the first known txNum found in history files of a given domain
+func (ac *AggregatorRoTx) HistoryStartFrom(domainName kv.Domain) uint64 {
+	return ac.d[domainName].HistoryStartFrom()
 }
 
 func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
