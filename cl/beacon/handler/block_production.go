@@ -326,8 +326,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	startConsensusProcessing := time.Now()
+
+	blockBuldingMachine := &eth2.Impl{}
+	blockBuldingMachine.BlockRewardsCollector = &eth2.BlockRewardsCollector{}
 	// do state transition
-	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToGeneric()); err != nil {
+	if err := machine.ProcessBlock(blockBuldingMachine, baseState, block.ToGeneric()); err != nil {
 		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
@@ -351,7 +354,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	)
 
 	// todo: consensusValue
-	rewardsCollector := &eth2.BlockRewardsCollector{}
+	rewardsCollector := blockBuldingMachine.BlockRewardsCollector
 	consensusValue := rewardsCollector.Attestations + rewardsCollector.ProposerSlashings + rewardsCollector.AttesterSlashings + rewardsCollector.SyncAggregate
 	a.setupHeaderReponseForBlockProduction(
 		w,
