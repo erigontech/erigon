@@ -632,8 +632,8 @@ func (tx *tx) StateHistoryStartFrom() uint64 {
 	return 0
 }
 
-func (tx *tx) GetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, K2: k2, Ts: ts})
+func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Ts: ts})
 	if err != nil {
 		return nil, false, err
 	}
