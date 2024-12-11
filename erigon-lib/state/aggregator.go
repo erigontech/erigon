@@ -1734,8 +1734,8 @@ func (ac *AggregatorRoTx) StateHistoryStartFrom() uint64 {
 	earliestTxNum := uint64(math.MaxUint64)
 	// get the minimum txnum across accounts , storage , and code
 	stateDomainNames := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
-	for domainName := range stateDomainNames {
-		domainStartingTxNum := ac.HistoryStartFrom(kv.Domain(domainName))
+	for _, domainName := range stateDomainNames {
+		domainStartingTxNum := ac.HistoryStartFrom(domainName)
 		if domainStartingTxNum < earliestTxNum {
 			earliestTxNum = domainStartingTxNum
 		}
