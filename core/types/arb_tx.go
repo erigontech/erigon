@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/cl/cltypes"
 	"io"
 	"math"
 	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon-lib/crypto/kzg4844"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
@@ -49,7 +50,7 @@ func getPooledBuffer(size uint64) ([]byte, *bytes.Buffer, error) {
 // Transaction is an Ethereum transaction.
 type ArbTx struct {
 	inner   Transaction // Consensus contents of a transaction
-	sidecar *cltypes.BlobSidecar
+	sidecar *BlobTxSidecar
 	time    time.Time // Time first seen locally (spam avoidance)
 
 	// Arbitrum cache: must be atomically accessed
@@ -409,7 +410,7 @@ func (tx *ArbTx) BlobHashes() []common.Hash {
 }
 
 // BlobTxSidecar returns the sidecar of a blob transaction, nil otherwise.
-func (tx *ArbTx) BlobTxSidecar() *cltypes.BlobSidecar {
+func (tx *ArbTx) BlobTxSidecar() *BlobTxSidecar {
 	//if blobtx, ok := tx.inner.(*BlobTx); ok {
 	//	//return blobtx.Get
 	//}
@@ -446,8 +447,41 @@ func (tx *ArbTx) BlobGasFeeCapIntCmp(other *big.Int) int {
 //	return cpy
 //}
 
+// BlobTxSidecar contains the blobs of a blob transaction.
+type BlobTxSidecar struct {
+	Blobs       []kzg4844.Blob       // Blobs needed by the blob pool
+	Commitments []kzg4844.Commitment // Commitments needed by the blob pool
+	Proofs      []kzg4844.Proof      // Proofs needed by the blob pool
+}
+
+// BlobHashes computes the blob hashes of the given blobs.
+func (sc *BlobTxSidecar) BlobHashes() []libcommon.Hash {
+	hasher := sha256.New()
+	h := make([]common.Hash, len(sc.Commitments))
+	for i := range sc.Blobs {
+		h[i] = kzg4844.CalcBlobHashV1(hasher, &sc.Commitments[i])
+	}
+	return h
+}
+
+// encodedSize computes the RLP size of the sidecar elements. This does NOT return the
+// encoded size of the BlobTxSidecar, it's just a helper for tx.Size().
+func (sc *BlobTxSidecar) encodedSize() uint64 {
+	var blobs, commitments, proofs uint64
+	for i := range sc.Blobs {
+		blobs += rlp.BytesSize(sc.Blobs[i][:])
+	}
+	for i := range sc.Commitments {
+		commitments += rlp.BytesSize(sc.Commitments[i][:])
+	}
+	for i := range sc.Proofs {
+		proofs += rlp.BytesSize(sc.Proofs[i][:])
+	}
+	return rlp.ListSize(blobs) + rlp.ListSize(commitments) + rlp.ListSize(proofs)
+}
+
 // WithBlobTxSidecar returns a copy of tx with the blob sidecar added.
-func (tx *ArbTx) WithBlobTxSidecar(sideCar *cltypes.BlobSidecar) *ArbTx {
+func (tx *ArbTx) WithBlobTxSidecar(sideCar *BlobTxSidecar) *ArbTx {
 	//blobtx, ok := tx.inner.(*BlobTx)
 	//if !ok {
 	//	return tx
