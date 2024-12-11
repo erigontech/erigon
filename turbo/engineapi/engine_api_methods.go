@@ -7,6 +7,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon/params"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_types"
