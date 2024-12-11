@@ -95,7 +95,7 @@ type Config struct {
 
 	ArbitrumChainParams ArbitrumChainParams `json:"arbitrum,omitempty"`
 
-	DAOForkSupport bool     `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
+	DAOForkSupport bool `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
 
 	// EIP150 implements the Gas price changes (https://github.com/ethereum/EIPs/issues/150)
 	EIP150Block *big.Int `json:"eip150Block,omitempty"` // EIP150 HF block (nil = no fork)
@@ -587,9 +587,19 @@ func (c *Config) IsArbitrumNitro(num *big.Int) bool {
 	return c.IsArbitrum() && isBlockForked(new(big.Int).SetUint64(c.ArbitrumChainParams.GenesisBlockNum), num)
 }
 
+// isBlockForked returns whether a fork scheduled at block s is active at the
+// given head block. Whilst this method is the same as isTimestampForked, they
+// are explicitly separate for clearer reading.
+func isBlockForked(s, head *big.Int) bool {
+	if s == nil || head == nil {
+		return false
+	}
+	return s.Cmp(head) <= 0
+}
+
 func (c *Config) MaxCodeSize() uint64 {
 	if c.ArbitrumChainParams.MaxCodeSize == 0 {
-		return DefaultMaxCodeSize
+		return 24576
 	}
 	return c.ArbitrumChainParams.MaxCodeSize
 }
@@ -603,6 +613,28 @@ func (c *Config) MaxInitCodeSize() uint64 {
 
 func (c *Config) DebugMode() bool {
 	return c.ArbitrumChainParams.AllowDebugPrecompiles
+}
+
+func newBlockCompatError(what string, storedblock, newblock *big.Int) *ConfigCompatError {
+	var rew *big.Int
+	switch {
+	case storedblock == nil:
+		rew = newblock
+	case newblock == nil || storedblock.Cmp(newblock) < 0:
+		rew = storedblock
+	default:
+		rew = newblock
+	}
+	err := &ConfigCompatError{
+		What:         what,
+		StoredConfig: storedblock,
+		NewConfig:    newblock,
+		RewindTo:     0,
+	}
+	if rew != nil && rew.Sign() > 0 {
+		err.RewindTo = rew.Uint64() - 1
+	}
+	return err
 }
 
 func (c *Config) checkArbitrumCompatible(newcfg *Config, head *big.Int) *ConfigCompatError {
