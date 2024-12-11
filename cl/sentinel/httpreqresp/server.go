@@ -96,7 +96,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		defer stream.Close()
 		// this write deadline is not part of the eth p2p spec, but we are implying it.
 		stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		if r.Body != nil && r.ContentLength > 0 {
+		if r.Body != nil {
 			_, err := io.Copy(stream, r.Body)
 			if err != nil {
 				http.Error(w, "Processing Stream: "+err.Error(), http.StatusBadRequest)
