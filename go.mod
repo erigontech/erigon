@@ -37,7 +37,6 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.6.2
 	github.com/erigontech/erigon-lib v0.0.0-00010101000000-000000000000
-	github.com/ethereum/go-ethereum v1.14.12
 	github.com/fjl/gencodec v0.0.0-20230517082657-f9840df7b83e
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/go-chi/chi/v5 v5.1.0
@@ -112,15 +111,11 @@ require (
 )
 
 require (
-	github.com/StackExchange/wmi v1.2.1 // indirect
-	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20240223125850-b1e8a79f509c // indirect
 	github.com/elastic/go-freelru v0.13.0 // indirect
 	github.com/erigontech/speedtest v0.0.2 // indirect
-	github.com/ethereum/c-kzg-4844 v1.0.0 // indirect
-	github.com/ethereum/go-verkle v0.1.1-0.20240829091221-dffa7562dbe9 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
@@ -128,8 +123,6 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4 // indirect
-	github.com/olekukonko/tablewriter v0.0.5 // indirect
-	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect

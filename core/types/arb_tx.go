@@ -11,8 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/crypto/kzg4844"
-
+	kzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"

@@ -11,6 +11,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon/arb/ethdb"
@@ -21,8 +22,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/ethereum/go-ethereum/triedb"
-	"github.com/ethereum/go-ethereum/triedb/hashdb"
 )
 
 var (
@@ -32,14 +31,18 @@ var (
 
 type RecordingKV struct {
 	//inner         *triedb.Database
-	diskDb        ethdb.KeyValueStore
+	diskDb        kv.RwDB
 	readDbEntries map[common.Hash][]byte
 	enableBypass  bool
 }
 
-func newRecordingKV(inner *triedb.Database, diskDb ethdb.KeyValueStore) *RecordingKV {
-	return &RecordingKV{inner, diskDb, make(map[common.Hash][]byte), false}
+func newRecordingKV() *RecordingKV {
+	return &RecordingKV{nil, make(map[common.Hash][]byte), false}
 }
+
+//func newRecordingKV(inner *triedb.Database, diskDb ethdb.KeyValueStore) *RecordingKV {
+//	return &RecordingKV{inner, diskDb, make(map[common.Hash][]byte), false}
+//}
 
 func (db *RecordingKV) Has(key []byte) (bool, error) {
 	return false, errors.New("recording KV doesn't support Has")
@@ -174,8 +177,8 @@ type RecordingDatabase struct {
 }
 
 func NewRecordingDatabase(config *RecordingDatabaseConfig, sd *state2.SharedDomains, ethdb ethdb.Database, blockchain *core.BlockChain) *RecordingDatabase {
-	hashConfig := *hashdb.Defaults
-	hashConfig.CleanCacheSize = config.TrieCleanCache
+	//hashConfig := *hashdb.Defaults
+	//hashConfig.CleanCacheSize = config.TrieCleanCache
 	//trieConfig := triedb.Config{
 	//	Preimages: false,
 	//	HashDB:    &hashConfig,
@@ -264,7 +267,8 @@ func (r *RecordingDatabase) PrepareRecording(ctx context.Context, lastBlockHeade
 	}
 	finalDereference := lastBlockHeader // dereference in case of error
 	defer func() { r.Dereference(finalDereference) }()
-	recordingKeyValue := newRecordingKV(r.db.TrieDB(), r.db.DiskDB())
+	//recordingKeyValue := newRecordingKV(r.db.TrieDB(), r.db.DiskDB())
+	recordingKeyValue := newRecordingKV()
 
 	recordingStateDatabase := state.NewDatabase(rawdb.WrapDatabaseWithWasm(rawdb.NewDatabase(recordingKeyValue), r.db.WasmStore(), 0, r.db.WasmTargets()))
 	var prevRoot common.Hash

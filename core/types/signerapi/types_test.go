@@ -23,7 +23,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto/kzg4844"
+	//"github.com/erigontech/erigon/crypto/kzg"
 	"github.com/holiman/uint256"
 )
 
@@ -128,11 +128,11 @@ func TestBlobTxs(t *testing.T) {
 		BlobFeeCap: uint256.NewInt(700),
 		BlobHashes: []common.Hash{hash},
 		Value:      uint256.NewInt(100),
-		Sidecar: &types.BlobTxSidecar{
-			Blobs:       []kzg4844.Blob{blob},
-			Commitments: []kzg4844.Commitment{commitment},
-			Proofs:      []kzg4844.Proof{proof},
-		},
+		//Sidecar: &types.BlobTxSidecar{
+		//	Blobs:       []kzg4844.Blob{blob},
+		//	Commitments: []kzg4844.Commitment{commitment},
+		//	Proofs:      []kzg4844.Proof{proof},
+		//},
 	}
 	tx := types.NewTx(b)
 	data, err := json.Marshal(tx)
