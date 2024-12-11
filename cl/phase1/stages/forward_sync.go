@@ -21,14 +21,31 @@ import (
 
 // shouldProcessBlobs checks if any block in the given list of blocks
 // has a version greater than or equal to DenebVersion and contains BlobKzgCommitments.
-func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock) bool {
+func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
+	blobsExist := false
+	highestSlot := blocks[0].Block.Slot
 	for _, block := range blocks {
 		// Check if block version is greater than or equal to DenebVersion and contains BlobKzgCommitments
 		if block.Version() >= clparams.DenebVersion && block.Block.Body.BlobKzgCommitments.Len() > 0 {
-			return true
+			blobsExist = true
+		}
+		if block.Block.Slot > highestSlot {
+			highestSlot = block.Block.Slot
 		}
 	}
-	return false
+	// Check if the requested blocks are too old to request blobs
+	// https://github.com/ethereum/consensus-specs/blob/dev/specs/deneb/p2p-interface.md#the-reqresp-domain
+	highestEpoch := highestSlot / cfg.beaconCfg.SlotsPerEpoch
+	currentEpoch := cfg.ethClock.GetCurrentEpoch()
+	minEpochDist := uint64(0)
+	if currentEpoch > cfg.beaconCfg.MinEpochsForBlobsSidecarsRequest {
+		minEpochDist = currentEpoch - cfg.beaconCfg.MinEpochsForBlobsSidecarsRequest
+	}
+	if highestEpoch < max(cfg.beaconCfg.DenebForkEpoch, minEpochDist) {
+		return false
+	}
+
+	return blobsExist
 }
 
 // downloadAndProcessEip4844DA handles downloading and processing of EIP-4844 data availability blobs.
@@ -191,7 +208,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		}
 		log.Info("after processDownloadedBlockBatches", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 		// Exit if we are pre-EIP-4844
-		if !shouldProcessBlobs(blocks) {
+		if !shouldProcessBlobs(blocks, cfg) {
 			log.Info("shouldProcessBlobs", "false", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 			currentSlot.Store(highestSlotProcessed)
 			return highestSlotProcessed, nil
