@@ -90,7 +90,9 @@ type TxnIndexCells struct {
 }
 
 type Version struct {
-	TxIndex    int
+	BlockNum    uint64
+	TxNum       uint64
+	TxIndex     int
 	Incarnation int
 }
 
@@ -286,7 +288,7 @@ func ValidateVersion(txIdx int, lastInputOutput *VersionedIO, versionedData *Ver
 			// }
 
 			valid = rd.Kind == ReadKindMap && rd.V == Version{
-				TxIndex:    mvResult.depIdx,
+				TxIndex:     mvResult.depIdx,
 				Incarnation: mvResult.incarnation,
 			}
 		case MVReadResultDependency:

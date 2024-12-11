@@ -58,7 +58,11 @@ type Task interface {
 	CreateReceipt(tx kv.Tx)
 
 	Version() state.Version
+	VersionMap() *state.VersionMap
+
 	TxHash() libcommon.Hash
+	TxSender() *libcommon.Address
+	TxMessage() types.Message
 
 	txNum() uint64
 
@@ -148,8 +152,20 @@ func (t *TxTask) TxHash() libcommon.Hash {
 	return t.Tx.Hash()
 }
 
+func (t *TxTask) TxSender() *libcommon.Address {
+	return t.Sender
+}
+
+func (t *TxTask) TxMessage() types.Message {
+	return t.TxAsMessage
+}
+
 func (t *TxTask) Version() state.Version {
-	return state.Version{TxIndex: t.TxIndex}
+	return state.Version{BlockNum: t.BlockNum, TxNum: t.TxNum, TxIndex: t.TxIndex}
+}
+
+func (t *TxTask) VersionMap() *state.VersionMap {
+	return nil
 }
 
 func (t *TxTask) IsBlockEnd() bool {

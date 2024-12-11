@@ -1,6 +1,6 @@
-//go:build integration
-
 package stagedsync
+
+///go:build integration
 
 import (
 	"context"
@@ -11,10 +11,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon/consensus"
+	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/core/exec"
+	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type OpType int
@@ -28,23 +36,23 @@ const redCross = "❌"
 const threeRockets = "🚀🚀🚀"
 
 type Op struct {
-	key      Key
+	key      state.VersionKey
 	duration time.Duration
 	opType   OpType
 	val      int
 }
 
 type testExecTask struct {
-	txIdx        int
+	*exec.TxTask
 	ops          []Op
-	readMap      map[Key]ReadDescriptor
-	writeMap     map[Key]WriteDescriptor
+	readMap      map[state.VersionKey]state.VersionedRead
+	writeMap     map[state.VersionKey]state.VersionedWrite
 	sender       common.Address
 	nonce        int
 	dependencies []int
 }
 
-type PathGenerator func(addr common.Address, i int, j int, total int) Key
+type PathGenerator func(addr common.Address, i int, j int, total int) state.VersionKey
 
 type TaskRunner func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration)
 
@@ -56,10 +64,12 @@ type Sender func(int) common.Address
 
 func NewTestExecTask(txIdx int, ops []Op, sender common.Address, nonce int) *testExecTask {
 	return &testExecTask{
-		txIdx:        txIdx,
+		TxTask: &exec.TxTask{
+			TxIndex: txIdx,
+		},
 		ops:          ops,
-		readMap:      make(map[Key]ReadDescriptor),
-		writeMap:     make(map[Key]WriteDescriptor),
+		readMap:      make(map[state.VersionKey]state.VersionedRead),
+		writeMap:     make(map[state.VersionKey]state.VersionedWrite),
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
@@ -72,14 +82,27 @@ func sleep(i time.Duration) {
 	}
 }
 
-func (t *testExecTask) Execute(mvh *MVHashMap, incarnation int) error {
+func (t *testExecTask) Execute(evm *vm.EVM,
+	vmCfg vm.Config,
+	engine consensus.Engine,
+	genesis *types.Genesis,
+	gasPool *core.GasPool,
+	rs *state.StateV3,
+	ibs *state.IntraBlockState,
+	_ exec.ApplyMessage,
+	stateWriter *state.StateWriterV3,
+	stateReader state.ResettableStateReader,
+	chainConfig *chain.Config,
+	chainReader consensus.ChainReader,
+	dirs datadir.Dirs,
+	isMining bool) *exec.Result {
 	// Sleep for 50 microsecond to simulate setup time
 	sleep(time.Microsecond * 50)
 
-	version := Version{TxnIndex: t.txIdx, Incarnation: incarnation}
+	version := state.Version{TxIndex: t.Version().TxIndex, Incarnation: incarnation}
 
-	t.readMap = make(map[Key]ReadDescriptor)
-	t.writeMap = make(map[Key]WriteDescriptor)
+	t.readMap = make(map[state.VersionKey]state.VersionedRead)
+	t.writeMap = make(map[state.VersionKey]state.VersionedWrite)
 
 	deps := -1
 
@@ -93,33 +116,33 @@ func (t *testExecTask) Execute(mvh *MVHashMap, incarnation int) error {
 				continue
 			}
 
-			result := mvh.Read(k, t.txIdx)
+			result := t.VersionMap().Read(k, t.Version().TxIndex)
 
 			val := result.Value()
 
 			if i == 0 && val != nil && (val.(int) != t.nonce) {
-				return ErrExecAbortError{}
+				return &exec.Result{Err: exec.ErrExecAbortError{}}
 			}
 
-			if result.Status() == MVReadResultDependency {
-				if result.depIdx > deps {
-					deps = result.depIdx
+			if result.Status() == state.MVReadResultDependency {
+				if result.DepIdx() > deps {
+					deps = result.DepIdx()
 				}
 			}
 
 			var readKind int
 
-			if result.Status() == MVReadResultDone {
-				readKind = ReadKindMap
-			} else if result.Status() == MVReadResultNone {
-				readKind = ReadKindStorage
+			if result.Status() == state.MVReadResultDone {
+				readKind = state.ReadKindMap
+			} else if result.Status() == state.MVReadResultNone {
+				readKind = state.ReadKindStorage
 			}
 
 			sleep(op.duration)
 
-			t.readMap[k] = ReadDescriptor{k, readKind, Version{TxnIndex: result.depIdx, Incarnation: result.incarnation}}
+			t.readMap[k] = state.VersionedRead{Path: k, Kind: readKind, V: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}}
 		case writeType:
-			t.writeMap[k] = WriteDescriptor{k, version, op.val}
+			t.writeMap[k] = state.VersionedWrite{Path: k, V: version, Val: op.val}
 		case otherType:
 			sleep(op.duration)
 		default:
@@ -128,18 +151,18 @@ func (t *testExecTask) Execute(mvh *MVHashMap, incarnation int) error {
 	}
 
 	if deps != -1 {
-		return ErrExecAbortError{deps, fmt.Errorf("Dependency error")}
+		return &exec.Result{Err: exec.ErrExecAbortError{Dependency: deps, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
 	return nil
 }
 
-func (t *testExecTask) MVWriteList() []WriteDescriptor {
+func (t *testExecTask) MVWriteList() []state.VersionedWrite {
 	return t.MVFullWriteList()
 }
 
-func (t *testExecTask) MVFullWriteList() []WriteDescriptor {
-	writes := make([]WriteDescriptor, 0, len(t.writeMap))
+func (t *testExecTask) MVFullWriteList() []state.VersionedWrite {
+	writes := make([]state.VersionedWrite, 0, len(t.writeMap))
 
 	for _, v := range t.writeMap {
 		writes = append(writes, v)
@@ -148,8 +171,8 @@ func (t *testExecTask) MVFullWriteList() []WriteDescriptor {
 	return writes
 }
 
-func (t *testExecTask) MVReadList() []ReadDescriptor {
-	reads := make([]ReadDescriptor, 0, len(t.readMap))
+func (t *testExecTask) MVReadList() []state.VersionedRead {
+	reads := make([]state.VersionedRead, 0, len(t.readMap))
 
 	for _, v := range t.readMap {
 		reads = append(reads, v)
@@ -158,14 +181,14 @@ func (t *testExecTask) MVReadList() []ReadDescriptor {
 	return reads
 }
 
-func (t *testExecTask) Settle() {}
+func (t *testExecTask) settle() {}
 
 func (t *testExecTask) Sender() common.Address {
 	return t.sender
 }
 
 func (t *testExecTask) Hash() common.Hash {
-	return common.BytesToHash([]byte(fmt.Sprintf("%d", t.txIdx)))
+	return common.BytesToHash([]byte(fmt.Sprintf("%d", t.TxIndex)))
 }
 
 func (t *testExecTask) Dependencies() []int {
@@ -188,15 +211,15 @@ func longTailTimeGenerator(min time.Duration, max time.Duration, i int, j int) f
 	}
 }
 
-var randomPathGenerator = func(sender common.Address, i int, j int, total int) Key {
-	return NewStateKey(common.BigToAddress((big.NewInt(int64(i % 10)))), common.BigToHash((big.NewInt(int64(total)))))
+var randomPathGenerator = func(sender common.Address, i int, j int, total int) state.VersionKey {
+	return state.VersionStateKey(common.BigToAddress((big.NewInt(int64(i % 10)))), common.BigToHash((big.NewInt(int64(total)))))
 }
 
-var dexPathGenerator = func(sender common.Address, i int, j int, total int) Key {
+var dexPathGenerator = func(sender common.Address, i int, j int, total int) state.VersionKey {
 	if j == total-1 || j == 2 {
-		return NewSubpathKey(common.BigToAddress(big.NewInt(int64(0))), 1)
+		return state.VersionSubpathKey(common.BigToAddress(big.NewInt(int64(0))), 1)
 	} else {
-		return NewSubpathKey(common.BigToAddress(big.NewInt(int64(j))), 1)
+		return state.VersionSubpathKey(common.BigToAddress(big.NewInt(int64(j))), 1)
 	}
 }
 
@@ -204,8 +227,8 @@ var readTime = randTimeGenerator(4*time.Microsecond, 12*time.Microsecond)
 var writeTime = randTimeGenerator(2*time.Microsecond, 6*time.Microsecond)
 var nonIOTime = randTimeGenerator(1*time.Microsecond, 2*time.Microsecond)
 
-func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonIOPerT int, pathGenerator PathGenerator, readTime Timer, writeTime Timer, nonIOTime Timer) ([]ExecTask, time.Duration) {
-	exec := make([]ExecTask, 0, numTask)
+func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonIOPerT int, pathGenerator PathGenerator, readTime Timer, writeTime Timer, nonIOTime Timer) ([]exec.Task, time.Duration) {
+	exec := make([]exec.Task, 0, numTask)
 
 	var serialDuration time.Duration
 
@@ -217,11 +240,11 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 		// Set first two ops to always read and write nonce
 		ops := make([]Op, 0, readsPerT+writesPerT+nonIOPerT)
 
-		ops = append(ops, Op{opType: readType, key: NewSubpathKey(s, 2), duration: readTime(i, 0), val: senderNonces[s]})
+		ops = append(ops, Op{opType: readType, key: state.VersionSubpathKey(s, 2), duration: readTime(i, 0), val: senderNonces[s]})
 
 		senderNonces[s]++
 
-		ops = append(ops, Op{opType: writeType, key: NewSubpathKey(s, 2), duration: writeTime(i, 1), val: senderNonces[s]})
+		ops = append(ops, Op{opType: writeType, key: state.VersionSubpathKey(s, 2), duration: writeTime(i, 1), val: senderNonces[s]})
 
 		for j := 0; j < readsPerT-1; j++ {
 			ops = append(ops, Op{opType: readType})
@@ -369,8 +392,8 @@ func testExecutorCombWithMetadata(t *testing.T, totalTxs []int, numReads []int, 
 	fmt.Printf("Without metadata <> with metadata: Total exec duration:          %v, total exec duration metadata: %v, time reduced: %v, time reduced percent: %.2f%%\n", totalExecDuration, totalExecDurationMetadata, totalExecDuration-totalExecDurationMetadata, float64(totalExecDuration-totalExecDurationMetadata)/float64(totalExecDuration)*100)
 }
 
-func composeValidations(checks []PropertyCheck) PropertyCheck {
-	return func(pe *ParallelExecutor) error {
+func composeValidations(checks []propertyCheck) propertyCheck {
+	return func(pe *parallelExecutor) error {
 		for _, check := range checks {
 			err := check(pe)
 			if err != nil {
@@ -382,37 +405,41 @@ func composeValidations(checks []PropertyCheck) PropertyCheck {
 	}
 }
 
-func checkNoStatusOverlap(pe *ParallelExecutor) error {
+func checkNoStatusOverlap(pe *parallelExecutor) error {
 	seen := make(map[int]string)
 
-	for _, tx := range pe.execTasks.complete {
-		seen[tx] = "complete"
-	}
-
-	for _, tx := range pe.execTasks.inProgress {
-		if v, ok := seen[tx]; ok {
-			return fmt.Errorf("tx %v is in both %v and inProgress", v, tx)
+	for blockNum, blockStatus := range pe.blockStatus {
+		for _, tx := range blockStatus.execTasks.complete {
+			seen[tx] = "complete"
 		}
 
-		seen[tx] = "inProgress"
-	}
+		for _, tx := range blockStatus.execTasks.inProgress {
+			if v, ok := seen[tx]; ok {
+				return fmt.Errorf("blk %d, tx %v is in both %v and inProgress", blockNum, v, tx)
+			}
 
-	for _, tx := range pe.execTasks.pending {
-		if v, ok := seen[tx]; ok {
-			return fmt.Errorf("tx %v is in both %v complete and pending", v, tx)
+			seen[tx] = "inProgress"
 		}
 
-		seen[tx] = "pending"
+		for _, tx := range blockStatus.execTasks.pending {
+			if v, ok := seen[tx]; ok {
+				return fmt.Errorf("blk %d, tx %v is in both %v complete and pending", blockNum, v, tx)
+			}
+
+			seen[tx] = "pending"
+		}
 	}
 
 	return nil
 }
 
-func checkNoDroppedTx(pe *ParallelExecutor) error {
-	for i := 0; i < len(pe.tasks); i++ {
-		if !pe.execTasks.checkComplete(i) && !pe.execTasks.checkInProgress(i) && !pe.execTasks.checkPending(i) {
-			if !pe.execTasks.isBlocked(i) {
-				return fmt.Errorf("tx %v is not in any status and is not blocked by any other tx", i)
+func checkNoDroppedTx(pe *parallelExecutor) error {
+	for blockNum, blockStatus := range pe.blockStatus {
+		for i := 0; i < len(blockStatus.tasks); i++ {
+			if !blockStatus.execTasks.checkComplete(i) && !blockStatus.execTasks.checkInProgress(i) && !blockStatus.execTasks.checkPending(i) {
+				if !blockStatus.execTasks.isBlocked(i) {
+					return fmt.Errorf("blk %d, tx %v is not in any status and is not blocked by any other tx", blockNum, i)
+				}
 			}
 		}
 	}
@@ -421,13 +448,13 @@ func checkNoDroppedTx(pe *ParallelExecutor) error {
 }
 
 // nolint: unparam
-func runParallel(t *testing.T, tasks []ExecTask, validation PropertyCheck, metadata bool) time.Duration {
+func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, metadata bool) time.Duration {
 	t.Helper()
 
 	profile := false
 
 	start := time.Now()
-	result, err := executeParallelWithCheck(tasks, false, validation, metadata, context.Background())
+	result, err := executeParallelWithCheck(context.Background(), tasks, false, validation, metadata, log.Root())
 
 	if result.Deps != nil && profile {
 		result.Deps.Report(*result.Stats, func(str string) { fmt.Println(str) })
@@ -437,7 +464,7 @@ func runParallel(t *testing.T, tasks []ExecTask, validation PropertyCheck, metad
 
 	// Need to apply the final write set to storage
 
-	finalWriteSet := make(map[Key]time.Duration)
+	finalWriteSet := make(map[state.VersionKey]time.Duration)
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
@@ -457,10 +484,51 @@ func runParallel(t *testing.T, tasks []ExecTask, validation PropertyCheck, metad
 	return duration
 }
 
-func runParallelGetMetadata(t *testing.T, tasks []ExecTask, validation PropertyCheck) map[int]map[int]bool {
+type propertyCheck func(*parallelExecutor) error
+
+func executeParallelWithCheck(interruptCtx context.Context, tasks []exec.Task, profile bool, check propertyCheck, metadata bool, logger log.Logger) (result blockResult, err error) {
+	if len(tasks) == 0 {
+		return blockResult{MakeTxnInputOutput(len(tasks)), nil, nil, nil}, nil
+	}
+
+	pe := NewParallelExecutor(tasks, profile, metadata)
+	err = pe.Prepare(logger)
+
+	if err != nil {
+		pe.Close(true)
+		return
+	}
+
+	for range pe.chResults {
+		if interruptCtx != nil && interruptCtx.Err() != nil {
+			pe.Close(true)
+			return result, interruptCtx.Err()
+		}
+
+		res := pe.resultQueue.Pop().(ExecResult)
+
+		result, err = pe.Step(&res)
+
+		if err != nil {
+			return result, err
+		}
+
+		if check != nil {
+			err = check(pe)
+		}
+
+		if result.TxIO != nil || err != nil {
+			return result, err
+		}
+	}
+
+	return
+}
+
+func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
 	t.Helper()
 
-	res, err := executeParallelWithCheck(tasks, true, validation, false, context.Background())
+	res, err := executeParallelWithCheck(context.Background(), tasks, true, validation, false, log.Root())
 
 	assert.NoError(t, err, "error occur during parallel execution")
 
@@ -476,7 +544,7 @@ func TestLessConflicts(t *testing.T) {
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
 		sender := func(i int) common.Address {
@@ -500,7 +568,7 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 	numWrites := []int{100, 200}
 	numNonIOs := []int{100, 500}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		sender := func(i int) common.Address {
@@ -513,16 +581,16 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
-		newTasks := make([]ExecTask, 0, len(tasks))
+		newTasks := make([]exec.Task, 0, len(tasks))
 
 		for _, t := range tasks {
 			temp := t.(*testExecTask)
 
-			keys := make([]int, len(allDeps[temp.txIdx]))
+			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
 
 			i := 0
 
-			for k := range allDeps[temp.txIdx] {
+			for k := range allDeps[temp.Version().TxIndex] {
 				keys[i] = k
 				i++
 			}
@@ -546,7 +614,7 @@ func TestZeroTx(t *testing.T) {
 	numWrites := []int{20}
 	numNonIO := []int{100}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(1))) }
@@ -567,7 +635,7 @@ func TestAlternatingTx(t *testing.T) {
 	numWrites := []int{20}
 	numNonIO := []int{100}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i % 2))) }
@@ -588,7 +656,7 @@ func TestAlternatingTxWithMetadata(t *testing.T) {
 	numWrites := []int{20}
 	numNonIO := []int{100}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i % 2))) }
@@ -598,16 +666,16 @@ func TestAlternatingTxWithMetadata(t *testing.T) {
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
-		newTasks := make([]ExecTask, 0, len(tasks))
+		newTasks := make([]exec.Task, 0, len(tasks))
 
 		for _, t := range tasks {
 			temp := t.(*testExecTask)
 
-			keys := make([]int, len(allDeps[temp.txIdx]))
+			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
 
 			i := 0
 
-			for k := range allDeps[temp.txIdx] {
+			for k := range allDeps[temp.Version().TxIndex] {
 				keys[i] = k
 				i++
 			}
@@ -631,7 +699,7 @@ func TestMoreConflicts(t *testing.T) {
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
 		sender := func(i int) common.Address {
@@ -655,7 +723,7 @@ func TestMoreConflictsWithMetadata(t *testing.T) {
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		sender := func(i int) common.Address {
@@ -668,16 +736,16 @@ func TestMoreConflictsWithMetadata(t *testing.T) {
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
-		newTasks := make([]ExecTask, 0, len(tasks))
+		newTasks := make([]exec.Task, 0, len(tasks))
 
 		for _, t := range tasks {
 			temp := t.(*testExecTask)
 
-			keys := make([]int, len(allDeps[temp.txIdx]))
+			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
 
 			i := 0
 
-			for k := range allDeps[temp.txIdx] {
+			for k := range allDeps[temp.Version().TxIndex] {
 				keys[i] = k
 				i++
 			}
@@ -701,7 +769,7 @@ func TestRandomTx(t *testing.T) {
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
 		// Randomly assign this tx to one of 10 senders
@@ -723,7 +791,7 @@ func TestRandomTxWithMetadata(t *testing.T) {
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		// Randomly assign this tx to one of 10 senders
@@ -734,16 +802,16 @@ func TestRandomTxWithMetadata(t *testing.T) {
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
-		newTasks := make([]ExecTask, 0, len(tasks))
+		newTasks := make([]exec.Task, 0, len(tasks))
 
 		for _, t := range tasks {
 			temp := t.(*testExecTask)
 
-			keys := make([]int, len(allDeps[temp.txIdx]))
+			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
 
 			i := 0
 
-			for k := range allDeps[temp.txIdx] {
+			for k := range allDeps[temp.Version().TxIndex] {
 				keys[i] = k
 				i++
 			}
@@ -767,7 +835,7 @@ func TestTxWithLongTailRead(t *testing.T) {
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
 		sender := func(i int) common.Address {
@@ -794,7 +862,7 @@ func TestTxWithLongTailReadWithMetadata(t *testing.T) {
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		sender := func(i int) common.Address {
@@ -810,16 +878,16 @@ func TestTxWithLongTailReadWithMetadata(t *testing.T) {
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
-		newTasks := make([]ExecTask, 0, len(tasks))
+		newTasks := make([]exec.Task, 0, len(tasks))
 
 		for _, t := range tasks {
 			temp := t.(*testExecTask)
 
-			keys := make([]int, len(allDeps[temp.txIdx]))
+			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
 
 			i := 0
 
-			for k := range allDeps[temp.txIdx] {
+			for k := range allDeps[temp.Version().TxIndex] {
 				keys[i] = k
 				i++
 			}
@@ -843,12 +911,14 @@ func TestDexScenario(t *testing.T) {
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
 
-	postValidation := func(pe *ParallelExecutor) error {
-		if pe.validateTasks.maxAllComplete() == len(pe.tasks) {
-			for i, inputs := range pe.lastTxIO.inputs {
-				for _, input := range inputs {
-					if input.V.TxnIndex != i-1 {
-						return fmt.Errorf("Tx %d should depend on tx %d, but it actually depends on %d", i, i-1, input.V.TxnIndex)
+	postValidation := func(pe *parallelExecutor) error {
+		for blockNum, blockStatus := range pe.blockStatus {
+			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
+				for i, inputs := range blockStatus.lastTxIO.inputs {
+					for _, input := range inputs {
+						if input.V.TxnIndex != i-1 {
+							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.V.TxnIndex)
+						}
 					}
 				}
 			}
@@ -857,7 +927,7 @@ func TestDexScenario(t *testing.T) {
 		return nil
 	}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, postValidation, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, postValidation, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i))) }
@@ -878,12 +948,14 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
 
-	postValidation := func(pe *ParallelExecutor) error {
-		if pe.validateTasks.maxAllComplete() == len(pe.tasks) {
-			for i, inputs := range pe.lastTxIO.inputs {
-				for _, input := range inputs {
-					if input.V.TxnIndex != i-1 {
-						return fmt.Errorf("Tx %d should depend on tx %d, but it actually depends on %d", i, i-1, input.V.TxnIndex)
+	postValidation := func(pe *parallelExecutor) error {
+		for blockNum, blockStatus := range pe.blockStatus {
+			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
+				for i, inputs := range blockStatus.LastTxIO.inputs {
+					for _, input := range inputs {
+						if input.V.TxnIndex != i-1 {
+							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.V.TxnIndex)
+						}
 					}
 				}
 			}
@@ -892,7 +964,7 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 		return nil
 	}
 
-	checks := composeValidations([]PropertyCheck{checkNoStatusOverlap, postValidation, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, postValidation, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		sender := func(i int) common.Address { return common.BigToAddress(big.NewInt(int64(i))) }
@@ -902,16 +974,16 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 
 		allDeps := runParallelGetMetadata(t, tasks, checks)
 
-		newTasks := make([]ExecTask, 0, len(tasks))
+		newTasks := make([]exec.Task, 0, len(tasks))
 
 		for _, t := range tasks {
 			temp := t.(*testExecTask)
 
-			keys := make([]int, len(allDeps[temp.txIdx]))
+			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
 
 			i := 0
 
-			for k := range allDeps[temp.txIdx] {
+			for k := range allDeps[temp.Version().TxIndex] {
 				keys[i] = k
 				i++
 			}

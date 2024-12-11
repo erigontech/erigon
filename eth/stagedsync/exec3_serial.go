@@ -35,8 +35,10 @@ func (se *serialExecutor) processEvents(ctx context.Context, commitThreshold uin
 	return nil
 }
 
-func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (cont bool, err error) {
-	for _, txTask := range tasks {
+func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task) (cont bool, err error) {
+	for _, task := range tasks {
+		txTask := task.(*exec.TxTask)
+
 		result := se.applyWorker.RunTxTaskNoLock(txTask, se.isMining)
 
 		if err := func() error {
@@ -110,7 +112,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*exec.TxTask) (co
 			return false, nil
 		}
 
-		if !txTask.IsBlockEnd() {
+		if !task.IsBlockEnd() {
 			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
 				receipt = txTask.BlockReceipts[txTask.TxIndex]
