@@ -217,7 +217,13 @@ func (a *Antiquary) Loop() error {
 		}
 	}
 
-	a.stateSn.OpenFolder()
+	if a.stateSn != nil {
+		if err := a.stateSn.OpenFolder(); err != nil {
+			return err
+		}
+	}
+	log.Info("[Caplin] Stat", "blocks-static", a.sn.BlocksAvailable(), "states-static", a.stateSn.BlocksAvailable(), "blobs-static", a.sn.FrozenBlobs(),
+		"state-history-enabled", a.states, "block-history-enabled", a.blocks, "blob-history-enabled", a.blobs, "snapgen", a.snapgen)
 
 	frozenSlots := a.sn.BlocksAvailable()
 	if frozenSlots != 0 {
