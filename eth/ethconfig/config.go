@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -212,6 +213,7 @@ type Config struct {
 	// Transaction pool options
 	DeprecatedTxPool DeprecatedTxPoolConfig
 	TxPool           txpoolcfg.Config
+	Shutter          shutter.Config
 
 	// Gas Price Oracle options
 	GPO gaspricecfg.Config

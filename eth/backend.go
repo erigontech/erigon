@@ -130,6 +130,8 @@ import (
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	stages2 "github.com/erigontech/erigon/turbo/stages"
 	"github.com/erigontech/erigon/turbo/stages/headerdownload"
+	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolutil"
@@ -660,6 +662,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
+	var txnProvider txnprovider.TxnProvider
+	if config.Shutter.Enabled {
+		txnProvider = shutter.Pool{}
+	} else {
+		txnProvider = backend.txPool
+	}
+
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
 	backend.miningSealingQuit = make(chan struct{})
 	backend.pendingBlocks = make(chan *types.Block, 1)
@@ -716,7 +725,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				stages2.SilkwormForExecutionStage(backend.silkworm, config),
 			),
 			stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool, blockReader),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, txnProvider, blockReader),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 		logger, stages.ModeBlockProduction)
@@ -767,7 +776,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					stages2.SilkwormForExecutionStage(backend.silkworm, config),
 				),
 				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool, blockReader),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore)), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger, stages.ModeBlockProduction)
 		// We start the mining step
 		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
