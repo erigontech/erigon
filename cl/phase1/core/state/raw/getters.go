@@ -323,6 +323,34 @@ func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
 	return b.nextWithdrawalValidatorIndex
 }
 
+func (b *BeaconState) DepositRequestsStartIndex() uint64 {
+	return b.depositRequestsStartIndex
+}
+
+func (b *BeaconState) DepositBalanceToConsume() uint64 {
+	return b.depositBalanceToConsume
+}
+
+func (b *BeaconState) ConsolidationBalanceToConsume() uint64 {
+	return b.consolidationBalanceToConsume
+}
+
+func (b *BeaconState) EarliestConsolidationEpoch() uint64 {
+	return b.earliestConsolidationEpoch
+}
+
+func (b *BeaconState) PendingDeposits() *solid.ListSSZ[*solid.PendingDeposit] {
+	return b.pendingDeposits
+}
+
+func (b *BeaconState) PendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal] {
+	return b.pendingPartialWithdrawals
+}
+
+func (b *BeaconState) PendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation] {
+	return b.pendingConsolidations
+}
+
 // more compluicated ones
 
 // GetBlockRootAtSlot returns the block root at a given slot

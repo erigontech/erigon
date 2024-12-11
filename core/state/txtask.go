@@ -19,6 +19,8 @@ package state
 import (
 	"container/heap"
 	"context"
+	"fmt"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"sync"
 	"time"
 
@@ -106,6 +108,10 @@ func (t *TxTask) CreateReceipt(tx kv.Tx) {
 	}
 
 	cumulativeGasUsed += t.UsedGas
+	if t.UsedGas == 0 {
+		msg := fmt.Sprintf("no gas used stack: %s tx %+v", dbg.Stack(), t.Tx)
+		panic(msg)
+	}
 
 	r := t.createReceipt(cumulativeGasUsed)
 	r.FirstLogIndexWithinBlock = firstLogIndex
