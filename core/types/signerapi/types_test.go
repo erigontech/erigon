@@ -21,9 +21,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto/kzg4844"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/crypto/kzg4844"
 	"github.com/holiman/uint256"
 )
 

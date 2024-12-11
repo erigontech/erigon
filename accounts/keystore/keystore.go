@@ -24,7 +24,6 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"errors"
-	"github.com/ethereum/go-ethereum/accounts"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -40,7 +39,7 @@ import (
 )
 
 var (
-	ErrLocked  = accounts.NewAuthNeededError("password or unlock")
+	ErrLocked  = NewAuthNeededError("password or unlock")
 	ErrNoMatch = errors.New("no key for given address or file")
 	ErrDecrypt = errors.New("could not decrypt key with given password")
 

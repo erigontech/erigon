@@ -18,6 +18,7 @@ package keystore
 
 import (
 	"errors"
+	"fmt"
 	ethereum "github.com/erigontech/erigon"
 	"math/big"
 
@@ -152,4 +153,26 @@ func (w *keystoreWallet) SignTxWithPassphrase(account Account, passphrase string
 	}
 	// Account seems valid, request the keystore to sign
 	return w.keystore.SignTxWithPassphrase(account, passphrase, tx, chainID)
+}
+
+// AuthNeededError is returned by backends for signing requests where the user
+// is required to provide further authentication before signing can succeed.
+//
+// This usually means either that a password needs to be supplied, or perhaps a
+// one time PIN code displayed by some hardware device.
+type AuthNeededError struct {
+	Needed string // Extra authentication the user needs to provide
+}
+
+// NewAuthNeededError creates a new authentication error with the extra details
+// about the needed fields set.
+func NewAuthNeededError(needed string) error {
+	return &AuthNeededError{
+		Needed: needed,
+	}
+}
+
+// Error implements the standard error interface.
+func (err *AuthNeededError) Error() string {
+	return fmt.Sprintf("authentication needed: %s", err.Needed)
 }

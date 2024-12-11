@@ -18,45 +18,43 @@
 
 package kzg4844
 
-import "sync"
-
 // ckzgAvailable signals whether the library was compiled into Geth.
-const ckzgAvailable = false
-
-// ckzgIniter ensures that we initialize the KZG library once before using it.
-var ckzgIniter sync.Once
-
-// ckzgInit initializes the KZG library with the provided trusted setup.
-func ckzgInit() {
-	panic("unsupported platform")
-}
-
-// ckzgBlobToCommitment creates a small commitment out of a data blob.
-func ckzgBlobToCommitment(blob Blob) (Commitment, error) {
-	panic("unsupported platform")
-}
-
-// ckzgComputeProof computes the KZG proof at the given point for the polynomial
-// represented by the blob.
-func ckzgComputeProof(blob Blob, point Point) (Proof, Claim, error) {
-	panic("unsupported platform")
-}
-
-// ckzgVerifyProof verifies the KZG proof that the polynomial represented by the blob
-// evaluated at the given point is the claimed value.
-func ckzgVerifyProof(commitment Commitment, point Point, claim Claim, proof Proof) error {
-	panic("unsupported platform")
-}
-
-// ckzgComputeBlobProof returns the KZG proof that is used to verify the blob against
-// the commitment.
+//const ckzgAvailable = false
 //
-// This method does not verify that the commitment is correct with respect to blob.
-func ckzgComputeBlobProof(blob Blob, commitment Commitment) (Proof, error) {
-	panic("unsupported platform")
-}
-
-// ckzgVerifyBlobProof verifies that the blob data corresponds to the provided commitment.
-func ckzgVerifyBlobProof(blob Blob, commitment Commitment, proof Proof) error {
-	panic("unsupported platform")
-}
+//// ckzgIniter ensures that we initialize the KZG library once before using it.
+//var ckzgIniter sync.Once
+//
+//// ckzgInit initializes the KZG library with the provided trusted setup.
+//func ckzgInit() {
+//	panic("unsupported platform")
+//}
+//
+//// ckzgBlobToCommitment creates a small commitment out of a data blob.
+//func ckzgBlobToCommitment(blob Blob) (Commitment, error) {
+//	panic("unsupported platform")
+//}
+//
+//// ckzgComputeProof computes the KZG proof at the given point for the polynomial
+//// represented by the blob.
+//func ckzgComputeProof(blob Blob, point Point) (Proof, Claim, error) {
+//	panic("unsupported platform")
+//}
+//
+//// ckzgVerifyProof verifies the KZG proof that the polynomial represented by the blob
+//// evaluated at the given point is the claimed value.
+//func ckzgVerifyProof(commitment Commitment, point Point, claim Claim, proof Proof) error {
+//	panic("unsupported platform")
+//}
+//
+//// ckzgComputeBlobProof returns the KZG proof that is used to verify the blob against
+//// the commitment.
+////
+//// This method does not verify that the commitment is correct with respect to blob.
+//func ckzgComputeBlobProof(blob Blob, commitment Commitment) (Proof, error) {
+//	panic("unsupported platform")
+//}
+//
+//// ckzgVerifyBlobProof verifies that the blob data corresponds to the provided commitment.
+//func ckzgVerifyBlobProof(blob Blob, commitment Commitment, proof Proof) error {
+//	panic("unsupported platform")
+//}

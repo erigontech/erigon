@@ -32,10 +32,10 @@ import (
 	kzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/holiman/uint256"
 )
 
