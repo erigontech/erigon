@@ -880,7 +880,7 @@ func batchVerifyAttestations(
 	s abstract.BeaconState,
 	indexedAttestations []*cltypes.IndexedAttestation,
 ) (valid bool, err error) {
-	c := make(chan indexedAttestationVerificationResult, 1)
+	c := make(chan indexedAttestationVerificationResult, len(indexedAttestations))
 
 	for idx := range indexedAttestations {
 		go func(idx int) {
@@ -894,7 +894,7 @@ func batchVerifyAttestations(
 	for i := 0; i < len(indexedAttestations); i++ {
 		result := <-c
 		if result.err != nil {
-			return false, err
+			return false, result.err
 		}
 		if !result.valid {
 			return false, nil
