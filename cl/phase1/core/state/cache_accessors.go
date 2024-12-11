@@ -408,6 +408,9 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 			committeeOffset += len(committee)
 		}
 	}
+	if committeeOffset != aggrBitsLen {
+		return nil, fmt.Errorf("GetAttestingIndicies: aggregation bits length does not match committee length. agg bits size: %d, committeeOffset: %d", aggrBitsLen, committeeOffset)
+	}
 	return attesters, nil
 }
 
