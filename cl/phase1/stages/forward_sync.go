@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"sync/atomic"
@@ -62,7 +61,9 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		return
 	}
 	if blobs == nil {
-		return 0, errors.New("blobs is nil")
+		lastSlot := blocks[len(blocks)-1].Block.Slot
+		log.Info("RequestBlobsFrantically nil blobs", "blobs", 0, "lastSlot", lastSlot)
+		return lastSlot, nil
 	}
 	log.Info("RequestBlobsFrantically", "blobs", len(blobs.Responses))
 	var highestProcessed, inserted uint64
