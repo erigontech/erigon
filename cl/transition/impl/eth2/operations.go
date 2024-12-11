@@ -626,7 +626,6 @@ func (I *impl) processAttestationPostAltair(
 		if attestation.AggregationBits.Bits() != committeeOffset {
 			return nil, errors.New("processAttestationPostAltair: aggregation bits length mismatch")
 		}
-		log.Info("processAttestationPostAltair: committee verified", "committeeOffset", committeeOffset)
 	}
 
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
