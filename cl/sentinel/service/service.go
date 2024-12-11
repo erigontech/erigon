@@ -236,9 +236,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	}
 	// known error codes, just remove the peer
 	if isError != 0 {
-		s.sentinel.Peers().RemovePeer(pid)
-		s.sentinel.Host().Peerstore().RemovePeer(pid)
-		s.sentinel.Host().Network().ClosePeer(pid)
+		//s.sentinel.Peers().RemovePeer(pid)
+		//s.sentinel.Host().Peerstore().RemovePeer(pid)
+		//s.sentinel.Host().Network().ClosePeer(pid)
 
 		errBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("peer error code: %d. body: %s", isError, string(errBody))
