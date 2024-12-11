@@ -384,7 +384,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 	// "Map-Reduce on history" is conflict-free - means we don't need "Retry" feature.
 	// But still can use this data-type as simple queue.
-	in := state.NewQueueWithRetry(10_000)
+	in := state.NewQueueWithRetry(5_000)
 	defer in.Close()
 
 	var WorkerCount = estimate.AlmostAllCPUs()
