@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
@@ -112,6 +113,10 @@ type ClientVersionV1 struct {
 	Name    string  `json:"name" gencodec:"required"`
 	Version string  `json:"version" gencodec:"required"`
 	Commit  [4]byte `json:"commit" gencodec:"required"`
+}
+
+func (c ClientVersionV1) String() string {
+	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
 }
 
 type StringifiedError struct{ err error }
