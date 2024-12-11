@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 )
 
-var requestBlobBatchExpiration = 15 * time.Second
+var requestBlobBatchExpiration = 5 * time.Second
 
 // This is just a bunch of functions to handle blobs
 
