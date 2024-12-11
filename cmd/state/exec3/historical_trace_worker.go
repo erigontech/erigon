@@ -244,8 +244,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	workers := make([]*HistoricalTraceWorker, workerCount)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
-	resultChannelLimit := workerCount * 128
-	heapLimit := workerCount * 128
+	resultChannelLimit := workerCount * 16
+	heapLimit := workerCount * 16
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // workerCount * 4
 
 	reducerGroup := &errgroup.Group{}
@@ -374,6 +374,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	if err != nil {
 		return err
 	}
+	if toBlock > 0 {
+		toBlock-- // [fromBlock,toBlock)
+	}
 	toTxNum, err := txNumsReader.Max(tx, toBlock)
 	if err != nil {
 		return err
@@ -381,7 +384,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 	// "Map-Reduce on history" is conflict-free - means we don't need "Retry" feature.
 	// But still can use this data-type as simple queue.
-	in := state.NewQueueWithRetry(100_000)
+	in := state.NewQueueWithRetry(10_000)
 	defer in.Close()
 
 	var WorkerCount = estimate.AlmostAllCPUs()
@@ -420,7 +423,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	}
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
-	for blockNum := fromBlock; blockNum <= toBlock; blockNum++ {
+	for blockNum := fromBlock; blockNum < toBlock; blockNum++ {
 		var b *types.Block
 		b, err = blockWithSenders(ctx, nil, tx, br, blockNum)
 		if err != nil {
