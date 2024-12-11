@@ -18,7 +18,6 @@ package antiquary
 
 import (
 	"context"
-	"fmt"
 	"io/ioutil"
 	"math"
 	"strings"
