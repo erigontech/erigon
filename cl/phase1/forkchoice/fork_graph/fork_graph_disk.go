@@ -17,6 +17,7 @@
 package fork_graph
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -260,10 +261,11 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		// Execute the state
 		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 			// Add block to list of invalid blocks
-			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", blockRoot, "reason", invalidBlockErr)
+			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", libcommon.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 			f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
 			//f.currentState = nil
-
+			bytes, _ := json.Marshal(block)
+			log.Warn("Invalid block", "block", string(bytes))
 			return nil, InvalidBlock, invalidBlockErr
 		}
 		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
