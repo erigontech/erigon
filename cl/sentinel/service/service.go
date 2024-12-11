@@ -240,7 +240,8 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		s.sentinel.Host().Peerstore().RemovePeer(pid)
 		s.sentinel.Host().Network().ClosePeer(pid)
 
-		return nil, fmt.Errorf("peer error code: %d", isError)
+		errBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("peer error code: %d. body: %s", isError, string(errBody))
 	}
 
 	// read the body from the response
