@@ -4,17 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/holiman/uint256"
 	"io"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/holiman/uint256"
 )
 
 // Returns true if nonce checks should be skipped based on inner's isFake()
@@ -170,7 +169,7 @@ func (tx *ArbitrumUnsignedTx) GetData() []byte {
 	panic("implement me")
 }
 
-func (tx *ArbitrumUnsignedTx) GetAccessList() types.AccessList { return nil }
+func (tx *ArbitrumUnsignedTx) GetAccessList() AccessList { return nil }
 
 func (tx *ArbitrumUnsignedTx) Protected() bool {
 	//TODO implement me
@@ -335,8 +334,8 @@ func (tx *ArbitrumContractTx) GetData() []byte { return tx.Data }
 func (tx *ArbitrumContractTx) GetValue() *uint256.Int {
 	return uint256.MustFromBig(tx.Value)
 }
-func (tx *ArbitrumContractTx) GetTo() *common.Address          { return tx.To }
-func (tx *ArbitrumContractTx) GetAccessList() types.AccessList { return nil }
+func (tx *ArbitrumContractTx) GetTo() *common.Address    { return tx.To }
+func (tx *ArbitrumContractTx) GetAccessList() AccessList { return nil }
 func (tx *ArbitrumContractTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
@@ -534,8 +533,8 @@ func (tx *ArbitrumRetryTx) GetData() []byte { return tx.Data }
 func (tx *ArbitrumRetryTx) GetValue() *uint256.Int {
 	return uint256.MustFromBig(tx.Value)
 }
-func (tx *ArbitrumRetryTx) GetTo() *common.Address          { return tx.To }
-func (tx *ArbitrumRetryTx) GetAccessList() types.AccessList { return nil }
+func (tx *ArbitrumRetryTx) GetTo() *common.Address    { return tx.To }
+func (tx *ArbitrumRetryTx) GetAccessList() AccessList { return nil }
 func (tx *ArbitrumRetryTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
@@ -768,8 +767,8 @@ func (tx *ArbitrumSubmitRetryableTx) GetData() []byte {
 func (tx *ArbitrumSubmitRetryableTx) GetValue() *uint256.Int {
 	return uint256.MustFromBig(common.Big0)
 }
-func (tx *ArbitrumSubmitRetryableTx) GetTo() *common.Address          { return &ArbRetryableTxAddress }
-func (tx *ArbitrumSubmitRetryableTx) GetAccessList() types.AccessList { return nil }
+func (tx *ArbitrumSubmitRetryableTx) GetTo() *common.Address    { return &ArbRetryableTxAddress }
+func (tx *ArbitrumSubmitRetryableTx) GetAccessList() AccessList { return nil }
 func (tx *ArbitrumSubmitRetryableTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
@@ -935,8 +934,8 @@ func (tx *ArbitrumDepositTx) GetData() []byte { return nil }
 func (tx *ArbitrumDepositTx) GetValue() *uint256.Int {
 	return uint256.MustFromBig(tx.Value)
 }
-func (tx *ArbitrumDepositTx) GetTo() *common.Address          { return &tx.To }
-func (tx *ArbitrumDepositTx) GetAccessList() types.AccessList { return nil }
+func (tx *ArbitrumDepositTx) GetTo() *common.Address    { return &tx.To }
+func (tx *ArbitrumDepositTx) GetAccessList() AccessList { return nil }
 func (tx *ArbitrumDepositTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }
@@ -1083,8 +1082,8 @@ func (tx *ArbitrumInternalTx) GetData() []byte { return tx.Data }
 func (tx *ArbitrumInternalTx) GetValue() *uint256.Int {
 	return uint256.MustFromBig(common.Big0)
 }
-func (tx *ArbitrumInternalTx) GetTo() *common.Address          { return &ArbosAddress }
-func (tx *ArbitrumInternalTx) GetAccessList() types.AccessList { return nil }
+func (tx *ArbitrumInternalTx) GetTo() *common.Address    { return &ArbosAddress }
+func (tx *ArbitrumInternalTx) GetAccessList() AccessList { return nil }
 func (tx *ArbitrumInternalTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
 }

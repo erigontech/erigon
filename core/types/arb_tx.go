@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"math/big"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,11 +23,6 @@ var (
 	errVYParityMismatch = errors.New("'v' and 'yParity' fields do not match")
 	errVYParityMissing  = errors.New("missing 'yParity' or 'v' field in transaction")
 )
-
-// encodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
-var encodeBufferPool = sync.Pool{
-	New: func() interface{} { return new(bytes.Buffer) },
-}
 
 // getPooledBuffer retrieves a buffer from the pool and creates a byte slice of the
 // requested size from it.
@@ -448,13 +442,13 @@ func (tx *ArbTx) BlobGasFeeCapIntCmp(other *big.Int) int {
 
 // BlobTxSidecar contains the blobs of a blob transaction.
 type BlobTxSidecar struct {
-	Blobs       []kzg4844.Blob       // Blobs needed by the blob pool
-	Commitments []kzg4844.Commitment // Commitments needed by the blob pool
-	Proofs      []kzg4844.Proof      // Proofs needed by the blob pool
+	Blobs       []kzg4844.Blob          // Blobs needed by the blob pool
+	Commitments []kzg4844.KZGCommitment // Commitments needed by the blob pool
+	Proofs      []kzg4844.KZGProof      // Proofs needed by the blob pool
 }
 
 // BlobHashes computes the blob hashes of the given blobs.
-func (sc *BlobTxSidecar) BlobHashes() []libcommon.Hash {
+func (sc *BlobTxSidecar) BlobHashes() []common.Hash {
 	hasher := sha256.New()
 	h := make([]common.Hash, len(sc.Commitments))
 	for i := range sc.Blobs {
