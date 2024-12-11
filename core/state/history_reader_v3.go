@@ -53,8 +53,20 @@ func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) GetTxNum() uint64      { return hr.txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
-// return the earliest known txnum in files
-func (hr *HistoryReaderV3) StartingTxNum() uint64 { return hr.ttx.StartingTxNum() }
+// Returns the earliest known txnum in history files for state history
+// This is the smallest txNum found across:
+//
+// - Account history
+//
+// - Storage history
+//
+// - Code history
+//
+// Not considered in the calculation are Commitment history and Receipt history, as
+// there are separate functions handling them.
+func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
+	return hr.ttx.StateHistoryStartFrom()
+}
 
 func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
 func (hr *HistoryReaderV3) ResetReadSet()                     {}
