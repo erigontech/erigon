@@ -20,7 +20,6 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
@@ -194,24 +193,6 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	return nil
 }
 
-// runIndexingRoutines runs the indexing routines for the database.
-func runIndexingRoutines(ctx context.Context, tx kv.RwTx, cfg *Cfg, headState *state.CachingBeaconState) error {
-	preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().Root)
-	preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().Root)
-	preverifiedHistoricalRoots := cfg.forkChoice.PreverifiedHistoricalRoots(headState.FinalizedCheckpoint().Root)
-
-	if err := state_accessors.IncrementPublicKeyTable(tx, headState, preverifiedValidators); err != nil {
-		return fmt.Errorf("failed to increment public key table: %w", err)
-	}
-	if err := state_accessors.IncrementHistoricalSummariesTable(tx, headState, preverifiedHistoricalSummary); err != nil {
-		return fmt.Errorf("failed to increment historical summaries table: %w", err)
-	}
-	if err := state_accessors.IncrementHistoricalRootsTable(tx, headState, preverifiedHistoricalRoots); err != nil {
-		return fmt.Errorf("failed to increment historical roots table: %w", err)
-	}
-	return nil
-}
-
 // emitHeadEvent emits the head event with the given head slot, head root, and head state.
 func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
 	headEpoch := headSlot / cfg.beaconCfg.SlotsPerEpoch
@@ -326,6 +307,9 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot(), 0); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)
 	}
+	if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
+		return err
+	}
 	start := time.Now()
 	cfg.forkChoice.SetSynced(true) // Now we are synced
 	// Update the head state with the new head state
@@ -337,13 +321,6 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	}()
 
 	return cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		// Produce and cache attestation data for validator node (this is not an expensive operation so we can do it for all nodes)
-
-		// Run indexing routines for the database
-		if err := runIndexingRoutines(ctx, tx, cfg, headState); err != nil {
-			return fmt.Errorf("failed to run indexing routines: %w", err)
-		}
-
 		// Dump the head state on disk for ease of chain reorgs
 		if err := cfg.forkChoice.DumpBeaconStateOnDisk(headState); err != nil {
 			return fmt.Errorf("failed to dump beacon state on disk: %w", err)

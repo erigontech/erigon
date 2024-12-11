@@ -67,7 +67,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	}
 
 	var isBorStateSyncTxn bool
-	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNumber, _, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -780,7 +780,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, logger, nil)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}

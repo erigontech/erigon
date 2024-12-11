@@ -89,7 +89,7 @@ func TestSimulatedBackend(t *testing.T) {
 	sim.Commit()
 	_, isPending, err = sim.TransactionByHash(context.Background(), txHash)
 	if err != nil {
-		t.Fatalf("error getting transaction with hash: %v", txHash.String())
+		t.Fatalf("error getting transaction with hash: %v %v", txHash.String(), err.Error())
 	}
 	if isPending {
 		t.Fatal("transaction should not have pending status")
@@ -152,7 +152,10 @@ func TestNewSimulatedBackend(t *testing.T) {
 	}
 
 	statedb := sim.stateByBlockNumber(tx, new(big.Int).SetUint64(num+1))
-	bal := statedb.GetBalance(testAddr)
+	bal, err := statedb.GetBalance(testAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
 	}
