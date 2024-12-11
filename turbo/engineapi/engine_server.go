@@ -788,10 +788,11 @@ func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *en
 	}
 	result := make([]engine_types.ClientVersionV1, 1)
 	result[0] = engine_types.ClientVersionV1{
-		Code:    "EG",
-		Name:    "erigon",
+		Code:    params.ClientCode,
+		Name:    params.ClientName,
 		Version: params.Version,
-		Commit:  commitBytes}
+		Commit:  commitBytes,
+	}
 	return result, nil
 }
 

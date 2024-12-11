@@ -40,6 +40,8 @@ const (
 	VersionModifier    = "alpha6" // Modifier component of the current release
 	VersionKeyCreated  = "ErigonVersionCreated"
 	VersionKeyFinished = "ErigonVersionFinished"
+	ClientName         = "erigon"
+	ClientCode         = "EG"
 )
 
 // Version holds the textual version string.
