@@ -113,7 +113,12 @@ func NewHistoricalTraceWorker(
 	return ie
 }
 
-func (rw *HistoricalTraceWorker) Run() error {
+func (rw *HistoricalTraceWorker) Run() (err error) {
+	defer func() { // convert panic to err - because it's background workers
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("HistoricalTraceWorker panic: %s", rec)
+		}
+	}()
 	defer rw.evm.JumpDestCache.LogStats()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTask(txTask)
@@ -264,14 +269,7 @@ func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx conte
 		for i := 0; i < workerCount; i++ {
 			i := i
 			workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
-			mapGroup.Go(func() (err error) {
-				defer func() {
-					if rec := recover(); rec != nil {
-						err = fmt.Errorf("%s, %s", rec, dbg.Stack())
-						log.Warn("[dbg] 'worker' paniced", "i", i, "err", err)
-					}
-				}()
-
+			mapGroup.Go(func() error {
 				return workers[i].Run()
 			})
 		}
