@@ -240,7 +240,15 @@ type ExecArgs struct {
 	Workers     int
 }
 
-func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) (reduceGroup *errgroup.Group, clearFunc func()) {
+func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
+	g := &errgroup.Group{}
+	g.Go(func() error {
+		return NewHistoricalTraceWorkers2(consumer, cfg, ctx, toTxNum, in, workerCount, outputTxNum, logger)
+	})
+	return g
+}
+
+func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) error {
 	workers := make([]*HistoricalTraceWorker, workerCount)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
@@ -248,9 +256,14 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	heapLimit := workerCount * 16
 
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
-	{
-		mapGroup, ctx := errgroup.WithContext(ctx)
+	mapGroup, mapCtx := errgroup.WithContext(ctx)
+	go func() {
+		mapGroup.Wait()
+		rws.Close()
+	}()
 
+	{
+		ctx := mapCtx
 		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 		// and in applyLoop all errors are critical
 		for i := 0; i < workerCount; i++ {
@@ -267,69 +280,52 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				return workers[i].Run()
 			})
 		}
-		go func() {
+		defer func() {
 			mapGroup.Wait()
-			rws.Close()
+			for _, w := range workers {
+				w.ResetTx(nil)
+			}
 		}()
 	}
 
 	//Reducer
-	reduceGroup, ctx = errgroup.WithContext(ctx)
-	reduceGroup.Go(func() (err error) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				err = fmt.Errorf("%s, %s", rec, dbg.Stack())
-				log.Warn("[dbg] 'reduce worker' paniced", "err", err)
-			}
-		}()
-
-		logEvery := time.NewTicker(1 * time.Second)
-		defer logEvery.Stop()
-
-		tx, err := cfg.ChainDB.BeginRo(ctx)
-		if err != nil {
-			panic(err)
-			//return err
+	defer func() {
+		if rec := recover(); rec != nil {
+			err := fmt.Errorf("%s, %s", rec, dbg.Stack())
+			log.Warn("[dbg] 'reduce worker' paniced", "err", err)
 		}
-		defer tx.Rollback()
-		ttx := tx.(kv.TemporalTx)
+	}()
 
-		for outputTxNum.Load() <= toTxNum {
-			if err := rws.DrainNonBlocking(ctx); err != nil {
-				return err
-			}
+	logEvery := time.NewTicker(1 * time.Second)
+	defer logEvery.Stop()
 
-			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), ttx, true)
-			if err != nil {
-				return fmt.Errorf("processResultQueueHistorical: %w", err)
-			}
-			if processedTxNum > 0 {
-				outputTxNum.Store(processedTxNum)
-			}
-
-			//select {
-			//case <-logEvery.C:
-			//	log.Info("[dbg] rws", "rws_ch_len", rws.ResultChLen(), "rws_q_len", rws.Len())
-			//default:
-			//}
-
-		}
-		return nil
-	})
-
-	var clearDone bool
-	clearFunc = func() {
-		if clearDone {
-			return
-		}
-		clearDone = true
-		reduceGroup.Wait()
-		for _, w := range workers {
-			w.ResetTx(nil)
-		}
+	tx, err := cfg.ChainDB.BeginRo(ctx)
+	if err != nil {
+		panic(err)
+		//return err
 	}
+	defer tx.Rollback()
+	ttx := tx.(kv.TemporalTx)
 
-	return reduceGroup, clearFunc
+	for outputTxNum.Load() <= toTxNum {
+		if err := rws.DrainNonBlocking(ctx); err != nil {
+			return err
+		}
+
+		processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), ttx, true)
+		if err != nil {
+			return fmt.Errorf("processResultQueueHistorical: %w", err)
+		}
+		if processedTxNum > 0 {
+			outputTxNum.Store(processedTxNum)
+		}
+		//select {
+		//case <-logEvery.C:
+		//	log.Info("[dbg] rws", "rws_ch_len", rws.ResultChLen(), "rws_q_len", rws.Len())
+		//default:
+		//}
+	}
+	return mapGroup.Wait()
 }
 
 func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
@@ -405,9 +401,9 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 	outTxNum := &atomic.Uint64{}
 	outTxNum.Store(fromTxNum)
-	workers, cleanup := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
+
+	workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
-	defer cleanup()
 
 	workersExited := &atomic.Bool{}
 	go func() {
