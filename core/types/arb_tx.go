@@ -63,41 +63,6 @@ func NewTx(inner Transaction) *ArbTx {
 	return tx
 }
 
-// TxData is the underlying data of a transaction.
-//
-// This is implemented by DynamicFeeTx, LegacyTx and AccessListTx.
-//type TxData interface {
-//	txType() byte // returns the type ID
-//	copy() TxData // creates a deep copy and initializes all fields
-//
-//	chainID() *big.Int
-//	accessList() types2.AccessList
-//	data() []byte
-//	gas() uint64
-//	gasPrice() *big.Int
-//	gasTipCap() *big.Int
-//	gasFeeCap() *big.Int
-//	value() *big.Int
-//	nonce() uint64
-//	to() *common.Address
-//
-//	rawSignatureValues() (v, r, s *big.Int)
-//	setSignatureValues(chainID, v, r, s *big.Int)
-//
-//	skipAccountChecks() bool
-//
-//	// effectiveGasPrice computes the gas price paid by the transaction, given
-//	// the inclusion block baseFee.
-//	//
-//	// Unlike other TxData methods, the returned *big.Int should be an independent
-//	// copy of the computed value, i.e. callers are allowed to mutate the result.
-//	// Method implementations can use 'dst' to store the result.
-//	effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int
-//
-//	encode(*bytes.Buffer) error
-//	decode([]byte) error
-//}
-
 // EncodeRLP implements rlp.Encoder
 // func (tx *ArbTx) EncodeRLP(w io.Writer) error {
 // 	if tx.Type() == LegacyTxType {
@@ -172,25 +137,25 @@ func (tx *ArbTx) DecodeRLP(s *rlp.Stream) error {
 
 // UnmarshalBinary decodes the canonical encoding of transactions.
 // It supports legacy RLP transactions and EIP-2718 typed transactions.
-// func (tx *ArbTx) UnmarshalBinary(b []byte) error {
-// 	if len(b) > 0 && b[0] > 0x7f {
-// 		// It's a legacy transaction.
-// 		var data LegacyTx
-// 		err := rlp.DecodeBytes(b, &data)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		tx.setDecoded(&data, uint64(len(b)))
-// 		return nil
-// 	}
-// 	// It's an EIP-2718 typed transaction envelope.
-// 	inner, err := tx.decodeTyped(b, false)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	tx.setDecoded(inner, uint64(len(b)))
-// 	return nil
-// }
+func (tx *ArbTx) UnmarshalBinary(b []byte) error {
+	if len(b) > 0 && b[0] > 0x7f {
+		// It's a legacy transaction.
+		var data LegacyTx
+		err := rlp.DecodeBytes(b, &data)
+		if err != nil {
+			return err
+		}
+		tx.setDecoded(&data, uint64(len(b)))
+		return nil
+	}
+	// It's an EIP-2718 typed transaction envelope.
+	inner, err := tx.decodeTyped(b, false)
+	if err != nil {
+		return err
+	}
+	tx.setDecoded(inner, uint64(len(b)))
+	return nil
+}
 
 // decodeTyped decodes a typed transaction from the canonical format.
 func (tx *ArbTx) decodeTyped(b []byte, arbParsing bool) (Transaction, error) {
@@ -309,15 +274,6 @@ func (tx *ArbTx) Cost() *big.Int {
 	}
 	total.Add(total, tx.Value())
 	return total
-}
-
-// RawSignatureValues returns the V, R, S signature values of the transaction.
-// The return values should not be modified by the caller.
-// The return values may be nil or zero, if the transaction is unsigned.
-func (tx *ArbTx) RawSignatureValues() (v, r, s *big.Int) {
-	vi, ri, si := tx.inner.RawSignatureValues()
-	v, r, s = vi.ToBig(), ri.ToBig(), si.ToBig()
-	return v, r, s
 }
 
 // GasFeeCapCmp compares the fee cap of two transactions.
@@ -562,18 +518,18 @@ func (tx *ArbTx) Hash() common.Hash {
 
 // WithSignature returns a new transaction with the given signature.
 // This signature needs to be in the [R || S || V] format where V is 0 or 1.
-func (tx *ArbTx) WithSignature(signer Signer, sig []byte) (*ArbTx, error) {
-	r, s, v, err := signer.SignatureValues(tx, sig)
-	if err != nil {
-		return nil, err
-	}
-	if r == nil || s == nil || v == nil {
-		return nil, fmt.Errorf("%w: r: %s, s: %s, v: %s", ErrInvalidSig, r, s, v)
-	}
-	cpy := tx.inner.copy()
-	cpy.setSignatureValues(signer.ChainID(), v, r, s)
-	return &ArbTx{inner: cpy, time: tx.time}, nil
-}
+// func (tx *ArbTx) WithSignature(signer Signer, sig []byte) (*ArbTx, error) {
+// 	r, s, v, err := signer.SignatureValues(tx, sig)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	if r == nil || s == nil || v == nil {
+// 		return nil, fmt.Errorf("%w: r: %s, s: %s, v: %s", ErrInvalidSig, r, s, v)
+// 	}
+// 	cpy := tx.inner.copy()
+// 	cpy.setSignatureValues(signer.ChainID(), v, r, s)
+// 	return &ArbTx{inner: cpy, time: tx.time}, nil
+// }
 
 // ArbTxs implements DerivableList for transactions.
 type ArbTxs []*ArbTx

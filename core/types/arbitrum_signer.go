@@ -26,14 +26,14 @@ var NodeInterfaceAddress = common.HexToAddress("0xc8")
 var NodeInterfaceDebugAddress = common.HexToAddress("0xc9")
 var ArbDebugAddress = common.HexToAddress("0xff")
 
-type arbitrumSigner struct{ Signer }
+type ArbitrumSigner struct{ Signer }
 
-func NewArbitrumSigner(signer Signer) Signer {
-	return arbitrumSigner{Signer: signer}
+func NewArbitrumSigner(signer Signer) ArbitrumSigner {
+	return ArbitrumSigner{Signer: signer}
 }
 
-func (s arbitrumSigner) Sender(tx Transaction) (common.Address, error) {
-	switch inner := tx.inner.(type) {
+func (s ArbitrumSigner) Sender(tx Transaction) (common.Address, error) {
+	switch inner := tx.(type) {
 	case *ArbitrumUnsignedTx:
 		return inner.From, nil
 	case *ArbitrumContractTx:
@@ -47,23 +47,24 @@ func (s arbitrumSigner) Sender(tx Transaction) (common.Address, error) {
 	case *ArbitrumSubmitRetryableTx:
 		return inner.From, nil
 	case *ArbitrumLegacyTxData:
-		legacyData := tx.inner.(*ArbitrumLegacyTxData)
-		if legacyData.Sender != nil {
-			return *legacyData.Sender, nil
+		legacyData := tx.(*ArbitrumLegacyTxData)
+		if legacyData.OverrideSender != nil {
+			return *legacyData.OverrideSender, nil
 		}
-		fakeTx := NewTx(&legacyData.LegacyTx)
-		return s.Signer.Sender(fakeTx)
+		return tx.Sender(s.Signer)
+		// fakeTx := NewTx(&legacyData.LegacyTx)
+		// return s.Signer.Sender(fakeTx)
 	default:
-		return s.Signer.Sender(tx)
+		return tx.Sender(s.Signer)
 	}
 }
 
-func (s arbitrumSigner) Equal(s2 Signer) bool {
-	x, ok := s2.(arbitrumSigner)
+func (s ArbitrumSigner) Equal(s2 Signer) bool {
+	x, ok := s2.(ArbitrumSigner)
 	return ok && x.Signer.Equal(s.Signer)
 }
 
-func (s arbitrumSigner) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big.Int, err error) {
+func (s ArbitrumSigner) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big.Int, err error) {
 	switch tx.inner.(type) {
 	case *ArbitrumUnsignedTx:
 		return bigZero, bigZero, bigZero, nil
@@ -88,8 +89,8 @@ func (s arbitrumSigner) SignatureValues(tx *Transaction, sig []byte) (R, S, V *b
 
 // Hash returns the hash to be signed by the sender.
 // It does not uniquely identify the transaction.
-func (s arbitrumSigner) Hash(tx Transaction) common.Hash {
-	if legacyData, isArbLegacy := tx.inner.(*ArbitrumLegacyTxData); isArbLegacy {
+func (s ArbitrumSigner) Hash(tx Transaction) common.Hash {
+	if legacyData, isArbLegacy := tx.(*ArbitrumLegacyTxData); isArbLegacy {
 		fakeTx := NewTx(&legacyData.LegacyTx)
 		return s.Signer.Hash(fakeTx)
 	}
