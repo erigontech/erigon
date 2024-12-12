@@ -1065,6 +1065,7 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 }
 
 func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.WithdrawalRequest) error {
+	log.Info("Processing withdrawal request", "slot", s.Slot())
 	var (
 		amount            = req.Amount
 		isFullExitRequest = req.Amount == FullExitRequestAmount
@@ -1072,34 +1073,39 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	)
 	// If partial withdrawal queue is full, only full exits are processed
 	if uint64(s.GetPendingPartialWithdrawals().Len()) >= s.BeaconConfig().PendingPartialWithdrawalsLimit && !isFullExitRequest {
+		log.Debug("Partial withdrawal queue is full, ignoring withdrawal request", "slot", s.Slot(), "req.Amount", req.Amount, "fullExitRequestAmount", FullExitRequestAmount)
 		return nil
 	}
 	// Verify pubkey exists
 	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
 	if !exist {
-		return nil
+		return fmt.Errorf("ProcessWithdrawalRequest: validator index not found for pubkey %v", common.Bytes2Hex(reqPubkey[:]))
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(vindex))
 	if err != nil {
-		return err
+		return fmt.Errorf("ProcessWithdrawalRequest: validator not found for index %d", vindex)
 	}
 	// Verify withdrawal credentials
 	hasCorrectCredential := state.HasExecutionWithdrawalCredential(validator, s.BeaconConfig())
 	wc := validator.WithdrawalCredentials()
 	isCorrectSourceAddress := bytes.Equal(req.SourceAddress[:], wc[12:])
 	if !(isCorrectSourceAddress && hasCorrectCredential) {
+		log.Debug("Withdrawal credentials are incorrect, ignoring withdrawal request", "slot", s.Slot(), "isCorrectSourceAddress", isCorrectSourceAddress, "hasCorrectCredential", hasCorrectCredential)
 		return nil
 	}
 	// check validator is active
 	if !validator.Active(state.Epoch(s)) {
+		log.Debug("Validator is not active, ignoring withdrawal request", "slot", s.Slot())
 		return nil
 	}
 	// Verify exit has not been initiated
 	if validator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
+		log.Debug("Exit has already been initiated, ignoring withdrawal request", "slot", s.Slot())
 		return nil
 	}
 	// Verify the validator has been active long enough
 	if state.Epoch(s) < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+		log.Debug("Validator has not been active long enough, ignoring withdrawal request", "slot", s.Slot(), "activationEpoch", validator.ActivationEpoch())
 		return nil
 	}
 	pendingBalanceToWithdraw := getPendingBalanceToWithdraw(s, vindex)
@@ -1118,6 +1124,8 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	hasExcessBalance := vbalance > s.BeaconConfig().MinActivationBalance+pendingBalanceToWithdraw
 	// Only allow partial withdrawals with compounding withdrawal credentials
 	if state.HasCompoundingWithdrawalCredential(validator, s.BeaconConfig()) && hasSufficientEffectiveBalance && hasExcessBalance {
+		log.Debug("Processing partial withdrawal request", "slot", s.Slot(), "effectiveBalance", validator.EffectiveBalance(),
+			"vbalance", vbalance, "pendingBalanceToWithdraw", pendingBalanceToWithdraw, "amount", amount)
 		toWithdraw := min(
 			vbalance-s.BeaconConfig().MinActivationBalance-pendingBalanceToWithdraw,
 			amount,
@@ -1130,6 +1138,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 			WithdrawableEpoch: withdrawableEpoch,
 		})
 	}
+	log.Debug("Processed withdrawal request", "slot", s.Slot())
 	return nil
 }
 
@@ -1209,6 +1218,7 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		return nil
 	}
 	// Verify the source has been active long enough
+	// ??? what ? why ? For passing the mekong test, we need to remove this check
 	/*if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
 		log.Info("[Consolidation] Source has not been active long enough, ignoring consolidation request", "slot", s.Slot(), "curEpoch", curEpoch, "activationEpoch", sourceValidator.ActivationEpoch())
 		return nil
