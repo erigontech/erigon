@@ -1724,26 +1724,18 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
 		}
 		if dt.d.largeValues {
-			if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok {
-				if mc.IsClosed() {
-					panic("domainRoTx lives longer than cursor (=> than tx opened that cursor)")
-				}
-				//fmt.Printf("reuse %d closed=%t\n", tx.ViewID(), mc.IsClosed())
-				return mc, nil
+			if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && mc.IsClosed() {
+				panic("domainRoTx lives longer than cursor (=> than tx opened that cursor)")
 			}
 		} else {
-			if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok {
-				//fmt.Printf("dsreuse %d closed=%t\n", tx.ViewID(), mc.IsClosed())
-				if mc.IsClosed() {
-					panic("domainRoTx lives longer than cursor (=> than tx opened that cursor)")
-				}
-				return mc, nil
+			if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && mc.IsClosed() {
+				panic("domainRoTx lives longer than cursor (=> than tx opened that cursor)")
 			}
 		}
-		dt.closeValsCursor()
+		//dt.closeValsCursor()
 
 		//fmt.Printf("cmp dvi=%d txvi=%d [%s] ptr %x\n", dt.valCViewID, tx.ViewID(), dt.d.filenameBase, dt.valsC)
-		//return dt.valsC, nil
+		return dt.valsC, nil
 	}
 	// initialise parent pointer tracking
 	// if !dt.vcParentPtr.CompareAndSwap(0, eface[1]) {
