@@ -56,7 +56,6 @@ func (f *ForkChoiceStore) OnAttestation(
 			return err
 		}
 	}
-
 	var attestationIndicies []uint64
 	var err error
 	target := data.Target

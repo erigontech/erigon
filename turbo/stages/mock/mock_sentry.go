@@ -103,7 +103,7 @@ type MockSentry struct {
 	tb                   testing.TB
 	Cancel               context.CancelFunc
 	EthConfig            *ethconfig.Config
-	DB                   kv.RwDB
+	DB                   kv.TemporalRwDB
 	Dirs                 datadir.Dirs
 	Engine               consensus.Engine
 	gspec                *types.Genesis
@@ -862,7 +862,7 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 	return ms.sentriesClient.Hd
 }
 
-func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
+func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
 	r, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ms.Ctx, ms.BlockReader)),
 		blockNum, 0, ms.ChainConfig.ChainName)
 	if err != nil {

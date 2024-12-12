@@ -29,7 +29,7 @@ import (
 )
 
 func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return false, fmt.Errorf("hasCode cannot open tx: %w", err)
 	}

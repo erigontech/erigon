@@ -319,9 +319,18 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
 	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
-		code2 := statedb.GetCode(addr)
-		balance2 := statedb.GetBalance(addr)
-		nonce2 := statedb.GetNonce(addr)
+		code2, err := statedb.GetCode(addr)
+		if err != nil {
+			return err
+		}
+		balance2, err := statedb.GetBalance(addr)
+		if err != nil {
+			return err
+		}
+		nonce2, err := statedb.GetNonce(addr)
+		if err != nil {
+			return err
+		}
 		if nonce2 != acct.Nonce {
 			return fmt.Errorf("account nonce mismatch for addr: %x want: %d have: %d", addr, acct.Nonce, nonce2)
 		}
