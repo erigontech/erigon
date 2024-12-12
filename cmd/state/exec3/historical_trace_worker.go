@@ -324,7 +324,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		cancel()
 		g.Wait()
 		rws.Close()
-		reducerGroup.Wait()
+		if err := reducerGroup.Wait(); err != nil {
+			panic(err)
+		}
 		for _, w := range workers {
 			w.ResetTx(nil)
 		}
