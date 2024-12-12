@@ -651,11 +651,15 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	cursor, err := dc.valsCursor(tx)
 	require.NoError(err)
 	require.NotNil(cursor)
+	fmt.Printf("roolback\n")
 	tx.Rollback()
+	fmt.Printf("eroolback\n")
 
 	otherTx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer otherTx.Rollback()
+	//dc.valsC.Close()
+	//dc.valsC = nil
 	_, _, _, err = dc.GetLatest([]byte("key1"), otherTx)
 
 	//defer func() {

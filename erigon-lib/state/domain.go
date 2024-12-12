@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"math"
 	"path/filepath"
 	"sort"
@@ -1708,9 +1709,8 @@ var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immut
 func (dt *DomainRoTx) closeValsCursor() {
 	if dt.valsC != nil {
 		dt.valsC.Close()
-		fmt.Printf("close view %d [%s]\n", dt.valCViewID, dt.d.filenameBase)
 		dt.valCViewID = 0
-		//dt.valsC = nil
+		dt.valsC = nil
 		// dt.vcParentPtr.Store(0)
 	}
 }
@@ -1718,21 +1718,33 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	// eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
 
 	if dt.valsC != nil { // run in assert mode only
-		//if tx.ViewID() != dt.valCViewID {
-		//	// if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
-		//	// panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
-		//	panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
-		//}
-		// fmt.Printf("cmp e1=%x e2=%x s=%x d=%s\n", eface[0], eface[1], dt.vcParentPtr.Load(), dt.d.filenameBase)
-		fmt.Printf("cmp dvi=%d txvi=%d [%s] ptr %x\n", dt.valCViewID, tx.ViewID(), dt.d.filenameBase, dt.valsC)
-		return dt.valsC, nil
+		if tx.ViewID() != dt.valCViewID {
+			// if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
+			// panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
+			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
+		}
+		if dt.d.largeValues {
+			if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && !mc.IsClosed() {
+				//fmt.Printf("reuse %d closed=%t\n", tx.ViewID(), mc.IsClosed())
+				return mc, nil
+			}
+		} else {
+			if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && !mc.IsClosed() {
+				//fmt.Printf("dsreuse %d closed=%t\n", tx.ViewID(), mc.IsClosed())
+				return mc, nil
+			}
+		}
+		dt.closeValsCursor()
+
+		//fmt.Printf("cmp dvi=%d txvi=%d [%s] ptr %x\n", dt.valCViewID, tx.ViewID(), dt.d.filenameBase, dt.valsC)
+		//return dt.valsC, nil
 	}
 	// initialise parent pointer tracking
 	// if !dt.vcParentPtr.CompareAndSwap(0, eface[1]) {
 	// 	panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
 	// }
 	// fmt.Printf("set e1=%x e2=%x d=%s\n", eface[0], eface[1], dt.d.filenameBase)
-	fmt.Printf("set vid=%d [%s]\n", tx.ViewID(), dt.d.filenameBase)
+	//fmt.Printf("set vid=%d [%s]\n", tx.ViewID(), dt.d.filenameBase)
 	dt.valCViewID = tx.ViewID()
 
 	if dt.d.largeValues {
