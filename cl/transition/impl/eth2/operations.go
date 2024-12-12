@@ -1145,18 +1145,22 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		if err := switchToCompoundingValidator(s, sourceIndex); err != nil {
 			return err
 		}
+		log.Info("[Consolidation] Switched to compounding validator", "slot", s.Slot())
 		return nil
 	}
 	// Verify that source != target, so a consolidation cannot be used as an exit.
 	if bytes.Equal(consolidationRequest.SourcePubKey[:], consolidationRequest.TargetPubKey[:]) {
+		log.Info("[Consolidation] Source and target are the same, ignoring consolidation request", "slot", s.Slot())
 		return nil
 	}
 	// If the pending consolidations queue is full, consolidation requests are ignored
 	if s.GetPendingConsolidations().Len() == int(s.BeaconConfig().PendingConsolidationsLimit) {
+		log.Info("[Consolidation] Pending consolidations queue is full, ignoring consolidation request", "slot", s.Slot())
 		return nil
 	}
 	// If there is too little available consolidation churn limit, consolidation requests are ignored
 	if state.GetConsolidationChurnLimit(s) <= s.BeaconConfig().MinActivationBalance {
+		log.Info("[Consolidation] Not enough available churn limit, ignoring consolidation request", "slot", s.Slot())
 		return nil
 	}
 	// source/target index and validator
@@ -1184,28 +1188,34 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 	sourceWc := sourceValidator.WithdrawalCredentials()
 	isCorrectSourceAddress := bytes.Equal(consolidationRequest.SourceAddress[:], sourceWc[12:])
 	if !(isCorrectSourceAddress && hasCorrectCredential) {
+		log.Info("[Consolidation] Source withdrawal credentials are incorrect, ignoring consolidation request", "slot", s.Slot(), "isCorrectSourceAddress", isCorrectSourceAddress, "hasCorrectCredential", hasCorrectCredential)
 		return nil
 	}
 	// Verify that target has execution withdrawal credentials
 	if !state.HasExecutionWithdrawalCredential(targetValidator, s.BeaconConfig()) {
+		log.Info("[Consolidation] Target does not have execution withdrawal credentials, ignoring consolidation request", "slot", s.Slot())
 		return nil
 	}
 	// Verify the source and the target are active
 	curEpoch := state.Epoch(s)
 	if !sourceValidator.Active(curEpoch) || !targetValidator.Active(curEpoch) {
+		log.Info("[Consolidation] Source or target is not active, ignoring consolidation request", "slot", s.Slot(), "sourceActive", sourceValidator.Active(curEpoch), "targetActive", targetValidator.Active(curEpoch))
 		return nil
 	}
 	// Verify exits for source and target have not been initiated
 	if sourceValidator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch ||
 		targetValidator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
+		log.Info("[Consolidation] Source or target has initiated exit, ignoring consolidation request", "slot", s.Slot(), "sourceExitEpoch", sourceValidator.ExitEpoch(), "targetExitEpoch", targetValidator.ExitEpoch())
 		return nil
 	}
 	// Verify the source has been active long enough
 	if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+		log.Info("[Consolidation] Source has not been active long enough, ignoring consolidation request", "slot", s.Slot(), "curEpoch", curEpoch, "activationEpoch", sourceValidator.ActivationEpoch())
 		return nil
 	}
 	// Verify the source has no pending withdrawals in the queue
 	if getPendingBalanceToWithdraw(s, sourceIndex) > 0 {
+		log.Info("[Consolidation] Source has pending withdrawals, ignoring consolidation request", "slot", s.Slot())
 		return nil
 	}
 
