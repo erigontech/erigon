@@ -2,16 +2,13 @@ package types
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"math/big"
 	"sync/atomic"
 	"time"
 
-	kzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 )

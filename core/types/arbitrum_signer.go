@@ -4,6 +4,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/holiman/uint256"
 )
 
 var ArbosAddress = common.HexToAddress("0xa4b05")
@@ -59,27 +60,19 @@ func (s ArbitrumSigner) Sender(tx Transaction) (common.Address, error) {
 	}
 }
 
-func (s ArbitrumSigner) Equal(s2 Signer) bool {
-	x, ok := s2.(ArbitrumSigner)
-	return ok && x.Signer.Equal(s.Signer)
+func (s ArbitrumSigner) Equal(s2 ArbitrumSigner) bool {
+	// x, ok := s2.(ArbitrumSigner)
+	return s2.Signer.Equal(s.Signer)
 }
 
-func (s ArbitrumSigner) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big.Int, err error) {
-	switch tx.inner.(type) {
-	case *ArbitrumUnsignedTx:
-		return bigZero, bigZero, bigZero, nil
-	case *ArbitrumContractTx:
-		return bigZero, bigZero, bigZero, nil
-	case *ArbitrumDepositTx:
-		return bigZero, bigZero, bigZero, nil
-	case *ArbitrumInternalTx:
-		return bigZero, bigZero, bigZero, nil
-	case *ArbitrumRetryTx:
-		return bigZero, bigZero, bigZero, nil
-	case *ArbitrumSubmitRetryableTx:
-		return bigZero, bigZero, bigZero, nil
+func (s ArbitrumSigner) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
+	switch tx.(type) {
+	case *ArbitrumUnsignedTx, *ArbitrumContractTx, *ArbitrumDepositTx,
+		*ArbitrumInternalTx, *ArbitrumRetryTx, *ArbitrumSubmitRetryableTx:
+
+		return nil, nil, nil, nil
 	case *ArbitrumLegacyTxData:
-		legacyData := tx.inner.(*ArbitrumLegacyTxData)
+		legacyData := tx.(*ArbitrumLegacyTxData)
 		fakeTx := NewTx(&legacyData.LegacyTx)
 		return s.Signer.SignatureValues(fakeTx, sig)
 	default:
@@ -89,10 +82,10 @@ func (s ArbitrumSigner) SignatureValues(tx *Transaction, sig []byte) (R, S, V *b
 
 // Hash returns the hash to be signed by the sender.
 // It does not uniquely identify the transaction.
-func (s ArbitrumSigner) Hash(tx Transaction) common.Hash {
-	if legacyData, isArbLegacy := tx.(*ArbitrumLegacyTxData); isArbLegacy {
-		fakeTx := NewTx(&legacyData.LegacyTx)
-		return s.Signer.Hash(fakeTx)
-	}
-	return s.Signer.Hash(tx)
-}
+// func (s ArbitrumSigner) Hash(tx Transaction) common.Hash {
+// 	if legacyData, isArbLegacy := tx.(*ArbitrumLegacyTxData); isArbLegacy {
+// 		fakeTx := NewTx(&legacyData.LegacyTx)
+// 		return s.Signer.Hash(fakeTx)
+// 	}
+// 	return s.Signer.Hash(tx)
+// }
