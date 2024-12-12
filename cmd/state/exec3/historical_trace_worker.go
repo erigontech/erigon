@@ -260,7 +260,10 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 			}
 		}()
 		defer rws.Close()
-		return doHistoryMap(consumer, cfg, ctx, in, workerCount, rws, logger)
+		if err := doHistoryMap(consumer, cfg, ctx, in, workerCount, rws, logger); err != nil {
+			return err
+		}
+		return nil
 	})
 	g.Go(func() (err error) {
 		defer func() {
@@ -268,7 +271,10 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
-		return doHistoryReduce(consumer, cfg.ChainDB, ctx, toTxNum, outputTxNum, rws)
+		if err := doHistoryReduce(consumer, cfg.ChainDB, ctx, toTxNum, outputTxNum, rws); err != nil {
+			return err
+		}
+		return nil
 	})
 	return g
 }
