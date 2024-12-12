@@ -86,7 +86,7 @@ type txExecutor struct {
 	execStage      *StageState
 	agg            *state2.Aggregator
 	rs             *state.StateV3
-	doms           *state2.SharedDomains
+	doms           state2.JointDomains
 	accumulator    *shards.Accumulator
 	u              Unwinder
 	isMining       bool
@@ -106,7 +106,7 @@ func (te *txExecutor) readState() *state.StateV3 {
 	return te.rs
 }
 
-func (te *txExecutor) domains() *state2.JointDomains {
+func (te *txExecutor) domains() state2.JointDomains {
 	return te.doms
 }
 

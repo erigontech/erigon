@@ -62,7 +62,7 @@ func skipOnUnsupportedPlatform(t testing.TB) {
 type MockTest struct {
 	Ctx            context.Context
 	Log            log.Logger
-	DB             kv.RwDB
+	DB             kv.TemporalRwDB
 	Dirs           datadir.Dirs
 	Engine         consensus.Engine
 	GenesisSpec    *types.Genesis

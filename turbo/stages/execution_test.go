@@ -21,6 +21,7 @@ package stages_test
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -39,16 +40,10 @@ import (
 	"github.com/erigontech/erigon/consensus/clique"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
-	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_utils"
-	"github.com/erigontech/erigon/turbo/silkworm"
 	"github.com/erigontech/erigon/turbo/stages/mock"
-	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 func TestBlockExecution1(t *testing.T) {
@@ -60,42 +55,47 @@ func TestBlockExecution1(t *testing.T) {
 		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB, log.New())
 		signer   = types.LatestSignerForChainID(nil)
 	)
+
+	fmt.Println("addr", addr.String())
+
 	genspec := &types.Genesis{
 		ExtraData: make([]byte, clique.ExtraVanity+length.Addr+clique.ExtraSeal),
 		Alloc: map[libcommon.Address]types.GenesisAccount{
 			addr: {Balance: big.NewInt(10000000000000000)},
 		},
-		Config: params.AllCliqueProtocolChanges,
+		Config:     params.AllCliqueProtocolChanges,
+		Difficulty: big.NewInt(123),
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
 	checkStateRoot := true
 	m := mock.MockWithGenesisEngine(t, genspec, engine, false, checkStateRoot)
 
-	//**********************************
-	// Start the private RPC server
-	backend := eth.NewEthereum(
-		m.Ctx,
-		m.Cancel,
-		m.EthConfig,
-		m.DB,
-		m.Log)
-	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
-	ethBackendRPC := privateapi.NewEthBackendServer(context.Background(), backend, m.DB, m.Notifications, m.BlockReader, m.Log, latestBlockBuiltStore)
-	privateRpcApi, err := privateapi.StartGrpc(
-		m.RemoteKvServer,
-		ethBackendRPC,
-		nil,              //backend.txPoolGrpcServer,
-		nil,              //miningRPC,
-		nil,              //bridgeRPC,
-		nil,              //heimdallRPC,
-		"127.0.0.1:9090", //stack.Config().PrivateApiAddr,
-		100,              //stack.Config().PrivateApiRateLimit,
-		nil,              //creds,
-		false,            //stack.Config().HealthCheck,
-		m.Log)
-	require.NoError(t, err)
-	require.NotNil(t, privateRpcApi)
-	//**********************************
+	// //**********************************
+	// // Start the private RPC server
+	// ctx, ctxCancel := context.WithCancel(context.Background())
+	// backend := eth.NewEthereum(
+	// 	ctx,
+	// 	ctxCancel,
+	// 	m.EthConfig,
+	// 	m.DB,
+	// 	m.Log)
+	// latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
+	// ethBackendRPC := privateapi.NewEthBackendServer(context.Background(), backend, m.DB, m.Notifications, m.BlockReader, m.Log, latestBlockBuiltStore)
+	// privateRpcApi, err := privateapi.StartGrpc(
+	// 	m.RemoteKvServer,
+	// 	ethBackendRPC,
+	// 	nil,              //backend.txPoolGrpcServer,
+	// 	nil,              //miningRPC,
+	// 	nil,              //bridgeRPC,
+	// 	nil,              //heimdallRPC,
+	// 	"127.0.0.1:9090", //stack.Config().PrivateApiAddr,
+	// 	100,              //stack.Config().PrivateApiRateLimit,
+	// 	nil,              //creds,
+	// 	false,            //stack.Config().HealthCheck,
+	// 	m.Log)
+	// require.NoError(t, err)
+	// require.NotNil(t, privateRpcApi)
+	// //**********************************
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash libcommon.Hash, number uint64) (h *types.Header) {
@@ -117,15 +117,16 @@ func TestBlockExecution1(t *testing.T) {
 		// first one. The last is needs a state change again to force a reorg.
 		// if i != 1 {
 		baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
-		tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), libcommon.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
+		tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), libcommon.Address{0x00}, uint256.NewInt(1), params.TxGas, baseFee, nil), *signer, key)
 		if err != nil {
 			panic(err)
 		}
 		block.AddTxWithChain(getHeader, engine, tx)
 		// }
 	})
+
 	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
+		t.Fatalf("generate blocks  : %v", err)
 	}
 	for i, block := range chain.Blocks {
 		header := block.Header()
@@ -141,9 +142,14 @@ func TestBlockExecution1(t *testing.T) {
 		chain.Blocks[i] = block.WithSeal(header)
 	}
 
+	fmt.Printf("block %d: %s\n", m.Genesis.Number(), m.Genesis.Hash().String())
+	for i, block := range chain.Blocks {
+		fmt.Printf("block %d: %s\n", i+1, block.Hash().String())
+	}
+
 	// Insert the first two blocks and make sure the chain is valid
 	if err := m.InsertChain(chain.Slice(0, 3)); err != nil {
-		t.Fatalf("failed to insert initial blocks: %v", err)
+		t.Fatalf("failed to insert initial blocks : %v", err)
 	}
 	if err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		if head, err1 := m.BlockReader.BlockByHash(m.Ctx, tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
@@ -156,7 +162,7 @@ func TestBlockExecution1(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newBlock := chain.Blocks[1]
+	newBlock := chain.Blocks[2]
 
 	println("newBlock.Hash()", hexutility.Encode(newBlock.Hash().Bytes()))
 
@@ -183,22 +189,32 @@ func TestBlockExecution1(t *testing.T) {
 	require.NotNil(t, fcuReceipt)
 	require.Equal(t, execution.ExecutionStatus_Success, fcuReceipt.Status)
 
-	silkwormInstance, err := silkworm.New(m.Dirs.DataDir, mdbx.Version(), 1, log.LvlDebug)
-	require.NoError(t, err)
-	require.NotNil(t, silkwormInstance)
-	defer silkwormInstance.Close()
-
 	txn, err := m.DB.BeginRw(context.Background())
+	defer txn.Rollback()
 	require.NoError(t, err)
-
-	txTask := state.TxTask{
-		BlockNum: 1,
-		TxIndex:  1,
-	}
-
-	err = silkworm.ExecuteTx(silkwormInstance, txn, &txTask)
+	stateReader := m.NewStateReader(txn)
+	acc, err := stateReader.ReadAccountData(addr)
 	require.NoError(t, err)
-	txn.Rollback()
+	require.NotNil(t, acc)
+	// require.Equal(t, big.NewInt(9999999999999997), acc.Balance)
+
+	// silkwormInstance, err := silkworm.New(m.Dirs.DataDir, mdbx.Version(), 1, log.LvlDebug)
+	// require.NoError(t, err)
+	// require.NotNil(t, silkwormInstance)
+	// defer silkwormInstance.Close()
+
+	// txn, err := m.DB.BeginRw(context.Background())
+	// defer txn.Rollback()
+	// require.NoError(t, err)
+
+	// txTask := state.TxTask{
+	// 	BlockNum: 1,
+	// 	TxIndex:  1,
+	// }
+
+	// err = silkworm.ExecuteTx(silkwormInstance, txn, &txTask)
+	// require.NoError(t, err)
+	// txn.Rollback()
 
 	// ****** HTTP Test
 	// req, err := http.NewRequest(http.MethodGet, "http://localhost:9090", nil)

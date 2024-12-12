@@ -135,7 +135,7 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *state.QueueWithRetr
 // Cases:
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *state2.SharedDomains, maxBlockNum uint64) (
+func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms state2.JointDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, cfg.blockReader))
