@@ -257,12 +257,6 @@ func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx conte
 
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
 	mapGroup, mapCtx := errgroup.WithContext(ctx)
-	go func() {
-		mapGroup.Wait()
-		log.Warn("mapGroup.Wait() done")
-		rws.Close()
-	}()
-
 	{
 		ctx := mapCtx
 		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
@@ -288,6 +282,11 @@ func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx conte
 			}
 		}()
 	}
+	go func() {
+		mapGroup.Wait()
+		log.Warn("mapGroup.Wait() done")
+		rws.Close()
+	}()
 
 	//Reducer
 	defer func() {
