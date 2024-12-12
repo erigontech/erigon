@@ -286,8 +286,7 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
-		panic(err)
-		//return err
+		return err
 	}
 	defer tx.Rollback()
 
@@ -305,7 +304,6 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 		if processedTxNum > 0 {
 			outputTxNum.Store(processedTxNum)
 		}
-		panic(1)
 		//select {
 		//case <-logEvery.C:
 		//	log.Info("[dbg] rws", "rws_ch_len", rws.ResultChLen(), "rws_q_len", rws.Len())
