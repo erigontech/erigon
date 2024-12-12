@@ -351,7 +351,7 @@ type ResultsQueue struct {
 	//tick
 	ticker *time.Ticker
 
-	sync.Mutex
+	m       sync.Mutex
 	results *TxTaskQueue
 }
 
@@ -377,8 +377,8 @@ func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	return nil
 }
 func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) error {
-	q.Lock()
-	defer q.Unlock()
+	q.m.Lock()
+	defer q.m.Unlock()
 	if task != nil {
 		heap.Push(q.results, task)
 	}
@@ -405,7 +405,7 @@ func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *TxTask) error {
 }
 
 func (q *ResultsQueue) Iter() *ResultsQueueIter {
-	q.Lock()
+	q.m.Lock()
 	return q.iter
 }
 
@@ -415,7 +415,7 @@ type ResultsQueueIter struct {
 }
 
 func (q *ResultsQueueIter) Close() {
-	q.q.Unlock()
+	q.q.m.Unlock()
 }
 func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
 	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
@@ -451,8 +451,8 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) error { return q.drainNoBlock(ctx, nil) }
 
 func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *TxTask)) {
-	q.Lock()
-	defer q.Unlock()
+	q.m.Lock()
+	defer q.m.Unlock()
 Loop:
 	for {
 		select {
@@ -486,9 +486,9 @@ func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
 func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }
 func (q *ResultsQueue) Limit() int       { return q.limit }
 func (q *ResultsQueue) Len() (l int) {
-	q.Lock()
+	q.m.Lock()
 	l = q.results.Len()
-	q.Unlock()
+	q.m.Unlock()
 	return l
 }
 func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].TxNum }
@@ -496,9 +496,9 @@ func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
 func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }
 func (q *ResultsQueue) PushLocked(t *TxTask)     { heap.Push(q.results, t) }
 func (q *ResultsQueue) Push(t *TxTask) {
-	q.Lock()
+	q.m.Lock()
 	heap.Push(q.results, t)
-	q.Unlock()
+	q.m.Unlock()
 }
 func (q *ResultsQueue) PopLocked() (t *TxTask) {
 	return heap.Pop(q.results).(*TxTask)

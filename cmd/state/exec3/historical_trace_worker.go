@@ -284,6 +284,7 @@ func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx conte
 		mapGroup.Wait()
 		log.Warn("mapGroup.Wait() done")
 		rws.Close()
+		log.Warn("rws.Close() done")
 	}()
 
 	//Reducer
