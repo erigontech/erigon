@@ -116,7 +116,7 @@ func NewHistoricalTraceWorker(
 func (rw *HistoricalTraceWorker) Run() (err error) {
 	defer func() { // convert panic to err - because it's background workers
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("HistoricalTraceWorker panic: %s", rec)
+			err = fmt.Errorf("HistoricalTraceWorker panic: %s, %s", rec, dbg.Stack())
 		}
 	}()
 	defer rw.evm.JumpDestCache.LogStats()
@@ -250,8 +250,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	g.Go(func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = fmt.Errorf("%s, %s", rec, dbg.Stack())
-				log.Warn("[dbg] 'reduce worker' paniced", "err", err)
+				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
 		return NewHistoricalTraceWorkers2(consumer, cfg, ctx, toTxNum, in, workerCount, outputTxNum, logger)
