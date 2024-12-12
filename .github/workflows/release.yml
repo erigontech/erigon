@@ -38,8 +38,8 @@ on:
 jobs:
 
   build-release:
-    ## runs-on: ubuntu-22.04
-    runs-on: ubuntu-latest-devops-xxlarge
+    runs-on: ubuntu-latest
+    #runs-on: ubuntu-latest-devops-xxlarge
     timeout-minutes: 75
     name: Create git tag, build and publish Release Artifacts
     outputs:
