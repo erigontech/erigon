@@ -296,10 +296,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
 	for i := 0; i < workerCount; i++ {
-		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
-	}
-	for i := 0; i < workerCount; i++ {
 		i := i
+		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
 		g.Go(func() (err error) {
 			defer func() {
 				if rec := recover(); rec != nil {
