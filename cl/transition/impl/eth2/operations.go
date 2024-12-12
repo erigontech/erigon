@@ -1134,6 +1134,7 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 }
 
 func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error {
+	log.Info("Processing consolidation request", "slot", s.Slot())
 	if isValidSwitchToCompoundingRequest(s, consolidationRequest) {
 		// source index
 		sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
@@ -1216,6 +1217,7 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		SourceIndex: sourceIndex,
 		TargetIndex: targetIndex,
 	})
+	defer log.Info("Processed consolidation request", "slot", s.Slot())
 	if state.HasEth1WithdrawalCredential(targetValidator, s.BeaconConfig()) {
 		return switchToCompoundingValidator(s, targetIndex)
 	}
