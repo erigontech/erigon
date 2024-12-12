@@ -324,19 +324,15 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		}
 		clearDone = true
 		cancel()
-		if err := g.Wait(); err != nil {
-			panic(err)
-		}
+		g.Wait()
 		rws.Close()
-		if err := reducerGroup.Wait(); err != nil {
-			panic(err)
-		}
+		reducerGroup.Wait()
 		for _, w := range workers {
 			w.ResetTx(nil)
 		}
 	}
 
-	return g, applyWorker, clearFunc
+	return reducerGroup, applyWorker, clearFunc
 }
 
 func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
