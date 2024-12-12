@@ -379,7 +379,7 @@ type APIImpl struct {
 	txPool                      txpool.TxpoolClient
 	mining                      txpool.MiningClient
 	gasCache                    *GasPriceCache
-	db                          kv.RoDB
+	db                          kv.TemporalRoDB
 	GasCap                      uint64
 	FeeCap                      float64
 	ReturnDataLimit             int
@@ -390,7 +390,7 @@ type APIImpl struct {
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}

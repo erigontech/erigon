@@ -46,8 +46,8 @@ import (
 var toAddr = common.BytesToAddress
 
 type StateSuite struct {
-	kv    kv.RwDB
-	tx    kv.RwTx
+	kv    kv.TemporalRwDB
+	tx    kv.TemporalTx
 	state *IntraBlockState
 	r     StateReader
 	w     StateWriter
@@ -80,7 +80,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
-	tx, err1 := s.kv.BeginRo(context.Background())
+	tx, err1 := s.kv.BeginTemporalRo(context.Background())
 	if err1 != nil {
 		c.Fatalf("create tx: %v", err1)
 	}
@@ -389,7 +389,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *state.Aggregator) {
+func NewTestTemporalDb(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *state.Aggregator) {
 	tb.Helper()
 	db := memdb.NewStateDB(tb.TempDir())
 	tb.Cleanup(db.Close)
