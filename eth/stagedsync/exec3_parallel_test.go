@@ -540,7 +540,7 @@ func executeParallelWithCheck(t *testing.T, tasks []exec.Task, profile bool, che
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorCancel := pe.run(context.Background(), 1+uint64(len(tasks)), logger)
+	executorCancel := pe.run(context.Background(), uint64(len(tasks)), logger)
 	defer executorCancel()
 
 	_, err = pe.execute(context.Background(), tasks)

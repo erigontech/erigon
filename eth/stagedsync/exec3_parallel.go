@@ -507,7 +507,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 
 	go pe.applyLoop(applyCtx, maxTxNum, &blockComplete, pe.rwLoopErrCh)
 
-	for pe.outputTxNum.Load() <= maxTxNum {
+	for pe.outputTxNum.Load() < maxTxNum {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -649,11 +649,15 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 	if err := pe.doms.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := pe.execStage.Update(tx, pe.outputBlockNum.GetValueUint64()); err != nil {
-		return err
+	if pe.execStage != nil {
+		if err := pe.execStage.Update(tx, pe.outputBlockNum.GetValueUint64()); err != nil {
+			return err
+		}
 	}
-	if err := tx.Commit(); err != nil {
-		return err
+	if tx != pe.applyTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -850,7 +854,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 	maxValidated := blockStatus.validateTasks.maxAllComplete()
 	if blockStatus.validateTasks.countComplete() == len(blockStatus.tasks) && blockStatus.execTasks.countComplete() == len(blockStatus.tasks) {
 		pe.logger.Debug("exec summary", "block", blockNum, "execs", blockStatus.cntExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail, "#tasks/#execs", fmt.Sprintf("%.2f%%", float64(len(blockStatus.tasks))/float64(blockStatus.cntExec)*100))
-		fmt.Println("exec summary", "block", blockNum, "execs", blockStatus.cntExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail, "#tasks/#execs", fmt.Sprintf("%.2f%%", float64(len(blockStatus.tasks))/float64(blockStatus.cntExec)*100))
+		//fmt.Println("exec summary", "block", blockNum, "execs", blockStatus.cntExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail, "#tasks/#execs", fmt.Sprintf("%.2f%%", float64(len(blockStatus.tasks))/float64(blockStatus.cntExec)*100))
 
 		var allDeps map[int]map[int]bool
 
