@@ -146,7 +146,7 @@ func TestAllocConstructor(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := mock.MockWithGenesis(t, genSpec, key, false)
 
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRo(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
 
@@ -154,9 +154,11 @@ func TestAllocConstructor(t *testing.T) {
 	reader, err := rpchelper.CreateHistoryStateReader(tx, rawdbv3.TxNums, 1, 0, genSpec.Config.ChainName)
 	require.NoError(err)
 	state := state.New(reader)
-	balance := state.GetBalance(address)
+	balance, err := state.GetBalance(address)
+	assert.NoError(err)
 	assert.Equal(funds, balance.ToBig())
-	code := state.GetCode(address)
+	code, err := state.GetCode(address)
+	assert.NoError(err)
 	assert.Equal(libcommon.FromHex("5f355f55"), code)
 
 	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")

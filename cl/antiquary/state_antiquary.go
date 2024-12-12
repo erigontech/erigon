@@ -57,11 +57,11 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 	// Execute this each second
 	reqRetryTimer := time.NewTicker(100 * time.Millisecond)
 	defer reqRetryTimer.Stop()
+
 	if !initial_state.IsGenesisStateSupported(clparams.NetworkType(s.cfg.DepositNetworkID)) {
 		s.logger.Warn("Genesis state is not supported for this network, no historical states data will be available")
 		return
 	}
-
 	_, beforeFinalized, err := s.readHistoricalProcessingProgress(ctx)
 	if err != nil {
 		s.logger.Error("Failed to read historical processing progress", "err", err)
@@ -81,11 +81,16 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 				s.logger.Error("Failed to read historical processing progress", "err", err)
 				continue
 			}
+			if s.sn == nil || s.syncedData.Syncing() {
+				continue
+			}
+
 			// We wait for updated finality.
 			if finalized == beforeFinalized {
 				continue
 			}
 			beforeFinalized = finalized
+
 			if err := s.IncrementBeaconState(ctx, finalized); err != nil {
 				if s.currentState != nil {
 					s.logger.Warn("Could not to increment beacon state, trying again later", "err", err, "slot", s.currentState.Slot())
@@ -137,9 +142,16 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 	blocksAvaiable := stateSn.BlocksAvailable()
 	stateSnRoTx := stateSn.View()
 	defer stateSnRoTx.Close()
-
+	log.Info("[Caplin-Archive] filling validators table", "from", 0, "to", stateSn.BlocksAvailable())
+	logTicker := time.NewTicker(10 * time.Second)
+	defer logTicker.Stop()
 	start := time.Now()
 	for slot := uint64(0); slot <= stateSn.BlocksAvailable(); slot++ {
+		select {
+		case <-logTicker.C:
+			log.Info("[Caplin-Archive] Filled validators table", "progress", fmt.Sprintf("%d/%d", slot, stateSn.BlocksAvailable()))
+		default:
+		}
 		seg, ok := stateSnRoTx.VisibleSegment(slot, kv.StateEvents)
 		if !ok {
 			return false, fmt.Errorf("segment not found for slot %d", slot)
@@ -434,7 +446,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// We now do some post-processing on the state.
 		select {
 		case <-progressTimer.C:
-			log.Log(logLvl, "State processing progress", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
+			log.Log(logLvl, "[Caplin-Archive] Historical States reconstruction", "slot", slot, "blk/sec", fmt.Sprintf("%.2f", float64(slot-prevSlot)/60))
 			prevSlot = slot
 		default:
 		}
@@ -488,7 +500,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 
-	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
+	log.Info("[Caplin-Archive] Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
 	if s.stateSn != nil {
 		if err := s.stateSn.OpenFolder(); err != nil {
 			return err
@@ -574,7 +586,7 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 	backoffStrides := uint64(10)
 	backoffStep := backoffStrides
 
-	historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState, s.stateSn)
+	historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState, s.stateSn, s.syncedData)
 
 	for {
 		attempt, err := computeSlotToBeRequested(tx, s.cfg, s.genesisState.Slot(), targetSlot, backoffStep)

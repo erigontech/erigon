@@ -857,13 +857,18 @@ var (
 		Usage: "Max outbound traffic per second per peer",
 		Value: "256KB",
 	}
+	CaplinAdaptableTrafficRequirementsFlag = cli.BoolFlag{
+		Name:  "caplin.adaptable-maximum-traffic-requirements",
+		Usage: "Make the node adaptable to the maximum traffic requirement based on how many validators are being ran",
+		Value: true,
+	}
 	CaplinCheckpointSyncUrlFlag = cli.StringSliceFlag{
 		Name:  "caplin.checkpoint-sync-url",
 		Usage: "checkpoint sync endpoint",
 		Value: cli.NewStringSlice(),
 	}
 	CaplinSubscribeAllTopicsFlag = cli.BoolFlag{
-		Name:  "caplin.subscibe-all-topics",
+		Name:  "caplin.subscribe-all-topics",
 		Usage: "Subscribe to all gossip topics",
 		Value: false,
 	}
@@ -880,7 +885,7 @@ var (
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
-		Value: 64,
+		Value: 80,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -1838,6 +1843,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if err != nil {
 		Fatalf("Option %s: %v", CaplinMaxOutboundTrafficPerPeerFlag.Name, err)
 	}
+	cfg.CaplinConfig.AdptableTrafficRequirements = ctx.Bool(CaplinAdaptableTrafficRequirementsFlag.Name)
 
 	cfg.CaplinConfig.SubscribeAllTopics = ctx.Bool(CaplinSubscribeAllTopicsFlag.Name)
 	cfg.CaplinConfig.MaxPeerCount = ctx.Uint64(CaplinMaxPeerCount.Name)

@@ -660,8 +660,8 @@ type DomainRoTx struct {
 	keyBuf [60]byte // 52b key and 8b for inverted step
 	comBuf []byte
 
-	valsC       kv.Cursor
-	vcParentPtr atomic.Uintptr
+	valsC      kv.Cursor
+	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
 
 	getFromFileCache *DomainGetFromFileCache
 }
@@ -1710,34 +1710,30 @@ var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immut
 func (dt *DomainRoTx) closeValsCursor() {
 	if dt.valsC != nil {
 		dt.valsC.Close()
-		dt.vcParentPtr.Store(0)
+		dt.valCViewID = 0
+		// dt.vcParentPtr.Store(0)
 		dt.valsC = nil
 	}
 }
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
+	// eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
+
 	if dt.valsC != nil { // run in assert mode only
-		fmt.Printf("cmp e1=%x e2=%x s=%x d=%s\n", eface[0], eface[1], dt.vcParentPtr.Load(), dt.d.filenameBase)
-		if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
-			//if sd, ok := tx.(kv.TemporalPutDel); ok {
-			//	if stx, ok := sd.(*SharedDomains); ok {
-			//		ttx := stx.Tx()
-			//		eface := *(*[2]uintptr)(unsafe.Pointer(&ttx))
-			//		if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
-			//			panic(fmt.Errorf("%w: cursor parent tx %x; current sd tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
-			//		}
-			//	}
-			//} else {
-			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
-			//}
+		if tx.ViewID() != dt.valCViewID {
+			// if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
+			// panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
+			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
 		}
+		// fmt.Printf("cmp e1=%x e2=%x s=%x d=%s\n", eface[0], eface[1], dt.vcParentPtr.Load(), dt.d.filenameBase)
+		fmt.Printf("cmp dvi=%d txvi=%d [%s]\n", dt.valCViewID, tx.ViewID(), dt.d.filenameBase)
 		return dt.valsC, nil
 	}
 	// initialise parent pointer tracking
-	if !dt.vcParentPtr.CompareAndSwap(0, eface[1]) {
-		panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
-	}
-	fmt.Printf("set e1=%x e2=%x d=%s\n", eface[0], eface[1], dt.d.filenameBase)
+	// if !dt.vcParentPtr.CompareAndSwap(0, eface[1]) {
+	// 	panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
+	// }
+	// fmt.Printf("set e1=%x e2=%x d=%s\n", eface[0], eface[1], dt.d.filenameBase)
+	fmt.Printf("set vid=%d [%s]\n", tx.ViewID(), dt.d.filenameBase)
 
 	if dt.d.largeValues {
 		dt.valsC, err = tx.Cursor(dt.d.valuesTable)

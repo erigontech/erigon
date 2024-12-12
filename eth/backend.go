@@ -145,7 +145,7 @@ type Ethereum struct {
 	config *ethconfig.Config
 
 	// DB interfaces
-	chainDB    kv.RwDB
+	chainDB    kv.TemporalRwDB
 	privateAPI *grpc.Server
 
 	engine consensus.Engine
@@ -250,13 +250,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Assemble the Ethereum object
-	chainKv, err := node.OpenDatabase(ctx, stack.Config(), kv.ChainDB, "", false, logger)
+	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), kv.ChainDB, "", false, logger)
 	if err != nil {
 		return nil, err
 	}
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
 
-	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
+	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
@@ -278,7 +278,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		sentryCtx:            ctx,
 		sentryCancel:         ctxCancel,
 		config:               config,
-		chainDB:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
 		waitForStageLoopStop: make(chan struct{}),
@@ -291,7 +290,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var chainConfig *chain.Config
 	var genesis *types.Block
-	if err := backend.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
+	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
 		genesisConfig, err := rawdb.ReadGenesis(tx)
 		if err != nil {
@@ -335,18 +334,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config, chainConfig, logger)
+	blockReader, blockWriter, allSnapshots, allBorSnapshots, bridgeStore, heimdallStore, agg, err := setUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
 
-	backend.chainDB, err = temporal.New(backend.chainDB, agg)
+	backend.chainDB, err = temporal.New(rawChainDB, agg)
 	if err != nil {
 		return nil, err
 	}
-	chainKv = backend.chainDB //nolint
 
 	// Can happen in some configurations
 	if config.Downloader.ChainName != "" {
@@ -598,7 +596,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
-		chainKv,
+		backend.chainDB,
 		chainConfig,
 		genesis,
 		backend.config.NetworkID,
@@ -657,7 +655,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.newTxs = make(chan txpool.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpoolutil.AllComponents(
-			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, chainKv, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
+			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
 		)
 		if err != nil {
 			return nil, err

@@ -265,6 +265,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 
+	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
 	// builder boost factor controls block choice between local execution node or builder
 	var builderBoostFactor uint64
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
@@ -285,6 +286,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			errors.New("node is syncing"),
 		)
 	}
+
+	start := time.Now()
 	sourceBlock, err := a.blockReader.ReadBlockByRoot(ctx, tx, baseBlockRoot)
 	if err != nil {
 		log.Warn("Failed to get source block", "err", err, "root", baseBlockRoot)
@@ -296,10 +299,13 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			fmt.Errorf("block not found %x", baseBlockRoot),
 		)
 	}
+
+	// make a simple copy to the current head state
 	baseState, err := a.forkchoiceStore.GetStateAtBlockRoot(
 		baseBlockRoot,
 		true,
 	) // we start the block production from this state
+
 	if err != nil {
 		return nil, err
 	}
@@ -312,22 +318,30 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
+	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
 	block, err := a.produceBlock(ctx, builderBoostFactor, sourceBlock.Block, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
 		log.Warn("Failed to produce block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
 
+	startConsensusProcessing := time.Now()
+
+	blockBuldingMachine := &eth2.Impl{}
+	blockBuldingMachine.BlockRewardsCollector = &eth2.BlockRewardsCollector{}
 	// do state transition
-	if err := machine.ProcessBlock(transition.DefaultMachine, baseState, block.ToGeneric()); err != nil {
+	if err := machine.ProcessBlock(blockBuldingMachine, baseState, block.ToGeneric()); err != nil {
 		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
+	log.Info("[Beacon API] Built block consensus-state", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
+	startConsensusProcessing = time.Now()
 	block.StateRoot, err = baseState.HashSSZ()
 	if err != nil {
 		log.Warn("Failed to get state root", "err", err)
 		return nil, err
 	}
+	log.Info("[Beacon API] Computed state root while producing slot", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 
 	log.Info("BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
@@ -336,10 +350,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"execution_value", block.GetExecutionValue().Uint64(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
+		"took", time.Since(start),
 	)
 
 	// todo: consensusValue
-	rewardsCollector := &eth2.BlockRewardsCollector{}
+	rewardsCollector := blockBuldingMachine.BlockRewardsCollector
 	consensusValue := rewardsCollector.Attestations + rewardsCollector.ProposerSlashings + rewardsCollector.AttesterSlashings + rewardsCollector.SyncAggregate
 	a.setupHeaderReponseForBlockProduction(
 		w,
@@ -380,6 +395,10 @@ func (a *ApiHandler) produceBlock(
 		kzgProofs      []libcommon.Bytes48
 	)
 	go func() {
+		start := time.Now()
+		defer func() {
+			a.logger.Debug("Produced BeaconBody", "slot", targetSlot, "duration", time.Since(start))
+		}()
 		defer wg.Done()
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlock, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
@@ -407,6 +426,10 @@ func (a *ApiHandler) produceBlock(
 		builderErr    error
 	)
 	go func() {
+		start := time.Now()
+		defer func() {
+			a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
+		}()
 		defer wg.Done()
 		if a.routerCfg.Builder && a.builderClient != nil {
 			builderHeader, builderErr = a.getBuilderPayload(ctx, baseBlock, baseState, targetSlot)
@@ -1161,6 +1184,24 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if _, err := a.engine.ForkChoiceUpdate(ctx, a.forkchoiceStore.GetEth1Hash(finalizedBlockRoot), a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
 		return err
 	}
+	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)
+	if err != nil {
+		return err
+	}
+	if headState == nil {
+		return errors.New("failed to get head state")
+	}
+
+	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
+		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot, 0)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := a.syncedData.OnHeadState(headState); err != nil {
+		return fmt.Errorf("failed to update synced data: %w", err)
+	}
+
 	return nil
 }
 

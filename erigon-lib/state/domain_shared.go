@@ -473,30 +473,23 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 	if !sd.aggTx.a.commitmentValuesTransform ||
 		len(branch) == 0 ||
 		sd.aggTx.minimaxTxNumInDomainFiles() == 0 ||
-		bytes.Equal(prefix, keyCommitmentState) || ((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 {
+		bytes.Equal(prefix, keyCommitmentState) ||
+		((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
 
 		return branch, nil // do not transform, return as is
 	}
 
 	sto := sd.aggTx.d[kv.StorageDomain]
 	acc := sd.aggTx.d[kv.AccountsDomain]
-	storageItem := sto.lookupVisibleFileByItsRange(fStartTxNum, fEndTxNum)
-	if storageItem == nil {
-		sd.logger.Warn(fmt.Sprintf("visible storage file of steps %d-%d not found", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-		storageItem = sto.lookupDirtyFileByItsRange(fStartTxNum, fEndTxNum)
-		if storageItem == nil {
-			sd.logger.Crit(fmt.Sprintf("dirty storage file of steps %d-%d not found", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-			return nil, errors.New("storage file not found")
-		}
+	storageItem, err := sto.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		sd.logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
 	}
-	accountItem := acc.lookupVisibleFileByItsRange(fStartTxNum, fEndTxNum)
-	if accountItem == nil {
-		sd.logger.Warn(fmt.Sprintf("visible account file of steps %d-%d not found", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-		accountItem = acc.lookupDirtyFileByItsRange(fStartTxNum, fEndTxNum)
-		if accountItem == nil {
-			sd.logger.Crit(fmt.Sprintf("dirty account file of steps %d-%d not found", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-			return nil, errors.New("account file not found")
-		}
+	accountItem, err := acc.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		sd.logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
 	}
 	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.compression)
 	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.compression)
@@ -1300,6 +1293,10 @@ func (sdc *SharedDomainsCommitmentContext) TempDir() string {
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
+}
+
+func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
+	return sdc.patriciaTrie
 }
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types

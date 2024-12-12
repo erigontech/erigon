@@ -48,7 +48,7 @@ type CustomTraceCfg struct {
 	execArgs *exec3.ExecArgs
 }
 
-func StageCustomTraceCfg(db kv.RwDB, prune prune.Mode, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config,
+func StageCustomTraceCfg(db kv.TemporalRwDB, prune prune.Mode, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config,
 	engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
 	execArgs := &exec3.ExecArgs{
 		ChainDB:     db,
@@ -173,9 +173,9 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 	var m runtime.MemStats
 	if err := exec3.CustomTraceMapReduce(fromBlock, toBlock, exec3.TraceConsumer{
 		NewTracer: func() exec3.GenericTracer { return nil },
-		Reduce: func(txTask *state.TxTask, tx kv.Tx) (err error) {
+		Reduce: func(txTask *state.TxTask, tx kv.Tx) error {
 			if txTask.Error != nil {
-				return err
+				return txTask.Error
 			}
 
 			if txTask.Tx != nil {

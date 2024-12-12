@@ -275,6 +275,28 @@ func New(
 func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthCounter) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
+		countSubnetsSubscribed := func() int {
+			count := 0
+			if s.subManager == nil {
+				return count
+			}
+			s.GossipManager().subscriptions.Range(func(key, value any) bool {
+				sub := value.(*GossipSubscription)
+				if sub.topic == nil {
+					return true
+				}
+				if strings.Contains(sub.topic.String(), "beacon_attestation") && sub.subscribed.Load() {
+					count++
+				}
+				return true
+			})
+			return count
+		}()
+
+		multiplierForAdaptableTraffic := 1.0
+		if s.cfg.AdaptableTrafficRequirements {
+			multiplierForAdaptableTraffic = ((float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -284,10 +306,10 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 			monitor.ObserveTotalOutBytes(totals.TotalOut)
 			minBound := datasize.KB
 			// define rate cap
-			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, minBound))
-			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minBound))
+			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
+			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
 			peers := s.host.Network().Peers()
-			maxPeersToBan := int(s.cfg.MaxPeerCount) / 8
+			maxPeersToBan := 16
 			// do not ban peers if we have less than 1/8 of max peer count
 			if len(peers) <= maxPeersToBan {
 				continue
