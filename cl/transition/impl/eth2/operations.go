@@ -1209,10 +1209,10 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		return nil
 	}
 	// Verify the source has been active long enough
-	if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
+	/*if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
 		log.Info("[Consolidation] Source has not been active long enough, ignoring consolidation request", "slot", s.Slot(), "curEpoch", curEpoch, "activationEpoch", sourceValidator.ActivationEpoch())
 		return nil
-	}
+	}*/
 	// Verify the source has no pending withdrawals in the queue
 	if getPendingBalanceToWithdraw(s, sourceIndex) > 0 {
 		log.Info("[Consolidation] Source has pending withdrawals, ignoring consolidation request", "slot", s.Slot())
