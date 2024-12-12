@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/turbo/shards"
 	"golang.org/x/sync/errgroup"
 )
@@ -101,12 +100,8 @@ type blockResult struct {
 
 type execTask struct {
 	exec.Task
-	versionMap                 *state.VersionMap
-	statedb                    *state.IntraBlockState // State database that stores the modified values after tx execution.
-	finalStateDB               *state.IntraBlockState // The final statedb.
-	result                     *evmtypes.ExecutionResult
-	shouldDelayFeeCalc         bool
-	shouldRerunWithoutFeeDelay bool
+	finalStateDB       *state.IntraBlockState // The final statedb.
+	shouldDelayFeeCalc bool
 
 	// length of dependencies          -> 2 + k (k = a whole number)
 	// first 2 element in dependencies -> transaction index, and flag representing if delay is allowed or not
@@ -115,27 +110,11 @@ type execTask struct {
 	dependencies []int
 }
 
-func (task *execTask) Execute(evm *vm.EVM,
-	vmCfg vm.Config,
-	engine consensus.Engine,
-	genesis *types.Genesis,
-	gasPool *core.GasPool,
-	rs *state.StateV3,
-	ibs *state.IntraBlockState,
-	_ exec.ApplyMessage,
-	stateWriter *state.StateWriterV3,
-	stateReader state.ResettableStateReader,
-	chainConfig *chain.Config,
-	chainReader consensus.ChainReader,
-	dirs datadir.Dirs,
-	isMining bool) *exec.Result {
-	return task.execute(0, evm, vmCfg, engine, genesis, gasPool, rs, ibs,
-		stateWriter, stateReader, chainConfig, chainReader, dirs, isMining)
+func (t *execTask) ShouldDelayFeeCalc() bool {
+	return t.shouldDelayFeeCalc
 }
 
-func (task *execTask) execute(
-	incarnation int,
-	evm *vm.EVM,
+func (task *execTask) Execute(evm *vm.EVM,
 	vmCfg vm.Config,
 	engine consensus.Engine,
 	genesis *types.Genesis,
@@ -151,25 +130,22 @@ func (task *execTask) execute(
 
 	var result *exec.Result
 
-	task.statedb = state.NewWithVersionMap(stateReader, task.versionMap)
-	task.statedb.SetVersion(incarnation)
-
 	defer func() {
 		if r := recover(); r != nil {
 			// Recover from dependency panic and retry the execution.
 			log.Debug("Recovered from EVM failure.", "Error:", r)
 
-			result.Err = exec.ErrExecAbortError{Dependency: task.statedb.DepTxIndex()}
+			result.Err = exec.ErrExecAbortError{Dependency: ibs.DepTxIndex()}
 		}
 	}()
 
 	result = task.Task.Execute(evm, vmCfg, engine, genesis, gasPool, rs, ibs,
-		task.applyMessage, stateWriter, stateReader, chainConfig, chainReader, dirs, isMining)
+		stateWriter, stateReader, chainConfig, chainReader, dirs, isMining)
 	result.Task = task
 
-	if task.statedb.HadInvalidRead() || result.Err != nil {
+	if ibs.HadInvalidRead() || result.Err != nil {
 		if err, ok := result.Err.(exec.ErrExecAbortError); !ok {
-			result.Err = exec.ErrExecAbortError{Dependency: task.statedb.DepTxIndex(), OriginError: err}
+			result.Err = exec.ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}
 		}
 	}
 
@@ -178,39 +154,10 @@ func (task *execTask) execute(
 	return result
 }
 
-func (task *execTask) applyMessage(evm *vm.EVM, msg core.Message, gp *core.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
-	// Apply the transaction to the current state (included in the env).
-	if task.shouldDelayFeeCalc {
-		result, err := core.ApplyMessageNoFeeBurnOrTip(evm, task.TxMessage(), gp, true, false)
-
-		if result == nil || err != nil {
-			return nil, exec.ErrExecAbortError{Dependency: task.statedb.DepTxIndex(), OriginError: err}
-		}
-
-		reads := task.statedb.VersionedReadMap()
-
-		if _, ok := reads[state.VersionSubpathKey(evm.Context.Coinbase, state.BalancePath)]; ok {
-			log.Debug("Coinbase is in MVReadMap", "address", evm.Context.Coinbase)
-
-			task.shouldRerunWithoutFeeDelay = true
-		}
-
-		if _, ok := reads[state.VersionSubpathKey(result.BurntContractAddress, state.BalancePath)]; ok {
-			log.Debug("BurntContractAddress is in MVReadMap", "address", task.result.BurntContractAddress)
-
-			task.shouldRerunWithoutFeeDelay = true
-		}
-
-		return result, err
-	}
-
-	return core.ApplyMessage(evm, task.TxMessage(), gp, true, false)
-}
-
-func (task *execTask) settle(engine consensus.Engine, stateWriter state.StateWriter) error {
+func (task *execTask) settle(result *exec.Result, engine consensus.Engine, stateWriter state.StateWriter) error {
 	task.finalStateDB.SetTxContext(task.Version().TxIndex)
 
-	task.finalStateDB.ApplyVersionedWrites(task.statedb.VersionedWrites())
+	task.finalStateDB.ApplyVersionedWrites(result.StateDb.VersionedWrites())
 
 	txHash := task.TxHash()
 	BlockNum := task.Version().BlockNum
@@ -221,20 +168,20 @@ func (task *execTask) settle(engine consensus.Engine, stateWriter state.StateWri
 		return nil
 	}
 
-	for _, l := range task.statedb.GetLogs(txTask.TxIndex, txHash, BlockNum, txTask.BlockHash) {
+	for _, l := range result.StateDb.GetLogs(txTask.TxIndex, txHash, BlockNum, txTask.BlockHash) {
 		task.finalStateDB.AddLog(l)
 	}
 
 	if task.shouldDelayFeeCalc {
 		if txTask.Config.IsLondon(txTask.BlockNum) {
-			task.finalStateDB.AddBalance(task.result.BurntContractAddress, task.result.FeeBurnt, tracing.BalanceDecreaseGasBuy)
+			task.finalStateDB.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
 		}
 
-		task.finalStateDB.AddBalance(txTask.Coinbase, task.result.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
+		task.finalStateDB.AddBalance(txTask.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
 
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
-				result := *task.result
+				result := *result.ExecutionResult
 				coinbaseBalance, err := task.finalStateDB.GetBalance(txTask.Coinbase)
 
 				if err != nil {
@@ -260,19 +207,19 @@ func (task *execTask) settle(engine consensus.Engine, stateWriter state.StateWri
 		task.finalStateDB.FinalizeTx(txTask.Rules, stateWriter)
 	}
 
-	txTask.UsedGas += task.result.UsedGas
+	txTask.UsedGas += result.ExecutionResult.UsedGas
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used
 	// by the tx.
 	receipt := &types.Receipt{Type: txTask.Tx.Type(), PostState: root, CumulativeGasUsed: txTask.UsedGas}
-	if task.result.Failed() {
+	if result.ExecutionResult.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
 
 	receipt.TxHash = txHash
-	receipt.GasUsed = task.result.UsedGas
+	receipt.GasUsed = result.ExecutionResult.UsedGas
 
 	// If the transaction created a contract, store the creation address in the receipt.
 	if txTask.TxAsMessage.To() == nil {
@@ -305,7 +252,6 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	gasPool *core.GasPool,
 	rs *state.StateV3,
 	ibs *state.IntraBlockState,
-	_ exec.ApplyMessage,
 	stateWriter *state.StateWriterV3,
 	stateReader state.ResettableStateReader,
 	chainConfig *chain.Config,
@@ -313,16 +259,20 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	dirs datadir.Dirs,
 	isMining bool) *exec.Result {
 
-	result := ev.execTask.execute(ev.version.Incarnation, evm, vmCfg, engine, genesis, gasPool, rs, ibs,
+	ibs.Reset()
+	ibs.SetVersionMap(ev.versionMap)
+	ibs.SetVersion(ev.version.Incarnation)
+
+	result := ev.execTask.Execute(evm, vmCfg, engine, genesis, gasPool, rs, ibs,
 		stateWriter, stateReader, chainConfig, chainReader, dirs, isMining)
 
 	if result.Err != nil {
 		return result
 	}
 
-	result.TxIn = ev.execTask.statedb.VersionedReads()
-	result.TxOut = ev.execTask.statedb.VersionedWrites()
-	result.TxAllOut = ev.execTask.statedb.VersionedWrites()
+	result.TxIn = ibs.VersionedReads()
+	result.TxOut = ibs.VersionedWrites()
+	result.TxAllOut = ibs.VersionedWrites()
 
 	return result
 }
@@ -343,7 +293,6 @@ type txExecutor struct {
 	isMining       bool
 	inMemExec      bool
 	applyTx        kv.RwTx
-	applyWorker    *exec3.Worker
 	outputTxNum    *atomic.Uint64
 	outputBlockNum metrics.Gauge
 	logger         log.Logger
@@ -429,6 +378,17 @@ type blockExecStatus struct {
 	result *blockResult
 }
 
+func newBlockStatus() *blockExecStatus {
+	return &blockExecStatus{
+		begin:        time.Now(),
+		stats:        map[int]ExecutionStat{},
+		skipCheck:    map[int]bool{},
+		estimateDeps: map[int][]int{},
+		blockIO:      &state.VersionedIO{},
+		versionMap:   &state.VersionMap{},
+	}
+}
+
 type parallelExecutor struct {
 	txExecutor
 	rwLoopErrCh              chan error
@@ -467,7 +427,9 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, bloc
 		}
 		defer tx.Rollback()
 
-		pe.applyWorker.ResetTx(tx)
+		for i := 0; i < len(pe.execWorkers); i++ {
+			pe.execWorkers[i].ResetTx(tx)
+		}
 
 		for pe.outputTxNum.Load() <= maxTxNum {
 			if err := pe.rws.Drain(ctx); err != nil {
@@ -523,7 +485,8 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 
 	tx := pe.applyTx
 	if tx == nil {
-		tx, err := pe.cfg.db.BeginRw(ctx)
+		var err error
+		tx, err = pe.cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -594,7 +557,9 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				//Drain results (and process) channel because read sets do not carry over
 				for !blockComplete.Load() {
 					pe.rws.DrainNonBlocking(ctx)
-					pe.applyWorker.ResetTx(tx)
+					for i := 0; i < len(pe.execWorkers); i++ {
+						pe.execWorkers[i].ResetTx(tx)
+					}
 
 					blockResult, err := pe.processResults(ctx, nil)
 
@@ -969,6 +934,13 @@ func (pe *parallelExecutor) run(ctx context.Context, maxTxNum uint64, logger log
 	})
 
 	return func() {
+		if pe.logEvery != nil {
+			pe.logEvery.Stop()
+		}
+		if pe.pruneEvery != nil {
+			pe.pruneEvery.Stop()
+		}
+
 		rwLoopCtxCancel()
 		pe.slowDownLimit.Stop()
 		pe.wait(ctx)
@@ -1054,13 +1026,7 @@ func (pe *parallelExecutor) execute(ctx context.Context, tasks []exec.Task) (boo
 		blockNum := t.Version().BlockNum
 
 		if pe.blockStatus == nil {
-			blockStatus = &blockExecStatus{
-				begin:        time.Now(),
-				stats:        map[int]ExecutionStat{},
-				skipCheck:    map[int]bool{},
-				estimateDeps: map[int][]int{},
-				blockIO:      &state.VersionedIO{},
-			}
+			blockStatus = newBlockStatus()
 			pe.lastBlockNum.Store(blockNum)
 			pe.blockStatus = map[uint64]*blockExecStatus{
 				blockNum: blockStatus,
@@ -1070,13 +1036,7 @@ func (pe *parallelExecutor) execute(ctx context.Context, tasks []exec.Task) (boo
 			blockStatus, ok = pe.blockStatus[blockNum]
 
 			if !ok {
-				blockStatus = &blockExecStatus{
-					begin:        time.Now(),
-					stats:        map[int]ExecutionStat{},
-					skipCheck:    map[int]bool{},
-					estimateDeps: map[int][]int{},
-					blockIO:      &state.VersionedIO{},
-				}
+				blockStatus = newBlockStatus()
 				pe.blockStatus[t.Version().BlockNum] = blockStatus
 			}
 		}

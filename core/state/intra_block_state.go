@@ -170,6 +170,10 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 	return state
 }
 
+func (sdb *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
+	sdb.versionMap = versionMap
+}
+
 func (sdb *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
 	sdb.tracingHooks = hooks
 }
@@ -208,6 +212,7 @@ func (sdb *IntraBlockState) Reset() {
 	//clear(sdb.balanceInc)
 	sdb.txIndex = 0
 	sdb.logSize = 0
+	sdb.versionMap = nil
 	sdb.versionedReads = nil
 	sdb.versionedReads = nil
 	sdb.dep = -1
@@ -499,6 +504,14 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) (bool, err
 		}
 		return stateObject.selfdestructed, nil
 	})
+}
+
+func (sdb *IntraBlockState) ReadVersion(k VersionKey, txIdx int) MVReadResult {
+	if sdb.versionMap == nil {
+		return MVReadResult{}
+	}
+
+	return sdb.versionMap.Read(k, txIdx)
 }
 
 /*
@@ -1256,7 +1269,7 @@ func (ibs *IntraBlockState) SetVersion(inc int) {
 
 func (s *IntraBlockState) Version() Version {
 	return Version{
-		TxIndex:    s.txIndex,
+		TxIndex:     s.txIndex,
 		Incarnation: s.version,
 	}
 }

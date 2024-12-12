@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
-	stateLib "github.com/erigontech/erigon-lib/state"
+	statelib "github.com/erigontech/erigon-lib/state"
 
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
@@ -243,7 +243,7 @@ func (test *snapshotTest) run() bool {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		test.err = err
 		return false
@@ -263,7 +263,7 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := statelib.NewSharedDomains(tx, log.New())
 	if err != nil {
 		test.err = err
 		return false
@@ -461,7 +461,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -472,7 +472,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := statelib.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -552,7 +552,7 @@ func TestVersionMapRevert(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -563,7 +563,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := statelib.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 	rs := NewStateV3(domains, log.New())
@@ -631,7 +631,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -642,7 +642,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := statelib.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -718,7 +718,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -729,7 +729,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := statelib.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -823,7 +823,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -834,7 +834,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := statelib.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -958,7 +958,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	assert.NoError(t, err)
 	defer agg.Close()
 
@@ -969,7 +969,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := statelib.NewSharedDomains(tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 	rs := NewStateV3(domains, log.New())

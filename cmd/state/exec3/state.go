@@ -18,6 +18,7 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -132,7 +133,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 
 func (rw *Worker) Run() error {
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
-		//fmt.Println("RTX", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Final)
+		fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
 		result := rw.RunTxTask(txTask, rw.isMining)
 		if err := rw.resultCh.Add(rw.ctx, result); err != nil {
 			return err
@@ -196,7 +197,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task, isMining bool) *exec.Result 
 	}
 
 	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.rs, rw.ibs,
-		core.ApplyMessage, rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs, isMining)
+		rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs, isMining)
 
 	result.Task = txTask
 

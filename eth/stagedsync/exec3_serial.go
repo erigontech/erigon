@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/cmd/state/exec3"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -20,6 +21,7 @@ import (
 
 type serialExecutor struct {
 	txExecutor
+	applyWorker        *exec3.Worker
 	skipPostEvaluation bool
 	// outputs
 	txCount     uint64

@@ -48,7 +48,6 @@ type Task interface {
 		gasPool *core.GasPool,
 		rs *state.StateV3,
 		ibs *state.IntraBlockState,
-		applyMessage ApplyMessage,
 		stateWriter *state.StateWriterV3,
 		stateReader state.ResettableStateReader,
 		chainConfig *chain.Config,
@@ -64,21 +63,24 @@ type Task interface {
 	TxSender() *libcommon.Address
 	TxMessage() types.Message
 
-	txNum() uint64
-
 	IsBlockEnd() bool
 	IsHistoric() bool
+	ShouldDelayFeeCalc() bool
 }
 
 type Result struct {
 	Task
-	Err      error
-	TxIn     state.VersionedReads
-	TxOut    state.VersionedWrites
-	TxAllOut state.VersionedWrites
+	StateDb         *state.IntraBlockState // State database that stores the modified values after tx execution.
+	ExecutionResult *evmtypes.ExecutionResult
+	Err             error
+	TxIn            state.VersionedReads
+	TxOut           state.VersionedWrites
+	TxAllOut        state.VersionedWrites
 
 	TraceFroms map[libcommon.Address]struct{}
 	TraceTos   map[libcommon.Address]struct{}
+
+	ShouldRerunWithoutFeeDelay bool
 }
 
 type ErrExecAbortError struct {
@@ -122,7 +124,6 @@ type TxTask struct {
 	TxAsMessage        types.Message
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
-
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 	ReadLists          state.ReadLists
 	WriteLists         state.WriteLists
@@ -142,10 +143,6 @@ type TxTask struct {
 
 	Config *chain.Config
 	Logger log.Logger
-}
-
-func (t *TxTask) txNum() uint64 {
-	return t.TxNum
 }
 
 func (t *TxTask) TxHash() libcommon.Hash {
@@ -174,6 +171,10 @@ func (t *TxTask) IsBlockEnd() bool {
 
 func (t *TxTask) IsHistoric() bool {
 	return t.HistoryExecution
+}
+
+func (t *TxTask) ShouldDelayFeeCalc() bool {
+	return false
 }
 
 func (t *TxTask) CreateReceipt(tx kv.Tx) {
@@ -250,7 +251,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	gasPool *core.GasPool,
 	rs *state.StateV3,
 	ibs *state.IntraBlockState,
-	applyMessage ApplyMessage,
 	stateWriter *state.StateWriterV3,
 	stateReader state.ResettableStateReader,
 	chainConfig *chain.Config,
@@ -338,7 +338,34 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, rules)
 
 		// MA applytx
-		applyRes, err := applyMessage(evm, msg, gasPool, true /* refunds */, false /* gasBailout */)
+
+		applyRes, err := func() (*evmtypes.ExecutionResult, error) {
+			// Apply the transaction to the current state (included in the env).
+			if txTask.ShouldDelayFeeCalc() {
+				applyRes, err := core.ApplyMessageNoFeeBurnOrTip(evm, txTask.TxMessage(), gasPool, true, false)
+
+				if applyRes == nil || err != nil {
+					return nil, ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}
+				}
+
+				reads := ibs.VersionedReadMap()
+
+				if _, ok := reads[state.VersionSubpathKey(evm.Context.Coinbase, state.BalancePath)]; ok {
+					log.Debug("Coinbase is in MVReadMap", "address", evm.Context.Coinbase)
+					result.ShouldRerunWithoutFeeDelay = true
+				}
+
+				if _, ok := reads[state.VersionSubpathKey(applyRes.BurntContractAddress, state.BalancePath)]; ok {
+					log.Debug("BurntContractAddress is in MVReadMap", "address", applyRes.BurntContractAddress)
+					result.ShouldRerunWithoutFeeDelay = true
+				}
+
+				return applyRes, err
+			}
+
+			return core.ApplyMessage(evm, txTask.TxMessage(), gasPool, true, false)
+		}()
+
 		if err != nil {
 			result.Err = err
 		} else {
@@ -375,7 +402,7 @@ func (h TxTaskQueue) Len() int {
 	return len(h)
 }
 func (h TxTaskQueue) Less(i, j int) bool {
-	return h[i].txNum() < h[j].txNum()
+	return h[i].Version().TxNum < h[j].Version().TxNum
 }
 
 func (h TxTaskQueue) Swap(i, j int) {
@@ -422,7 +449,7 @@ func (q *QueueWithRetry) RetriesLen() (l int) {
 func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
 	q.retiresLock.Lock()
 	for _, t := range q.retires {
-		out = append(out, t.txNum())
+		out = append(out, t.Version().TxNum)
 	}
 	q.retiresLock.Unlock()
 	return out
@@ -610,7 +637,7 @@ func (q *ResultsQueueIter) HasNext() bool {
 }
 
 func (q *ResultsQueueIter) Has(outputTxNum uint64) bool {
-	return q.HasNext() && (*q.q.results)[0].txNum() == outputTxNum
+	return q.HasNext() && (*q.q.results)[0].Version().TxNum == outputTxNum
 }
 
 func (q *ResultsQueueIter) PopNext() *Result {
@@ -684,7 +711,7 @@ func (q *ResultsQueue) Len() (l int) {
 	q.Unlock()
 	return l
 }
-func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].txNum() }
+func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].Version().TxNum }
 func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
 func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }
 func (q *ResultsQueue) PushLocked(t *Result)     { heap.Push(q.results, t) }

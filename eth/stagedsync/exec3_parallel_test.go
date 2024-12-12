@@ -8,17 +8,24 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/exec"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/eth/stagedsync/stages"
+	"github.com/erigontech/erigon/params"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -65,7 +72,9 @@ type Sender func(int) common.Address
 func NewTestExecTask(txIdx int, ops []Op, sender common.Address, nonce int) *testExecTask {
 	return &testExecTask{
 		TxTask: &exec.TxTask{
-			TxIndex: txIdx,
+			BlockNum: 1,
+			TxNum:    1 + uint64(txIdx),
+			TxIndex:  txIdx,
 		},
 		ops:          ops,
 		readMap:      make(map[state.VersionKey]state.VersionedRead),
@@ -89,7 +98,6 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	gasPool *core.GasPool,
 	rs *state.StateV3,
 	ibs *state.IntraBlockState,
-	_ exec.ApplyMessage,
 	stateWriter *state.StateWriterV3,
 	stateReader state.ResettableStateReader,
 	chainConfig *chain.Config,
@@ -116,7 +124,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 				continue
 			}
 
-			result := t.VersionMap().Read(k, version.TxIndex)
+			result := ibs.ReadVersion(k, version.TxIndex)
 
 			val := result.Value()
 
@@ -154,7 +162,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 		return &exec.Result{Err: exec.ErrExecAbortError{Dependency: deps, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
-	return nil
+	return &exec.Result{
+		StateDb: ibs,
+	}
 }
 
 func (t *testExecTask) MVWriteList() []state.VersionedWrite {
@@ -454,7 +464,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	profile := false
 
 	start := time.Now()
-	result, err := executeParallelWithCheck(context.Background(), tasks, false, validation, metadata, log.Root())
+	result, err := executeParallelWithCheck(t, tasks, false, validation, metadata, log.Root())
 
 	if result.Deps != nil && profile {
 		Report(result.Deps, *result.Stats, func(str string) { fmt.Println(str) })
@@ -486,25 +496,60 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 type propertyCheck func(*parallelExecutor) error
 
-func executeParallelWithCheck(interruptCtx context.Context, tasks []exec.Task, profile bool, check propertyCheck, metadata bool, logger log.Logger) (result blockResult, err error) {
+func executeParallelWithCheck(t *testing.T, tasks []exec.Task, profile bool, check propertyCheck, metadata bool, logger log.Logger) (result blockResult, err error) {
 	if len(tasks) == 0 {
 		return blockResult{}, nil
 	}
 
+	rawDb := memdb.NewStateDB("")
+	defer rawDb.Close()
+
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, log.New())
+	assert.NoError(t, err)
+	defer agg.Close()
+
+	db, err := temporal.New(rawDb, agg)
+	assert.NoError(t, err)
+
+	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
+	assert.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := statelib.NewSharedDomains(tx, log.New())
+	assert.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	assert.NoError(t, err)
+
 	pe := &parallelExecutor{
-		txExecutor: txExecutor{},
+		txExecutor: txExecutor{
+			cfg: ExecuteBlockCfg{
+				chainConfig: params.MainnetChainConfig,
+				db:          db,
+			},
+			doms:           domains,
+			rs:             state.NewStateV3(domains, logger),
+			outputTxNum:    &atomic.Uint64{},
+			outputBlockNum: stages.SyncMetrics[stages.Execution],
+			logger:         logger,
+		},
+		logEvery:    time.NewTicker(20 * time.Second),
+		pruneEvery:  time.NewTicker(2 * time.Second),
+		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorCancel := pe.run(interruptCtx, 100, logger)
+	executorCancel := pe.run(context.Background(), 1+uint64(len(tasks)), logger)
 	defer executorCancel()
 
-	_, err = pe.execute(interruptCtx, tasks)
+	_, err = pe.execute(context.Background(), tasks)
 
 	if err != nil {
 		return
 	}
 
-	pe.wait(interruptCtx)
+	pe.wait(context.Background())
 
 	if check != nil {
 		err = check(pe)
@@ -516,7 +561,7 @@ func executeParallelWithCheck(interruptCtx context.Context, tasks []exec.Task, p
 func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
 	t.Helper()
 
-	res, err := executeParallelWithCheck(context.Background(), tasks, true, validation, false, log.Root())
+	res, err := executeParallelWithCheck(t, tasks, true, validation, false, log.Root())
 
 	assert.NoError(t, err, "error occur during parallel execution")
 

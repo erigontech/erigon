@@ -121,6 +121,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStor
 	return v, nil
 }
 
+
 type VersionedIO struct {
 	inputs     []VersionedReads
 	outputs    []VersionedWrites // write sets that should be checked during validation
