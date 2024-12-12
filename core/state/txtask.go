@@ -20,9 +20,11 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dbg"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
@@ -49,7 +51,7 @@ type TxTask struct {
 	Coinbase           libcommon.Address
 	Withdrawals        types.Withdrawals
 	BlockHash          libcommon.Hash
-	Sender             *libcommon.Address
+	sender             *libcommon.Address
 	SkipAnalysis       bool
 	PruneNonEssentials bool
 	TxIndex            int // -1 for block initialisation
@@ -84,6 +86,24 @@ type TxTask struct {
 	BlockReceipts types.Receipts
 
 	Config *chain.Config
+}
+
+func (t *TxTask) Sender() *libcommon.Address {
+	if t.sender != nil {
+		return t.sender
+	}
+	if sender, ok := t.Tx.GetSender(); ok {
+		t.sender = &sender
+		return t.sender
+	}
+	signer := *types.MakeSigner(t.Config, t.BlockNum, t.Header.Time)
+	sender, err := signer.Sender(t.Tx)
+	if err != nil {
+		panic(err)
+	}
+	t.sender = &sender
+	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNum, "txIdx", t.TxIndex)
+	return t.sender
 }
 
 func (t *TxTask) CreateReceipt(tx kv.Tx) {
