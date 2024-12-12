@@ -40,8 +40,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	stateLib "github.com/erigontech/erigon-lib/state"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/asm"
@@ -49,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/rlp"
 )
 
 func NewTestTemporalDb(tb testing.TB) (kv.RwDB, kv.RwTx, *stateLib.Aggregator) {
@@ -260,7 +259,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	)
 
 	statedb.CreateAccount(sender, true)
-	statedb.SetCode(receiver, common.FromHex(code))
+	statedb.SetCode(receiver, libcommon.FromHex(code))
 	runtimeConfig := Config{
 		Origin:      sender,
 		State:       statedb,
@@ -372,7 +371,7 @@ func (d *dummyChain) Engine() consensus.Engine {
 func (d *dummyChain) GetHeader(h libcommon.Hash, n uint64) *types.Header {
 	d.counter++
 	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
+	s := libcommon.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 
 	//parentHash := libcommon.Hash{byte(n - 1)}
@@ -387,7 +386,7 @@ func TestBlockhash(t *testing.T) {
 	// Current head
 	n := uint64(1000)
 	parentHash := libcommon.Hash{}
-	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
+	s := libcommon.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 	header := fakeHeader(n, parentHash)
 

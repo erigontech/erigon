@@ -25,6 +25,7 @@ import (
 	"math/bits"
 	"sort"
 	"strings"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 
@@ -137,7 +138,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	default:
 
 		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
-		tree := NewUpdates(mode, tmpdir, trie.hashAndNibblizeKey)
+		tree := NewUpdates(mode, tmpdir, trie.HashAndNibblizeKey)
 		return trie, tree
 	}
 }
@@ -258,34 +259,29 @@ func (be *BranchEncoder) CollectUpdate(
 	return lastNibble, nil
 }
 
+func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
+	n := binary.PutUvarint(be.bitmapBuf[:], size)
+	if _, err := be.buf.Write(be.bitmapBuf[:n]); err != nil {
+		return err
+	}
+	if _, err := be.buf.Write(val); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
-	if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {
+	var encoded [2]byte
+	binary.BigEndian.PutUint16(encoded[:], touchMap)
+	if _, err := be.buf.Write(encoded[:]); err != nil {
 		return nil, 0, err
 	}
-	if err := binary.Write(be.buf, binary.BigEndian, afterMap); err != nil {
+	binary.BigEndian.PutUint16(encoded[:], afterMap)
+	if _, err := be.buf.Write(encoded[:]); err != nil {
 		return nil, 0, err
-	}
-
-	putUvarAndVal := func(size uint64, val []byte) error {
-		n := binary.PutUvarint(be.bitmapBuf[:], size)
-		wn, err := be.buf.Write(be.bitmapBuf[:n])
-		if err != nil {
-			return err
-		}
-		if n != wn {
-			return errors.New("n != wn size")
-		}
-		wn, err = be.buf.Write(val)
-		if err != nil {
-			return err
-		}
-		if len(val) != wn {
-			return errors.New("wn != value size")
-		}
-		return nil
 	}
 
 	var lastNibble int
@@ -325,38 +321,35 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 				return nil, 0, err
 			}
 			if fields&fieldExtension != 0 {
-				if err := putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fields&fieldAccountAddr != 0 {
-				if err := putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fields&fieldStorageAddr != 0 {
-				if err := putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fields&fieldHash != 0 {
-				if err := putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 			if fields&fieldStateHash != 0 {
-				if err := putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
+				if err := be.putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
 					return nil, 0, err
 				}
 			}
 		}
 		bitset ^= bit
 	}
-	res := make([]byte, be.buf.Len())
-	copy(res, be.buf.Bytes())
-
 	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
-	return res, lastNibble, nil
+	return be.buf.Bytes(), lastNibble, nil
 }
 
 func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }
@@ -1030,29 +1023,30 @@ func (t *Updates) Size() (updates uint64) {
 
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
-func (t *Updates) TouchPlainKey(key, val []byte, fn func(c *KeyUpdate, val []byte)) {
+func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
 	case ModeUpdate:
 		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
 
 		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
-			if bytes.Equal(item.plainKey, pivot.plainKey) {
+			if item.plainKey == pivot.plainKey {
 				fn(item, val)
 				updated = true
 			}
 			return false
 		})
 		if !updated {
-			pivot.hashedKey = t.hasher(pivot.plainKey)
+			pivot.hashedKey = t.hasher(toBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
 		}
 	case ModeDirect:
-		if _, ok := t.keys[string(key)]; !ok {
-			if err := t.etl.Collect(t.hasher(key), key); err != nil {
+		if _, ok := t.keys[key]; !ok {
+			keyBytes := toBytesZeroCopy(key)
+			if err := t.etl.Collect(t.hasher(keyBytes), keyBytes); err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
-			t.keys[string(key)] = struct{}{}
+			t.keys[key] = struct{}{}
 		}
 	default:
 	}
@@ -1144,7 +1138,7 @@ func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *U
 			default:
 			}
 
-			if err := fn(item.hashedKey, item.plainKey, item.update); err != nil {
+			if err := fn(item.hashedKey, toBytesZeroCopy(item.plainKey), item.update); err != nil {
 				return false
 			}
 			return true
@@ -1170,13 +1164,13 @@ func (t *Updates) Reset() {
 }
 
 type KeyUpdate struct {
-	plainKey  []byte
+	plainKey  string
 	hashedKey []byte
 	update    *Update
 }
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
-	return bytes.Compare(i.plainKey, j.plainKey) < 0
+	return i.plainKey < j.plainKey
 }
 
 type UpdateFlags uint8
@@ -1223,7 +1217,7 @@ func (u *Update) Reset() {
 	u.Balance.Clear()
 	u.Nonce = 0
 	u.StorageLen = 0
-	copy(u.CodeHash[:], EmptyCodeHash)
+	u.CodeHash = EmptyCodeHashArray
 }
 
 func (u *Update) Merge(b *Update) {
@@ -1354,3 +1348,6 @@ func (u *Update) String() string {
 	}
 	return sb.String()
 }
+
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) } //nolint
+func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

@@ -29,8 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/historyv2"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/debug"
+	"github.com/erigontech/erigon-lib/common/debug"
 	"github.com/erigontech/erigon/core/rawdb"
 )
 
@@ -52,7 +51,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	}
 	defer cancelWorkers()
 
-	storageCursor, err := tx.CursorDupSort(kv.StorageChangeSet)
+	storageCursor, err := tx.CursorDupSort(kv.StorageChangeSetDeprecated)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -151,7 +150,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
-	log.Info("Computed verkle root", "root", common.Bytes2Hex(newRoot[:]))
+	log.Info("Computed verkle root", "root", libcommon.Bytes2Hex(newRoot[:]))
 
 	return newRoot, rawdb.WriteVerkleRoot(vTx, to, newRoot)
 }

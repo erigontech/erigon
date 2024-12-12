@@ -19,7 +19,6 @@ package temporal
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -103,7 +102,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
-func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
@@ -204,8 +203,8 @@ func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, as
 	return it, nil
 }
 
-func (tx *Tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
-	v, step, ok, err := tx.filesTx.GetLatest(name, k, k2, tx.MdbxTx)
+func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+	v, step, ok, err := tx.filesTx.GetLatest(name, k, tx.MdbxTx)
 	if err != nil {
 		return nil, step, err
 	}
@@ -214,11 +213,8 @@ func (tx *Tx) GetLatest(name kv.Domain, k, k2 []byte) (v []byte, step uint64, er
 	}
 	return v, step, nil
 }
-func (tx *Tx) GetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	if key2 != nil {
-		key = append(common.Copy(key), key2...)
-	}
-	return tx.filesTx.GetAsOf(tx.MdbxTx, name, key, ts)
+func (tx *Tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	return tx.filesTx.GetAsOf(tx.MdbxTx, name, k, ts)
 }
 
 func (tx *Tx) HistorySeek(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {

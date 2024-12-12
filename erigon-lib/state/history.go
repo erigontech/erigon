@@ -284,6 +284,10 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	}
 }
 
+func (h *History) Tables() []string {
+	return append([]string{h.keysTable, h.valuesTable}, h.InvertedIndex.Tables()...)
+}
+
 func (h *History) Close() {
 	if h == nil {
 		return
@@ -1075,7 +1079,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 		}
 
 		if ht.h.historyLargeValues {
-			seek = append(append(seek[:0], k...), txnm...)
+			seek = append(bytes.Clone(k), txnm...)
 			if err := valsC.Delete(seek); err != nil {
 				return err
 			}

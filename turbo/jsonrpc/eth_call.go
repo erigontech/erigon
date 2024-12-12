@@ -17,13 +17,21 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/kv/dbutils"
+	"github.com/erigontech/erigon-lib/trie"
+
+	"github.com/erigontech/erigon-lib/commitment"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
+
+	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -34,12 +42,14 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/tracers/logger"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
@@ -53,7 +63,7 @@ var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides) (hexutility.Bytes, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +144,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		args = *argsOrNil
 	}
 
-	dbtx, err := api.db.BeginRo(ctx)
+	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -205,7 +215,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("can't get the current state")
 		}
 
-		balance := state.GetBalance(*args.From) // from can't be nil
+		balance, err := state.GetBalance(*args.From) // from can't be nil
+		if err != nil {
+			return 0, err
+		}
 		available := balance.ToBig()
 		if args.Value != nil {
 			if args.Value.ToInt().Cmp(available) >= 0 {
@@ -335,7 +348,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	return nil, errors.New("not supported by Erigon3")
 	/*
-		tx, err := api.db.BeginRo(ctx)
+		tx, err := api.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -417,6 +430,217 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	*/
 }
 
+func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
+	return api.getWitness(ctx, api.db, blockNrOrHash, 0, true, api.MaxGetProofRewindBlockCount, api.logger)
+}
+
+func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrHash, txIndex hexutil.Uint) (hexutility.Bytes, error) {
+	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.MaxGetProofRewindBlockCount, api.logger)
+}
+
+func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) error {
+	actualTxRoot := execResult.TxRoot.Bytes()
+	expectedTxRoot := block.TxHash().Bytes()
+	if !bytes.Equal(actualTxRoot, expectedTxRoot) {
+		return fmt.Errorf("mismatch in block TxRoot actual(%x) != expected(%x)", actualTxRoot, expectedTxRoot)
+	}
+
+	actualGasUsed := uint64(execResult.GasUsed)
+	expectedGasUsed := block.GasUsed()
+	if actualGasUsed != expectedGasUsed {
+		return fmt.Errorf("mismatch in block gas used actual(%x) != expected(%x)", actualGasUsed, expectedGasUsed)
+	}
+
+	actualReceiptsHash := execResult.ReceiptRoot.Bytes()
+	expectedReceiptsHash := block.ReceiptHash().Bytes()
+	if !bytes.Equal(actualReceiptsHash, expectedReceiptsHash) {
+		return fmt.Errorf("mismatch in receipts hash actual(%x) != expected(%x)", actualReceiptsHash, expectedReceiptsHash)
+	}
+
+	// check the state root
+	resultingStateRoot := execResult.StateRoot.Bytes()
+	expectedBlockStateRoot := block.Root().Bytes()
+	if !bytes.Equal(resultingStateRoot, expectedBlockStateRoot) {
+		return fmt.Errorf("resulting state root after execution doesn't match state root in block actual(%x)!=expected(%x)", resultingStateRoot, expectedBlockStateRoot)
+	}
+	return nil
+}
+
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutility.Bytes, error) {
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer roTx.Rollback()
+
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return nil, err
+	}
+
+	// Witness for genesis block is empty
+	if blockNr == 0 {
+		w := trie.NewWitness(make([]trie.WitnessOperator, 0))
+
+		var buf bytes.Buffer
+		_, err = w.WriteInto(&buf)
+		if err != nil {
+			return nil, err
+		}
+
+		return buf.Bytes(), nil
+	}
+
+	block, err := api.blockWithSenders(ctx, roTx, hash, blockNr)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	if !fullBlock && int(txIndex) >= len(block.Transactions()) {
+		return nil, fmt.Errorf("transaction index out of bounds: %d", txIndex)
+	}
+
+	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	if err != nil {
+		return nil, err
+	}
+
+	if latestBlock < blockNr {
+		// shouldn't happen, but check anyway
+		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
+	}
+
+	// Compute the witness if it's for a tx or it's not present in db
+	prevHeader, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNr-1)
+	if err != nil {
+		return nil, err
+	}
+
+	regenerateHash := false
+	if latestBlock-blockNr > uint64(maxGetProofRewindBlockCount) {
+		regenerateHash = true
+	}
+
+	engine, ok := api.engine().(consensus.Engine)
+	if !ok {
+		return nil, errors.New("engine is not consensus.Engine")
+	}
+
+	roTx2, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer roTx2.Rollback()
+	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
+	defer txBatch2.Rollback()
+
+	// Prepare witness config
+	chainConfig, err := api.chainConfig(ctx, roTx2)
+	if err != nil {
+		return nil, fmt.Errorf("error loading chain config: %v", err)
+	}
+
+	// Unwind to blockNr
+	cfg := stagedsync.StageWitnessCfg(true, 0, chainConfig, engine, api._blockReader, api.dirs)
+	err = stagedsync.RewindStagesForWitness(txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	store, err := stagedsync.PrepareForWitness(txBatch2, block, prevHeader.Root, &cfg, ctx, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
+	patricieTrie := sdCtx.Trie()
+	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
+	}
+
+	// execute block #blockNr ephemerally. This will use TrieStateWriter to record touches of accounts and storage keys.
+	_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// gather touched keys from ephemeral block execution
+	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
+	codeReads := store.Tds.BuildCodeTouches()
+
+	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
+	// so this is just to satisfy the current hex patricia trie api.
+	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
+	for _, key := range touchedPlainKeys {
+		updates.TouchPlainKey(string(key), nil, updates.TouchAccount)
+	}
+
+	hph.SetTrace(false) // disable tracing to avoid mixing with trace from witness computation
+	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
+	witnessTrie, witnessRootHash, err := hph.GenerateWitness(ctx, updates, codeReads, prevHeader.Root[:], "computeWitness")
+	if err != nil {
+		return nil, err
+	}
+
+	//
+	if !bytes.Equal(witnessRootHash, prevHeader.Root[:]) {
+		return nil, fmt.Errorf("witness root hash mismatch actual(%x)!=expected(%x)", witnessRootHash, prevHeader.Root[:])
+	}
+
+	// retain list is need for the serialization of the trie.Trie into a witness
+	retainListBuilder := trie.NewRetainListBuilder()
+	for _, key := range touchedHashedKeys {
+		if len(key) == 32 {
+			retainListBuilder.AddTouch(key)
+		} else {
+			addr, _, hash := dbutils.ParseCompositeStorageKey(key)
+			storageTouch := dbutils.GenerateCompositeTrieKey(addr, hash)
+			retainListBuilder.AddStorageTouch(storageTouch)
+		}
+	}
+
+	for _, codeWithHash := range codeReads {
+		retainListBuilder.ReadCode(codeWithHash.CodeHash, codeWithHash.Code)
+	}
+
+	retainList := retainListBuilder.Build(false)
+
+	// serialize witness trie
+	witness, err := witnessTrie.ExtractWitness(true, retainList)
+	if err != nil {
+		return nil, err
+	}
+
+	var witnessBuffer bytes.Buffer
+	_, err = witness.WriteInto(&witnessBuffer)
+	if err != nil {
+		return nil, err
+	}
+
+	// this is a verification step: we execute block #blockNr statelessly using the witness, and we expect to get the same state root as in the header
+	// otherwise something went wrong
+	store.Tds.SetTrie(witnessTrie)
+	newStateRoot, err := stagedsync.ExecuteBlockStatelessly(block, prevHeader, store.ChainReader, store.Tds, &cfg, &witnessBuffer, store.GetHashFn, logger)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(newStateRoot.Bytes(), block.Root().Bytes()) {
+		fmt.Printf("state root mismatch after stateless execution actual(%x) != expected(%x)\n", newStateRoot.Bytes(), block.Root().Bytes())
+	}
+	witnessBufBytes := witnessBuffer.Bytes()
+	witnessBufBytesCopy := make([]byte, len(witnessBufBytes))
+	copy(witnessBufBytesCopy, witnessBufBytes)
+	return witnessBufBytesCopy, nil
+}
+
 func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
 	var block *types.Block
 	if api.blocksLRU != nil {
@@ -445,7 +669,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		bNrOrHash = *blockNrOrHash
 	}
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}

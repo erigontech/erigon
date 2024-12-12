@@ -149,8 +149,9 @@ func TestTwoLayerIndex(t *testing.T) {
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
+	N := 2571
 	rs, err := NewRecSplit(RecSplitArgs{
-		KeyCount:           100,
+		KeyCount:           N,
 		BucketSize:         10,
 		Salt:               &salt,
 		TmpDir:             tmpDir,
@@ -162,7 +163,7 @@ func TestTwoLayerIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < N; i++ {
 		if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +174,7 @@ func TestTwoLayerIndex(t *testing.T) {
 
 	idx := MustOpen(indexFile)
 	defer idx.Close()
-	for i := 0; i < 100; i++ {
+	for i := 0; i < N; i++ {
 		reader := NewIndexReader(idx)
 		e, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
 		if e != uint64(i) {

@@ -848,7 +848,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 					}
-
 					t.AddWebSeeds(urls)
 				}
 			}
@@ -2474,7 +2473,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		}()
 	}
 
-	g, ctx := errgroup.WithContext(ctx)
+	g, context := errgroup.WithContext(ctx)
 	// torrent lib internally limiting amount of hashers per file
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
@@ -2483,13 +2482,13 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		g.Go(func() error {
 			defer completedFiles.Add(1)
 			if failFast {
-				return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
+				return VerifyFileFailFast(context, t, d.SnapDir(), completedPieces)
 			}
 
-			err := ScheduleVerifyFile(ctx, t, completedPieces)
+			err := ScheduleVerifyFile(context, t, completedPieces)
 
 			if err != nil || !t.Complete.Bool() {
-				if err := d.db.Update(ctx, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
+				if err := d.db.Update(context, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
 					return fmt.Errorf("verify data: %s: reset failed: %w", t.Name(), err)
 				}
 			}
@@ -2501,6 +2500,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	if err := g.Wait(); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -2576,7 +2576,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if err != nil {
 		return err
 	}
-
 	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
 		return err

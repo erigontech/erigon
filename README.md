@@ -168,38 +168,31 @@ datadir
 ### Erigon3 datadir size
 
 ```sh
-# eth-mainnet - archive - April 2024
+# eth-mainnet - archive - Nov 2024
 
-du -hsc /erigon/* 
-6G  	/erigon/caplin
-50G 	/erigon/chaindata
-1.8T	/erigon/snapshots
-1.9T	total
+du -hsc /erigon/chaindata
+15G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-100G 	/erigon/snapshots/accessor
-240G	/erigon/snapshots/domain
-260G	/erigon/snapshots/history
-410G	/erigon/snapshots/idx
-1.7T	/erigon/snapshots
+120G 	/erigon/snapshots/accessor
+300G	/erigon/snapshots/domain
+280G	/erigon/snapshots/history
+430G	/erigon/snapshots/idx
+2.3T	/erigon/snapshots
 ```
 
 ```sh
-# bor-mainnet - archive - Jun 2024
+# bor-mainnet - archive - Nov 2024
 
-du -hsc /erigon/* 
-
-160M	/erigon/bor
-50G 	/erigon/chaindata
-3.7T	/erigon/snapshots
-3.8T	total
+du -hsc /erigon/chaindata
+20G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-260G	/erigon-data/snapshots/accessor
-850G	/erigon-data/snapshots/domain
-650G	/erigon-data/snapshots/history
-1.4T	/erigon-data/snapshots/idx
-4.1T	/erigon/snapshots
+360G	/erigon-data/snapshots/accessor
+1.1T	/erigon-data/snapshots/domain
+750G	/erigon-data/snapshots/history
+1.5T	/erigon-data/snapshots/idx
+4.9T	/erigon/snapshots
 ```
 
 ### Erigon3 changes from Erigon2
@@ -214,7 +207,7 @@ du -hsc /erigon/snapshots/*
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
     - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
-- **`--prune` flags changed**: see `--prune.mode` (default: `archive`, full: `full`, EIP-4444: `minimal`)
+- **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
 - **Other changes:**
     - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
     - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default

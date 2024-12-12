@@ -151,7 +151,7 @@ func InitMiner(ctx context.Context, dirName string, genesis *types.Genesis, priv
 		DeprecatedTxPool: ethconfig.Defaults.DeprecatedTxPool,
 		RPCGasCap:        50000000,
 		RPCTxFeeCap:      1, // 1 ether
-		Snapshot:         ethconfig.BlocksFreezing{NoDownloader: true},
+		Snapshot:         ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
 		StateStream:      true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool

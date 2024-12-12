@@ -17,18 +17,38 @@ ChangeLog
   mode.
 - Erigon3 book: https://development.erigon-documentation-preview.pages.dev/
 
-### Fixes:
- 
-- `eth_syncing` works on Bor chains
-- support upper-bounds at: `eth_accRange` https://github.com/erigontech/erigon/pull/12609 , `erigon_getBalanceChangesInBlock` https://github.com/erigontech/erigon/pull/12642, `debug_getModifiedAccountsByNumber` https://github.com/erigontech/erigon/pull/12634
-- `eth_getLogs` fix `fee cap less than block` https://github.com/erigontech/erigon/pull/12640
-
 ### TODO
 
 - milestone: https://github.com/erigontech/erigon/milestone/5
 - Known problem:
     - external CL support
     - `erigon_getLatestLogs` not emplimented
+
+### Acknowledgements:
+
+## v3.0.0-alpha6
+
+### Breaking changes
+
+- `--prune.mode` default is `full`. For compatibility with `geth` and other clients. Plz set explicit
+  `--prune.mode` flag to your Erigon3 setups - to simplify future upgrade/downgrade.
+
+### New features:
+
+- Reduced `.idx` and `.efi` files size by 25% (require re-sync)
+- Support: `debug_getRawReceipts`
+- debian packages
+- `--externalcl` support
+- bor-mainnet can work on 32G machine
+- Erigon3 book: https://development.erigon-documentation-preview.pages.dev/
+
+### Fixes:
+
+- `eth_syncing` works on Bor chains
+- support upper-bounds at: `eth_accRange` https://github.com/erigontech/erigon/pull/12609 ,
+  `erigon_getBalanceChangesInBlock` https://github.com/erigontech/erigon/pull/12642,
+  `debug_getModifiedAccountsByNumber` https://github.com/erigontech/erigon/pull/12634
+- `eth_getLogs` fix `fee cap less than block` https://github.com/erigontech/erigon/pull/12640
 
 ### Acknowledgements:
 

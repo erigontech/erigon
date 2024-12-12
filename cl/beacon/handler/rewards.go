@@ -19,6 +19,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -85,7 +86,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	defer snRoTx.Close()
 
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
-	slotData, err := state_accessors.ReadSlotData(stateGetter, slot)
+	slotData, err := state_accessors.ReadSlotData(stateGetter, slot, a.beaconChainCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +129,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	}
-	filterIndicies, err := parseQueryValidatorIndicies(tx, req)
+	filterIndicies, err := parseQueryValidatorIndicies(a.syncedData, req)
 	if err != nil {
 		return nil, err
 	}
@@ -217,12 +218,9 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	participantReward := int64(a.syncParticipantReward(totalActiveBalance))
 
 	for committeeIdx, v := range committee {
-		idx, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, v)
+		idx, _, err := a.syncedData.ValidatorIndexByPublicKey(v)
 		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("sync committee public key not found"))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("sync committee public key not found: %s", err))
 		}
 		if len(filterIndiciesSet) > 0 {
 			if _, ok := filterIndiciesSet[idx]; !ok {
