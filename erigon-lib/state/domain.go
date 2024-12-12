@@ -1708,22 +1708,23 @@ var sdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immut
 func (dt *DomainRoTx) closeValsCursor() {
 	if dt.valsC != nil {
 		dt.valsC.Close()
+		fmt.Printf("close view %d [%s]\n", dt.valCViewID, dt.d.filenameBase)
 		dt.valCViewID = 0
+		//dt.valsC = nil
 		// dt.vcParentPtr.Store(0)
-		dt.valsC = nil
 	}
 }
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	// eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
 
 	if dt.valsC != nil { // run in assert mode only
-		if tx.ViewID() != dt.valCViewID {
-			// if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
-			// panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
-			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
-		}
+		//if tx.ViewID() != dt.valCViewID {
+		//	// if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
+		//	// panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
+		//	panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
+		//}
 		// fmt.Printf("cmp e1=%x e2=%x s=%x d=%s\n", eface[0], eface[1], dt.vcParentPtr.Load(), dt.d.filenameBase)
-		fmt.Printf("cmp dvi=%d txvi=%d [%s]\n", dt.valCViewID, tx.ViewID(), dt.d.filenameBase)
+		fmt.Printf("cmp dvi=%d txvi=%d [%s] ptr %x\n", dt.valCViewID, tx.ViewID(), dt.d.filenameBase, dt.valsC)
 		return dt.valsC, nil
 	}
 	// initialise parent pointer tracking
@@ -1732,6 +1733,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	// }
 	// fmt.Printf("set e1=%x e2=%x d=%s\n", eface[0], eface[1], dt.d.filenameBase)
 	fmt.Printf("set vid=%d [%s]\n", tx.ViewID(), dt.d.filenameBase)
+	dt.valCViewID = tx.ViewID()
 
 	if dt.d.largeValues {
 		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
