@@ -840,8 +840,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	TargetNumberOfPeers:          70,
 
 	// Electra
-	MinPerEpochChurnLimitElectra:          128000000000,
-	MaxPerEpochActivationExitChurnLimit:   256000000000,
+	MinPerEpochChurnLimitElectra:          128_000_000_000,
+	MaxPerEpochActivationExitChurnLimit:   256_000_000_000,
 	MaxDepositRequestsPerPayload:          8192,
 	MaxWithdrawalRequestsPerPayload:       16,
 	MaxConsolidationRequestsPerPayload:    1,
