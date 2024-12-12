@@ -263,22 +263,22 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		return doHistoryMap(consumer, cfg, ctx, in, workerCount, rws, logger)
 	})
 	g.Go(func() (err error) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
-			}
-		}()
-		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, rws)
+		//defer func() {
+		//	if rec := recover(); rec != nil {
+		//		err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
+		//	}
+		//}()
+		return doHistoryReduce(consumer, cfg.ChainDB, ctx, toTxNum, outputTxNum, rws)
 	})
 	return g
 }
 
-func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue) error {
+func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue) error {
 	//Reducer
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 
-	tx, err := cfg.ChainDB.BeginTemporalRo(ctx)
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		panic(err)
 		//return err
