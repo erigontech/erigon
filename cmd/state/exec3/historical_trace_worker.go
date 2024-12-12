@@ -469,17 +469,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				if err != nil {
 					return err
 				}
-
-				if sender, ok := txs[txIndex].GetSender(); ok {
-					txTask.Sender = &sender
-				} else {
-					sender, err := signer.Sender(txTask.Tx)
-					if err != nil {
-						return err
-					}
-					txTask.Sender = &sender
-					logger.Warn("[Execution] expensive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
-				}
 			}
 			if workersExited.Load() {
 				return workers.Wait()
