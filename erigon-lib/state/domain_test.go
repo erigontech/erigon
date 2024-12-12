@@ -621,6 +621,8 @@ func TestDomain_ScanFiles(t *testing.T) {
 func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	t.Parallel()
 
+	asserts = true
+
 	logger := log.New()
 	db, d := testDbAndDomain(t, logger)
 	ctx, require := context.Background(), require.New(t)
@@ -647,30 +649,29 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	defer tx.Rollback()
 
 	_, _, _, err = dc.GetLatest([]byte("key1"), tx)
+	require.NoError(err)
 
 	cursor, err := dc.valsCursor(tx)
 	require.NoError(err)
 	require.NotNil(cursor)
-	fmt.Printf("roolback\n")
 	tx.Rollback()
-	fmt.Printf("eroolback\n")
 
 	otherTx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer otherTx.Rollback()
 	//dc.valsC.Close()
 	//dc.valsC = nil
+
+	defer func() {
+		r := recover()
+		require.NotNil(r)
+		//re := r.(error)
+		//fmt.Println(re)
+		//require.ErrorIs(re, sdTxImmutabilityInvariant)
+	}()
+
 	_, _, _, err = dc.GetLatest([]byte("key1"), otherTx)
-
-	//defer func() {
-	//	r := recover()
-	//	require.NotNil(r)
-	//	re := r.(error)
-	//	fmt.Println(re)
-	//	require.ErrorIs(re, sdTxImmutabilityInvariant)
-	//}()
-
-	//dc.GetLatest([]byte("key1"), otherTx)
+	require.NoError(err)
 }
 
 func TestDomain_Delete(t *testing.T) {

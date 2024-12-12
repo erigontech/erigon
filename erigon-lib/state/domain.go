@@ -1715,36 +1715,25 @@ func (dt *DomainRoTx) closeValsCursor() {
 	}
 }
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	// eface := *(*[2]uintptr)(unsafe.Pointer(&tx))
-
 	if dt.valsC != nil { // run in assert mode only
-		if tx.ViewID() != dt.valCViewID {
-			// if !dt.vcParentPtr.CompareAndSwap(eface[1], eface[1]) { // cant swap when parent ptr is different
-			// panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
-			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
-		}
-		if dt.d.largeValues {
-			if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && mc.IsClosed() {
-				panic("domainRoTx lives longer than cursor (=> than tx opened that cursor)")
+		if asserts {
+			if tx.ViewID() != dt.valCViewID {
+				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", sdTxImmutabilityInvariant, dt.d.filenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
 			}
-		} else {
-			if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && mc.IsClosed() {
-				panic("domainRoTx lives longer than cursor (=> than tx opened that cursor)")
+			if dt.d.largeValues {
+				if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && mc.IsClosed() {
+					panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
+				}
+			} else {
+				if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && mc.IsClosed() {
+					panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than DupCursor (=> than tx opened that cursor)", dt.d.filenameBase))
+				}
 			}
 		}
-		//dt.closeValsCursor()
-
-		//fmt.Printf("cmp dvi=%d txvi=%d [%s] ptr %x\n", dt.valCViewID, tx.ViewID(), dt.d.filenameBase, dt.valsC)
 		return dt.valsC, nil
 	}
-	// initialise parent pointer tracking
-	// if !dt.vcParentPtr.CompareAndSwap(0, eface[1]) {
-	// 	panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.vcParentPtr.Load(), eface[1])) // cursor opened by different tx, invariant broken
-	// }
-	// fmt.Printf("set e1=%x e2=%x d=%s\n", eface[0], eface[1], dt.d.filenameBase)
-	//fmt.Printf("set vid=%d [%s]\n", tx.ViewID(), dt.d.filenameBase)
-	dt.valCViewID = tx.ViewID()
 
+	dt.valCViewID = tx.ViewID()
 	if dt.d.largeValues {
 		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
 		return dt.valsC, err
