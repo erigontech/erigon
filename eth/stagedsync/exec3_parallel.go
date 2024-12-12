@@ -607,9 +607,12 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				pe.doms.ClearRam(true)
 				t3 = time.Since(tt)
 
-				if err := pe.execStage.Update(tx, pe.outputBlockNum.GetValueUint64()); err != nil {
-					return err
+				if pe.execStage != nil {
+					if err := pe.execStage.Update(tx, pe.outputBlockNum.GetValueUint64()); err != nil {
+						return err
+					}
 				}
+
 				if _, err := rawdb.IncrementStateVersion(tx); err != nil {
 					return fmt.Errorf("writing plain state version: %w", err)
 				}
