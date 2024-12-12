@@ -14,7 +14,6 @@ import (
 	kzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	types2 "github.com/erigontech/erigon-lib/types"
 )
 
 var (
@@ -275,7 +274,7 @@ func (tx *ArbTx) ChainId() *big.Int {
 func (tx *ArbTx) Data() []byte { return tx.inner.GetData() }
 
 // AccessList returns the access list of the transaction.
-func (tx *ArbTx) AccessList() types2.AccessList { return tx.inner.GetAccessList() }
+func (tx *ArbTx) AccessList() AccessList { return tx.inner.GetAccessList() }
 
 // Gas returns the gas limit of the transaction.
 func (tx *ArbTx) Gas() uint64 { return tx.inner.GetGas() }
