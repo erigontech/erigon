@@ -1724,13 +1724,19 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 			panic(fmt.Errorf("%w: cursor parent tx %x; current tx %x", sdTxImmutabilityInvariant, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
 		}
 		if dt.d.largeValues {
-			if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && !mc.IsClosed() {
+			if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok {
+				if mc.IsClosed() {
+					panic("domainRoTx lives longer than cursor (=> than tx opened that cursor)")
+				}
 				//fmt.Printf("reuse %d closed=%t\n", tx.ViewID(), mc.IsClosed())
 				return mc, nil
 			}
 		} else {
-			if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && !mc.IsClosed() {
+			if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok {
 				//fmt.Printf("dsreuse %d closed=%t\n", tx.ViewID(), mc.IsClosed())
+				if mc.IsClosed() {
+					panic("domainRoTx lives longer than cursor (=> than tx opened that cursor)")
+				}
 				return mc, nil
 			}
 		}
