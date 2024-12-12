@@ -181,7 +181,7 @@ func customTraceBatch(ctx context.Context, cfg *exec3.ExecArgs, tx kv.TemporalRw
 		NewTracer: func() exec3.GenericTracer { return nil },
 		Reduce: func(txTask *state.TxTask, tx kv.Tx) (err error) {
 			if txTask.Error != nil {
-				return err
+				return txTask.Error
 			}
 
 			if txTask.Tx != nil {
