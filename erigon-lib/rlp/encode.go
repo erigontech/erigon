@@ -645,7 +645,7 @@ func EncodeUint256(i *uint256.Int, w io.Writer, buffer []byte) error {
 	return err
 }
 
-func EncodeString(s []byte, w io.Writer, buffer []byte) error {
+func EncodeBytes(s []byte, w io.Writer, buffer []byte) error {
 	switch len(s) {
 	case 0:
 		buffer[0] = 128
@@ -706,5 +706,22 @@ func EncodeOptionalAddress(addr *libcommon.Address, w io.Writer, buffer []byte) 
 		}
 	}
 
+	return nil
+}
+
+func EncodeStructSizePrefix(size int, w io.Writer, buffer []byte) error {
+	if size >= 56 {
+		beSize := libcommon.BitLenToByteLen(bits.Len(uint(size)))
+		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
+		buffer[8-beSize] = byte(beSize) + 247
+		if _, err := w.Write(buffer[8-beSize : 9]); err != nil {
+			return err
+		}
+	} else {
+		buffer[0] = byte(size) + 192
+		if _, err := w.Write(buffer[:1]); err != nil {
+			return err
+		}
+	}
 	return nil
 }

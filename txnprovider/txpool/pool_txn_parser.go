@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
-	rlp "github.com/erigontech/erigon-lib/rlp2"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 const (
@@ -160,7 +160,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if p >= len(payload) {
 			return 0, fmt.Errorf("%w: unexpected end of payload after txnType", ErrParseTxn)
 		}
-		dataPos, dataLen, err = rlp.List(payload, p)
+		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: envelope Prefix: %s", ErrParseTxn, err) //nolint
 		}
@@ -172,7 +172,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			p = dataPos
 			wrapperDataPos = dataPos
 			wrapperDataLen = dataLen
-			dataPos, dataLen, err = rlp.List(payload, dataPos)
+			dataPos, dataLen, err = rlp.ParseList(payload, dataPos)
 			if err != nil {
 				return 0, fmt.Errorf("%w: wrapped blob tx: %s", ErrParseTxn, err) //nolint
 			}
@@ -192,7 +192,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: unexpected leftover after blob txn body", ErrParseTxn)
 		}
 
-		dataPos, dataLen, err = rlp.List(payload, p)
+		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blobs len: %s", ErrParseTxn, err) //nolint
 		}
@@ -210,7 +210,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		p = blobPos
 
-		dataPos, dataLen, err = rlp.List(payload, p)
+		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: commitments len: %s", ErrParseTxn, err) //nolint
 		}
@@ -230,7 +230,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		p = commitmentPos
 
-		dataPos, dataLen, err = rlp.List(payload, p)
+		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: proofs len: %s", ErrParseTxn, err) //nolint
 		}
@@ -264,7 +264,7 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 	p = pos
 
 	// Parse V / yParity
-	p, err = rlp.U256(payload, p, &sig.V)
+	p, err = rlp.ParseU256(payload, p, &sig.V)
 	if err != nil {
 		return 0, 0, fmt.Errorf("v: %w", err)
 	}
@@ -295,12 +295,12 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 	}
 
 	// Next follows R of the signature
-	p, err = rlp.U256(payload, p, &sig.R)
+	p, err = rlp.ParseU256(payload, p, &sig.R)
 	if err != nil {
 		return 0, 0, fmt.Errorf("r: %w", err)
 	}
 	// New follows S of the signature
-	p, err = rlp.U256(payload, p, &sig.S)
+	p, err = rlp.ParseU256(payload, p, &sig.S)
 	if err != nil {
 		return 0, 0, fmt.Errorf("s: %w", err)
 	}
@@ -323,7 +323,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		if _, err = ctx.Keccak2.Write(typeByte); err != nil {
 			return 0, fmt.Errorf("%w: computing signHash (hashing type Prefix): %s", ErrParseTxn, err) //nolint
 		}
-		dataPos, dataLen, err := rlp.List(payload, p)
+		dataPos, dataLen, err := rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: envelope Prefix: %s", ErrParseTxn, err) //nolint
 		}
@@ -343,7 +343,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
 	if !legacy {
-		p, err = rlp.U256(payload, p, &ctx.ChainID)
+		p, err = rlp.ParseU256(payload, p, &ctx.ChainID)
 		if err != nil {
 			return 0, fmt.Errorf("%w: chainId len: %s", ErrParseTxn, err) //nolint
 		}
@@ -358,12 +358,12 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		}
 	}
 	// Next follows the nonce, which we need to parse
-	p, slot.Nonce, err = rlp.U64(payload, p)
+	p, slot.Nonce, err = rlp.ParseU64(payload, p)
 	if err != nil {
 		return 0, fmt.Errorf("%w: nonce: %s", ErrParseTxn, err) //nolint
 	}
 	// Next follows gas price or tip
-	p, err = rlp.U256(payload, p, &slot.Tip)
+	p, err = rlp.ParseU256(payload, p, &slot.Tip)
 	if err != nil {
 		return 0, fmt.Errorf("%w: tip: %s", ErrParseTxn, err) //nolint
 	}
@@ -372,18 +372,18 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	if slot.Type < DynamicFeeTxnType {
 		slot.FeeCap = slot.Tip
 	} else {
-		p, err = rlp.U256(payload, p, &slot.FeeCap)
+		p, err = rlp.ParseU256(payload, p, &slot.FeeCap)
 		if err != nil {
 			return 0, fmt.Errorf("%w: feeCap: %s", ErrParseTxn, err) //nolint
 		}
 	}
 	// Next follows gas
-	p, slot.Gas, err = rlp.U64(payload, p)
+	p, slot.Gas, err = rlp.ParseU64(payload, p)
 	if err != nil {
 		return 0, fmt.Errorf("%w: gas: %s", ErrParseTxn, err) //nolint
 	}
 	// Next follows the destination address (if present)
-	dataPos, dataLen, err := rlp.String(payload, p)
+	dataPos, dataLen, err := rlp.ParseString(payload, p)
 	if err != nil {
 		return 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err) //nolint
 	}
@@ -395,12 +395,12 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	slot.Creation = dataLen == 0
 	p = dataPos + dataLen
 	// Next follows value
-	p, err = rlp.U256(payload, p, &slot.Value)
+	p, err = rlp.ParseU256(payload, p, &slot.Value)
 	if err != nil {
 		return 0, fmt.Errorf("%w: value: %s", ErrParseTxn, err) //nolint
 	}
 	// Next goes data, but we are only interesting in its length
-	dataPos, dataLen, err = rlp.String(payload, p)
+	dataPos, dataLen, err = rlp.ParseString(payload, p)
 	if err != nil {
 		return 0, fmt.Errorf("%w: data len: %s", ErrParseTxn, err) //nolint
 	}
@@ -418,14 +418,14 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
 	if !legacy {
-		dataPos, dataLen, err = rlp.List(payload, p)
+		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: access list len: %s", ErrParseTxn, err) //nolint
 		}
 		tuplePos := dataPos
 		for tuplePos < dataPos+dataLen {
 			var tupleLen int
-			tuplePos, tupleLen, err = rlp.List(payload, tuplePos)
+			tuplePos, tupleLen, err = rlp.ParseList(payload, tuplePos)
 			if err != nil {
 				return 0, fmt.Errorf("%w: tuple len: %s", ErrParseTxn, err) //nolint
 			}
@@ -436,7 +436,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			}
 			slot.AlAddrCount++
 			var storagePos, storageLen int
-			storagePos, storageLen, err = rlp.List(payload, addrPos+20)
+			storagePos, storageLen, err = rlp.ParseList(payload, addrPos+20)
 			if err != nil {
 				return 0, fmt.Errorf("%w: storage key list len: %s", ErrParseTxn, err) //nolint
 			}
@@ -463,20 +463,20 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		p = dataPos + dataLen
 	}
 	if slot.Type == SetCodeTxnType {
-		dataPos, dataLen, err = rlp.List(payload, p)
+		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
 		}
 		authPos := dataPos
 		for authPos < dataPos+dataLen {
 			var authLen int
-			authPos, authLen, err = rlp.List(payload, authPos)
+			authPos, authLen, err = rlp.ParseList(payload, authPos)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization: %s", ErrParseTxn, err) //nolint
 			}
 			var sig Signature
 			p2 := authPos
-			p2, err = rlp.U256(payload, p2, &sig.ChainID)
+			p2, err = rlp.ParseU256(payload, p2, &sig.ChainID)
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization chainId: %s", ErrParseTxn, err) //nolint
 			}
@@ -489,7 +489,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err) //nolint
 			}
 			p2 += 20
-			p2, _, err = rlp.U64(payload, p2) // nonce
+			p2, _, err = rlp.ParseU64(payload, p2) // nonce
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization nonce: %s", ErrParseTxn, err) //nolint
 			}
@@ -509,11 +509,11 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 		p = dataPos + dataLen
 	}
 	if slot.Type == BlobTxnType {
-		p, err = rlp.U256(payload, p, &slot.BlobFeeCap)
+		p, err = rlp.ParseU256(payload, p, &slot.BlobFeeCap)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blob fee cap: %s", ErrParseTxn, err) //nolint
 		}
-		dataPos, dataLen, err = rlp.List(payload, p)
+		dataPos, dataLen, err = rlp.ParseList(payload, p)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blob hashes len: %s", ErrParseTxn, err) //nolint
 		}

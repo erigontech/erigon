@@ -75,12 +75,12 @@ func (li BlobKzgs) payloadSize() int {
 
 func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
 	for _, cmtmt := range li {
-		if err := rlp.EncodeString(cmtmt[:], w, b); err != nil {
+		if err := rlp.EncodeBytes(cmtmt[:], w, b); err != nil {
 			return err
 		}
 	}
@@ -125,12 +125,12 @@ func (li KZGProofs) payloadSize() int {
 
 func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
 	for _, proof := range li {
-		if err := rlp.EncodeString(proof[:], w, b); err != nil {
+		if err := rlp.EncodeBytes(proof[:], w, b); err != nil {
 			return err
 		}
 	}
@@ -179,12 +179,12 @@ func (blobs Blobs) payloadSize() int {
 
 func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
 	for _, blob := range blobs {
-		if err := rlp.EncodeString(blob[:], w, b); err != nil {
+		if err := rlp.EncodeBytes(blob[:], w, b); err != nil {
 			return err
 		}
 	}
