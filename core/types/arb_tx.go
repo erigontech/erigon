@@ -40,11 +40,12 @@ func getPooledBuffer(size uint64) ([]byte, *bytes.Buffer, error) {
 	return b, buf, nil
 }
 
-// Transaction is an Ethereum transaction.
+// ArbTx is an Arbitrum transaction.
 type ArbTx struct {
-	inner   Transaction // Consensus contents of a transaction
-	sidecar *BlobTxSidecar
-	time    time.Time // Time first seen locally (spam avoidance)
+	BlobTxWrapper
+	inner Transaction // Consensus contents of a transaction
+	// sidecar *BlobTxSidecar
+	time time.Time // Time first seen locally (spam avoidance)
 
 	// Arbitrum cache: must be atomically accessed
 	CalldataUnits uint64
@@ -98,19 +99,19 @@ func NewTx(inner Transaction) *ArbTx {
 //}
 
 // EncodeRLP implements rlp.Encoder
-func (tx *ArbTx) EncodeRLP(w io.Writer) error {
-	if tx.Type() == LegacyTxType {
-		return rlp.Encode(w, tx.inner)
-	}
-	// It's an EIP-2718 typed TX envelope.
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
-	if err := tx.encodeTyped(buf); err != nil {
-		return err
-	}
-	return rlp.Encode(w, buf.Bytes())
-}
+// func (tx *ArbTx) EncodeRLP(w io.Writer) error {
+// 	if tx.Type() == LegacyTxType {
+// 		return rlp.Encode(w, tx.inner)
+// 	}
+// 	// It's an EIP-2718 typed TX envelope.
+// 	buf := encodeBufferPool.Get().(*bytes.Buffer)
+// 	defer encodeBufferPool.Put(buf)
+// 	buf.Reset()
+// 	if err := tx.encodeTyped(buf); err != nil {
+// 		return err
+// 	}
+// 	return rlp.Encode(w, buf.Bytes())
+// }
 
 // encodeTyped writes the canonical encoding of a typed transaction to w.
 func (tx *ArbTx) encodeTyped(w *bytes.Buffer) error {
@@ -121,14 +122,14 @@ func (tx *ArbTx) encodeTyped(w *bytes.Buffer) error {
 // MarshalBinary returns the canonical encoding of the transaction.
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
-func (tx *ArbTx) MarshalBinary() ([]byte, error) {
-	if tx.Type() == LegacyTxType {
-		return rlp.EncodeToBytes(tx.inner)
-	}
-	var buf bytes.Buffer
-	err := tx.encodeTyped(&buf)
-	return buf.Bytes(), err
-}
+// func (tx *ArbTx) MarshalBinary() ([]byte, error) {
+// 	if tx.Type() == LegacyTxType {
+// 		return rlp.EncodeToBytes(tx.inner)
+// 	}
+// 	var buf bytes.Buffer
+// 	err := tx.encodeTyped(&buf)
+// 	return buf.Bytes(), err
+// }
 
 // DecodeRLP implements rlp.Decoder
 func (tx *ArbTx) DecodeRLP(s *rlp.Stream) error {
@@ -171,25 +172,25 @@ func (tx *ArbTx) DecodeRLP(s *rlp.Stream) error {
 
 // UnmarshalBinary decodes the canonical encoding of transactions.
 // It supports legacy RLP transactions and EIP-2718 typed transactions.
-func (tx *ArbTx) UnmarshalBinary(b []byte) error {
-	if len(b) > 0 && b[0] > 0x7f {
-		// It's a legacy transaction.
-		var data LegacyTx
-		err := rlp.DecodeBytes(b, &data)
-		if err != nil {
-			return err
-		}
-		tx.setDecoded(&data, uint64(len(b)))
-		return nil
-	}
-	// It's an EIP-2718 typed transaction envelope.
-	inner, err := tx.decodeTyped(b, false)
-	if err != nil {
-		return err
-	}
-	tx.setDecoded(inner, uint64(len(b)))
-	return nil
-}
+// func (tx *ArbTx) UnmarshalBinary(b []byte) error {
+// 	if len(b) > 0 && b[0] > 0x7f {
+// 		// It's a legacy transaction.
+// 		var data LegacyTx
+// 		err := rlp.DecodeBytes(b, &data)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		tx.setDecoded(&data, uint64(len(b)))
+// 		return nil
+// 	}
+// 	// It's an EIP-2718 typed transaction envelope.
+// 	inner, err := tx.decodeTyped(b, false)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	tx.setDecoded(inner, uint64(len(b)))
+// 	return nil
+// }
 
 // decodeTyped decodes a typed transaction from the canonical format.
 func (tx *ArbTx) decodeTyped(b []byte, arbParsing bool) (Transaction, error) {
@@ -407,11 +408,11 @@ func (tx *ArbTx) BlobHashes() []common.Hash {
 }
 
 // BlobTxSidecar returns the sidecar of a blob transaction, nil otherwise.
-func (tx *ArbTx) BlobTxSidecar() *BlobTxSidecar {
+func (tx *ArbTx) BlobTxSidecar() *BlobTxWrapper {
 	//if blobtx, ok := tx.inner.(*BlobTx); ok {
 	//	//return blobtx.Get
 	//}
-	return nil
+	return &tx.BlobTxWrapper
 }
 
 // BlobGasFeeCapCmp compares the blob fee cap of two transactions.
@@ -445,40 +446,41 @@ func (tx *ArbTx) BlobGasFeeCapIntCmp(other *big.Int) int {
 //}
 
 // BlobTxSidecar contains the blobs of a blob transaction.
-type BlobTxSidecar struct {
-	Blobs       []kzg4844.Blob          // Blobs needed by the blob pool
-	Commitments []kzg4844.KZGCommitment // Commitments needed by the blob pool
-	Proofs      []kzg4844.KZGProof      // Proofs needed by the blob pool
-}
+// type BlobTxSidecar struct {
+// 	Blobs       []kzg4844.Blob          // Blobs needed by the blob pool
+// 	Commitments []kzg4844.KZGCommitment // Commitments needed by the blob pool
+// 	Proofs      []kzg4844.KZGProof      // Proofs needed by the blob pool
+// }
 
-// BlobHashes computes the blob hashes of the given blobs.
-func (sc *BlobTxSidecar) BlobHashes() []common.Hash {
-	hasher := sha256.New()
-	h := make([]common.Hash, len(sc.Commitments))
-	for i := range sc.Blobs {
-		h[i] = kzg4844.CalcBlobHashV1(hasher, &sc.Commitments[i])
-	}
-	return h
-}
+// // BlobHashes computes the blob hashes of the given blobs.
+// func (sc *BlobTxSidecar) BlobHashes() []common.Hash {
+// 	hasher := sha256.New()
+// 	h := make([]common.Hash, len(sc.Commitments))
+// 	for i := range sc.Blobs {
+// 		h[i] = kzg4844.CalcBlobHashV1(hasher, &sc.Commitments[i])
+// 	}
+// 	return h
+// }
 
-// encodedSize computes the RLP size of the sidecar elements. This does NOT return the
-// encoded size of the BlobTxSidecar, it's just a helper for tx.Size().
-func (sc *BlobTxSidecar) encodedSize() uint64 {
-	var blobs, commitments, proofs uint64
-	for i := range sc.Blobs {
-		blobs += rlp.BytesSize(sc.Blobs[i][:])
-	}
-	for i := range sc.Commitments {
-		commitments += rlp.BytesSize(sc.Commitments[i][:])
-	}
-	for i := range sc.Proofs {
-		proofs += rlp.BytesSize(sc.Proofs[i][:])
-	}
-	return rlp.ListSize(blobs) + rlp.ListSize(commitments) + rlp.ListSize(proofs)
-}
+// // encodedSize computes the RLP size of the sidecar elements. This does NOT return the
+// // encoded size of the BlobTxSidecar, it's just a helper for tx.Size().
+// func (sc *BlobTxSidecar) encodedSize() uint64 {
+// 	var blobs, commitments, proofs uint64
+// 	for i := range sc.Blobs {
+// 		blobs += rlp.BytesSize(sc.Blobs[i][:])
+// 	}
+// 	for i := range sc.Commitments {
+// 		commitments += rlp.BytesSize(sc.Commitments[i][:])
+// 	}
+// 	for i := range sc.Proofs {
+// 		proofs += rlp.BytesSize(sc.Proofs[i][:])
+// 	}
+// 	return rlp.ListSize(blobs) + rlp.ListSize(commitments) + rlp.ListSize(proofs)
+// }
 
 // WithBlobTxSidecar returns a copy of tx with the blob sidecar added.
-func (tx *ArbTx) WithBlobTxSidecar(sideCar *BlobTxSidecar) *ArbTx {
+// TODO figure out how to add the sidecar
+func (tx *ArbTx) WithBlobTxSidecar(sideCar *BlobTxWrapper) *ArbTx {
 	//blobtx, ok := tx.inner.(*BlobTx)
 	//if !ok {
 	//	return tx
@@ -486,8 +488,8 @@ func (tx *ArbTx) WithBlobTxSidecar(sideCar *BlobTxSidecar) *ArbTx {
 	cpy := &ArbTx{
 		inner: tx.inner,
 		//inner: blobtx.withSidecar(sideCar),
-		sidecar: sideCar,
-		time:    tx.time,
+		// sidecar: sideCar,
+		time: tx.time,
 	}
 	// Note: tx.size cache not carried over because the sidecar is included in size!
 	if h := tx.hash.Load(); h != nil {
@@ -532,31 +534,31 @@ func (tx *ArbTx) Hash() common.Hash {
 
 // Size returns the true encoded storage size of the transaction, either by encoding
 // and returning it, or returning a previously cached value.
-func (tx *ArbTx) Size() uint64 {
-	if size := tx.size.Load(); size != nil {
-		return size.(uint64)
-	}
+// func (tx *ArbTx) Size() uint64 {
+// 	if size := tx.size.Load(); size != nil {
+// 		return size.(uint64)
+// 	}
 
-	// Cache miss, encode and cache.
-	// Note we rely on the assumption that all tx.inner values are RLP-encoded!
-	c := writeCounter(0)
-	rlp.Encode(&c, &tx.inner)
-	size := uint64(c)
+// 	// Cache miss, encode and cache.
+// 	// Note we rely on the assumption that all tx.inner values are RLP-encoded!
+// 	c := writeCounter(0)
+// 	rlp.Encode(&c, &tx.inner)
+// 	size := uint64(c)
 
-	// For blob transactions, add the size of the blob content and the outer list of the
-	// tx + sidecar encoding.
-	if sc := tx.BlobTxSidecar(); sc != nil {
-		size += rlp.ListSize(sc.encodedSize())
-	}
+// 	// For blob transactions, add the size of the blob content and the outer list of the
+// 	// tx + sidecar encoding.
+// 	if sc := tx.BlobTxSidecar(); sc != nil {
+// 		size += rlp.ListSize(sc.encodedSize())
+// 	}
 
-	// For typed transactions, the encoding also includes the leading type byte.
-	if tx.Type() != LegacyTxType {
-		size += 1
-	}
+// 	// For typed transactions, the encoding also includes the leading type byte.
+// 	if tx.Type() != LegacyTxType {
+// 		size += 1
+// 	}
 
-	tx.size.Store(size)
-	return size
-}
+// 	tx.size.Store(size)
+// 	return size
+// }
 
 // WithSignature returns a new transaction with the given signature.
 // This signature needs to be in the [R || S || V] format where V is 0 or 1.

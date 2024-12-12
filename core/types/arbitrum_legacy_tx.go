@@ -13,7 +13,7 @@ type ArbitrumLegacyTxData struct {
 	HashOverride      common.Hash // Hash cannot be locally computed from other fields
 	EffectiveGasPrice uint64
 	L1BlockNumber     uint64
-	Sender            *common.Address `rlp:"optional,nil"` // only used in unsigned Txs
+	// Sender            *common.Address `rlp:"optional,nil"` // only used in unsigned Txs
 }
 
 func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effectiveGas uint64, l1Block uint64, senderOverride *common.Address) (Transaction, error) {
@@ -26,24 +26,24 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 		HashOverride:      hashOverride,
 		EffectiveGasPrice: effectiveGas,
 		L1BlockNumber:     l1Block,
-		Sender:            senderOverride,
+		// Sender:            senderOverride,
 	}
 	return NewTx(&inner), nil
 }
 
 func (tx *ArbitrumLegacyTxData) copy() *ArbitrumLegacyTxData {
 	legacyCopy := tx.LegacyTx.copy()
-	var sender *common.Address
-	if tx.Sender != nil {
-		sender = new(common.Address)
-		*sender = *tx.Sender
-	}
+	// var sender *common.Address
+	// if tx.Sender != nil {
+	// sender = new(common.Address)
+	// *sender = *tx.Sender
+	// }
 	return &ArbitrumLegacyTxData{
 		LegacyTx:          *legacyCopy,
 		HashOverride:      tx.HashOverride,
 		EffectiveGasPrice: tx.EffectiveGasPrice,
 		L1BlockNumber:     tx.L1BlockNumber,
-		Sender:            sender,
+		// Sender:            sender,
 	}
 }
 
