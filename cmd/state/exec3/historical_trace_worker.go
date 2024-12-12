@@ -263,11 +263,11 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		return doHistoryMap(consumer, cfg, ctx, in, workerCount, rws, logger)
 	})
 	g.Go(func() (err error) {
-		//defer func() {
-		//	if rec := recover(); rec != nil {
-		//		err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
-		//	}
-		//}()
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
+			}
+		}()
 		return doHistoryReduce(consumer, cfg.ChainDB, ctx, toTxNum, outputTxNum, rws)
 	})
 	return g
