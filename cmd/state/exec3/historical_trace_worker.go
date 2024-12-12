@@ -280,10 +280,6 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 }
 
 func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue) error {
-	//Reducer
-	logEvery := time.NewTicker(1 * time.Second)
-	defer logEvery.Stop()
-
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -304,11 +300,6 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 		if processedTxNum > 0 {
 			outputTxNum.Store(processedTxNum)
 		}
-		//select {
-		//case <-logEvery.C:
-		//	log.Info("[dbg] rws", "rws_ch_len", rws.ResultChLen(), "rws_q_len", rws.Len())
-		//default:
-		//}
 	}
 	return nil
 }
