@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 	"unsafe"

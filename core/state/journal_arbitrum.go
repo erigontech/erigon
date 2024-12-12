@@ -28,8 +28,9 @@ type CacheWasm struct {
 	Debug      bool
 }
 
-func (ch CacheWasm) revert(*IntraBlockState) {
+func (ch CacheWasm) revert(*IntraBlockState) error {
 	EvictWasmRust(ch.ModuleHash, ch.Version, ch.Tag, ch.Debug)
+	return nil
 }
 
 func (ch CacheWasm) dirtied() *common.Address {
@@ -43,12 +44,13 @@ type EvictWasm struct {
 	Debug      bool
 }
 
-func (ch EvictWasm) revert(s *IntraBlockState) {
+func (ch EvictWasm) revert(s *IntraBlockState) error {
 	asm, err := s.TryGetActivatedAsm(rawdb.LocalTarget(), ch.ModuleHash) // only happens in native mode
 	if err == nil && len(asm) != 0 {
 		//if we failed to get it - it's not in the current rust cache
 		CacheWasmRust(asm, ch.ModuleHash, ch.Version, ch.Tag, ch.Debug)
 	}
+	return err
 }
 
 func (ch EvictWasm) dirtied() *common.Address {

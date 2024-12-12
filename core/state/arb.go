@@ -71,7 +71,7 @@ func (s *IntraBlockState) TryGetActivatedAsm(target ethdb.WasmTarget, moduleHash
 			return asm, nil
 		}
 	}
-	return s.db.ActivatedAsm(target, moduleHash)
+	return s.ActivatedAsm(target, moduleHash)
 }
 
 func (s *IntraBlockState) TryGetActivatedAsmMap(targets []ethdb.WasmTarget, moduleHash common.Hash) (map[ethdb.WasmTarget][]byte, error) {
