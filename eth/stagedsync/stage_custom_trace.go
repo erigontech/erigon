@@ -48,7 +48,7 @@ type CustomTraceCfg struct {
 	execArgs *exec3.ExecArgs
 }
 
-func StageCustomTraceCfg(db kv.RwDB, prune prune.Mode, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config,
+func StageCustomTraceCfg(db kv.TemporalRwDB, prune prune.Mode, dirs datadir.Dirs, br services.FullBlockReader, cc *chain.Config,
 	engine consensus.Engine, genesis *types.Genesis, syncCfg *ethconfig.Sync) CustomTraceCfg {
 	execArgs := &exec3.ExecArgs{
 		ChainDB:     db,

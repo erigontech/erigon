@@ -16,6 +16,8 @@
 
 package stream
 
+import "errors"
+
 // Streams - it's iterator-like composable high-level abstraction - which designed for inter-process communication and between processes:
 //  - cancelable
 //  - return errors
@@ -37,6 +39,10 @@ package stream
 //   4. automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
 //     check in loops on stream. Duo has very limited API - user has no way to
 //     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
+
+// Indicates the iterator has no more elements. Meant to be returned by implementations of Next()
+// when there are no more elements.
+var ErrIteratorExhausted = errors.New("iterator exhausted")
 
 // Uno - return 1 item. Example:
 //

@@ -56,12 +56,12 @@ type ErigonAPI interface {
 // ErigonImpl is implementation of the ErigonAPI interface
 type ErigonImpl struct {
 	*BaseAPI
-	db         kv.RoDB
+	db         kv.TemporalRoDB
 	ethBackend rpchelper.ApiBackend
 }
 
 // NewErigonAPI returns ErigonImpl instance
-func NewErigonAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend) *ErigonImpl {
+func NewErigonAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend) *ErigonImpl {
 	return &ErigonImpl{
 		BaseAPI:    base,
 		db:         db,

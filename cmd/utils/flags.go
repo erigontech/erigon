@@ -868,7 +868,7 @@ var (
 		Value: cli.NewStringSlice(),
 	}
 	CaplinSubscribeAllTopicsFlag = cli.BoolFlag{
-		Name:  "caplin.subscibe-all-topics",
+		Name:  "caplin.subscribe-all-topics",
 		Usage: "Subscribe to all gossip topics",
 		Value: false,
 	}
@@ -885,7 +885,7 @@ var (
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
-		Value: 64,
+		Value: 80,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{

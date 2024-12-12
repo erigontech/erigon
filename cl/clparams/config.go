@@ -105,11 +105,12 @@ const (
 )
 
 const (
-	MaxDialTimeout               = 15 * time.Second
-	VersionLength  int           = 4
-	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
-	ReqTimeout     time.Duration = 10 * time.Second
-	RespTimeout    time.Duration = 15 * time.Second
+	MaxDialTimeout     = 15 * time.Second
+	VersionLength  int = 4
+	// 15 MiB
+	MaxChunkSize uint64        = 15728640
+	ReqTimeout   time.Duration = 10 * time.Second
+	RespTimeout  time.Duration = 15 * time.Second
 )
 
 const (
@@ -210,8 +211,8 @@ type NetworkConfig struct {
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
 	MainnetNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
+		GossipMaxSize:                   15728640,
+		GossipMaxSizeBellatrix:          15728640,
 		MaxChunkSize:                    MaxChunkSize,
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
@@ -229,9 +230,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	SepoliaNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		GossipMaxSize:                   15728640,
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    15728640,
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
@@ -248,9 +249,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	GnosisNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		GossipMaxSize:                   15728640, // 15 MiB
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    15728640, // 15 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
@@ -267,9 +268,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	ChiadoNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		GossipMaxSize:                   15728640, // 15 MiB
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    15728640, // 15 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
@@ -286,9 +287,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 	},
 
 	HoleskyNetwork: {
-		GossipMaxSize:                   1 << 20, // 1 MiB
-		GossipMaxSizeBellatrix:          10485760,
-		MaxChunkSize:                    1 << 20, // 1 MiB
+		GossipMaxSize:                   15728640, // 15 MiB
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    15728640, // 15 MiB
 		AttestationSubnetCount:          64,
 		AttestationPropagationSlotRange: 32,
 		MaxRequestBlocks:                1 << 10, // 1024
@@ -531,11 +532,10 @@ type BeaconChainConfig struct {
 	MinSyncCommitteeParticipants uint64 `yaml:"MIN_SYNC_COMMITTEE_PARTICIPANTS" spec:"true" json:"MIN_SYNC_COMMITTEE_PARTICIPANTS,string"` // MinSyncCommitteeParticipants defines the minimum amount of sync committee participants for which the light client acknowledges the signature.
 
 	// Bellatrix
-	TerminalBlockHash                libcommon.Hash    `yaml:"TERMINAL_BLOCK_HASH" spec:"true" json:"TERMINAL_BLOCK_HASH"`                                          // TerminalBlockHash of beacon chain.
-	TerminalBlockHashActivationEpoch uint64            `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true" json:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH,string"` // TerminalBlockHashActivationEpoch of beacon chain.
-	TerminalTotalDifficulty          string            `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"  json:"TERMINAL_TOTAL_DIFFICULTY"`                             // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
-	DefaultFeeRecipient              libcommon.Address `json:"-"`                                                                                                   // DefaultFeeRecipient where the transaction fee goes to.
-	DefaultBuilderGasLimit           uint64            `json:"-"`                                                                                                   // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
+	TerminalBlockHash                libcommon.Hash `yaml:"TERMINAL_BLOCK_HASH" spec:"true" json:"TERMINAL_BLOCK_HASH"`                                          // TerminalBlockHash of beacon chain.
+	TerminalBlockHashActivationEpoch uint64         `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true" json:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH,string"` // TerminalBlockHashActivationEpoch of beacon chain.
+	TerminalTotalDifficulty          string         `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"  json:"TERMINAL_TOTAL_DIFFICULTY"`                             // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
+	DefaultBuilderGasLimit           uint64         `json:"-"`                                                                                                   // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
 
 	// Mev-boost circuit breaker
 	MaxBuilderConsecutiveMissedSlots uint64 `json:"-"` // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
@@ -804,7 +804,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	TerminalBlockHashActivationEpoch: 18446744073709551615,
 	TerminalBlockHash:                [32]byte{},
 	TerminalTotalDifficulty:          "58750000000000000000000", // Estimated: Sept 15, 2022
-	DefaultBuilderGasLimit:           uint64(30000000),
+	DefaultBuilderGasLimit:           uint64(36000000),
 
 	// Mevboost circuit breaker
 	MaxBuilderConsecutiveMissedSlots: 3,
