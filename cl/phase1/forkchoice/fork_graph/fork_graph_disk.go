@@ -260,6 +260,19 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 
+	dumpssz := func(obj solid.EncodableHashableSSZ, name string) {
+		buf := make([]byte, 0, obj.EncodingSizeSSZ())
+		bytes, err := obj.EncodeSSZ(buf)
+		if err != nil {
+			log.Warn("Could not marshal object", "name", name, "err", err)
+			return
+		}
+		err = afero.WriteFile(f.fs, name, bytes, 0644)
+		if err != nil {
+			log.Warn("Could not write file", "name", name, "err", err)
+		}
+	}
+
 	if !isBlockRootTheCurrentState {
 		// Execute the state
 		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
