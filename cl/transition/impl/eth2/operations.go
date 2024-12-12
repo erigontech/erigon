@@ -1065,7 +1065,6 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 }
 
 func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.WithdrawalRequest) error {
-	log.Info("Processing withdrawal request", "slot", s.Slot())
 	var (
 		amount            = req.Amount
 		isFullExitRequest = req.Amount == FullExitRequestAmount
@@ -1073,7 +1072,6 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	)
 	// If partial withdrawal queue is full, only full exits are processed
 	if uint64(s.GetPendingPartialWithdrawals().Len()) >= s.BeaconConfig().PendingPartialWithdrawalsLimit && !isFullExitRequest {
-		log.Debug("Partial withdrawal queue is full, ignoring withdrawal request", "slot", s.Slot(), "req.Amount", req.Amount, "fullExitRequestAmount", FullExitRequestAmount)
 		return nil
 	}
 	// Verify pubkey exists
@@ -1090,22 +1088,18 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	wc := validator.WithdrawalCredentials()
 	isCorrectSourceAddress := bytes.Equal(req.SourceAddress[:], wc[12:])
 	if !(isCorrectSourceAddress && hasCorrectCredential) {
-		log.Debug("Withdrawal credentials are incorrect, ignoring withdrawal request", "slot", s.Slot(), "isCorrectSourceAddress", isCorrectSourceAddress, "hasCorrectCredential", hasCorrectCredential)
 		return nil
 	}
 	// check validator is active
 	if !validator.Active(state.Epoch(s)) {
-		log.Debug("Validator is not active, ignoring withdrawal request", "slot", s.Slot())
 		return nil
 	}
 	// Verify exit has not been initiated
 	if validator.ExitEpoch() != s.BeaconConfig().FarFutureEpoch {
-		log.Debug("Exit has already been initiated, ignoring withdrawal request", "slot", s.Slot())
 		return nil
 	}
 	// Verify the validator has been active long enough
 	if state.Epoch(s) < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
-		log.Debug("Validator has not been active long enough, ignoring withdrawal request", "slot", s.Slot(), "activationEpoch", validator.ActivationEpoch())
 		return nil
 	}
 	pendingBalanceToWithdraw := getPendingBalanceToWithdraw(s, vindex)
@@ -1124,13 +1118,12 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	hasExcessBalance := vbalance > s.BeaconConfig().MinActivationBalance+pendingBalanceToWithdraw
 	// Only allow partial withdrawals with compounding withdrawal credentials
 	if state.HasCompoundingWithdrawalCredential(validator, s.BeaconConfig()) && hasSufficientEffectiveBalance && hasExcessBalance {
-		log.Debug("Processing partial withdrawal request", "slot", s.Slot(), "effectiveBalance", validator.EffectiveBalance(),
-			"vbalance", vbalance, "pendingBalanceToWithdraw", pendingBalanceToWithdraw, "amount", amount)
 		toWithdraw := min(
 			vbalance-s.BeaconConfig().MinActivationBalance-pendingBalanceToWithdraw,
 			amount,
 		)
-		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(validator.EffectiveBalance())
+		//exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(validator.EffectiveBalance()) mekong alpha9
+		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(toWithdraw)
 		withdrawableEpoch := exitQueueEpoch + s.BeaconConfig().MinValidatorWithdrawabilityDelay
 		s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{
 			Index:             vindex,
@@ -1138,7 +1131,6 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 			WithdrawableEpoch: withdrawableEpoch,
 		})
 	}
-	log.Debug("Processed withdrawal request", "slot", s.Slot())
 	return nil
 }
 
@@ -1218,16 +1210,16 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		return nil
 	}
 	// Verify the source has been active long enough
-	// ??? what ? why ? For passing the mekong test, we need to remove this check
+	// mekong alpha9
 	/*if curEpoch < sourceValidator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
 		log.Info("[Consolidation] Source has not been active long enough, ignoring consolidation request", "slot", s.Slot(), "curEpoch", curEpoch, "activationEpoch", sourceValidator.ActivationEpoch())
 		return nil
-	}*/
+	}
 	// Verify the source has no pending withdrawals in the queue
 	if getPendingBalanceToWithdraw(s, sourceIndex) > 0 {
 		log.Info("[Consolidation] Source has pending withdrawals, ignoring consolidation request", "slot", s.Slot())
 		return nil
-	}
+	}*/
 
 	// Initiate source validator exit and append pending consolidation
 	sourceValidator.SetExitEpoch(computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance()))
