@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,10 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"sync"
+
 	"github.com/ledgerwatch/erigon/zk/datastream/proto/github.com/0xPolygonHermez/zkevm-node/state/datastream"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/log/v3"
-	"sync"
 )
 
 type StreamType uint64
@@ -68,6 +70,9 @@ type StreamClient struct {
 
 	lastError error
 	started   bool
+
+	useTLS    bool
+	tlsConfig *tls.Config
 }
 
 const (
@@ -84,7 +89,7 @@ const (
 
 // Creates a new client fo datastream
 // server must be in format "url:port"
-func NewClient(ctx context.Context, server string, version int, checkTimeout time.Duration, latestDownloadedForkId uint16) *StreamClient {
+func NewClient(ctx context.Context, server string, useTLS bool, version int, checkTimeout time.Duration, latestDownloadedForkId uint16) *StreamClient {
 	c := &StreamClient{
 		ctx:          ctx,
 		checkTimeout: checkTimeout,
@@ -94,7 +99,16 @@ func NewClient(ctx context.Context, server string, version int, checkTimeout tim
 		entryChan:    make(chan interface{}, 100000),
 		currentFork:  uint64(latestDownloadedForkId),
 		mtxStreaming: &sync.Mutex{},
+		useTLS:       useTLS,
+		tlsConfig:    &tls.Config{},
 	}
+
+	// Extract hostname from server address (removing port if present)
+	host, _, err := net.SplitHostPort(c.server)
+	if err != nil {
+		host = c.server // If no port was specified, use the full server string
+	}
+	c.tlsConfig.ServerName = host
 
 	return c
 }
@@ -282,9 +296,12 @@ func (c *StreamClient) GetProgressAtomic() *atomic.Uint64 {
 
 // Opens a TCP connection to the server
 func (c *StreamClient) Start() error {
-	// Connect to server
 	var err error
-	c.conn, err = net.Dial("tcp", c.server)
+	if c.useTLS {
+		c.conn, err = tls.Dial("tcp", c.server, c.tlsConfig)
+	} else {
+		c.conn, err = net.Dial("tcp", c.server)
+	}
 	if err != nil {
 		return fmt.Errorf("connecting to server %s: %w", c.server, err)
 	}

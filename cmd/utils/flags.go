@@ -415,6 +415,11 @@ var (
 		Usage: "L2 datastreamer endpoint",
 		Value: "",
 	}
+	L2DataStreamerUseTLSFlag = cli.BoolFlag{
+		Name:  "zkevm.l2-datastreamer-use-tls",
+		Usage: "Use TLS connection to L2 datastreamer endpoint",
+		Value: false,
+	}
 	L2DataStreamerTimeout = cli.StringFlag{
 		Name:  "zkevm.l2-datastreamer-timeout",
 		Usage: "The time to wait for data to arrive from the stream before reporting an error (0s doesn't check)",

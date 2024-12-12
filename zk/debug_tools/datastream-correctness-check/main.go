@@ -19,7 +19,7 @@ func main() {
 	}
 
 	// Create client
-	client := client.NewClient(ctx, cfg.Datastream, 3, 500, 0)
+	client := client.NewClient(ctx, cfg.Datastream, false, 3, 500, 0)
 
 	// Start client (connect to the server)
 	defer client.Stop()
