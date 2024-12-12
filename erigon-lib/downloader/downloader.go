@@ -2294,7 +2294,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.lock.Unlock()
 
 	if !stats.Completed {
-		log.Info("[1snapshots] downloading",
+		log.Info("[snapshots] downloading",
 			"len", len(torrents),
 			"webTransfers", webTransfers,
 			"torrent", torrentInfo,
@@ -2377,12 +2377,12 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 		if peerUrl, err := webPeerUrl(peer); err == nil {
 			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
 				rate := uint64(peer.DownloadRate())
-				//upRate := uint64(peer.UploadRate()) - TODO: uncomment when torrent lib wil be fixed
+				upRate := uint64(peer.UploadRate())
 				if !finished {
 					seed := diagnostics.SegmentPeer{
 						Url:          peerUrl.Host,
 						DownloadRate: rate,
-						UploadRate:   0,
+						UploadRate:   upRate,
 						RemoteAddr:   peer.RemoteAddr.String(),
 						PeerId:       [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 						PiecesCount:  0,
@@ -2410,13 +2410,13 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 
 	for _, peer := range peersOfThisFile {
 		dr := uint64(peer.DownloadRate())
-		//ur := uint64(peer.UploadRate()) - TODO: uncomment when torrent lib wil be fixed
+		ur := uint64(peer.UploadRate())
 		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
 
 		segPeer := diagnostics.SegmentPeer{
 			Url:          url,
 			DownloadRate: dr,
-			UploadRate:   0,
+			UploadRate:   ur,
 			PiecesCount:  peer.PeerPieces().GetCardinality(),
 			RemoteAddr:   peer.RemoteAddr.String(),
 			PeerId:       peer.PeerID,
