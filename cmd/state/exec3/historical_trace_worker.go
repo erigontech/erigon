@@ -332,10 +332,12 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
-	var i int
 	outputTxNum = outputTxNumIn
 	for rwsIt.HasNext(outputTxNum) {
 		txTask := rwsIt.PopNext()
+		outputTxNum++
+		stopedAtBlockEnd = txTask.Final
+
 		if txTask.Error != nil {
 			return outputTxNum, false, txTask.Error
 		}
@@ -343,14 +345,10 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 		if txTask.TxIndex >= 0 && !txTask.Final {
 			txTask.CreateReceipt(tx)
 		}
-
 		if err := consumer.Reduce(txTask, tx); err != nil {
 			return outputTxNum, false, err
 		}
 
-		i++
-		outputTxNum++
-		stopedAtBlockEnd = txTask.Final
 		if forceStopAtBlockEnd && txTask.Final {
 			break
 		}
