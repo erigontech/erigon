@@ -246,63 +246,44 @@ type ExecArgs struct {
 }
 
 func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
-	g := &errgroup.Group{}
+	g, ctx := errgroup.WithContext(ctx)
+
+	// can afford big limits - because historical execution doesn't need conflicts-resolution
+	resultChannelLimit := workerCount * 16
+	heapLimit := workerCount * 16
+	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
+
 	g.Go(func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
 			}
 		}()
-		return NewHistoricalTraceWorkers2(consumer, cfg, ctx, toTxNum, in, workerCount, outputTxNum, logger)
+		defer rws.Close()
+		return doHistoryMap(consumer, cfg, ctx, in, workerCount, rws, logger)
+	})
+	g.Go(func() (err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
+			}
+		}()
+		return doHistoryReduce(consumer, cfg, ctx, toTxNum, outputTxNum, rws)
 	})
 	return g
 }
 
-func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) error {
-	workers := make([]*HistoricalTraceWorker, workerCount)
-
-	// can afford big limits - because historical execution doesn't need conflicts-resolution
-	resultChannelLimit := workerCount * 16
-	heapLimit := workerCount * 16
-
-	var mapGroup *errgroup.Group
-	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
-	{
-		mapGroup, ctx = errgroup.WithContext(ctx)
-		// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
-		// and in applyLoop all errors are critical
-		for i := 0; i < workerCount; i++ {
-			i := i
-			workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
-			mapGroup.Go(func() error {
-				return workers[i].Run()
-			})
-		}
-		defer func() {
-			mapGroup.Wait()
-			for _, w := range workers {
-				w.ResetTx(nil)
-			}
-		}()
-		go func() {
-			mapGroup.Wait()
-			log.Warn("mapGroup.Wait() done")
-			rws.Close()
-			log.Warn("rws.Close() done")
-		}()
-	}
-
+func doHistoryReduce(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue) error {
 	//Reducer
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 
-	tx, err := cfg.ChainDB.BeginRo(ctx)
+	tx, err := cfg.ChainDB.BeginTemporalRo(ctx)
 	if err != nil {
 		panic(err)
 		//return err
 	}
 	defer tx.Rollback()
-	ttx := tx.(kv.TemporalTx)
 
 	var rwsClosed bool
 	for outputTxNum.Load() <= toTxNum && !rwsClosed {
@@ -311,7 +292,7 @@ func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx conte
 			return err
 		}
 
-		processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), ttx, true)
+		processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), tx, true)
 		if err != nil {
 			return fmt.Errorf("processResultQueueHistorical: %w", err)
 		}
@@ -325,6 +306,26 @@ func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx conte
 		//default:
 		//}
 	}
+	return nil
+}
+func doHistoryMap(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, in *state.QueueWithRetry, workerCount int, rws *state.ResultsQueue, logger log.Logger) error {
+	workers := make([]*HistoricalTraceWorker, workerCount)
+	mapGroup, ctx := errgroup.WithContext(ctx)
+	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
+	// and in applyLoop all errors are critical
+	for i := 0; i < workerCount; i++ {
+		i := i
+		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
+		mapGroup.Go(func() error {
+			return workers[i].Run()
+		})
+	}
+	defer func() {
+		mapGroup.Wait()
+		for _, w := range workers {
+			w.ResetTx(nil)
+		}
+	}()
 	return mapGroup.Wait()
 }
 
