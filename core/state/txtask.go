@@ -448,6 +448,7 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 	return nil
 }
 
+// DrainNonBlocking - does drain batch of results to heap. Immediately stops at `q.limit` or if nothing to drain
 func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) (closed bool, err error) {
 	return q.drainNoBlock(ctx, nil)
 }

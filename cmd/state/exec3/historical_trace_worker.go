@@ -304,6 +304,7 @@ func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Con
 		if processedTxNum > 0 {
 			outputTxNum.Store(processedTxNum)
 		}
+		panic(1)
 		//select {
 		//case <-logEvery.C:
 		//	log.Info("[dbg] rws", "rws_ch_len", rws.ResultChLen(), "rws_q_len", rws.Len())
