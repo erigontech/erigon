@@ -1,8 +1,6 @@
 package types
 
 import (
-	"math/big"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/holiman/uint256"
 )
