@@ -425,6 +425,8 @@ type blockExecStatus struct {
 
 	// Stores the execution statistics for the last incarnation of each task
 	stats map[int]ExecutionStat
+
+	result *blockResult
 }
 
 type parallelExecutor struct {

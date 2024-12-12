@@ -18,7 +18,7 @@ type ExecutionStat struct {
 }
 
 // Find the longest execution path in the DAG
-func LongestPath(d state.DAG, stats map[int]ExecutionStat) ([]int, uint64) {
+func LongestPath(d *state.DAG, stats map[int]ExecutionStat) ([]int, uint64) {
 	prev := make(map[int]int, len(d.GetVertices()))
 
 	for i := 0; i < len(d.GetVertices()); i++ {
@@ -70,7 +70,7 @@ func LongestPath(d state.DAG, stats map[int]ExecutionStat) ([]int, uint64) {
 	return path, maxPathWeight
 }
 
-func Report(d state.DAG, stats map[int]ExecutionStat, out func(string)) {
+func Report(d *state.DAG, stats map[int]ExecutionStat, out func(string)) {
 	longestPath, weight := LongestPath(d, stats)
 
 	serialWeight := uint64(0)

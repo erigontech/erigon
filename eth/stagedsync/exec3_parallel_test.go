@@ -99,7 +99,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	// Sleep for 50 microsecond to simulate setup time
 	sleep(time.Microsecond * 50)
 
-	version := state.Version{TxIndex: t.Version().TxIndex, Incarnation: incarnation}
+	version := t.Version()
 
 	t.readMap = make(map[state.VersionKey]state.VersionedRead)
 	t.writeMap = make(map[state.VersionKey]state.VersionedWrite)
@@ -116,7 +116,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 				continue
 			}
 
-			result := t.VersionMap().Read(k, t.Version().TxIndex)
+			result := t.VersionMap().Read(k, version.TxIndex)
 
 			val := result.Value()
 
@@ -457,7 +457,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	result, err := executeParallelWithCheck(context.Background(), tasks, false, validation, metadata, log.Root())
 
 	if result.Deps != nil && profile {
-		result.Deps.Report(*result.Stats, func(str string) { fmt.Println(str) })
+		Report(result.Deps, *result.Stats, func(str string) { fmt.Println(str) })
 	}
 
 	assert.NoError(t, err, "error occur during parallel execution")
@@ -488,38 +488,26 @@ type propertyCheck func(*parallelExecutor) error
 
 func executeParallelWithCheck(interruptCtx context.Context, tasks []exec.Task, profile bool, check propertyCheck, metadata bool, logger log.Logger) (result blockResult, err error) {
 	if len(tasks) == 0 {
-		return blockResult{MakeTxnInputOutput(len(tasks)), nil, nil, nil}, nil
+		return blockResult{}, nil
 	}
 
-	pe := NewParallelExecutor(tasks, profile, metadata)
-	err = pe.Prepare(logger)
+	pe := &parallelExecutor{
+		txExecutor: txExecutor{},
+	}
+
+	executorCancel := pe.run(interruptCtx, 100, logger)
+	defer executorCancel()
+
+	_, err = pe.execute(interruptCtx, tasks)
 
 	if err != nil {
-		pe.Close(true)
 		return
 	}
 
-	for range pe.chResults {
-		if interruptCtx != nil && interruptCtx.Err() != nil {
-			pe.Close(true)
-			return result, interruptCtx.Err()
-		}
+	pe.wait(interruptCtx)
 
-		res := pe.resultQueue.Pop().(ExecResult)
-
-		result, err = pe.Step(&res)
-
-		if err != nil {
-			return result, err
-		}
-
-		if check != nil {
-			err = check(pe)
-		}
-
-		if result.TxIO != nil || err != nil {
-			return result, err
-		}
+	if check != nil {
+		err = check(pe)
 	}
 
 	return
@@ -914,10 +902,10 @@ func TestDexScenario(t *testing.T) {
 	postValidation := func(pe *parallelExecutor) error {
 		for blockNum, blockStatus := range pe.blockStatus {
 			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
-				for i, inputs := range blockStatus.lastTxIO.inputs {
+				for i, inputs := range blockStatus.result.TxIO.Inputs() {
 					for _, input := range inputs {
-						if input.V.TxnIndex != i-1 {
-							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.V.TxnIndex)
+						if input.V.TxIndex != i-1 {
+							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.V.TxIndex)
 						}
 					}
 				}
@@ -951,10 +939,10 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 	postValidation := func(pe *parallelExecutor) error {
 		for blockNum, blockStatus := range pe.blockStatus {
 			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
-				for i, inputs := range blockStatus.LastTxIO.inputs {
+				for i, inputs := range blockStatus.result.TxIO.Inputs() {
 					for _, input := range inputs {
-						if input.V.TxnIndex != i-1 {
-							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.V.TxnIndex)
+						if input.V.TxIndex != i-1 {
+							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.V.TxIndex)
 						}
 					}
 				}

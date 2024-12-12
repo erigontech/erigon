@@ -128,6 +128,10 @@ type VersionedIO struct {
 	allOutputs []VersionedWrites // entire write sets in MVHashMap. allOutputs should always be a parent set of outputs
 }
 
+func (io *VersionedIO) Inputs() []VersionedReads {
+	return io.inputs
+}
+
 func (io *VersionedIO) ReadSet(txnIdx int) []VersionedRead {
 	if len(io.inputs) <= txnIdx {
 		return nil
