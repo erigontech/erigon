@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/common"
 )
 
 func BenchmarkCutOriginal(b *testing.B) {
@@ -45,6 +44,6 @@ func BenchmarkCutsetterFn(b *testing.B) {
 func BenchmarkCutCustomTrim(b *testing.B) {
 	value := libcommon.HexToHash("0x01")
 	for i := 0; i < b.N; i++ {
-		common.TrimLeftZeroes(value[:])
+		libcommon.TrimLeftZeroes(value[:])
 	}
 }

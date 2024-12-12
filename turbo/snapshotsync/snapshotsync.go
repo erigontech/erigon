@@ -228,11 +228,11 @@ func getMinimumBlocksToDownload(tx kv.Tx, blockReader blockReader, minStep uint6
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	minToDownload := uint64(math.MaxUint64)
 	minStepToDownload := uint64(math.MaxUint32)
-	stateTxNum := minStep * config3.HistoryV3AggregationStep
+	stateTxNum := minStep * config3.DefaultStepSize
 	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 		if blockNum == historyPruneTo {
-			minStepToDownload = (baseTxNum - (config3.HistoryV3AggregationStep - 1)) / config3.HistoryV3AggregationStep
-			if baseTxNum < (config3.HistoryV3AggregationStep - 1) {
+			minStepToDownload = (baseTxNum - (config3.DefaultStepSize - 1)) / config3.DefaultStepSize
+			if baseTxNum < (config3.DefaultStepSize - 1) {
 				minStepToDownload = 0
 			}
 		}
@@ -343,7 +343,8 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 		if !caplinState && strings.Contains(p.Name, "caplin/") {
 			continue
 		}
-		if headerchain && !strings.Contains(p.Name, "headers") && !strings.Contains(p.Name, "bodies") {
+		if headerchain &&
+			!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
 			continue
 		}
 		if _, ok := blackListForPruning[p.Name]; ok {

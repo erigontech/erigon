@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 )
@@ -72,7 +71,7 @@ func (ct *CallTracer) WriteToDb(tx kv.Putter, block *types.Block, vmConfig vm.Co
 	for _, uncle := range block.Uncles() {
 		ct.tos[uncle.Coinbase] = struct{}{}
 	}
-	list := make(common.Addresses, len(ct.froms)+len(ct.tos))
+	list := make(libcommon.Addresses, len(ct.froms)+len(ct.tos))
 	i := 0
 	for addr := range ct.froms {
 		copy(list[i][:], addr[:])

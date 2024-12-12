@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -54,7 +53,7 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	}
 	assert.Equal(len(answers), len(result))
 	for k, v := range result {
-		assert.Equal(answers[k], common.Bytes2Hex(v))
+		assert.Equal(answers[k], libcommon.Bytes2Hex(v))
 	}
 }
 
@@ -78,7 +77,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 	}
 	assert.Equal(len(answers), len(result))
 	for k, v := range result {
-		assert.Equal(answers[k], common.Bytes2Hex(v))
+		assert.Equal(answers[k], libcommon.Bytes2Hex(v))
 	}
 }
 
@@ -99,7 +98,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 	}
 	assert.Equal(len(answers), len(result))
 	for k, v := range result {
-		assert.Equal(answers[k], common.Bytes2Hex(v))
+		assert.Equal(answers[k], libcommon.Bytes2Hex(v))
 	}
 }
 

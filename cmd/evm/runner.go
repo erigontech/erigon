@@ -171,7 +171,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.HistoryV3AggregationStep, db, log.New())
+	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func runCmd(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	tx, err := tdb.BeginRw(context.Background())
+	tx, err := tdb.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}

@@ -136,14 +136,12 @@ func aggregateResultsFromStateTests(
 	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
 	_db := mdbx.New(kv.ChainDB, log.New()).
 		Path(dirs.Chaindata).
-		Flags(func(u uint) uint {
-			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap
-		}).
+		AddFlags(mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap).
 		GrowthStep(1 * datasize.MB).
 		MustOpen()
 	defer _db.Close()
 
-	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, log.New())
+	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, _db, log.New())
 	if err != nil {
 		return nil, err
 	}

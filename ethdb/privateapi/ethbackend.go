@@ -31,10 +31,9 @@ import (
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/builder"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -266,7 +265,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", params.Version)}, nil
+	return &remote.ClientVersionReply{NodeName: libcommon.MakeName("erigon", params.Version)}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupRequest) (*remote.TxnLookupReply, error) {
@@ -276,15 +275,15 @@ func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupR
 	}
 	defer tx.Rollback()
 
-	blockNum, ok, err := s.blockReader.TxnLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.TxnHash))
+	blockNum, txNum, ok, err := s.blockReader.TxnLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.TxnHash))
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		// Not a perfect solution, assumes there are no transactions in block 0
-		return &remote.TxnLookupReply{BlockNumber: 0}, nil
+		return &remote.TxnLookupReply{BlockNumber: 0, TxNumber: txNum}, nil
 	}
-	return &remote.TxnLookupReply{BlockNumber: blockNum}, nil
+	return &remote.TxnLookupReply{BlockNumber: blockNum, TxNumber: txNum}, nil
 }
 
 func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) (*remote.BlockReply, error) {

@@ -22,15 +22,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"reflect"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
-)
-
-var (
-	addressT = reflect.TypeOf(Address{})
 )
 
 // Address represents the 20 byte address of an Ethereum account.

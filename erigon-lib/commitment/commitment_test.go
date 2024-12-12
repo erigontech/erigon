@@ -355,8 +355,8 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 		{common.FromHex("97c780315e7820752006b7a918ce7ec023df263a87a715b64d5ab445e1782a760a974f8810551f81dfb7f1425f7d835838888885"), []byte("value1")},
 	}
 	for i := 0; i < len(upds); i++ {
-		utUpdate.TouchPlainKey(upds[i].key, upds[i].val, utUpdate.TouchStorage)
-		utDirect.TouchPlainKey(upds[i].key, upds[i].val, utDirect.TouchStorage)
+		utUpdate.TouchPlainKey(string(upds[i].key), upds[i].val, utUpdate.TouchStorage)
+		utDirect.TouchPlainKey(string(upds[i].key), upds[i].val, utDirect.TouchStorage)
 	}
 
 	uniqUpds := make(map[string]tc)

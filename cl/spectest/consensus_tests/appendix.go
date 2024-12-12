@@ -48,7 +48,9 @@ func init() {
 		With("rewards_and_penalties", rewardsAndPenaltiesTest).
 		With("slashings", slashingsTest).
 		With("slashings_reset", slashingsResetTest).
-		With("participation_record_updates", participationRecordUpdatesTest)
+		With("participation_record_updates", participationRecordUpdatesTest).
+		With("pending_deposits", pendingDepositTest).
+		With("pending_consolidations", PendingConsolidationTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
 	TestFormats.Add("fork_choice").
@@ -76,7 +78,10 @@ func init() {
 		WithFn("voluntary_exit", operationVoluntaryExitHandler).
 		WithFn("sync_aggregate", operationSyncAggregateHandler).
 		WithFn("withdrawals", operationWithdrawalHandler).
-		WithFn("bls_to_execution-change", operationSignedBlsChangeHandler)
+		WithFn("bls_to_execution_change", operationSignedBlsChangeHandler).
+		WithFn("consolidation_request", operationConsolidationRequestHandler).
+		WithFn("deposit_request", operationDepositRequstHandler).
+		WithFn("withdrawal_request", operationWithdrawalRequstHandler)
 	TestFormats.Add("random").
 		With("random", SanityBlocks)
 	TestFormats.Add("rewards").
@@ -101,11 +106,7 @@ func init() {
 func addSszTests() {
 	TestFormats.Add("ssz_static").
 		With("AggregateAndProof", getSSZStaticConsensusTest(&cltypes.AggregateAndProof{})).
-		With("Attestation", getSSZStaticConsensusTest(&solid.Attestation{})).
 		With("AttestationData", getSSZStaticConsensusTest(&solid.AttestationData{})).
-		With("AttesterSlashing", getSSZStaticConsensusTest(&cltypes.AttesterSlashing{})).
-		With("BeaconBlock", getSSZStaticConsensusTest(cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion))).
-		With("BeaconBlockBody", getSSZStaticConsensusTest(cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.DenebVersion))).
 		With("BeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.BeaconBlockHeader{})).
 		With("BeaconState", getSSZStaticConsensusTest(state.New(&clparams.MainnetBeaconConfig))).
 		With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})).
@@ -118,23 +119,18 @@ func addSszTests() {
 		//	With("DepositMessage", getSSZStaticConsensusTest(&cltypes.DepositMessage{})).
 		// With("Eth1Block", getSSZStaticConsensusTest(&cltypes.Eth1Block{})).
 		With("Eth1Data", getSSZStaticConsensusTest(&cltypes.Eth1Data{})).
-		With("ExecutionPayload", getSSZStaticConsensusTest(cltypes.NewEth1Block(clparams.Phase0Version, &clparams.MainnetBeaconConfig))).
-		//With("ExecutionPayloadHeader", getSSZStaticConsensusTest(&cltypes.Eth1Header{})).
 		With("Fork", getSSZStaticConsensusTest(&cltypes.Fork{})).
 		//With("ForkData", getSSZStaticConsensusTest(&cltypes.ForkData{})).
 		//With("HistoricalBatch", getSSZStaticConsensusTest(&cltypes.HistoricalBatch{})).
 		With("HistoricalSummary", getSSZStaticConsensusTest(&cltypes.HistoricalSummary{})).
-		With("IndexedAttestation", getSSZStaticConsensusTest(&cltypes.IndexedAttestation{})).
 		With("LightClientBootstrap", getSSZStaticConsensusTest(&cltypes.LightClientBootstrap{})).
 		With("LightClientFinalityUpdate", getSSZStaticConsensusTest(&cltypes.LightClientFinalityUpdate{})).
-		With("LightClientHeader", getSSZStaticConsensusTest(&cltypes.LightClientHeader{})).
 		With("LightClientOptimisticUpdate", getSSZStaticConsensusTest(&cltypes.LightClientOptimisticUpdate{})).
-		With("LightClientUpdate", getSSZStaticConsensusTest(&cltypes.LightClientUpdate{})).
+		//With("LightClientUpdate", getSSZStaticConsensusTest(&cltypes.LightClientUpdate{})).
 		With("PendingAttestation", getSSZStaticConsensusTest(&solid.PendingAttestation{})).
 		//		With("PowBlock", getSSZStaticConsensusTest(&cltypes.PowBlock{})). Unimplemented
 		With("ProposerSlashing", getSSZStaticConsensusTest(&cltypes.ProposerSlashing{})).
 		With("SignedAggregateAndProof", getSSZStaticConsensusTest(&cltypes.SignedAggregateAndProof{})).
-		With("SignedBeaconBlock", getSSZStaticConsensusTest(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion))).
 		With("SignedBeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlockHeader{})).
 		//With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSideCar{})).
 		With("SignedBLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.SignedBLSToExecutionChange{})).
@@ -144,9 +140,60 @@ func addSszTests() {
 		With("SyncAggregate", getSSZStaticConsensusTest(&cltypes.SyncAggregate{})).
 		With("SyncAggregatorSelectionData", getSSZStaticConsensusTest(&cltypes.SyncAggregatorSelectionData{})).
 		With("SyncCommittee", getSSZStaticConsensusTest(&solid.SyncCommittee{})).
-		//	With("SyncCommitteeContribution", getSSZStaticConsensusTest(&cltypes.SyncCommitteeContribution{})).
 		//	With("SyncCommitteeMessage", getSSZStaticConsensusTest(&cltypes.SyncCommitteeMessage{})).
-		With("Validator", getSSZStaticConsensusTest(solid.NewValidator()))
-	// With("VoluntaryExit", getSSZStaticConsensusTest(&cltypes.VoluntaryExit{})) TODO
-	// With("Withdrawal", getSSZStaticConsensusTest(&types.Withdrawal{})) TODO
+		With("Validator", getSSZStaticConsensusTest(solid.NewValidator())).
+		With("ExecutionPayloadHeader", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.Eth1Header {
+				return cltypes.NewEth1Header(v)
+			}, withTestJson())).
+		With("SyncCommitteeContribution", sszStaticTestByEmptyObject(&cltypes.Contribution{})).
+		With("Withdrawal", sszStaticTestByEmptyObject(&cltypes.Withdrawal{}, withTestJson())).
+		With("LightClientHeader", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.LightClientHeader {
+				return cltypes.NewLightClientHeader(v)
+			}, withTestJson())).
+		With("LightClientUpdate", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.LightClientUpdate {
+				return cltypes.NewLightClientUpdate(v)
+			}, withTestJson())).
+		With("SignedBeaconBlock", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.SignedBeaconBlock {
+				return cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, v)
+			}, withTestJson())).
+		With("ExecutionPayload", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.Eth1Block {
+				return cltypes.NewEth1Block(v, &clparams.MainnetBeaconConfig)
+			}, withTestJson())).
+		With("ExecutionRequests", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.ExecutionRequests {
+				return cltypes.NewExecutionRequests(&clparams.MainnetBeaconConfig)
+			}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
+		With("IndexedAttestation", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.IndexedAttestation {
+				return cltypes.NewIndexedAttestation(v)
+			}, withTestJson())).
+		With("BeaconBlock", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.BeaconBlock {
+				return cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, v)
+			}, withTestJson())).
+		With("AttesterSlashing", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.AttesterSlashing {
+				return cltypes.NewAttesterSlashing(v)
+			}, withTestJson())).
+		With("BeaconBlockBody", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.BeaconBody {
+				return cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, v)
+			}, withTestJson())).
+		With("Attestation", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *solid.Attestation {
+				return &solid.Attestation{}
+			}, withTestJson())).
+		With("VoluntaryExit", sszStaticTestByEmptyObject(&cltypes.VoluntaryExit{}, withTestJson())).
+		With("SingleAttestation", sszStaticTestByEmptyObject(&solid.SingleAttestation{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
+		With("WithdrawalRequest", sszStaticTestByEmptyObject(&solid.WithdrawalRequest{}, runAfterVersion(clparams.ElectraVersion))).
+		With("DepositRequest", sszStaticTestByEmptyObject(&solid.DepositRequest{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
+		With("ConsolidationRequest", sszStaticTestByEmptyObject(&solid.ConsolidationRequest{}, withTestJson(), runAfterVersion(clparams.ElectraVersion))).
+		With("PendingConsolidation", sszStaticTestByEmptyObject(&solid.PendingConsolidation{}, runAfterVersion(clparams.ElectraVersion))).        // no need json test
+		With("PendingDeposit", sszStaticTestByEmptyObject(&solid.PendingDeposit{}, runAfterVersion(clparams.ElectraVersion))).                    // no need json test
+		With("PendingPartialWithdrawal", sszStaticTestByEmptyObject(&solid.PendingPartialWithdrawal{}, runAfterVersion(clparams.ElectraVersion))) // no need json test
 }

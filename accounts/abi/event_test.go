@@ -33,7 +33,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/common"
 )
 
 var jsonEventTransfer = []byte(`{
@@ -392,7 +391,7 @@ func TestEventIndexedWithArrayUnpack(t *testing.T) {
 	// number of fields that will be encoded * 32
 	b.Write(packNum(reflect.ValueOf(32)))
 	b.Write(packNum(reflect.ValueOf(len(stringOut))))
-	b.Write(common.RightPadBytes([]byte(stringOut), 32))
+	b.Write(libcommon.RightPadBytes([]byte(stringOut), 32))
 
 	var rst testStruct
 	require.NoError(t, abi.UnpackIntoInterface(&rst, "test", b.Bytes()))

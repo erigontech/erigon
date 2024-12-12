@@ -33,13 +33,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv/membatchwithdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
@@ -345,7 +345,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		if !account.IsEmptyCodeHash() {
 			isEoaCodeAllowed := false
 			if config.IsPrague(header.Time) {
-				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation, account.CodeHash)
+				code, err := simStateReader.ReadAccountCode(sender, account.Incarnation)
 				if err != nil {
 					return nil, err
 				}

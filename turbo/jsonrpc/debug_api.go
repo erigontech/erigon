@@ -21,19 +21,19 @@ import (
 	"errors"
 	"fmt"
 
+	jsoniter "github.com/json-iterator/go"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	jsoniter "github.com/json-iterator/go"
-
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
 	"github.com/erigontech/erigon/turbo/rpchelper"
@@ -61,17 +61,18 @@ type PrivateDebugAPI interface {
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error)
+	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
 	*BaseAPI
-	db     kv.RoDB
+	db     kv.TemporalRoDB
 	GasCap uint64
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(base *BaseAPI, db kv.RoDB, gascap uint64) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
 		BaseAPI: base,
 		db:      db,
@@ -81,7 +82,7 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.RoDB, gascap uint64) *PrivateDebugA
 
 // storageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutility.Bytes, maxResult int) (StorageRangeResult, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -100,12 +101,12 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return StorageRangeResult{}, err
 	}
 	fromTxNum := minTxNum + txIndex + 1 //+1 for system txn in the beginning of block
-	return storageRangeAt(tx.(kv.TemporalTx), contractAddress, keyStart, fromTxNum, maxResult)
+	return storageRangeAt(tx, contractAddress, keyStart, fromTxNum, maxResult)
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
 func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage bool) (state.IteratorDump, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -172,7 +173,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
 // [from, to)
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +215,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccounts(tx.(kv.TemporalTx), startTxNum, endTxNum-1)
+	return getModifiedAccounts(tx, startTxNum, endTxNum-1)
 }
 
 // getModifiedAccounts returns a list of addresses that were modified in the block range
@@ -244,7 +245,7 @@ func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]commo
 
 // GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -286,11 +287,11 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccounts(tx.(kv.TemporalTx), startTxNum, endTxNum-1)
+	return getModifiedAccounts(tx, startTxNum, endTxNum-1)
 }
 
 func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -321,8 +322,8 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	if err != nil {
 		return nil, err
 	}
-	ttx := tx.(kv.TemporalTx)
-	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
+	ttx := tx
+	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], minTxNum+txIndex+1)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +340,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash
 
-	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], nil, minTxNum+txIndex)
+	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], minTxNum+txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +356,7 @@ type AccountResult struct {
 }
 
 func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +376,7 @@ func (api *PrivateDebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash 
 }
 
 func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -392,4 +393,56 @@ func (api *PrivateDebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash r
 		return nil, errors.New("block not found")
 	}
 	return rlp.EncodeToBytes(block)
+}
+
+// GetRawReceipts retrieves the binary-encoded receipts of a single block.
+func (api *PrivateDebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutility.Bytes, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	receipts, err := api.getReceipts(ctx, tx, block)
+	if err != nil {
+		return nil, fmt.Errorf("getReceipts error: %w", err)
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if chainConfig.Bor != nil {
+		events, err := api.stateSyncEvents(ctx, tx, block.Hash(), blockNum, chainConfig)
+		if err != nil {
+			return nil, err
+		}
+		if len(events) != 0 {
+			borReceipt, err := api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig, receipts)
+			if err != nil {
+				return nil, err
+			}
+			receipts = append(receipts, borReceipt)
+		}
+	}
+
+	result := make([]hexutility.Bytes, len(receipts))
+	for i, receipt := range receipts {
+		b, err := receipt.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+		result[i] = b
+	}
+	return result, nil
 }

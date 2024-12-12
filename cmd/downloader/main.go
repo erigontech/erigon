@@ -58,10 +58,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
 
+	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/turbo/debug"
@@ -681,7 +681,7 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	}
 	db, err := mdbx.New(kv.ChainDB, log.New()).
 		Path(dirs.Chaindata).
-		Accede().
+		Accede(true).
 		Open(ctx)
 	if err != nil {
 		return err
