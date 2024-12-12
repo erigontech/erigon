@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -147,14 +148,17 @@ func (tx *ArbTx) DecodeRLP(s *rlp.Stream) error {
 	case kind == rlp.Byte:
 		return errShortTypedTx
 	default:
+		//b, buf, err := getPooledBuffer(size)
+		//if err != nil {
+		//	return err
+		//}
+		//defer encodeBufferPool.Put(buf)
+		//s.
+
 		// It's an EIP-2718 typed TX envelope.
 		// First read the tx payload bytes into a temporary buffer.
-		b, buf, err := getPooledBuffer(size)
+		b, err := s.Bytes()
 		if err != nil {
-			return err
-		}
-		defer encodeBufferPool.Put(buf)
-		if err := s.ReadBytes(b); err != nil {
 			return err
 		}
 		// Now decode the inner transaction.
@@ -226,7 +230,8 @@ func (tx *ArbTx) decodeTyped(b []byte, arbParsing bool) (Transaction, error) {
 			return nil, ErrTxTypeNotSupported
 		}
 	}
-	err := inner.DecodeRLP(b[1:])
+	s := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
+	err := inner.DecodeRLP(s)
 	return inner, err
 }
 
