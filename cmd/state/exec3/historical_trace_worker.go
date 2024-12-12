@@ -405,7 +405,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	}
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
-	for blockNum := fromBlock; blockNum < toBlock; blockNum++ {
+	for blockNum := fromBlock; blockNum < toBlock && !workersExited.Load(); blockNum++ {
 		var b *types.Block
 		b, err = blockWithSenders(ctx, nil, tx, br, blockNum)
 		if err != nil {
@@ -460,10 +460,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 					return err
 				}
 			}
-			if workersExited.Load() {
-				return workers.Wait()
-			}
-
 			in.Add(ctx, txTask)
 			inputTxNum++
 
@@ -472,7 +468,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			//	log.Info("[dbg] in", "in", in.Len())
 			//default:
 			//}
-
 		}
 	}
 	in.Close() //no more work. no retries in map-reduce. means can close here.
