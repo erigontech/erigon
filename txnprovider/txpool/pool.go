@@ -671,7 +671,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	best := p.pending.best
 
 	isShanghai := p.isShanghai() || p.isAgra()
-	isPrague := p.isCancun()
+	isPrague := p.isPrague()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
