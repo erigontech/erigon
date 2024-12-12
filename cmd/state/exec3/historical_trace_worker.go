@@ -310,6 +310,7 @@ func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx conte
 		if err := rws.DrainNonBlocking(ctx); err != nil {
 			return err
 		}
+		fmt.Printf("[dbg] outputTxNum.Load()=%d, toTxNum=%d\n", outputTxNum, toTxNum)
 
 		processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), ttx, true)
 		if err != nil {
