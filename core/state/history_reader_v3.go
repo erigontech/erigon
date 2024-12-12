@@ -53,19 +53,24 @@ func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) GetTxNum() uint64      { return hr.txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
-// Returns the earliest known txnum in history files for state history
-// This is the smallest txNum found across:
+// Gets the txNum where Account, Storage and Code history begins.
+// If the node is an archive node all history will be available therefore
+// the result will be 0.
 //
-// - Account history
-//
-// - Storage history
-//
-// - Code history
-//
-// Not considered in the calculation are Commitment history and Receipt history, as
-// there are separate functions handling them.
+// For non-archive node old history files get deleted, so this number will vary
+// but the goal is to know where the historical data begins.
 func (hr *HistoryReaderV3) StateHistoryStartFrom() uint64 {
-	return hr.ttx.StateHistoryStartFrom()
+	var earliestTxNum uint64 = 0
+	// get the first txnum where  accounts, storage , and code are all available in history files
+	// This is max(HistoryStart(Accounts), HistoryStart(Storage), HistoryStart(Code))
+	stateDomainNames := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+	for _, domainName := range stateDomainNames {
+		domainStartingTxNum := hr.ttx.HistoryStartFrom(domainName)
+		if domainStartingTxNum > earliestTxNum {
+			earliestTxNum = domainStartingTxNum
+		}
+	}
+	return earliestTxNum
 }
 
 func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }

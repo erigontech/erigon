@@ -194,8 +194,8 @@ func (tx *Tx) Commit() error {
 	return mdbxTx.Commit()
 }
 
-func (tx *Tx) StateHistoryStartFrom() uint64 {
-	return tx.filesTx.StateHistoryStartFrom()
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.filesTx.HistoryStartFrom(name)
 }
 
 func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {

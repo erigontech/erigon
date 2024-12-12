@@ -627,7 +627,7 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.las
 
 // Temporal Methods
 
-func (tx *tx) StateHistoryStartFrom() uint64 {
+func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
 	// TODO: not yet implemented, return 0 for now
 	return 0
 }

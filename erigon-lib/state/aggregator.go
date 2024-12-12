@@ -1729,26 +1729,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return fin
 }
 
-// Gets the txNum where Account, Storage and Code history begins.
-// If the node is an archive node all history will be available therefore
-// the result will be 0.
-//
-// For non-archive node old history files get deleted, so this number will vary
-// but the goal is to know where the historical data begins
-func (ac *AggregatorRoTx) StateHistoryStartFrom() uint64 {
-	var earliestTxNum uint64 = 0
-	// get the first txnum where  accounts, storage , and code are all available in history files
-	// This is max(HistoryStart(Accounts), HistoryStart(Storage), HistoryStart(Code))
-	stateDomainNames := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
-	for _, domainName := range stateDomainNames {
-		domainStartingTxNum := ac.HistoryStartFrom(domainName)
-		if domainStartingTxNum > earliestTxNum {
-			earliestTxNum = domainStartingTxNum
-		}
-	}
-	return earliestTxNum
-}
-
 // Returns the first known txNum found in history files of a given domain
 func (ac *AggregatorRoTx) HistoryStartFrom(domainName kv.Domain) uint64 {
 	return ac.d[domainName].HistoryStartFrom()
