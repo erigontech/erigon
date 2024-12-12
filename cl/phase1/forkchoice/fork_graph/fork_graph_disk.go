@@ -17,7 +17,6 @@
 package fork_graph
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -257,6 +256,19 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 
+	dumpssz := func(obj solid.EncodableHashableSSZ, name string) {
+		buf := make([]byte, 0, obj.EncodingSizeSSZ())
+		bytes, err := obj.EncodeSSZ(buf)
+		if err != nil {
+			log.Warn("Could not marshal object", "name", name, "err", err)
+			return
+		}
+		err = afero.WriteFile(f.fs, name, bytes, 0644)
+		if err != nil {
+			log.Warn("Could not write file", "name", name, "err", err)
+		}
+	}
+
 	if !isBlockRootTheCurrentState {
 		// Execute the state
 		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
@@ -264,8 +276,11 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", libcommon.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 			f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
 			//f.currentState = nil
-			bytes, _ := json.Marshal(block)
-			log.Warn("Invalid block", "block", string(bytes))
+			//bytes, _ := json.Marshal(block)
+			//log.Warn("Invalid block", "block", string(bytes))
+			dumpssz(block, fmt.Sprintf("block_%d", block.Slot))
+			s, _ := f.GetState(block.ParentRoot, true)
+			dumpssz(s, fmt.Sprintf("state_%d", block.Slot-1))
 			return nil, InvalidBlock, invalidBlockErr
 		}
 		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
