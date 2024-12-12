@@ -8,8 +8,8 @@ How to run Erigon in a single process (all parts of the system run as one).
 2. Run erigon:
     ``` 
     ./build/bin/erigon --datadir=/desired/path/to/datadir \
-     --chain=sepolia" \
-     --port=30304" \
+     --chain=sepolia \
+     --port=30304 \
      --http.port=8546 \
      --authrpc.port=8552 \
      --torrent.port=42068 \
