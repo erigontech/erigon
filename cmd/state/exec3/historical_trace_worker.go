@@ -247,7 +247,13 @@ type ExecArgs struct {
 
 func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
 	g := &errgroup.Group{}
-	g.Go(func() error {
+	g.Go(func() (err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("%s, %s", rec, dbg.Stack())
+				log.Warn("[dbg] 'reduce worker' paniced", "err", err)
+			}
+		}()
 		return NewHistoricalTraceWorkers2(consumer, cfg, ctx, toTxNum, in, workerCount, outputTxNum, logger)
 	})
 	return g
@@ -288,13 +294,6 @@ func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx conte
 	}
 
 	//Reducer
-	defer func() {
-		if rec := recover(); rec != nil {
-			err := fmt.Errorf("%s, %s", rec, dbg.Stack())
-			log.Warn("[dbg] 'reduce worker' paniced", "err", err)
-		}
-	}()
-
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 
@@ -320,6 +319,7 @@ func NewHistoricalTraceWorkers2(consumer TraceConsumer, cfg *ExecArgs, ctx conte
 		if processedTxNum > 0 {
 			outputTxNum.Store(processedTxNum)
 		}
+		panic(1)
 		//select {
 		//case <-logEvery.C:
 		//	log.Info("[dbg] rws", "rws_ch_len", rws.ResultChLen(), "rws_q_len", rws.Len())
