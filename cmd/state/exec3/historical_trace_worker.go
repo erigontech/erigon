@@ -296,23 +296,25 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
 	ctx, cancel := context.WithCancel(ctx)
-	g, ctx = errgroup.WithContext(ctx)
-	for i := 0; i < workerCount; i++ {
-		workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
-	}
-	applyWorker = NewHistoricalTraceWorker(consumer, in, rws, false, ctx, cfg, logger)
-	for i := 0; i < workerCount; i++ {
-		i := i
-		g.Go(func() (err error) {
-			defer func() {
-				if rec := recover(); rec != nil {
-					err = fmt.Errorf("%s, %s", rec, dbg.Stack())
-					log.Warn("[dbg] 'worker' paniced", "i", i, "err", err)
-				}
-			}()
+	{
+		g, ctx = errgroup.WithContext(ctx)
+		for i := 0; i < workerCount; i++ {
+			workers[i] = NewHistoricalTraceWorker(consumer, in, rws, true, ctx, cfg, logger)
+		}
+		applyWorker = NewHistoricalTraceWorker(consumer, in, rws, false, ctx, cfg, logger)
+		for i := 0; i < workerCount; i++ {
+			i := i
+			g.Go(func() (err error) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						err = fmt.Errorf("%s, %s", rec, dbg.Stack())
+						log.Warn("[dbg] 'worker' paniced", "i", i, "err", err)
+					}
+				}()
 
-			return workers[i].Run()
-		})
+				return workers[i].Run()
+			})
+		}
 	}
 
 	var clearDone bool
@@ -322,9 +324,13 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		}
 		clearDone = true
 		cancel()
-		g.Wait()
+		if err := g.Wait(); err != nil {
+			panic(err)
+		}
 		rws.Close()
-		reducerGroup.Wait()
+		if err := reducerGroup.Wait(); err != nil {
+			panic(err)
+		}
 		for _, w := range workers {
 			w.ResetTx(nil)
 		}
