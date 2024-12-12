@@ -104,7 +104,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
 			// pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, nil, rwTx)
-			pv, step, err := domains.DomainGet(kv.CommitmentDomain, commKey2, nil)
+			pv, step, err := domains.GetLatest(kv.CommitmentDomain, commKey2, nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
@@ -112,7 +112,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			otherMaxWrite = txNum
 		} else {
 			// pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, nil, rwTx)
-			pv, step, err := domains.DomainGet(kv.CommitmentDomain, commKey1, nil)
+			pv, step, err := domains.GetLatest(kv.CommitmentDomain, commKey1, nil)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv, step)

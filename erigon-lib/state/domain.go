@@ -26,9 +26,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/erigontech/erigon-lib/metrics"
 	btree2 "github.com/tidwall/btree"
