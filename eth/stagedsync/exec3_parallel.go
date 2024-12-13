@@ -1035,6 +1035,7 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 
 func (pe *parallelExecutor) execute(ctx context.Context, tasks []exec.Task, profile bool) (bool, error) {
 	prevSenderTx := map[common.Address]int{}
+	var initialTask exec.Task
 
 	for i, txTask := range tasks {
 		t := &execTask{
@@ -1088,7 +1089,7 @@ func (pe *parallelExecutor) execute(ctx context.Context, tasks []exec.Task, prof
 			prevSenderTx[*t.TxSender()] = i
 		}
 
-		if t.IsBlockEnd() && pe.in.Len() == 0 {
+		if t.IsBlockEnd() && initialTask == nil {
 			nextTx := blockStatus.execTasks.takeNextPending()
 
 			if nextTx == -1 {
@@ -1097,12 +1098,15 @@ func (pe *parallelExecutor) execute(ctx context.Context, tasks []exec.Task, prof
 
 			blockStatus.cntExec++
 			execTask := blockStatus.tasks[nextTx]
-			pe.in.Add(ctx,
-				&taskVersion{
-					execTask:   execTask,
-					version:    execTask.Version(),
-					versionMap: blockStatus.versionMap})
+			initialTask = &taskVersion{
+				execTask:   execTask,
+				version:    execTask.Version(),
+				versionMap: blockStatus.versionMap}
 		}
+	}
+
+	if initialTask != nil {
+		pe.in.Add(ctx, initialTask)
 	}
 
 	return false, nil
