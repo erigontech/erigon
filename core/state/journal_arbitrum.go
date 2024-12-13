@@ -9,8 +9,9 @@ type wasmActivation struct {
 	moduleHash common.Hash
 }
 
-func (ch wasmActivation) revert(s *IntraBlockState) {
+func (ch wasmActivation) revert(s *IntraBlockState) error {
 	delete(s.arbExtraData.activatedWasms, ch.moduleHash)
+	return nil
 }
 
 func (ch wasmActivation) dirtied() *common.Address {

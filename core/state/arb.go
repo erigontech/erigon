@@ -60,9 +60,9 @@ func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[ethdb.
 		return
 	}
 	s.arbExtraData.activatedWasms[moduleHash] = asmMap
-	//s.journal.append(wasmActivation{
-	//	moduleHash: moduleHash,
-	//})
+	s.journal.append(wasmActivation{
+		moduleHash: moduleHash,
+	})
 }
 
 func (s *IntraBlockState) TryGetActivatedAsm(target ethdb.WasmTarget, moduleHash common.Hash) ([]byte, error) {
