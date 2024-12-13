@@ -97,8 +97,8 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	cfg := domainCfg{
 		name: kv.AccountsDomain, valuesTable: valsTable,
 		hist: histCfg{
-			valuesTable:       historyValsTable,
-			withLocalityIndex: false, compression: seg.CompressNone, historyLargeValues: true,
+			valuesTable: historyValsTable,
+			compression: seg.CompressNone, historyLargeValues: true,
 
 			iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
 				aggregationStep: aggStep, keysTable: historyKeysTable, valuesTable: indexTable},
