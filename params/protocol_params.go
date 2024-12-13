@@ -185,6 +185,7 @@ const (
 )
 
 var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
+var DelegatedCodeHash = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
 
 // EIP-4788: Beacon block root in the EVM
 var BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
