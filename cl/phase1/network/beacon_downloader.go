@@ -64,8 +64,10 @@ func (f *ForwardBeaconDownloader) SetProcessFunction(fn ProcessFn) {
 func (f *ForwardBeaconDownloader) SetHighestProcessedSlot(highestSlotProcessed uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.highestSlotProcessed = highestSlotProcessed
-	f.highestSlotUpdateTime = time.Now()
+	if highestSlotProcessed > f.highestSlotProcessed {
+		f.highestSlotProcessed = highestSlotProcessed
+		f.highestSlotUpdateTime = time.Now()
+	}
 }
 
 type peerAndBlocks struct {
@@ -150,8 +152,10 @@ Loop:
 		log.Info("Banned peer", "peer", pid)
 		return
 	}
-	f.highestSlotProcessed = highestSlotProcessed
-	f.highestSlotUpdateTime = time.Now()
+	if highestSlotProcessed > f.highestSlotProcessed {
+		f.highestSlotProcessed = highestSlotProcessed
+		f.highestSlotUpdateTime = time.Now()
+	}
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.
