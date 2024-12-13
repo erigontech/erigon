@@ -212,7 +212,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			*committeeIndex,
 		)
 
-		if err == attestation_producer.ErrHeadStateBehind {
+		if errors.Is(attestation_producer.ErrHeadStateBehind, err) {
 			return beaconhttp.NewEndpointError(
 				http.StatusServiceUnavailable,
 				synced_data.ErrNotSynced,
