@@ -37,10 +37,11 @@ type ProcessFn func(
 	err error)
 
 type ForwardBeaconDownloader struct {
-	ctx                  context.Context
-	highestSlotProcessed uint64
-	rpc                  *rpc.BeaconRpcP2P
-	process              ProcessFn
+	ctx                   context.Context
+	highestSlotProcessed  uint64
+	highestSlotUpdateTime time.Time
+	rpc                   *rpc.BeaconRpcP2P
+	process               ProcessFn
 
 	mu sync.Mutex
 }
@@ -64,6 +65,7 @@ func (f *ForwardBeaconDownloader) SetHighestProcessedSlot(highestSlotProcessed u
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.highestSlotProcessed = highestSlotProcessed
+	f.highestSlotUpdateTime = time.Now()
 }
 
 type peerAndBlocks struct {
@@ -78,6 +80,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	atomicResp.Store(peerAndBlocks{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
 	defer reqInterval.Stop()
+
 Loop:
 	for {
 		select {
@@ -89,6 +92,15 @@ Loop:
 				var reqSlot uint64
 				if f.highestSlotProcessed > 2 {
 					reqSlot = f.highestSlotProcessed - 2
+				}
+				reqCount := count
+				if time.Since(f.highestSlotUpdateTime) > 30*time.Second {
+					reqCount *= 2
+				} else if time.Since(f.highestSlotUpdateTime) > time.Minute {
+					reqCount *= 4
+				}
+				if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
+					log.Warn("Forward beacon downloader gets stuck for %v seconds", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
 				}
 				// this is so we do not get stuck on a side-fork
 				log.Info("Requesting beacon blocks by range", "slot", reqSlot, "count", count)
@@ -139,6 +151,7 @@ Loop:
 		return
 	}
 	f.highestSlotProcessed = highestSlotProcessed
+	f.highestSlotUpdateTime = time.Now()
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.
