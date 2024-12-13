@@ -457,7 +457,7 @@ type BeaconChainConfig struct {
 	MaxWithdrawalsPerPayload         uint64 `yaml:"MAX_WITHDRAWALS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWALS_PER_PAYLOAD,string"`                   // MaxWithdrawalsPerPayload defines the maximum number of withdrawals in a block.
 	MaxBlsToExecutionChanges         uint64 `yaml:"MAX_BLS_TO_EXECUTION_CHANGES" spec:"true" json:"MAX_BLS_TO_EXECUTION_CHANGES,string"`                 // MaxBlsToExecutionChanges defines the maximum number of BLS-to-execution-change objects in a block.
 	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP,string"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
-	MaxBlobsCommittmentsPerBlock     uint64 `yaml:"MAX_BLOBS_COMMITMENTS_PER_BLOCK" spec:"true" json:"MAX_BLOBS_COMMITMENTS_PER_BLOCK,string"`           // MaxBlobsCommittmentsPerBlock defines the maximum number of blobs commitments in a block.
+	MaxBlobCommittmentsPerBlock      uint64 `yaml:"MAX_BLOB_COMMITMENTS_PER_BLOCK" spec:"true" json:"MAX_BLOB_COMMITMENTS_PER_BLOCK,string"`             // MaxBlobsCommittmentsPerBlock defines the maximum number of blobs commitments in a block.
 	// BLS domain values.
 	DomainBeaconProposer              libcommon.Bytes4 `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true" json:"DOMAIN_BEACON_PROPOSER"`                               // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
 	DomainRandao                      libcommon.Bytes4 `yaml:"DOMAIN_RANDAO" spec:"true" json:"DOMAIN_RANDAO"`                                                 // DomainRandao defines the BLS signature domain for randao verification.
