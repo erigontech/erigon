@@ -158,7 +158,7 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 	return blocks - blocks%snaptype.Erigon2MergeLimit
 }
 
-func shouldUseStepsForPruning(name string) bool {
+func isStateSnapshot(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 
@@ -335,6 +335,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, dirs datadir.Dirs,
 			continue
 		}
 		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") && !strings.Contains(p.Name, "caplin") {
+			continue
+		}
+
+		if isStateSnapshot(p.Name) && blockReader.FreezingCfg().DisableDownloadE3 {
 			continue
 		}
 		if !blobs && strings.Contains(p.Name, "blobsidecars") {
