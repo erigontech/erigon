@@ -37,7 +37,7 @@ func (se *serialExecutor) processEvents(ctx context.Context, commitThreshold uin
 	return nil
 }
 
-func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task) (cont bool, err error) {
+func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profile bool) (cont bool, err error) {
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 

@@ -593,7 +593,7 @@ Loop:
 		}
 
 		if parallel {
-			if _, err := executor.execute(ctx, txTasks); err != nil {
+			if _, err := executor.execute(ctx, txTasks, false); err != nil {
 				return err
 			}
 			agg.BuildFilesInBackground(outputTxNum.Load())
@@ -602,7 +602,7 @@ Loop:
 
 			se.skipPostEvaluation = skipPostEvaluation
 
-			continueLoop, err := se.execute(ctx, txTasks)
+			continueLoop, err := se.execute(ctx, txTasks, false)
 
 			if err != nil {
 				return err

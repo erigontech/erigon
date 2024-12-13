@@ -121,7 +121,6 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStor
 	return v, nil
 }
 
-
 type VersionedIO struct {
 	inputs     []VersionedReads
 	outputs    []VersionedWrites // write sets that should be checked during validation
@@ -249,7 +248,7 @@ func HasReadDep(txFrom VersionedWrites, txTo VersionedReads) bool {
 	return false
 }
 
-func BuildDAG(deps VersionedIO, logger log.Logger) (d DAG) {
+func BuildDAG(deps *VersionedIO, logger log.Logger) (d DAG) {
 	d = DAG{dag.NewDAG()}
 	ids := make(map[int]string)
 
@@ -318,7 +317,7 @@ func UpdateDeps(deps map[int]map[int]bool, t TxDep) map[int]map[int]bool {
 	return deps
 }
 
-func GetDep(deps VersionedIO) map[int]map[int]bool {
+func GetDep(deps *VersionedIO) map[int]map[int]bool {
 	newDependencies := map[int]map[int]bool{}
 
 	for i := 1; i < len(deps.inputs); i++ {

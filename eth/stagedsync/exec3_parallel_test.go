@@ -167,11 +167,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	}
 }
 
-func (t *testExecTask) MVWriteList() []state.VersionedWrite {
-	return t.MVFullWriteList()
-}
-
-func (t *testExecTask) MVFullWriteList() []state.VersionedWrite {
+func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) []state.VersionedWrite {
 	writes := make([]state.VersionedWrite, 0, len(t.writeMap))
 
 	for _, v := range t.writeMap {
@@ -181,7 +177,7 @@ func (t *testExecTask) MVFullWriteList() []state.VersionedWrite {
 	return writes
 }
 
-func (t *testExecTask) MVReadList() []state.VersionedRead {
+func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) []state.VersionedRead {
 	reads := make([]state.VersionedRead, 0, len(t.readMap))
 
 	for _, v := range t.readMap {
@@ -467,7 +463,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	result, err := executeParallelWithCheck(t, tasks, false, validation, metadata, log.Root())
 
 	if result.Deps != nil && profile {
-		Report(result.Deps, *result.Stats, func(str string) { fmt.Println(str) })
+		ReportDAG(result.Deps, result.Stats, func(str string) { fmt.Println(str) })
 	}
 
 	assert.NoError(t, err, "error occur during parallel execution")
@@ -535,15 +531,13 @@ func executeParallelWithCheck(t *testing.T, tasks []exec.Task, profile bool, che
 			outputBlockNum: stages.SyncMetrics[stages.Execution],
 			logger:         logger,
 		},
-		logEvery:    time.NewTicker(20 * time.Second),
-		pruneEvery:  time.NewTicker(2 * time.Second),
 		workerCount: runtime.NumCPU() - 1,
 	}
 
 	executorCancel := pe.run(context.Background(), uint64(len(tasks)), logger)
 	defer executorCancel()
 
-	_, err = pe.execute(context.Background(), tasks)
+	_, err = pe.execute(context.Background(), tasks, profile)
 
 	if err != nil {
 		return

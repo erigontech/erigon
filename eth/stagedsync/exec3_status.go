@@ -70,7 +70,7 @@ func LongestPath(d *state.DAG, stats map[int]ExecutionStat) ([]int, uint64) {
 	return path, maxPathWeight
 }
 
-func Report(d *state.DAG, stats map[int]ExecutionStat, out func(string)) {
+func ReportDAG(d *state.DAG, stats map[int]ExecutionStat, out func(string)) {
 	longestPath, weight := LongestPath(d, stats)
 
 	serialWeight := uint64(0)

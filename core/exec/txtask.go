@@ -58,6 +58,8 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
+	VersionedReads(ibs *state.IntraBlockState) []state.VersionedRead
+	VersionedWrites(ibs *state.IntraBlockState) []state.VersionedWrite
 
 	TxHash() libcommon.Hash
 	TxSender() *libcommon.Address
@@ -163,6 +165,14 @@ func (t *TxTask) Version() state.Version {
 
 func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
+}
+
+func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) []state.VersionedRead {
+	return ibs.VersionedReads()
+}
+
+func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) []state.VersionedWrite {
+	return ibs.VersionedWrites()
 }
 
 func (t *TxTask) IsBlockEnd() bool {
