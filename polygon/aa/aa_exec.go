@@ -1,4 +1,4 @@
-package core
+package aa
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/accounts/abi"
+	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
@@ -19,7 +20,7 @@ import (
 func ValidateAATransaction(
 	tx *types.AccountAbstractionTransaction,
 	ibs *state.IntraBlockState,
-	gasPool *GasPool,
+	gasPool *core.GasPool,
 	header *types.Header,
 	evm *vm.EVM,
 	chainConfig *chain.Config,
@@ -27,7 +28,7 @@ func ValidateAATransaction(
 	senderCodeSize := ibs.GetCodeSize(*tx.SenderAddress)
 	paymasterCodeSize := ibs.GetCodeSize(*tx.Paymaster)
 	deployerCodeSize := ibs.GetCodeSize(*tx.Deployer)
-	if err := performStaticValidation(tx, senderCodeSize, paymasterCodeSize, deployerCodeSize); err != nil {
+	if err := PerformTxnStaticValidation(tx, senderCodeSize, paymasterCodeSize, deployerCodeSize); err != nil {
 		return nil, 0, err
 	}
 
@@ -45,7 +46,7 @@ func ValidateAATransaction(
 
 	// Deployer frame
 	msg := tx.DeployerFrame()
-	validateDeployer := func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error {
+	validateDeployer := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
 		if ibs.GetCodeSize(*tx.SenderAddress) == 0 {
 			return wrapError(fmt.Errorf(
 				"sender not deployed by the deployer, sender:%s deployer:%s",
@@ -54,7 +55,7 @@ func ValidateAATransaction(
 		}
 		return nil
 	}
-	applyRes, err := ApplyFrame(evm, msg, gasPool, validateDeployer)
+	applyRes, err := core.ApplyFrame(evm, msg, gasPool, validateDeployer)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -74,7 +75,7 @@ func ValidateAATransaction(
 	if err != nil {
 		return nil, 0, err
 	}
-	validateValidation := func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error {
+	validateValidation := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
 		if epc.Error != nil {
 			return epc.Error
 		}
@@ -91,7 +92,7 @@ func ValidateAATransaction(
 		}
 		return validateValidityTimeRange(header.Time, validityTimeRange.ValidAfter.Uint64(), validityTimeRange.ValidUntil.Uint64())
 	}
-	applyRes, err = ApplyFrame(evm, msg, gasPool, validateValidation)
+	applyRes, err = core.ApplyFrame(evm, msg, gasPool, validateValidation)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -112,7 +113,7 @@ func ValidateAATransaction(
 	}
 
 	if msg != nil {
-		validatePaymaster := func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error {
+		validatePaymaster := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
 			if epc.Error != nil {
 				return epc.Error
 			}
@@ -144,7 +145,7 @@ func ValidateAATransaction(
 			paymasterContext = paymasterValidity.Context
 			return nil
 		}
-		applyRes, err = ApplyFrame(evm, msg, gasPool, validatePaymaster)
+		applyRes, err = core.ApplyFrame(evm, msg, gasPool, validatePaymaster)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -182,14 +183,14 @@ func ExecuteAATransaction(
 	tx *types.AccountAbstractionTransaction,
 	paymasterContext []byte,
 	validationGasUsed uint64,
-	gasPool *GasPool,
+	gasPool *core.GasPool,
 	evm *vm.EVM,
 ) (executionStatus uint64, executionReturnData []byte, postOpReturnData []byte, err error) {
 	executionStatus = types.ExecutionStatusSuccess
 
 	// Execution frame
 	msg := tx.ExecutionFrame()
-	applyRes, err := ApplyFrame(evm, msg, gasPool, nil)
+	applyRes, err := core.ApplyFrame(evm, msg, gasPool, nil)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -210,7 +211,7 @@ func ExecuteAATransaction(
 		return 0, nil, nil, err
 	}
 
-	applyRes, err = ApplyFrame(evm, msg, gasPool, nil)
+	applyRes, err = core.ApplyFrame(evm, msg, gasPool, nil)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -343,15 +344,32 @@ func injectEvent(topics []common.Hash, data []byte, blockNumber uint64, ibs *sta
 	return nil
 }
 
-func performStaticValidation(
+func PerformTxnStaticValidation(
 	txn *types.AccountAbstractionTransaction,
 	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
 ) error {
-	hasPaymaster := txn.Paymaster != nil
-	hasPaymasterData := txn.PaymasterData != nil && len(txn.PaymasterData) != 0
-	hasPaymasterGasLimit := txn.PaymasterValidationGasLimit != 0
-	hasDeployer := txn.Deployer != nil
-	hasDeployerData := txn.DeployerData != nil && len(txn.DeployerData) != 0
+	paymasterAddress, deployerAddress, senderAddress := txn.Paymaster, txn.Deployer, txn.SenderAddress
+	paymasterData, deployerData, paymasterValidationGasLimit := txn.PaymasterData, txn.DeployerData, txn.PaymasterValidationGasLimit
+
+	return PerformStaticValidation(
+		paymasterAddress, deployerAddress, senderAddress,
+		paymasterData, deployerData,
+		paymasterValidationGasLimit,
+		senderCodeSize, paymasterCodeSize, deployerCodeSize,
+	)
+}
+
+func PerformStaticValidation(
+	paymasterAddress, deployerAddress, senderAddress *common.Address,
+	paymasterData, deployerData []byte,
+	paymasterValidationGasLimit uint64,
+	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
+) error {
+	hasPaymaster := paymasterAddress != nil
+	hasPaymasterData := paymasterData != nil && len(paymasterData) != 0
+	hasPaymasterGasLimit := paymasterValidationGasLimit != 0
+	hasDeployer := deployerAddress != nil
+	hasDeployerData := deployerData != nil && len(deployerData) != 0
 	hasCodeSender := senderCodeSize != 0
 	hasCodeDeployer := deployerCodeSize != 0
 
@@ -359,7 +377,7 @@ func performStaticValidation(
 		return wrapError(
 			fmt.Errorf(
 				"deployer data of size %d is provided but deployer address is not set",
-				len(txn.DeployerData),
+				len(deployerData),
 			),
 		)
 	}
@@ -367,8 +385,8 @@ func performStaticValidation(
 		return wrapError(
 			fmt.Errorf(
 				"paymaster data of size %d (or a gas limit: %d) is provided but paymaster address is not set",
-				len(txn.DeployerData),
-				txn.PaymasterValidationGasLimit,
+				len(deployerData),
+				paymasterValidationGasLimit,
 			),
 		)
 	}
@@ -378,7 +396,7 @@ func performStaticValidation(
 			return wrapError(
 				fmt.Errorf(
 					"paymaster address  %s is provided but 'paymasterVerificationGasLimit' is zero",
-					txn.Paymaster.String(),
+					paymasterAddress.String(),
 				),
 			)
 		}
@@ -387,7 +405,7 @@ func performStaticValidation(
 			return wrapError(
 				fmt.Errorf(
 					"paymaster address %s is provided but contract has no code deployed",
-					txn.Paymaster.String(),
+					paymasterAddress.String(),
 				),
 			)
 		}
@@ -398,7 +416,7 @@ func performStaticValidation(
 			return wrapError(
 				fmt.Errorf(
 					"deployer address %s is provided but contract has no code deployed",
-					txn.Deployer.String(),
+					deployerAddress.String(),
 				),
 			)
 		}
@@ -406,20 +424,10 @@ func performStaticValidation(
 			return wrapError(
 				fmt.Errorf(
 					"sender address %s and deployer address %s are provided but sender is already deployed",
-					txn.SenderAddress.String(),
-					txn.Deployer.String(),
+					senderAddress.String(),
+					deployerAddress.String(),
 				))
 		}
-	}
-
-	preTransactionGasCost, _ := txn.PreTransactionGasCost() // might not be needed: this is checked when we do ApplyMessage
-	if preTransactionGasCost > txn.ValidationGasLimit {
-		return wrapError(
-			fmt.Errorf(
-				"insufficient ValidationGasLimit(%d) to cover PreTransactionGasCost(%d)",
-				txn.ValidationGasLimit, preTransactionGasCost,
-			),
-		)
 	}
 
 	if !hasDeployer && !hasCodeSender {

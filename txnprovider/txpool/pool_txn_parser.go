@@ -255,6 +255,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
+	// TODO: add 7560 support here
+
 	slot.Size = uint32(len(slot.Rlp))
 
 	return p, err
@@ -685,6 +687,11 @@ type TxnSlot struct {
 
 	// EIP-7702: set code tx
 	Authorizations []Signature
+
+	// 7560: account abstraction
+	SenderAddress, Paymaster, Deployer *common.Address
+	PaymasterData, DeployerData        []byte
+	PaymasterValidationGasLimit        uint64
 }
 
 // nolint

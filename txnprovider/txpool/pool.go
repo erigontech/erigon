@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -861,6 +862,34 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 				p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%x current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
 			}
 			return txpoolcfg.BlobPoolOverflow
+		}
+	}
+
+	// TODO: put 7562 rules here
+	if txn.Type == types.AccountAbstractionTxType {
+		senderCode, err := stateCache.GetCode(txn.SenderAddress[:])
+		if err != nil {
+			return txpoolcfg.InvalidAA // TODO: choose correct discard reason
+		}
+
+		paymasterCode, err := stateCache.GetCode(txn.Paymaster[:])
+		if err != nil {
+			return txpoolcfg.InvalidAA // TODO: choose correct discard reason
+		}
+
+		deployerCode, err := stateCache.GetCode(txn.Deployer[:])
+		if err != nil {
+			return txpoolcfg.InvalidAA // TODO: choose correct discard reason
+		}
+
+		err = aa.PerformStaticValidation(
+			txn.Paymaster, txn.Deployer, txn.SenderAddress,
+			txn.PaymasterData, txn.DeployerData,
+			txn.PaymasterValidationGasLimit,
+			len(senderCode), len(paymasterCode), len(deployerCode),
+		)
+		if err != nil {
+			return txpoolcfg.InvalidAA
 		}
 	}
 

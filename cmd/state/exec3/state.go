@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/aa"
 
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon/eth/consensuschain"
@@ -259,19 +260,19 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 		ibs.SetTxContext(txTask.TxIndex)
 		if txTask.Tx.Type() == types.AccountAbstractionTxType {
 			aaTxn := txTask.Tx.(*types.AccountAbstractionTransaction)
-			paymasterContext, validationGasUsed, err := core.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
+			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, rw.taskGasPool, header, rw.evm, rw.chainConfig)
 			if err != nil {
 				txTask.Error = err
 				break
 			}
 
-			execStatus, execReturnData, postOpReturnData, err := core.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, rw.taskGasPool, rw.evm)
+			execStatus, execReturnData, postOpReturnData, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, rw.taskGasPool, rw.evm)
 			if err != nil {
 				txTask.Error = err
 				break
 			}
 
-			err = core.InjectAALogs(aaTxn, execStatus, header.Number.Uint64(), execReturnData, postOpReturnData, ibs)
+			err = aa.InjectAALogs(aaTxn, execStatus, header.Number.Uint64(), execReturnData, postOpReturnData, ibs)
 			if err != nil {
 				txTask.Error = err
 				break
