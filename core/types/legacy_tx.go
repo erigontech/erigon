@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 )
 
 type CommonTx struct {
@@ -206,7 +205,7 @@ func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
-	payloadSize += rlp2.StringLen(tx.Data)
+	payloadSize += rlp.StringLen(tx.Data)
 	// size of V
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
@@ -229,7 +228,7 @@ func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 
 func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	if tx.Nonce > 0 && tx.Nonce < 128 {
