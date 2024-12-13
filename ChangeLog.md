@@ -22,7 +22,7 @@ ChangeLog
 - milestone: https://github.com/erigontech/erigon/milestone/5
 - Known problem:
     - external CL support
-    - `erigon_getLatestLogs` not emplimented
+    - `erigon_getLatestLogs` not implemented
 
 ### Acknowledgements:
 
@@ -37,7 +37,7 @@ ChangeLog
 
 - Reduced `.idx` and `.efi` files size by 25% (require re-sync)
 - Support: `debug_getRawReceipts`
-- debian packages
+- debain packages
 - `--externalcl` support
 - bor-mainnet can work on 32G machine
 - Erigon3 book: https://development.erigon-documentation-preview.pages.dev/
