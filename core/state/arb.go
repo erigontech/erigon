@@ -71,7 +71,8 @@ func (s *IntraBlockState) TryGetActivatedAsm(target ethdb.WasmTarget, moduleHash
 			return asm, nil
 		}
 	}
-	return s.ActivatedAsm(target, moduleHash)
+	// return s.ActivatedAsm(target, moduleHash)
+	return nil, errors.New("not found")
 }
 
 func (s *IntraBlockState) TryGetActivatedAsmMap(targets []ethdb.WasmTarget, moduleHash common.Hash) (map[ethdb.WasmTarget][]byte, error) {
@@ -87,7 +88,9 @@ func (s *IntraBlockState) TryGetActivatedAsmMap(targets []ethdb.WasmTarget, modu
 	var err error
 	asmMap = make(map[ethdb.WasmTarget][]byte, len(targets))
 	for _, target := range targets {
-		asm, dbErr := s.db.ActivatedAsm(target, moduleHash)
+		// asm, dbErr := s.db.ActivatedAsm(target, moduleHash)
+		asm := []byte{}
+		var dbErr error
 		if dbErr == nil {
 			asmMap[target] = asm
 		} else {
