@@ -30,9 +30,9 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/trie"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/core/types"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -114,7 +114,7 @@ func newObject(db *IntraBlockState, address libcommon.Address, data, original *a
 		so.data.CodeHash = emptyCodeHashH
 	}
 	if so.data.Root == (libcommon.Hash{}) {
-		so.data.Root = trie.EmptyRoot
+		so.data.Root = types.EmptyRootHash
 	}
 	so.original.Copy(original)
 	return &so
