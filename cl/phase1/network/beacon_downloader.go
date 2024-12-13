@@ -75,7 +75,7 @@ type peerAndBlocks struct {
 
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	log.Info("Requesting more beacon blocks")
-	count := uint64(16)
+	count := uint64(32)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
@@ -104,7 +104,7 @@ Loop:
 				}
 				// this is so we do not get stuck on a side-fork
 				log.Info("Requesting beacon blocks by range", "slot", reqSlot, "count", count)
-				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, count)
+				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
 				if err != nil {
 					log.Warn("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "count", count)
 					return
