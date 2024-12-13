@@ -518,7 +518,7 @@ func TestStringLen56(t *testing.T) {
 	assert.Equal(t, 56+2, strLen)
 
 	encoded := make([]byte, strLen)
-	EncodeString(str, encoded)
+	EncodeString2(str, encoded)
 
 	dataPos, dataLen, err := ParseString(encoded, 0)
 	require.NoError(t, err)

@@ -319,7 +319,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode Data
-	if err := rlp.EncodeBytes(tx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
 	// prefix

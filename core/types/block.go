@@ -267,7 +267,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeInt(h.Time, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeBytes(h.Extra, w, b[:]); err != nil {
+	if err := rlp.EncodeString(h.Extra, w, b[:]); err != nil {
 		return err
 	}
 
@@ -275,7 +275,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		if err := rlp.EncodeInt(h.AuRaStep, w, b[:]); err != nil {
 			return err
 		}
-		if err := rlp.EncodeBytes(h.AuRaSeal, w, b[:]); err != nil {
+		if err := rlp.EncodeString(h.AuRaSeal, w, b[:]); err != nil {
 			return err
 		}
 	} else {
@@ -343,7 +343,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.Verkle {
-		if err := rlp.EncodeBytes(h.VerkleProof, w, b[:]); err != nil {
+		if err := rlp.EncodeString(h.VerkleProof, w, b[:]); err != nil {
 			return err
 		}
 

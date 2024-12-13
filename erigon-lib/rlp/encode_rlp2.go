@@ -200,7 +200,7 @@ func StringLen(s []byte) int {
 		return 1 + sLen
 	}
 }
-func EncodeString(src []byte, dst []byte) int {
+func EncodeString2(src []byte, dst []byte) int {
 	switch {
 	case len(src) >= 56:
 		beLen := common.BitLenToByteLen(bits.Len(uint(len(src))))
@@ -293,7 +293,7 @@ func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 	hashesLen := len(hashes) / 32 * 33
 	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
 	pos += EncodeListPrefix(totalLen, encodeBuf)
-	pos += EncodeString(types, encodeBuf[pos:])
+	pos += EncodeString2(types, encodeBuf[pos:])
 	pos += EncodeListPrefix(sizesLen, encodeBuf[pos:])
 	for _, size := range sizes {
 		pos += EncodeU32(size, encodeBuf[pos:])

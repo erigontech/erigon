@@ -645,7 +645,14 @@ func EncodeUint256(i *uint256.Int, w io.Writer, buffer []byte) error {
 	return err
 }
 
-func EncodeBytes(s []byte, w io.Writer, buffer []byte) error {
+type IoBytes []byte
+
+func (b IoBytes) Write(p []byte) (n int, err error) {
+	b = append(b, p...)
+	return len(p), nil
+}
+
+func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 	switch len(s) {
 	case 0:
 		buffer[0] = 128

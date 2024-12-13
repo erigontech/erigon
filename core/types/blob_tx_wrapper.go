@@ -80,7 +80,7 @@ func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	}
 
 	for _, cmtmt := range li {
-		if err := rlp.EncodeBytes(cmtmt[:], w, b); err != nil {
+		if err := rlp.EncodeString(cmtmt[:], w, b); err != nil {
 			return err
 		}
 	}
@@ -130,7 +130,7 @@ func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	}
 
 	for _, proof := range li {
-		if err := rlp.EncodeBytes(proof[:], w, b); err != nil {
+		if err := rlp.EncodeString(proof[:], w, b); err != nil {
 			return err
 		}
 	}
@@ -184,7 +184,7 @@ func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	}
 
 	for _, blob := range blobs {
-		if err := rlp.EncodeBytes(blob[:], w, b); err != nil {
+		if err := rlp.EncodeString(blob[:], w, b); err != nil {
 			return err
 		}
 	}

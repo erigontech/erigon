@@ -265,7 +265,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeBytes(tx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeUint256(&tx.V, w, b); err != nil {

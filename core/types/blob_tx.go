@@ -178,7 +178,7 @@ func blobVersionedHashesSize(hashes []libcommon.Hash) int {
 
 func encodeBlobVersionedHashes(hashes []libcommon.Hash, w io.Writer, b []byte) error {
 	for i := 0; i < len(hashes); i++ {
-		if err := rlp.EncodeBytes(hashes[i][:], w, b); err != nil {
+		if err := rlp.EncodeString(hashes[i][:], w, b); err != nil {
 			return err
 		}
 	}
@@ -223,7 +223,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 		return err
 	}
 	// encode Data
-	if err := rlp.EncodeBytes(stx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(stx.Data, w, b); err != nil {
 		return err
 	}
 	// prefix
