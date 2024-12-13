@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"runtime"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/lru"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/ethdb"
 	"github.com/erigontech/erigon/core/types"
-	"math/big"
-	"runtime"
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -125,7 +126,7 @@ func (s *IntraBlockState) AddStylusPagesEver(new uint16) {
 }
 
 type ArbitrumExtraData struct {
-	unexpectedBalanceDelta *big.Int                      // total balance change across all accounts
+	unexpectedBalanceDelta *uint256.Int                  // total balance change across all accounts
 	userWasms              UserWasms                     // user wasms encountered during execution
 	openWasmPages          uint16                        // number of pages currently open
 	everWasmPages          uint16                        // largest number of pages ever allocated during this tx's execution
@@ -143,8 +144,8 @@ func (s *IntraBlockState) GetCurrentTxLogs() []*types.Log {
 }
 
 // GetUnexpectedBalanceDelta returns the total unexpected change in balances since the last commit to the database.
-func (s *IntraBlockState) GetUnexpectedBalanceDelta() *big.Int {
-	return new(big.Int).Set(s.arbExtraData.unexpectedBalanceDelta)
+func (s *IntraBlockState) GetUnexpectedBalanceDelta() *uint256.Int {
+	return s.arbExtraData.unexpectedBalanceDelta
 }
 
 func (s *IntraBlockState) GetSelfDestructs() []common.Address {

@@ -43,6 +43,9 @@ var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-
 type revision struct {
 	id           int
 	journalIndex int
+
+	// Arbiturm: track the total balance change across all accounts
+	unexpectedBalanceDelta *uint256.Int
 }
 
 // SystemAddress - sender address for internal state updates.
@@ -64,7 +67,7 @@ type BalanceIncrease struct {
 type IntraBlockState struct {
 	stateReader StateReader
 
-	arbExtraData *ArbitrumExtraData
+	arbExtraData *ArbitrumExtraData // TODO make sure this field not used for other chains
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
 	stateObjects      map[libcommon.Address]*stateObject
@@ -489,6 +492,10 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if err != nil {
 		return err
 	}
+	sdb.arbExtraData.unexpectedBalanceDelta.Add(
+		sdb.arbExtraData.unexpectedBalanceDelta,
+		amount,
+	)
 	stateObject.AddBalance(amount, reason)
 	return nil
 }
@@ -505,6 +512,10 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 		return err
 	}
 	if stateObject != nil {
+		sdb.arbExtraData.unexpectedBalanceDelta.Sub(
+			sdb.arbExtraData.unexpectedBalanceDelta,
+			amount,
+		)
 		stateObject.SubBalance(amount, reason)
 	}
 	return nil
@@ -517,9 +528,28 @@ func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.I
 		return err
 	}
 	if stateObject != nil {
+		if sdb.arbExtraData != nil {
+			if amount == nil {
+				amount = uint256.NewInt(0)
+			}
+			prevBalance := stateObject.Balance()
+			sdb.arbExtraData.unexpectedBalanceDelta.Add(
+				sdb.arbExtraData.unexpectedBalanceDelta, amount)
+			sdb.arbExtraData.unexpectedBalanceDelta.Sub(
+				sdb.arbExtraData.unexpectedBalanceDelta, prevBalance)
+		}
 		stateObject.SetBalance(amount, reason)
 	}
 	return nil
+}
+
+// Arbitrum
+func (sdb *IntraBlockState) ExpectBalanceBurn(amount *uint256.Int) {
+	if amount.Sign() < 0 {
+		panic(fmt.Sprintf("ExpectBalanceBurn called with negative amount %v", amount))
+	}
+	sdb.arbExtraData.unexpectedBalanceDelta.Add(
+		sdb.arbExtraData.unexpectedBalanceDelta, amount)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
@@ -621,6 +651,9 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) (bool, error) {
 	}
 
 	stateObject.markSelfdestructed()
+	sdb.arbExtraData.unexpectedBalanceDelta.Sub(
+		sdb.arbExtraData.unexpectedBalanceDelta, &stateObject.data.Balance)
+
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
 
@@ -802,7 +835,8 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 func (sdb *IntraBlockState) Snapshot() int {
 	id := sdb.nextRevisionID
 	sdb.nextRevisionID++
-	sdb.validRevisions = append(sdb.validRevisions, revision{id, sdb.journal.length()})
+	sdb.validRevisions = append(sdb.validRevisions,
+		revision{id, sdb.journal.length(), new(uint256.Int).Set(sdb.arbExtraData.unexpectedBalanceDelta)})
 	return id
 }
 
@@ -991,6 +1025,10 @@ func (sdb *IntraBlockState) SetTxContext(ti int) {
 		panic(err)
 	}
 	sdb.txIndex = ti
+
+	// Arbitrum: clear memory charging state for new tx
+	sdb.arbExtraData.openWasmPages = 0
+	sdb.arbExtraData.everWasmPages = 0
 }
 
 // no not lock
