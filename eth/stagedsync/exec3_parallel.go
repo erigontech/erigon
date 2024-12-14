@@ -243,6 +243,9 @@ type taskVersion struct {
 	*execTask
 	version    state.Version
 	versionMap *state.VersionMap
+	profile    bool
+	stats      map[int]ExecutionStat
+	statsMutex *sync.Mutex
 }
 
 func (ev *taskVersion) Execute(evm *vm.EVM,
@@ -258,6 +261,10 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	chainReader consensus.ChainReader,
 	dirs datadir.Dirs,
 	isMining bool) *exec.Result {
+	var start time.Time
+	if ev.profile {
+		start = time.Now()
+	}
 
 	ibs.Reset()
 	ibs.SetVersionMap(ev.versionMap)
@@ -274,6 +281,16 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	result.TxOut = ev.VersionedWrites(ibs)
 	result.TxAllOut = ev.VersionedWrites(ibs)
 	ev.versionMap.FlushVersionedWrites(result.TxAllOut)
+
+	if ev.profile {
+		ev.statsMutex.Lock()
+		ev.stats[ev.version.TxIndex] = ExecutionStat{
+			TxIdx:       ev.version.TxIndex,
+			Incarnation: ev.version.Incarnation,
+			Duration:    time.Since(start),
+		}
+		ev.statsMutex.Unlock()
+	}
 
 	return result
 }
@@ -334,6 +351,7 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 }
 
 type blockExecStatus struct {
+	sync.Mutex
 	tasks []*execTask
 
 	// For a task that runs only after all of its preceding tasks have finished and passed validation,
@@ -369,7 +387,7 @@ type blockExecStatus struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail int
+	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail int
 
 	diagExecSuccess, diagExecAbort []int
 
@@ -466,7 +484,10 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, bloc
 						&taskVersion{
 							execTask:   execTask,
 							version:    execTask.Version(),
-							versionMap: blockStatus.versionMap})
+							versionMap: blockStatus.versionMap,
+							profile:    blockStatus.profile,
+							stats:      blockStatus.stats,
+							statsMutex: &blockStatus.Mutex})
 				}
 			}
 		}
@@ -567,6 +588,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 				}
 				break
 			}
+
 			if pe.inMemExec {
 				break
 			}
@@ -612,7 +634,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 
 				// Drain results channel because read sets do not carry over
 				pe.rws.DropResults(ctx, func(result *exec.Result) {
-					pe.in.ReTry(result.Task)
+					pe.in.Add(ctx, result.Task)
 				})
 
 				//lastTxNumInDb, _ := txNumsReader.Max(tx, outputBlockNum.Get())
@@ -686,12 +708,12 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, maxTxNum uint64, logger 
 	return nil
 }
 
-func (pe *parallelExecutor) processResults(ctx context.Context, backPressure chan<- struct{}) (result blockResult, err error) {
+func (pe *parallelExecutor) processResults(ctx context.Context, backPressure chan<- struct{}) (blockResult blockResult, err error) {
 	rwsIt := pe.rws.Iter()
 	defer rwsIt.Close()
 	//defer fmt.Println("PRQ", "Done")
 
-	for rwsIt.HasNext() && !result.complete {
+	for rwsIt.HasNext() && !blockResult.complete {
 		txResult := rwsIt.PopNext()
 		txTask := txResult.Task.(*taskVersion)
 		//fmt.Println("PRQ", txTask.BlockNum, txTask.TxIndex, txTask.TxNum)
@@ -699,19 +721,19 @@ func (pe *parallelExecutor) processResults(ctx context.Context, backPressure cha
 			chaosErr := chaos_monkey.ThrowRandomConsensusError(pe.execStage.CurrentSyncCycle.IsInitialCycle, txTask.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
 			if chaosErr != nil {
 				log.Warn("Monkey in consensus")
-				return result, chaosErr
+				return blockResult, chaosErr
 			}
 		}
 
-		result, err = pe.nextResult(ctx, txTask.Version().BlockNum, txResult)
+		blockResult, err = pe.nextResult(ctx, txResult)
 
 		if err != nil {
-			return result, err
+			return blockResult, err
 		}
 
-		if result.complete {
+		if blockResult.complete {
 			if txTask, ok := txTask.Task.(*exec.TxTask); ok {
-				pe.rs.SetTxNum(result.lastTxNum, result.BlockNum)
+				pe.rs.SetTxNum(blockResult.lastTxNum, blockResult.BlockNum)
 
 				err := pe.rs.ApplyState4(ctx,
 					txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
@@ -719,7 +741,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, backPressure cha
 					txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution)
 
 				if err != nil {
-					return result, fmt.Errorf("StateV3.Apply: %w", err)
+					return blockResult, fmt.Errorf("StateV3.Apply: %w", err)
 				}
 				txTask.ReadLists, txTask.WriteLists = nil, nil
 			}
@@ -736,15 +758,16 @@ func (pe *parallelExecutor) processResults(ctx context.Context, backPressure cha
 			if err := pe.rs.ApplyLogsAndTraces4(
 				txTask.Logs, txResult.TraceFroms, txResult.TraceTos,
 				pe.rs.Domains(), txTask.PruneNonEssentials, txTask.Config); err != nil {
-				return result, fmt.Errorf("ApplyLogsAndTraces4: %w", err)
+				return blockResult, fmt.Errorf("ApplyLogsAndTraces4: %w", err)
 			}
 		}
 	}
 
-	return result, nil
+	return blockResult, nil
 }
 
-func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res *exec.Result) (result blockResult, err error) {
+func (pe *parallelExecutor) nextResult(ctx context.Context, res *exec.Result) (result blockResult, err error) {
+	blockNum := res.Version().BlockNum
 	tx := res.Version().TxIndex
 
 	blockStatus, ok := pe.blockStatus[blockNum]
@@ -868,7 +891,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 
 	maxValidated := blockStatus.validateTasks.maxAllComplete()
 	if blockStatus.validateTasks.countComplete() == len(blockStatus.tasks) && blockStatus.execTasks.countComplete() == len(blockStatus.tasks) {
-		pe.logger.Debug("exec summary", "block", blockNum, "execs", blockStatus.cntExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail, "#tasks/#execs", fmt.Sprintf("%.2f%%", float64(len(blockStatus.tasks))/float64(blockStatus.cntExec)*100))
+		pe.logger.Debug("exec summary", "block", blockNum, "tasks", len(blockStatus.tasks), "execs", blockStatus.cntExec, "speculative", blockStatus.cntSpecExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail, "#tasks/#execs", fmt.Sprintf("%.2f%%", float64(len(blockStatus.tasks))/float64(blockStatus.cntExec)*100))
 		//fmt.Println("exec summary", "block", blockNum, "execs", blockStatus.cntExec, "success", blockStatus.cntSuccess, "aborts", blockStatus.cntAbort, "validations", blockStatus.cntTotalValidations, "failures", blockStatus.cntValidationFail, "#tasks/#execs", fmt.Sprintf("%.2f%%", float64(len(blockStatus.tasks))/float64(blockStatus.cntExec)*100))
 
 		var allDeps map[int]map[int]bool
@@ -898,31 +921,43 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, blockNum uint64, res
 				pe.in.Add(ctx, &taskVersion{
 					execTask:   execTask,
 					version:    execTask.Version(),
-					versionMap: blockStatus.versionMap})
+					versionMap: blockStatus.versionMap,
+					profile:    blockStatus.profile,
+					stats:      blockStatus.stats,
+					statsMutex: &blockStatus.Mutex})
 			} else {
 				version := execTask.Version()
 				version.Incarnation = incarnation
 				pe.in.ReTry(&taskVersion{
 					execTask:   execTask,
 					version:    version,
-					versionMap: blockStatus.versionMap})
+					versionMap: blockStatus.versionMap,
+					profile:    blockStatus.profile,
+					stats:      blockStatus.stats,
+					statsMutex: &blockStatus.Mutex})
 			}
 		}
 	}
 
 	// Send speculative tasks
-	for blockStatus.execTasks.minPending() != -1 {
-		nextTx := blockStatus.execTasks.takeNextPending()
+	for nextTx := blockStatus.execTasks.minPending(); nextTx != -1; nextTx = blockStatus.execTasks.minPending() {
+		execTask := blockStatus.tasks[nextTx]
+		version := execTask.Version()
+		version.Incarnation = blockStatus.txIncarnations[nextTx]
 
-		if nextTx != -1 {
+		if version.Incarnation == 0 {
+			blockStatus.execTasks.takeNextPending()
 			blockStatus.cntExec++
-			execTask := blockStatus.tasks[nextTx]
-			version := execTask.Version()
-			version.Incarnation = blockStatus.txIncarnations[nextTx]
+			blockStatus.cntSpecExec++
 			pe.in.Add(ctx, &taskVersion{
 				execTask:   execTask,
 				version:    version,
-				versionMap: blockStatus.versionMap})
+				versionMap: blockStatus.versionMap,
+				profile:    blockStatus.profile,
+				stats:      blockStatus.stats,
+				statsMutex: &blockStatus.Mutex})
+		} else {
+			break
 		}
 	}
 

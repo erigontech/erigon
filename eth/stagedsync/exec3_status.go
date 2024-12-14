@@ -12,9 +12,7 @@ import (
 type ExecutionStat struct {
 	TxIdx       int
 	Incarnation int
-	Start       uint64
-	End         uint64
-	Worker      int
+	Duration    time.Duration
 }
 
 // Find the longest execution path in the DAG
@@ -41,14 +39,14 @@ func LongestPath(d *state.DAG, stats map[int]ExecutionStat) ([]int, uint64) {
 
 		if len(parents) > 0 {
 			for _, p := range parents {
-				weight := pathWeights[p.(int)] + stats[i].End - stats[i].Start
+				weight := pathWeights[p.(int)] + uint64(stats[i].Duration)
 				if weight > pathWeights[i] {
 					pathWeights[i] = weight
 					prev[i] = p.(int)
 				}
 			}
 		} else {
-			pathWeights[i] = stats[i].End - stats[i].Start
+			pathWeights[i] = uint64(stats[i].Duration)
 		}
 
 		if pathWeights[i] > maxPathWeight {
@@ -76,7 +74,7 @@ func ReportDAG(d *state.DAG, stats map[int]ExecutionStat, out func(string)) {
 	serialWeight := uint64(0)
 
 	for i := 0; i < len(d.GetVertices()); i++ {
-		serialWeight += stats[i].End - stats[i].Start
+		serialWeight += uint64(stats[i].Duration)
 	}
 
 	makeStrs := func(ints []int) (ret []string) {

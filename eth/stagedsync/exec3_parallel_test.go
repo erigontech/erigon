@@ -112,7 +112,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	t.readMap = make(map[state.VersionKey]state.VersionedRead)
 	t.writeMap = make(map[state.VersionKey]state.VersionedWrite)
 
-	deps := -1
+	dep := -1
 
 	for i, op := range t.ops {
 		k := op.key
@@ -129,12 +129,14 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			val := result.Value()
 
 			if i == 0 && val != nil && (val.(int) != t.nonce) {
-				return &exec.Result{Err: exec.ErrExecAbortError{}}
+				return &exec.Result{Err: exec.ErrExecAbortError{
+					Dependency:  -1,
+					OriginError: fmt.Errorf("invalid nonce: got: %d, expected: %d", val.(int), t.nonce)}}
 			}
 
 			if result.Status() == state.MVReadResultDependency {
-				if result.DepIdx() > deps {
-					deps = result.DepIdx()
+				if result.DepIdx() > dep {
+					dep = result.DepIdx()
 				}
 			}
 
@@ -158,8 +160,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 		}
 	}
 
-	if deps != -1 {
-		return &exec.Result{Err: exec.ErrExecAbortError{Dependency: deps, OriginError: fmt.Errorf("Dependency error")}}
+	if dep != -1 {
+		return &exec.Result{Err: exec.ErrExecAbortError{Dependency: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
 	return &exec.Result{
