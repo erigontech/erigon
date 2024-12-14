@@ -69,6 +69,7 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	if len(blocks) == 0 {
 		return nil, nil
 	}
+	log.Debug("got blocks", "count", len(blocks), "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
 
 	// Generate blob identifiers from the retrieved blocks
 	ids, err := network2.BlobsIdentifiersFromBlocks(blocks)

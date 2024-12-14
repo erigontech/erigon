@@ -17,6 +17,7 @@
 package network
 
 import (
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -122,7 +123,7 @@ Loop:
 			return nil, ctx.Err()
 		case <-timer.C:
 			log.Debug("RequestBlobsFrantically: timeout")
-			return nil, nil
+			return nil, errors.New("timeout")
 		default:
 			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
 				break Loop
