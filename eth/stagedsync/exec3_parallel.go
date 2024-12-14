@@ -463,13 +463,15 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, maxTxNum uint64, bloc
 			if err != nil {
 				return err
 			}
-			//TODO
-			//mxExecRepeats.AddInt(conflicts)
-			//mxExecTriggers.AddInt(triggers)
 
 			if blockResult.complete {
 				lastTxNum = blockResult.lastTxNum
 				blockResults <- blockResult
+
+				if blockStatus, ok := pe.blockStatus[blockResult.BlockNum]; ok {
+					mxExecRepeats.AddInt(blockStatus.cntAbort)
+					mxExecTriggers.AddInt(blockStatus.cntExec)
+				}
 
 				if blockStatus, ok := pe.blockStatus[blockResult.BlockNum+1]; ok {
 					nextTx := blockStatus.execTasks.takeNextPending()
@@ -949,7 +951,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, res *exec.Result) (r
 			blockStatus.execTasks.takeNextPending()
 			blockStatus.cntExec++
 			blockStatus.cntSpecExec++
-			pe.in.Add(ctx, &taskVersion{
+			pe.in.ReTry(&taskVersion{
 				execTask:   execTask,
 				version:    version,
 				versionMap: blockStatus.versionMap,
