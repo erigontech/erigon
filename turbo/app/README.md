@@ -10,7 +10,7 @@
 
 This command connects erigon to diagnostics tools by establishing websocket connection.
 
-In order to conect diagnostics run
+In order to connect diagnostics run
 
 ```
 ./build/bin/erigon support --debug.addrs <value> --diagnostics.addr <value> --diagnostics.sessions <PINs>
@@ -46,7 +46,7 @@ in the rclone config file.
 The **uploader** is configured to minimize disk usage by doing the following:
 
 * It removes snapshots once they are loaded
-* It agressively prunes the database once entites are transferred to snapshots
+* It agressively prunes the database once entities are transferred to snapshots
 
 in addition to this it has the following performance related features:
 
@@ -61,7 +61,7 @@ The following configuration can be used to upload blocks from genesis where:
 | upload.location=r2:erigon-v2-snapshots-bor-mainnet | Specified the rclone location to upload snapshot to                                                                                                                        |
 | upload.from=earliest                               | Sets the upload start location to be the earliest available block, which will be 0 in the case of a fresh installation, or specified by the last block in the chaindata db |
 | upload.snapshot.limit=1500000                      | Tells the uploader to keep a maximum 1,500,000 blocks in the `snapshots` before deleting the aged snapshot                                                                 |
-| snapshot.version=2                                 | Indivates the version to be appended to snapshot file names when they are creatated                                                                                        |
+| snapshot.version=2                                 | Indicates the version to be appended to snapshot file names when they are creatated                                                                                        |
 
 ```shell
 erigon/build/bin/erigon seg uploader --datadir=~/snapshots/bor-mainnet --chain=bor-mainnet \
