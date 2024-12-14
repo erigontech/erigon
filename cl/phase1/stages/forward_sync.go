@@ -210,7 +210,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		log.Info("after processDownloadedBlockBatches", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 		// Exit if we are pre-EIP-4844
 		if !shouldProcessBlobs(blocks, cfg) {
-			log.Info("shouldProcessBlobs", "false", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
+			log.Info("shouldProcessBlobs", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 			currentSlot.Store(highestSlotProcessed)
 			return highestSlotProcessed, nil
 		}
