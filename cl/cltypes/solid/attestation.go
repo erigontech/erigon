@@ -184,6 +184,7 @@ func (s *SingleAttestation) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (s *SingleAttestation) DecodeSSZ(buf []byte, version int) error {
+	s.Data = &AttestationData{}
 	return ssz2.UnmarshalSSZ(buf, version, &s.CommitteeIndex, &s.AttesterIndex, s.Data, s.Signature[:])
 }
 
