@@ -26,6 +26,7 @@ import (
 	"github.com/spf13/afero"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -355,7 +356,7 @@ func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addC
 	currentIteratorRoot := blockRoot
 	var copyReferencedState, outState *state.CachingBeaconState
 	var err error
-	if addChainSegment {
+	if addChainSegment && dbg.CaplinEfficientReorg {
 		outState = f.currentState
 	}
 
