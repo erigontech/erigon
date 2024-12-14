@@ -43,6 +43,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	var file afero.File
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
+	fmt.Println("getState")
 
 	file, err = f.fs.Open(getBeaconStateFilename(blockRoot))
 	if err != nil {
