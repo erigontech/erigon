@@ -262,12 +262,13 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			obj := &services.AttestationWithGossipData{
-				GossipData:        copyOfSentinelData(data),
-				Attestation:       &solid.Attestation{},
-				SingleAttestation: &solid.SingleAttestation{},
-				ImmediateProcess:  false,
+				GossipData: copyOfSentinelData(data),
+				//Attestation:       &solid.Attestation{},
+				//SingleAttestation: &solid.SingleAttestation{},
+				ImmediateProcess: false,
 			}
 			if version < clparams.ElectraVersion {
+				obj.Attestation = &solid.Attestation{}
 				if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 					return err
 				}
@@ -276,6 +277,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 				}
 			} else {
 				// after electra
+				obj.SingleAttestation = &solid.SingleAttestation{}
 				if err := obj.SingleAttestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 					return err
 				}
