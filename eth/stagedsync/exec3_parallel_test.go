@@ -459,45 +459,7 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, metadata bool) time.Duration {
 	t.Helper()
 
-	profile := false
-
-	start := time.Now()
-	result, err := executeParallelWithCheck(t, tasks, false, validation, metadata, log.Root())
-
-	if result.Deps != nil && profile {
-		ReportDAG(result.Deps, result.Stats, func(str string) { fmt.Println(str) })
-	}
-
-	assert.NoError(t, err, "error occur during parallel execution")
-
-	// Need to apply the final write set to storage
-
-	finalWriteSet := make(map[state.VersionKey]time.Duration)
-
-	for _, task := range tasks {
-		task := task.(*testExecTask)
-		for _, op := range task.ops {
-			if op.opType == writeType {
-				finalWriteSet[op.key] = op.duration
-			}
-		}
-	}
-
-	for _, v := range finalWriteSet {
-		sleep(v)
-	}
-
-	duration := time.Since(start)
-
-	return duration
-}
-
-type propertyCheck func(*parallelExecutor) error
-
-func executeParallelWithCheck(t *testing.T, tasks []exec.Task, profile bool, check propertyCheck, metadata bool, logger log.Logger) (result blockResult, err error) {
-	if len(tasks) == 0 {
-		return blockResult{}, nil
-	}
+	logger := log.Root()
 
 	rawDb := memdb.NewStateDB("")
 	defer rawDb.Close()
@@ -536,8 +498,42 @@ func executeParallelWithCheck(t *testing.T, tasks []exec.Task, profile bool, che
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorCancel := pe.run(context.Background(), uint64(len(tasks)), logger)
+	executorCancel := pe.run(context.Background(), uint64(len(tasks)))
 	defer executorCancel()
+
+	start := time.Now()
+	_, err = executeParallelWithCheck(t, pe, tasks, false, validation, metadata)
+
+	assert.NoError(t, err, "error occur during parallel execution")
+
+	// Need to apply the final write set to storage
+
+	finalWriteSet := make(map[state.VersionKey]time.Duration)
+
+	for _, task := range tasks {
+		task := task.(*testExecTask)
+		for _, op := range task.ops {
+			if op.opType == writeType {
+				finalWriteSet[op.key] = op.duration
+			}
+		}
+	}
+
+	for _, v := range finalWriteSet {
+		sleep(v)
+	}
+
+	duration := time.Since(start)
+
+	return duration
+}
+
+type propertyCheck func(*parallelExecutor) error
+
+func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
+	if len(tasks) == 0 {
+		return nil, nil
+	}
 
 	_, err = pe.execute(context.Background(), tasks, profile)
 
@@ -551,13 +547,59 @@ func executeParallelWithCheck(t *testing.T, tasks []exec.Task, profile bool, che
 		err = check(pe)
 	}
 
+	if blockStatus, ok := pe.blockStatus[1]; ok {
+		return blockStatus.result, nil
+	}
+
 	return
 }
 
 func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
 	t.Helper()
 
-	res, err := executeParallelWithCheck(t, tasks, true, validation, false, log.Root())
+	logger := log.Root()
+
+	rawDb := memdb.NewStateDB("")
+	defer rawDb.Close()
+
+	agg, err := statelib.NewAggregator(context.Background(), datadir.New(""), 16, rawDb, log.New())
+	assert.NoError(t, err)
+	defer agg.Close()
+
+	db, err := temporal.New(rawDb, agg)
+	assert.NoError(t, err)
+
+	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
+	assert.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := statelib.NewSharedDomains(tx, log.New())
+	assert.NoError(t, err)
+	defer domains.Close()
+
+	domains.SetTxNum(1)
+	domains.SetBlockNum(1)
+	assert.NoError(t, err)
+
+	pe := &parallelExecutor{
+		txExecutor: txExecutor{
+			cfg: ExecuteBlockCfg{
+				chainConfig: params.MainnetChainConfig,
+				db:          db,
+			},
+			doms:           domains,
+			rs:             state.NewStateV3(domains, logger),
+			outputTxNum:    &atomic.Uint64{},
+			outputBlockNum: stages.SyncMetrics[stages.Execution],
+			logger:         logger,
+		},
+		workerCount: runtime.NumCPU() - 1,
+	}
+
+	executorCancel := pe.run(context.Background(), uint64(len(tasks)))
+	defer executorCancel()
+
+	res, err := executeParallelWithCheck(t, pe, tasks, true, validation, false)
 
 	assert.NoError(t, err, "error occur during parallel execution")
 

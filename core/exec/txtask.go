@@ -68,6 +68,10 @@ type Task interface {
 	IsBlockEnd() bool
 	IsHistoric() bool
 	ShouldDelayFeeCalc() bool
+
+	
+	// elements in dependencies -> transaction indexes on which transaction i is dependent on
+	Dependencies() []int
 }
 
 type Result struct {
@@ -161,6 +165,10 @@ func (t *TxTask) TxMessage() types.Message {
 
 func (t *TxTask) Version() state.Version {
 	return state.Version{BlockNum: t.BlockNum, TxNum: t.TxNum, TxIndex: t.TxIndex}
+}
+
+func (t *TxTask) Dependencies() []int {
+	return nil
 }
 
 func (t *TxTask) VersionMap() *state.VersionMap {

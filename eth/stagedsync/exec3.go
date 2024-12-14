@@ -386,7 +386,7 @@ func ExecV3(ctx context.Context,
 			progress:                 progress,
 		}
 
-		executorCancel := pe.run(ctx, maxTxNum, logger)
+		executorCancel := pe.run(ctx, maxTxNum)
 		defer executorCancel()
 
 		defer func() {
