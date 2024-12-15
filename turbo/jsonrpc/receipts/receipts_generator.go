@@ -95,11 +95,6 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 	}
 	header := block.HeaderNoCopy()
 
-	minTxNum, err := txNumsReader.Min(tx, block.NumberU64())
-	if err != nil {
-		return nil, err
-	}
-
 	return &ReceiptEnv{
 		ibs:         ibs,
 		usedGas:     usedGas,
@@ -108,7 +103,6 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 		noopWriter:  noopWriter,
 		getHeader:   getHeader,
 		header:      header,
-		minTxNum:    minTxNum,
 	}, nil
 }
 
@@ -156,15 +150,22 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	receipts := make(types.Receipts, len(block.Transactions()))
 
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
+	minTxNum, err := txNumsReader.Min(tx, block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+
 	wg := &sync.WaitGroup{}
 	wg.Add(len(receipts))
 	for i, txn := range block.Transactions() {
 		go func(i int, txn types.Transaction) {
+			defer wg.Done()
 			genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, i)
 			if err != nil {
 				return
 			}
-			cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, genEnv.minTxNum+uint64(i))
+			cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, minTxNum+uint64(i))
 			if err != nil {
 				return
 			}
@@ -187,6 +188,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}(i, txn)
 
 	}
+
+	wg.Wait()
 
 	g.addToCache(block.HeaderNoCopy(), receipts)
 	return receipts, nil
