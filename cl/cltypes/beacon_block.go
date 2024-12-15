@@ -536,15 +536,18 @@ func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 }
 
 func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
-	ret := []hexutility.Bytes{}
 	r := b.ExecutionRequests
-	for requestType, requests := range map[byte]ssz.EncodableSSZ{
+	if r == nil {
+		return nil
+	}
+	ret := []hexutility.Bytes{}
+	for _, requests := range map[byte]ssz.EncodableSSZ{
 		b.beaconCfg.DepositRequestType:       r.Deposits,
 		b.beaconCfg.WithdrawalRequestType:    r.Withdrawals,
 		b.beaconCfg.ConsolidationRequestType: r.Consolidations,
 	} {
 		if requests != nil {
-			ssz, err := r.Deposits.EncodeSSZ(nil)
+			ssz, err := requests.EncodeSSZ(nil)
 			if err != nil {
 				log.Warn("Error encoding deposits", "err", err)
 				return nil
@@ -553,7 +556,9 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
 				continue
 			}
 			// type + ssz
-			ret = append(ret, append(hexutility.Bytes{requestType}, ssz...))
+			// ret = append(ret, append(hexutility.Bytes{requestType}, ssz...))
+			// in Mekong, we don't need to add type
+			ret = append(ret, ssz)
 		}
 	}
 	return ret

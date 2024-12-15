@@ -310,7 +310,7 @@ func (b *Eth1Block) getSchema() []interface{} {
 }
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
-func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error) {
+func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash, executionReqHash libcommon.Hash) (*types.Header, error) {
 	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
 	reversedBaseFeePerGas := libcommon.Copy(b.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
@@ -360,6 +360,10 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error)
 		header.BlobGasUsed = &blobGasUsed
 		excessBlobGas := b.ExcessBlobGas
 		header.ExcessBlobGas = &excessBlobGas
+	}
+
+	if b.version >= clparams.ElectraVersion {
+		header.RequestsHash = &executionReqHash
 	}
 
 	// If the header hash does not match the block hash, return an error.
