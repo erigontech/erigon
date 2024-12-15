@@ -69,7 +69,6 @@ type Task interface {
 	IsHistoric() bool
 	ShouldDelayFeeCalc() bool
 
-	
 	// elements in dependencies -> transaction indexes on which transaction i is dependent on
 	Dependencies() []int
 }
@@ -368,12 +367,12 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 				reads := ibs.VersionedReadMap()
 
-				if _, ok := reads[state.VersionSubpathKey(evm.Context.Coinbase, state.BalancePath)]; ok {
+				if _, ok := reads[state.SubpathKey(evm.Context.Coinbase, state.BalancePath)]; ok {
 					log.Debug("Coinbase is in MVReadMap", "address", evm.Context.Coinbase)
 					result.ShouldRerunWithoutFeeDelay = true
 				}
 
-				if _, ok := reads[state.VersionSubpathKey(applyRes.BurntContractAddress, state.BalancePath)]; ok {
+				if _, ok := reads[state.SubpathKey(applyRes.BurntContractAddress, state.BalancePath)]; ok {
 					log.Debug("BurntContractAddress is in MVReadMap", "address", applyRes.BurntContractAddress)
 					result.ShouldRerunWithoutFeeDelay = true
 				}

@@ -220,14 +220,14 @@ func longTailTimeGenerator(min time.Duration, max time.Duration, i int, j int) f
 }
 
 var randomPathGenerator = func(sender common.Address, i int, j int, total int) state.VersionKey {
-	return state.VersionStateKey(common.BigToAddress((big.NewInt(int64(i % 10)))), common.BigToHash((big.NewInt(int64(total)))))
+	return state.StateKey(common.BigToAddress((big.NewInt(int64(i % 10)))), common.BigToHash((big.NewInt(int64(total)))))
 }
 
 var dexPathGenerator = func(sender common.Address, i int, j int, total int) state.VersionKey {
 	if j == total-1 || j == 2 {
-		return state.VersionSubpathKey(common.BigToAddress(big.NewInt(int64(0))), 1)
+		return state.SubpathKey(common.BigToAddress(big.NewInt(int64(0))), 1)
 	} else {
-		return state.VersionSubpathKey(common.BigToAddress(big.NewInt(int64(j))), 1)
+		return state.SubpathKey(common.BigToAddress(big.NewInt(int64(j))), 1)
 	}
 }
 
@@ -248,11 +248,11 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 		// Set first two ops to always read and write nonce
 		ops := make([]Op, 0, readsPerT+writesPerT+nonIOPerT)
 
-		ops = append(ops, Op{opType: readType, key: state.VersionSubpathKey(s, 2), duration: readTime(i, 0), val: senderNonces[s]})
+		ops = append(ops, Op{opType: readType, key: state.SubpathKey(s, 2), duration: readTime(i, 0), val: senderNonces[s]})
 
 		senderNonces[s]++
 
-		ops = append(ops, Op{opType: writeType, key: state.VersionSubpathKey(s, 2), duration: writeTime(i, 1), val: senderNonces[s]})
+		ops = append(ops, Op{opType: writeType, key: state.SubpathKey(s, 2), duration: writeTime(i, 1), val: senderNonces[s]})
 
 		for j := 0; j < readsPerT-1; j++ {
 			ops = append(ops, Op{opType: readType})

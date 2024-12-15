@@ -25,7 +25,6 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
@@ -35,7 +34,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/state"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/turbo/shards"
@@ -44,7 +42,7 @@ import (
 var execTxsDone = metrics.NewCounter(`exec_txs_done`)
 
 type StateV3 struct {
-	domains             *libstate.SharedDomains
+	domains             *state.SharedDomains
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 	logger              log.Logger
@@ -52,7 +50,7 @@ type StateV3 struct {
 	trace bool
 }
 
-func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
+func NewStateV3(domains *state.SharedDomains, logger log.Logger) *StateV3 {
 	return &StateV3{
 		domains:             domains,
 		applyPrevAccountBuf: make([]byte, 256),
@@ -61,7 +59,7 @@ func NewStateV3(domains *libstate.SharedDomains, logger log.Logger) *StateV3 {
 	}
 }
 
-func (rs *StateV3) applyState(writeLists map[string]*state.KvList, balanceIncreases map[libcommon.Address]uint256.Int, domains *libstate.SharedDomains, rules *chain.Rules) error {
+func (rs *StateV3) applyState(writeLists map[string]*state.KvList, balanceIncreases map[common.Address]uint256.Int, domains *state.SharedDomains, rules *chain.Rules) error {
 	var acc accounts.Account
 
 	//maps are unordered in Go! don't iterate over it. SharedDomains.deleteAccount will call GetLatest(Code) and expecting it not been delete yet
@@ -115,7 +113,7 @@ func (rs *StateV3) applyState(writeLists map[string]*state.KvList, balanceIncrea
 	return nil
 }
 
-func (rs *StateV3) Domains() *libstate.SharedDomains {
+func (rs *StateV3) Domains() *state.SharedDomains {
 	return rs.domains
 }
 
@@ -129,10 +127,10 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	txNum uint64,
 	readLists ReadLists,
 	writeLists WriteLists,
-	balanceIncreases map[libcommon.Address]uint256.Int,
+	balanceIncreases map[common.Address]uint256.Int,
 	logs []*types.Log,
-	traceFroms map[libcommon.Address]struct{},
-	traceTos map[libcommon.Address]struct{},
+	traceFroms map[common.Address]struct{},
+	traceTos map[common.Address]struct{},
 	config *chain.Config,
 	rules *chain.Rules,
 	pruneNonEssentials bool,
@@ -166,7 +164,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[libcommon.Address]struct{}, traceTos map[libcommon.Address]struct{}, domains *libstate.SharedDomains, pruneNonEssentials bool, config *chain.Config) error {
+func (rs *StateV3) ApplyLogsAndTraces4(logs []*types.Log, traceFroms map[common.Address]struct{}, traceTos map[common.Address]struct{}, domains *state.SharedDomains, pruneNonEssentials bool, config *chain.Config) error {
 	shouldPruneNonEssentials := pruneNonEssentials && config != nil
 
 	for addr := range traceFroms {
@@ -289,7 +287,7 @@ func (rs *StateV3) SizeEstimate() (r uint64) {
 	return r
 }
 
-func (rs *StateV3) ReadsValid(readLists map[string]*libstate.KvList) bool {
+func (rs *StateV3) ReadsValid(readLists map[string]*state.KvList) bool {
 	return rs.domains.ReadsValid(readLists)
 }
 
@@ -297,7 +295,7 @@ func (rs *StateV3) ReadsValid(readLists map[string]*libstate.KvList) bool {
 type StateWriterBufferedV3 struct {
 	rs           *StateV3
 	trace        bool
-	writeLists   map[string]*libstate.KvList
+	writeLists   map[string]*state.KvList
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
@@ -327,7 +325,7 @@ func (w *StateWriterBufferedV3) ResetWriteSet() {
 	w.codePrevs = nil
 }
 
-func (w *StateWriterBufferedV3) WriteSet() map[string]*libstate.KvList {
+func (w *StateWriterBufferedV3) WriteSet() map[string]*state.KvList {
 	return w.writeLists
 }
 
@@ -432,7 +430,7 @@ func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriter
 
 func (w *StateWriterV3) ResetWriteSet() {}
 
-func (w *StateWriterV3) WriteSet() map[string]*libstate.KvList {
+func (w *StateWriterV3) WriteSet() map[string]*state.KvList {
 	return nil
 }
 
@@ -537,12 +535,12 @@ func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()                     {}
-func (r *ReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
-func (r *ReaderV3) SetTx(tx kv.Tx)                       {}
-func (r *ReaderV3) ReadSet() map[string]*libstate.KvList { return nil }
-func (r *ReaderV3) SetTrace(trace bool)                  { r.trace = trace }
-func (r *ReaderV3) ResetReadSet()                        {}
+func (r *ReaderV3) DiscardReadList()                  {}
+func (r *ReaderV3) SetTxNum(txNum uint64)             { r.txNum = txNum }
+func (r *ReaderV3) SetTx(tx kv.Tx)                    {}
+func (r *ReaderV3) ReadSet() map[string]*state.KvList { return nil }
+func (r *ReaderV3) SetTrace(trace bool)               { r.trace = trace }
+func (r *ReaderV3) ResetReadSet()                     {}
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.tx.GetLatest(kv.AccountsDomain, address[:], nil)
@@ -616,14 +614,14 @@ func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error
 type ReaderParallelV3 struct {
 	txNum     uint64
 	trace     bool
-	sd        *libstate.SharedDomains
+	sd        *state.SharedDomains
 	composite []byte
 
 	discardReadList bool
-	readLists       map[string]*libstate.KvList
+	readLists       map[string]*state.KvList
 }
 
-func NewReaderParallelV3(sd *libstate.SharedDomains) *ReaderParallelV3 {
+func NewReaderParallelV3(sd *state.SharedDomains) *ReaderParallelV3 {
 	return &ReaderParallelV3{
 		//trace:     true,
 		sd:        sd,
@@ -632,12 +630,12 @@ func NewReaderParallelV3(sd *libstate.SharedDomains) *ReaderParallelV3 {
 	}
 }
 
-func (r *ReaderParallelV3) DiscardReadList()                     { r.discardReadList = true }
-func (r *ReaderParallelV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
-func (r *ReaderParallelV3) SetTx(tx kv.Tx)                       {}
-func (r *ReaderParallelV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
-func (r *ReaderParallelV3) SetTrace(trace bool)                  { r.trace = trace }
-func (r *ReaderParallelV3) ResetReadSet()                        { r.readLists = newReadList() }
+func (r *ReaderParallelV3) DiscardReadList()                  { r.discardReadList = true }
+func (r *ReaderParallelV3) SetTxNum(txNum uint64)             { r.txNum = txNum }
+func (r *ReaderParallelV3) SetTx(tx kv.Tx)                    {}
+func (r *ReaderParallelV3) ReadSet() map[string]*state.KvList { return r.readLists }
+func (r *ReaderParallelV3) SetTrace(trace bool)               { r.trace = trace }
+func (r *ReaderParallelV3) ResetReadSet()                     { r.readLists = newReadList() }
 
 func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, address[:], nil)
@@ -731,7 +729,7 @@ func (r *ReaderParallelV3) ReadAccountCodeSize(address common.Address, incarnati
 	if !r.discardReadList {
 		var sizebuf [8]byte
 		binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
-		r.readLists[libstate.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
+		r.readLists[state.CodeSizeTableFake].Push(string(address[:]), sizebuf[:])
 	}
 	size := len(enc)
 	if r.trace {
@@ -744,7 +742,7 @@ func (r *ReaderParallelV3) ReadAccountIncarnation(address common.Address) (uint6
 	return 0, nil
 }
 
-type WriteLists map[string]*libstate.KvList
+type WriteLists map[string]*state.KvList
 
 func (v WriteLists) Return() {
 	returnWriteList(v)
@@ -761,12 +759,12 @@ var writeListPool = sync.Pool{
 }
 
 func newWriteList() WriteLists {
-	v := writeListPool.Get().(map[string]*libstate.KvList)
+	v := writeListPool.Get().(map[string]*state.KvList)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
-	//return writeListPool.Get().(map[string]*libstate.KvList)
+	//return writeListPool.Get().(map[string]*state.KvList)
 }
 func returnWriteList(v WriteLists) {
 	if v == nil {
@@ -780,7 +778,7 @@ func returnWriteList(v WriteLists) {
 	writeListPool.Put(v)
 }
 
-type ReadLists map[string]*libstate.KvList
+type ReadLists map[string]*state.KvList
 
 func (v ReadLists) Return() {
 	returnReadList(v)
@@ -791,7 +789,7 @@ var readListPool = sync.Pool{
 		return ReadLists{
 			kv.AccountsDomain.String(): {},
 			kv.CodeDomain.String():     {},
-			libstate.CodeSizeTableFake: {},
+			state.CodeSizeTableFake:    {},
 			kv.StorageDomain.String():  {},
 		}
 	},
@@ -803,7 +801,7 @@ func newReadList() ReadLists {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
-	//return readListPool.Get().(map[string]*libstate.KvList)
+	//return readListPool.Get().(map[string]*state.KvList)
 }
 func returnReadList(v ReadLists) {
 	if v == nil {

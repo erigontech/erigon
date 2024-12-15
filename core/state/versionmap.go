@@ -56,11 +56,11 @@ func newVersionKey(addr common.Address, hash common.Hash, subpath byte, keyType 
 	return k
 }
 
-func VersionAddressKey(addr common.Address) VersionKey {
+func AddressKey(addr common.Address) VersionKey {
 	return newVersionKey(addr, common.Hash{}, 0, addressType)
 }
 
-func VersionStateKey(addr common.Address, hash common.Hash) VersionKey {
+func StateKey(addr common.Address, hash common.Hash) VersionKey {
 	k := newVersionKey(addr, hash, 0, stateType)
 	if !k.IsState() {
 		panic(fmt.Errorf("key is not a state key"))
@@ -69,7 +69,7 @@ func VersionStateKey(addr common.Address, hash common.Hash) VersionKey {
 	return k
 }
 
-func VersionSubpathKey(addr common.Address, subpath byte) VersionKey {
+func SubpathKey(addr common.Address, subpath byte) VersionKey {
 	return newVersionKey(addr, common.Hash{}, subpath, subpathType)
 }
 
@@ -84,7 +84,7 @@ type WriteCell struct {
 	data        interface{}
 }
 
-type TxnIndexCells struct {
+type TxIndexCells struct {
 	rw sync.RWMutex
 	tm *btree.Map[int, *WriteCell]
 }
@@ -96,27 +96,27 @@ type Version struct {
 	Incarnation int
 }
 
-func (vm *VersionMap) getKeyCells(k VersionKey, fNoKey func(kenc VersionKey) *TxnIndexCells) (cells *TxnIndexCells) {
+func (vm *VersionMap) getKeyCells(k VersionKey, fNoKey func(kenc VersionKey) *TxIndexCells) (cells *TxIndexCells) {
 	val, ok := vm.m.Load(k)
 
 	if !ok {
 		cells = fNoKey(k)
 	} else {
-		cells = val.(*TxnIndexCells)
+		cells = val.(*TxIndexCells)
 	}
 
 	return
 }
 
 func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}) {
-	cells := vm.getKeyCells(k, func(kenc VersionKey) (cells *TxnIndexCells) {
-		n := &TxnIndexCells{
+	cells := vm.getKeyCells(k, func(kenc VersionKey) (cells *TxIndexCells) {
+		n := &TxIndexCells{
 			rw: sync.RWMutex{},
 			tm: &btree.Map[int, *WriteCell]{},
 		}
 		cells = n
 		val, _ := vm.m.LoadOrStore(kenc, n)
-		cells = val.(*TxnIndexCells)
+		cells = val.(*TxIndexCells)
 		return
 	})
 
@@ -163,7 +163,7 @@ func (vm *VersionMap) ReadStorage(k VersionKey, fallBack func() any) any {
 }
 
 func (vm *VersionMap) MarkEstimate(k VersionKey, txIdx int) {
-	cells := vm.getKeyCells(k, func(_ VersionKey) *TxnIndexCells {
+	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
 
@@ -177,7 +177,7 @@ func (vm *VersionMap) MarkEstimate(k VersionKey, txIdx int) {
 }
 
 func (vm *VersionMap) Delete(k VersionKey, txIdx int) {
-	cells := vm.getKeyCells(k, func(_ VersionKey) *TxnIndexCells {
+	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
 		panic(fmt.Errorf("path must already exist"))
 	})
 
@@ -192,25 +192,25 @@ const (
 	MVReadResultNone       = 2
 )
 
-type MVReadResult struct {
+type ReadResult struct {
 	depIdx      int
 	incarnation int
 	value       interface{}
 }
 
-func (res *MVReadResult) DepIdx() int {
+func (res *ReadResult) DepIdx() int {
 	return res.depIdx
 }
 
-func (res *MVReadResult) Incarnation() int {
+func (res *ReadResult) Incarnation() int {
 	return res.incarnation
 }
 
-func (res *MVReadResult) Value() interface{} {
+func (res *ReadResult) Value() interface{} {
 	return res.value
 }
 
-func (mvr MVReadResult) Status() int {
+func (mvr ReadResult) Status() int {
 	if mvr.depIdx != -1 {
 		if mvr.incarnation == -1 {
 			return MVReadResultDependency
@@ -222,11 +222,11 @@ func (mvr MVReadResult) Status() int {
 	return MVReadResultNone
 }
 
-func (vm *VersionMap) Read(k VersionKey, txIdx int) (res MVReadResult) {
+func (vm *VersionMap) Read(k VersionKey, txIdx int) (res ReadResult) {
 	res.depIdx = -1
 	res.incarnation = -1
 
-	cells := vm.getKeyCells(k, func(_ VersionKey) *TxnIndexCells {
+	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
 		return nil
 	})
 	if cells == nil {

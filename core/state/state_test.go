@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
-	stateLib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 )
@@ -122,7 +121,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	db := memdb.NewStateDB("")
 	defer db.Close()
 
-	agg, err := stateLib.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
+	agg, err := state.NewAggregator(context.Background(), datadir.New(""), 16, db, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -139,7 +138,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	}
 	defer tx.Rollback()
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -252,7 +251,7 @@ func TestSnapshot2(t *testing.T) {
 	t.Parallel()
 	_, tx, _ := NewTestTemporalDb(t)
 
-	domains, err := stateLib.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
