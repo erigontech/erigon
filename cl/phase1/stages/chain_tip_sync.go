@@ -59,23 +59,25 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 // It returns a PeeredObject containing the blocks and the peer ID, or an error if something goes wrong.
 func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	// spam requests to fetch blocks by range from the execution client
-
+	log.Debug("[fetchBlocksFromReqResp] fetching blocks", "from", from, "count", count)
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
 		blocks, pid, err = cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	}
+	log.Debug("[fetchBlocksFromReqResp] fetched blocks", "count", len(blocks), "from", from, "to", from+count)
 
 	// If no blocks are returned, return nil without error
 	if len(blocks) == 0 {
 		return nil, nil
 	}
-	log.Debug("got blocks", "count", len(blocks), "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
+	log.Debug("[fetchBlocksFromReqResp] got blocks", "count", len(blocks), "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
 
 	// Generate blob identifiers from the retrieved blocks
 	ids, err := network2.BlobsIdentifiersFromBlocks(blocks)
 	if err != nil {
 		return nil, err
 	}
+	log.Debug("[fetchBlocksFromReqResp] number of blobs identifiers", "count", ids.Len())
 
 	var inserted uint64
 
@@ -91,13 +93,17 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 		// Request blobs frantically from the execution client
 		blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
 		if err != nil {
+			log.Debug("[fetchBlocksFromReqResp] failed to fetch blobs", "err", err)
 			return nil, err
 		}
+		log.Debug("[fetchBlocksFromReqResp] got blobs", "count", len(blobs.Responses), "from", blobs.Peer)
 
 		// Verify the blobs against identifiers and insert them into the blob store
 		if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
+			log.Debug("[fetchBlocksFromReqResp] failed to insert blobs", "err", err)
 			return nil, err
 		}
+		log.Debug("[fetchBlocksFromReqResp] inserted blobs", "count", inserted)
 	}
 
 	// Return the blocks and the peer ID wrapped in a PeeredObject
@@ -226,16 +232,20 @@ MainLoop:
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	totalRequest := args.targetSlot - args.seenSlot
 	// If the execution engine is not ready, wait for it to be ready.
+	log.Debug("[chainTipSync] waiting for execution engine to be ready")
 	ready, err := waitForExecutionEngineToBeFinished(ctx, cfg)
 	if err != nil {
+		log.Warn("[chainTipSync] error waiting for execution engine to be ready", "err", err)
 		return err
 	}
 	if !ready {
+		log.Debug("[chainTipSync] execution engine not ready")
 		return nil
 	}
 
 	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
 		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
+			log.Warn("[chainTipSync] failed to flush block collector", "err", err)
 			return err
 		}
 	}
