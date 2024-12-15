@@ -3,6 +3,7 @@ package receipts
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -38,6 +39,7 @@ type ReceiptEnv struct {
 	noopWriter  *state.NoopWriter
 	getHeader   func(hash common.Hash, number uint64) *types.Header
 	header      *types.Header
+	minTxNum    uint64
 }
 
 var (
@@ -92,6 +94,12 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 		return h
 	}
 	header := block.HeaderNoCopy()
+
+	minTxNum, err := txNumsReader.Min(tx, block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+
 	return &ReceiptEnv{
 		ibs:         ibs,
 		usedGas:     usedGas,
@@ -100,6 +108,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *cha
 		noopWriter:  noopWriter,
 		getHeader:   getHeader,
 		header:      header,
+		minTxNum:    minTxNum,
 	}, nil
 }
 
@@ -147,19 +156,36 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	receipts := make(types.Receipts, len(block.Transactions()))
 
-	genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, 0)
-	if err != nil {
-		return nil, err
-	}
-
+	wg := &sync.WaitGroup{}
+	wg.Add(len(receipts))
 	for i, txn := range block.Transactions() {
-		genEnv.ibs.SetTxContext(i)
-		receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
-		if err != nil {
-			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
-		}
-		receipt.BlockHash = block.Hash()
-		receipts[i] = receipt
+		go func(i int, txn types.Transaction) {
+			genEnv, err := g.PrepareEnv(ctx, block, cfg, tx, i)
+			if err != nil {
+				return
+			}
+			cumGasUsed, _, firstLogIndex, err := rawtemporaldb.ReceiptAsOf(tx, genEnv.minTxNum+uint64(i))
+			if err != nil {
+				return
+			}
+			genEnv.ibs.SetTxContext(i)
+			receipt, _, err := core.ApplyTransaction(cfg, core.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, nil, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.usedGas, genEnv.usedBlobGas, vm.Config{})
+			if err != nil {
+				return
+			}
+			receipt.BlockHash = block.Hash()
+
+			receipt.CumulativeGasUsed = cumGasUsed
+			receipt.TransactionIndex = uint(i)
+
+			for j := range receipt.Logs {
+				receipt.Logs[j].TxIndex = uint(i)
+				receipt.Logs[j].Index = uint(firstLogIndex + uint32(j))
+			}
+			receipts[i] = receipt
+
+		}(i, txn)
+
 	}
 
 	g.addToCache(block.HeaderNoCopy(), receipts)
