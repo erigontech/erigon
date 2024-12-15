@@ -27,6 +27,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/core/types"
@@ -55,7 +56,12 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusValidated, nil
 	}
 
-	header, err := payload.RlpHeader(beaconParentRoot)
+	var requestsHash libcommon.Hash
+	if payload.Version() >= clparams.ElectraVersion {
+		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
+	}
+
+	header, err := payload.RlpHeader(beaconParentRoot, requestsHash)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
