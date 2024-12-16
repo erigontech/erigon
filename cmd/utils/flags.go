@@ -1098,6 +1098,12 @@ var (
 		Usage: "Enable 'chaos monkey' to generate spontaneous network/consensus/etc failures. Use ONLY for testing",
 		Value: false,
 	}
+
+	ExperimentalEFOptimizationFlag = cli.BoolFlag{
+		Name:  "experimental.ef-optimization",
+		Usage: "Enable experimental elias-fano encoding optimization for indexes. ****FORWARD-COMPATIBLE ONLY****: once enabled on an existing node, new .ef files can't be read if this flag is disabled. Enable it on genesis sync to build snapshots 100% using this new format.",
+		Value: false,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag, &DiagDisabledFlag, &DiagEndpointAddrFlag, &DiagEndpointPortFlag, &DiagSpeedTestFlag}
@@ -2001,6 +2007,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
+	}
+
+	if ctx.IsSet(ExperimentalEFOptimizationFlag.Name) {
+		cfg.ExperimentalEFOptimization = ctx.Bool(ExperimentalEFOptimizationFlag.Name)
 	}
 }
 
