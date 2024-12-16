@@ -43,6 +43,7 @@ import (
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -518,7 +519,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 	}
 	var r DomainRanges
-	maxSpan := d.aggregationStep * StepsInFrozenFile
+	maxSpan := d.aggregationStep * config3.StepsInFrozenFile
 
 	for {
 		if stop := func() bool {
@@ -570,7 +571,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		dc.Close()
 	}
 
-	maxSpan := d.aggregationStep * StepsInFrozenFile
+	maxSpan := d.aggregationStep * config3.StepsInFrozenFile
 	for {
 		dc := d.BeginFilesRo()
 		r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan)
@@ -715,7 +716,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
-	maxFrozenFiles := (txCount / dom.aggregationStep) / StepsInFrozenFile
+	maxFrozenFiles := (txCount / dom.aggregationStep) / config3.StepsInFrozenFile
 
 	ctx := context.Background()
 	roTx, err := db.BeginRo(ctx)
@@ -1232,7 +1233,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 
 	var k [8]byte
 	var v [8]byte
-	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInFrozenFile
+	maxFrozenFiles := (txCount / d.aggregationStep) / config3.StepsInFrozenFile
 	prev := map[string]string{}
 
 	// key 0: only in frozen file 0
