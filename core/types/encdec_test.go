@@ -29,7 +29,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 )
 
 const RUNS = 10000 // for local tests increase this number
@@ -253,7 +252,7 @@ func (tr *TRand) RandRLPTransactions(size int) [][]byte {
 	for i := 0; i < size; i++ {
 		txn := make([]byte, 512)
 		txSize := tr.RandIntInRange(1, 500)
-		encodedSize := rlp2.EncodeString(tr.RandBytes(txSize), txn)
+		encodedSize := rlp.EncodeString2(tr.RandBytes(txSize), txn)
 		txns[i] = txn[:encodedSize]
 	}
 	return txns

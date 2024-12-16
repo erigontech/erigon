@@ -29,7 +29,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/math"
 )
 
@@ -505,4 +508,20 @@ func BenchmarkEncodeBigInts(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestStringLen56(t *testing.T) {
+	str := hexutility.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
+	require.Equal(t, 56, len(str))
+
+	strLen := StringLen(str)
+	assert.Equal(t, 56+2, strLen)
+
+	encoded := make([]byte, strLen)
+	EncodeString2(str, encoded)
+
+	dataPos, dataLen, err := ParseString(encoded, 0)
+	require.NoError(t, err)
+	assert.Equal(t, dataPos, 2)
+	assert.Equal(t, dataLen, 56)
 }
