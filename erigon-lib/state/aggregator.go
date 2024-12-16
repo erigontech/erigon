@@ -1872,62 +1872,12 @@ func (ac *AggregatorRoTx) DebugEFKey(domain kv.Domain, k []byte) error {
 	return ac.d[domain].DebugEFKey(k)
 }
 
-func (ac *AggregatorRoTx) DebugEFAllValuesAreInRange(ctx context.Context, name kv.InvertedIdx, failFast bool, fromStep uint64) error {
-	switch name {
-	case kv.AccountsHistoryIdx:
-		err := ac.d[kv.AccountsDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.StorageHistoryIdx:
-		err := ac.d[kv.CodeDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.CodeHistoryIdx:
-		err := ac.d[kv.StorageDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.CommitmentHistoryIdx:
-		err := ac.d[kv.CommitmentDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.ReceiptHistoryIdx:
-		err := ac.d[kv.ReceiptDomain].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	//case kv.GasUsedHistoryIdx:
-	//	err := ac.d[kv.GasUsedDomain].ht.iit.DebugEFAllValuesAreInRange(ctx)
-	//	if err != nil {
-	//		return err
-	//	}
-	case kv.TracesFromIdx:
-		err := ac.iis[kv.TracesFromIdxPos].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.TracesToIdx:
-		err := ac.iis[kv.TracesToIdxPos].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.LogAddrIdx:
-		err := ac.iis[kv.LogAddrIdxPos].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	case kv.LogTopicIdx:
-		err := ac.iis[kv.LogTopicIdxPos].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-		if err != nil {
-			return err
-		}
-	default:
-		panic(fmt.Sprintf("unexpected: %s", name))
-	}
-	return nil
+func (ac *AggregatorRoTx) DebugInvertedIndexOfDomainAllValuesAreInRange(ctx context.Context, name kv.Domain, failFast bool, fromStep uint64) error {
+	return ac.d[name].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
+}
+
+func (ac *AggregatorRoTx) DebugInvertedIndexAllValuesAreInRange(ctx context.Context, name kv.InvertedIdxPos, failFast bool, fromStep uint64) error {
+	return ac.iis[name].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
 }
 
 // --- Domain part END ---

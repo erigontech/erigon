@@ -34,7 +34,7 @@ func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator, fail
 		return err
 	}
 	g := &errgroup.Group{}
-	for _, idx := range []kv.InvertedIdx{kv.AccountsHistoryIdx, kv.StorageHistoryIdx, kv.CodeHistoryIdx, kv.CommitmentHistoryIdx, kv.ReceiptHistoryIdx, kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
+	for _, idx := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain} {
 		idx := idx
 		g.Go(func() error {
 			tx, err := db.BeginTemporalRo(ctx)
@@ -43,13 +43,44 @@ func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator, fail
 			}
 			defer tx.Rollback()
 
-			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugEFAllValuesAreInRange(ctx, idx, failFast, fromStep)
+			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugInvertedIndexOfDomainAllValuesAreInRange(ctx, idx, failFast, fromStep)
 			if err != nil {
 				return err
 			}
 			return nil
 		})
 	}
+	for _, idx := range []kv.InvertedIdxPos{kv.LogTopicIdxPos, kv.LogAddrIdxPos, kv.TracesFromIdxPos, kv.TracesToIdxPos} {
+		idx := idx
+		g.Go(func() error {
+			tx, err := db.BeginTemporalRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+
+			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+	}
+
+	g.Go(func() error {
+		tx, err := db.BeginTemporalRo(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugInvertedIndexAllValuesAreInRange(ctx, kv.ReceiptHistoryIdx, failFast, fromStep)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+
 	if err := g.Wait(); err != nil {
 		return err
 	}

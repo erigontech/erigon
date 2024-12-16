@@ -923,14 +923,6 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 		defer src.Close()
 		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName())
-		if strings.Contains(fname, ".ef") {
-			g := src.MakeGetter()
-			for g.HasNext() {
-				k, _ := g.Next(nil)
-				v, _ := g.Next(nil)
-				log.Info("meta", "k", fmt.Sprintf("%x", k), "count", eliasfano32.Count(v))
-			}
-		}
 	} else if strings.Contains(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
