@@ -405,7 +405,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	}
 	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
-	for blockNum := fromBlock; blockNum < toBlock && !workersExited.Load(); blockNum++ {
+	for blockNum := fromBlock; blockNum <= toBlock && !workersExited.Load(); blockNum++ {
 		var b *types.Block
 		b, err = blockWithSenders(ctx, nil, tx, br, blockNum)
 		if err != nil {
