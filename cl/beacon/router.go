@@ -70,7 +70,7 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		Handler:      mux,
 		ReadTimeout:  routerCfg.ReadTimeTimeout,
 		IdleTimeout:  routerCfg.IdleTimeout,
-		WriteTimeout: routerCfg.IdleTimeout,
+		WriteTimeout: routerCfg.WriteTimeout,
 	}
 	if err != nil {
 		log.Warn("[Beacon API] Failed to start listening", "addr", routerCfg.Address, "err", err)

@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
-	rlp "github.com/erigontech/erigon-lib/rlp2"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // SignatureLength indicates the byte length required to carry a signature with recovery id.

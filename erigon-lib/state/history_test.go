@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 
@@ -82,7 +83,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 		iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
 			aggregationStep: 16, filenameBase: "hist", keysTable: keysTable, valuesTable: indexTable,
 		},
-		withLocalityIndex: false, compression: seg.CompressNone, historyLargeValues: largeValues,
+		compression: seg.CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, logger)
 	require.NoError(tb, err)
@@ -924,7 +925,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 	}
 
 	var r HistoryRanges
-	maxSpan := h.aggregationStep * StepsInColdFile
+	maxSpan := h.aggregationStep * config3.StepsInFrozenFile
 
 	for {
 		if stop := func() bool {

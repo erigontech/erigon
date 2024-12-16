@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
@@ -907,7 +908,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		return nil
 	}
 
-	txs := (aggStep) * StepsInColdFile
+	txs := (aggStep) * config3.StepsInFrozenFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
 	rnd := newRnd(0)
