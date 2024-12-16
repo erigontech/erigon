@@ -121,9 +121,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		}
 	}
 
-	println("begin:", begin, "end", end, "latest")
 	if end < begin {
-		println("here")
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
