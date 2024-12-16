@@ -37,38 +37,38 @@ func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator, fail
 		return err
 	}
 	g := &errgroup.Group{}
-	for _, idx := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain} {
-		idx := idx
-		g.Go(func() error {
-			tx, err := db.BeginTemporalRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-
-			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugInvertedIndexOfDomainAllValuesAreInRange(ctx, idx, failFast, fromStep)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-	}
-	for _, idx := range []kv.InvertedIdxPos{kv.LogTopicIdxPos, kv.LogAddrIdxPos, kv.TracesFromIdxPos, kv.TracesToIdxPos} {
-		idx := idx
-		g.Go(func() error {
-			tx, err := db.BeginTemporalRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-
-			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-	}
+	//for _, idx := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain} {
+	//	idx := idx
+	//	g.Go(func() error {
+	//		tx, err := db.BeginTemporalRo(ctx)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		defer tx.Rollback()
+	//
+	//		err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugInvertedIndexOfDomainAllValuesAreInRange(ctx, idx, failFast, fromStep)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		return nil
+	//	})
+	//}
+	//for _, idx := range []kv.InvertedIdxPos{kv.LogTopicIdxPos, kv.LogAddrIdxPos, kv.TracesFromIdxPos, kv.TracesToIdxPos} {
+	//	idx := idx
+	//	g.Go(func() error {
+	//		tx, err := db.BeginTemporalRo(ctx)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		defer tx.Rollback()
+	//
+	//		err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
+	//		if err != nil {
+	//			return err
+	//		}
+	//		return nil
+	//	})
+	//}
 
 	g.Go(func() error {
 		tx, err := db.BeginTemporalRo(ctx)
