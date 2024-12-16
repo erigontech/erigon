@@ -1,11 +1,18 @@
 package shutter
 
-import "github.com/erigontech/erigon/core/types"
+import (
+	"context"
+
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/txnprovider"
+)
+
+var _ txnprovider.TxnProvider = Pool{}
 
 type Pool struct {
 }
 
-func (p Pool) Yield() ([]types.Transaction, error) {
+func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	//
 	// TODO
 	//

@@ -269,7 +269,7 @@ func getNextTransactions(
 		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
 	}
 
-	yieldOpts := []txnprovider.YieldOption{
+	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithGasTarget(remainingGas),
@@ -277,7 +277,7 @@ func getNextTransactions(
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
 	}
 
-	txns, err := cfg.txnProvider.Yield(ctx, yieldOpts...)
+	txns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
 		return nil, err
 	}
