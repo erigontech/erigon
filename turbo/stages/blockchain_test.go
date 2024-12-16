@@ -537,7 +537,7 @@ func TestChainTxReorgs(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
-	tx, err := m.DB.BeginRo(context.Background())
+	tx, err := m.DB.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -576,7 +576,7 @@ func TestChainTxReorgs(t *testing.T) {
 	}
 }
 
-func readReceipt(db kv.Tx, txHash libcommon.Hash, m *mock.MockSentry) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
+func readReceipt(db kv.TemporalTx, txHash libcommon.Hash, m *mock.MockSentry) (*types.Receipt, libcommon.Hash, uint64, uint64, error) {
 	// Retrieve the context of the receipt based on the transaction hash
 	blockNumber, _, err := rawdb.ReadTxLookupEntry(db, txHash)
 	if err != nil {
@@ -1107,7 +1107,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 
 	err = m.InsertChain(chain)
 	assert.NoError(t, err)
-	tx, err := m.DB.BeginRw(m.Ctx)
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	if err != nil {
 		fmt.Printf("beginro error: %v\n", err)
 		return
@@ -1505,34 +1505,35 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		statedb := state.New(m.NewHistoryStateReader(2, tx))
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
-		// If all is correct, then slot 1 and 2 are zero
-		key1 := libcommon.HexToHash("01")
-		var got uint256.Int
-		statedb.GetState(aa, &key1, &got)
-		if !got.IsZero() {
-			t.Errorf("got %d exp %d", got.Uint64(), 0)
-		}
-		key2 := libcommon.HexToHash("02")
-		statedb.GetState(aa, &key2, &got)
-		if !got.IsZero() {
-			t.Errorf("got %d exp %d", got.Uint64(), 0)
-		}
-		// Also, 3 and 4 should be set
-		key3 := libcommon.HexToHash("03")
-		statedb.GetState(aa, &key3, &got)
-		if got.Uint64() != 3 {
-			t.Errorf("got %d exp %d", got.Uint64(), 3)
-		}
-		key4 := libcommon.HexToHash("04")
-		statedb.GetState(aa, &key4, &got)
-		if got.Uint64() != 4 {
-			t.Errorf("got %d exp %d", got.Uint64(), 4)
-		}
-		return nil
-	})
+	statedb := state.New(m.NewHistoryStateReader(2, tx))
+
+	// If all is correct, then slot 1 and 2 are zero
+	key1 := libcommon.HexToHash("01")
+	var got uint256.Int
+	statedb.GetState(aa, &key1, &got)
+	if !got.IsZero() {
+		t.Errorf("got %d exp %d", got.Uint64(), 0)
+	}
+	key2 := libcommon.HexToHash("02")
+	statedb.GetState(aa, &key2, &got)
+	if !got.IsZero() {
+		t.Errorf("got %d exp %d", got.Uint64(), 0)
+	}
+	// Also, 3 and 4 should be set
+	key3 := libcommon.HexToHash("03")
+	statedb.GetState(aa, &key3, &got)
+	if got.Uint64() != 3 {
+		t.Errorf("got %d exp %d", got.Uint64(), 3)
+	}
+	key4 := libcommon.HexToHash("04")
+	statedb.GetState(aa, &key4, &got)
+	if got.Uint64() != 4 {
+		t.Errorf("got %d exp %d", got.Uint64(), 4)
+	}
 	require.NoError(t, err)
 }
 
@@ -1624,7 +1625,7 @@ func TestCVE2020_26265(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		reader := m.NewHistoryStateReader(2, tx)
 		statedb := state.New(reader)
 
@@ -1695,7 +1696,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 		// If all is correct, then both slots are zero
@@ -2015,7 +2016,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 
 		// Import the canonical chain
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
@@ -2233,7 +2234,7 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expectedGas, block.GasUsed())
 	}
 
-	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 
 		// 3: Ensure that miner received only the tx's tip.
@@ -2281,7 +2282,7 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	block = chain.Blocks[0]
-	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 

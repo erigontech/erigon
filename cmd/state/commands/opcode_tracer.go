@@ -32,16 +32,17 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"
 
-	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	chain2 "github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-
-	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core"
@@ -430,16 +431,26 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	ot := NewOpcodeTracer(blockNum, saveOpcodes, saveBblocks)
 
-	chainDb := mdbx.MustOpen(chaindata)
-	defer chainDb.Close()
-	historyDb := chainDb
-	historyTx, err1 := historyDb.BeginRo(context.Background())
+	datadirPath := filepath.Base(chaindata)
+	dirs := datadir2.New(datadirPath)
+	rawChainDb := mdbx.MustOpen(dirs.Chaindata)
+	defer rawChainDb.Close()
+
+	agg, err := state2.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, rawChainDb, log.New())
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	historyDb, err := temporal.New(rawChainDb, agg)
+	if err != nil {
+		return err
+	}
+	historyTx, err1 := historyDb.BeginTemporalRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
 	defer historyTx.Rollback()
 
-	dirs := datadir2.New(filepath.Dir(chainDb.(*mdbx.MdbxKV).Path()))
 	freezeCfg := ethconfig.Defaults.Snapshot
 	freezeCfg.ChainName = genesis.Config.ChainName
 	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(freezeCfg, dirs.Snap, 0, log.New()), nil, nil, nil)
@@ -577,7 +588,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	for !interrupt {
 		var block *types.Block
-		if err := chainDb.View(context.Background(), func(tx kv.Tx) (err error) {
+		if err := historyDb.View(context.Background(), func(tx kv.Tx) (err error) {
 			block, err = blockReader.BlockByNumber(context.Background(), tx, blockNum)
 			return err
 		}); err != nil {

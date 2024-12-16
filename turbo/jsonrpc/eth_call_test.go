@@ -203,7 +203,7 @@ func TestGetProof(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, proof)
 
-			tx, err := m.DB.BeginRo(context.Background())
+			tx, err := m.DB.BeginTemporalRo(context.Background())
 			assert.NoError(t, err)
 			defer tx.Rollback()
 			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
@@ -234,7 +234,7 @@ func TestGetProof(t *testing.T) {
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	tx, err := m.DB.BeginRo(ctx)
+	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
@@ -269,7 +269,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	tx, err := m.DB.BeginRo(ctx)
+	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("failed at beginning tx")
 	}
@@ -307,7 +307,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	tx, err := m.DB.BeginRo(ctx)
+	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
@@ -343,7 +343,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	tx, err := m.DB.BeginRo(ctx)
+	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
@@ -390,7 +390,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	tx, err := m.DB.BeginRo(ctx)
+	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
 	}
@@ -543,7 +543,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, libcommon.Addres
 	err = m.InsertChain(chain)
 	assert.NoError(t, err)
 
-	tx, err := db.BeginRo(context.Background())
+	tx, err := db.BeginTemporalRo(context.Background())
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}

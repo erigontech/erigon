@@ -54,7 +54,7 @@ type HistoricalTraceWorker struct {
 	ibs         *state.IntraBlockState
 	evm         *vm.EVM
 
-	chainTx     kv.Tx
+	chainTx     kv.TemporalTx
 	background  bool
 	ctx         context.Context
 	stateWriter state.StateWriter
@@ -127,7 +127,7 @@ func (rw *HistoricalTraceWorker) Run() error {
 func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
-		if rw.chainTx, err = rw.execArgs.ChainDB.BeginRo(rw.ctx); err != nil {
+		if rw.chainTx, err = rw.execArgs.ChainDB.BeginTemporalRo(rw.ctx); err != nil {
 			panic(fmt.Errorf("BeginRo: %w", err))
 		}
 		rw.stateReader.SetTx(rw.chainTx)
@@ -215,7 +215,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		}
 	}
 }
-func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.Tx) {
+func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.TemporalTx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
 		rw.chainTx = nil
@@ -230,7 +230,7 @@ func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.Tx) {
 
 // immutable (aka. global) params required for block execution. can instantiate once at app-start
 type ExecArgs struct {
-	ChainDB     kv.RoDB
+	ChainDB     kv.TemporalRoDB
 	Genesis     *types.Genesis
 	BlockReader services.FullBlockReader
 	Prune       prune.Mode
@@ -324,7 +324,9 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		cancel()
 		g.Wait()
 		rws.Close()
-		reducerGroup.Wait()
+		if err := reducerGroup.Wait(); err != nil {
+			panic(err)
+		}
 		for _, w := range workers {
 			w.ResetTx(nil)
 		}
@@ -342,7 +344,7 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *state.ResultsQueu
 	for rwsIt.HasNext(outputTxNum) {
 		txTask := rwsIt.PopNext()
 		if txTask.Error != nil {
-			return outputTxNum, false, err
+			return outputTxNum, false, txTask.Error
 		}
 
 		if txTask.TxIndex >= 0 && !txTask.Final {

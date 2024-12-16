@@ -57,7 +57,7 @@ func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chain
 
 // PrepareForWitness abstracts the process of initialising bunch of necessary things required for witness
 // generation and puts them in a WitnessStore.
-func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*WitnessStore, error) {
+func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot libcommon.Hash, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*WitnessStore, error) {
 	blockNr := block.NumberU64()
 	txNumsReader := rawdbv3.TxNums
 	reader, err := rpchelper.CreateHistoryStateReader(tx, txNumsReader, blockNr, 0, cfg.chainConfig.ChainName)

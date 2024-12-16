@@ -301,7 +301,7 @@ func Main(ctx *cli.Context) error {
 	defer db.Close()
 	defer agg.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}

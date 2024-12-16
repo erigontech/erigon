@@ -464,6 +464,9 @@ type TemporalTx interface {
 	Tx
 	TemporalGetter
 
+	// return the earliest known txnum in history of a given domain
+	HistoryStartFrom(domainName Domain) uint64
+
 	// DomainGetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
 	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
@@ -509,6 +512,17 @@ type TemporalPutDel interface {
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
+}
+
+type TemporalRoDB interface {
+	RoDB
+	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
+	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+}
+type TemporalRwDB interface {
+	RwDB
+	TemporalRoDB
+	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 }
 
 // ---- non-importnt utilites
