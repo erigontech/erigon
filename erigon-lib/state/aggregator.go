@@ -164,7 +164,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblAccountHistoryVals,
 			compression: seg.CompressNone,
 
-			withLocalityIndex: false, historyLargeValues: false,
+			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx},
@@ -184,7 +184,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblStorageHistoryVals,
 			compression: seg.CompressNone,
 
-			withLocalityIndex: false, historyLargeValues: false,
+			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx},
@@ -205,7 +205,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblCodeHistoryVals,
 			compression: seg.CompressKeys | seg.CompressVals,
 
-			withLocalityIndex: false, historyLargeValues: true,
+			historyLargeValues: true,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx},
@@ -226,8 +226,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblCommitmentHistoryVals,
 			compression: seg.CompressNone,
 
-			snapshotsDisabled: true,
-			withLocalityIndex: false, historyLargeValues: false,
+			snapshotsDisabled:  true,
+			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx},
@@ -245,7 +245,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblReceiptHistoryVals,
 			compression: seg.CompressNone,
 
-			withLocalityIndex: false, historyLargeValues: false,
+			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx},
