@@ -34,7 +34,10 @@ func (p Pool) Run(ctx context.Context) error {
 
 func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	//
-	// TODO
+	// TODO - implement shutter spec
+	//        1) fetch corresponding txns for current slot and fill the remaining gas
+	//           with the secondary txn provider (devp2p)
+	//        2) if no decryption keys arrive for current slot then return empty transactions
 	//
 	return p.secondaryTxnProvider.ProvideTxns(ctx, opts...)
 }
