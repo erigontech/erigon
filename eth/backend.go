@@ -1702,11 +1702,7 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
-	if err := s.bgComponentsEg.Wait(); err != nil {
-		return err
-	}
-
-	return nil
+	return s.bgComponentsEg.Wait()
 }
 
 func (s *Ethereum) ChainDB() kv.RwDB {
