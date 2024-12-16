@@ -94,13 +94,12 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash, out *s
 	}
 	defer cacheFile.Close()
 
-	f.sszBuffer = f.sszBuffer[:0]
-	b := bytes.NewBuffer(f.sszBuffer)
-	if _, err := io.Copy(b, cacheFile); err != nil {
+	b := bytes.Buffer{}
+	if _, err := io.Copy(&b, cacheFile); err != nil {
 		return nil, err
 	}
 
-	if err := bs.DecodeCaches(b); err != nil {
+	if err := bs.DecodeCaches(&b); err != nil {
 		return nil, err
 	}
 
