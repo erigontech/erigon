@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -801,7 +802,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	defer mxRunningMerges.Dec()
 
 	closeAll := true
-	maxSpan := StepsInColdFile * a.StepSize()
+	maxSpan := config3.StepsInFrozenFile * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		return false, nil

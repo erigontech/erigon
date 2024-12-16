@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 
@@ -924,7 +925,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 	}
 
 	var r HistoryRanges
-	maxSpan := h.aggregationStep * StepsInColdFile
+	maxSpan := h.aggregationStep * config3.StepsInFrozenFile
 
 	for {
 		if stop := func() bool {
