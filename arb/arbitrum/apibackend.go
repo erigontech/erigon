@@ -4,19 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	state2 "github.com/erigontech/erigon-lib/state"
 	"math/big"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon/turbo/services"
-
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
+	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/arb/arbitrum_types"
 	"github.com/erigontech/erigon/arb/ethdb"
 	"github.com/erigontech/erigon/consensus"
@@ -33,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/services"
 )
 
 var (

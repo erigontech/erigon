@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
+	"net/http"
+	"net/url"
+
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
@@ -12,9 +16,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/holiman/uint256"
-	"math/big"
-	"net/http"
-	"net/url"
 )
 
 // Client defines typed wrappers for the Ethereum RPC API.
