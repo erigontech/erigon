@@ -292,7 +292,6 @@ func (h *hasher) valueNodeToBuffer(vn ValueNode, buffer []byte, pos int) (int, e
 		val = rlphacks.RlpSerializableBytes(vn)
 	}
 
-	fmt.Printf("valueNodeToBuffer()>>>>>>> val=%x\n", val)
 	if err := val.ToDoubleRLP(h.bw, h.prefixBuf[:]); err != nil {
 		return 0, err
 	}
