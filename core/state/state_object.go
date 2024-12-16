@@ -163,6 +163,21 @@ func (so *stateObject) GetState(key *libcommon.Hash, out *uint256.Int) {
 	so.GetCommittedState(key, out)
 }
 
+// GetState returns a value from account storage.
+func (so *stateObject) GetFullStateStorage() *Storage {
+	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	if so.fakeStorage != nil {
+		res := so.fakeStorage.Copy()
+		return &res
+	}
+	value, dirty := so.dirtyStorage[*key]
+	if dirty {
+		return
+	}
+	// Otherwise return the entry's original value
+	so.GetCommittedState(key, out)
+}
+
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key *libcommon.Hash, out *uint256.Int) {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
@@ -183,6 +198,7 @@ func (so *stateObject) GetCommittedState(key *libcommon.Hash, out *uint256.Int) 
 		return
 	}
 	// Load from DB in case it is missing.
+	so.db.stateReader.ReadAccountData()
 	enc, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), key)
 	if err != nil {
 		so.setError(err)

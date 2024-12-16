@@ -405,6 +405,22 @@ func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash
 	return nil
 }
 
+// GetState retrieves a value from the given account's storage trie.
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
+func (sdb *IntraBlockState) GetStateStorage(addr libcommon.Address, value *uint256.Int) error {
+	stateObject, err := sdb.getStateObject(addr)
+	if err != nil {
+		return err
+	}
+	if stateObject != nil && !stateObject.deleted {
+		stateObject.sto
+		stateObject.GetState(key, value)
+	} else {
+		value.Clear()
+	}
+	return nil
+}
+
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error {
