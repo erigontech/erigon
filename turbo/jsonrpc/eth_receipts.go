@@ -55,6 +55,10 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, txNum)
 }
 
+func (api *BaseAPI) getCachedReceipt(ctx context.Context, txNum uint64) (*types.Receipt, bool) {
+	return api.receiptsGenerator.GetCachedReceipt(ctx, txNum)
+}
+
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
 	return api.receiptsGenerator.GetCachedReceipts(ctx, hash)
 }
@@ -501,7 +505,6 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 	defer tx.Rollback()
-
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
