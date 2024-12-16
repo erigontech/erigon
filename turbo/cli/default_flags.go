@@ -237,4 +237,7 @@ var DefaultFlags = []cli.Flag{
 	&SyncParallelStateFlushing,
 
 	&utils.ChaosMonkeyFlag,
+
+	&utils.ShutterEnabled,
+	&utils.ShutterKeyperBootnodes,
 }
