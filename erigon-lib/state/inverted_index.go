@@ -556,10 +556,10 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		return false, 0, nil
 	}
 
-	if txNum < iit.files[0].startTxNum {
+	if iit.files[0].isAfter(txNum) {
 		return false, 0, fmt.Errorf("seek with txNum=%d but data before txNum=%d is not available", txNum, iit.files[0].startTxNum)
 	}
-	if iit.files[len(iit.files)-1].endTxNum <= txNum {
+	if iit.files[len(iit.files)-1].isBefore(txNum) {
 		return false, 0, nil
 	}
 
@@ -584,7 +584,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 	}
 
 	for i := 0; i < len(iit.files); i++ {
-		if iit.files[i].endTxNum <= txNum {
+		if iit.files[i].isBefore(txNum) {
 			continue
 		}
 		offset, ok := iit.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
@@ -604,7 +604,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 			continue
 		}
 
-		if equalOrHigherTxNum < iit.files[i].startTxNum || equalOrHigherTxNum >= iit.files[i].endTxNum {
+		if iit.files[i].isBefore(equalOrHigherTxNum) || iit.files[i].isAfter(equalOrHigherTxNum) {
 			return false, equalOrHigherTxNum, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon seg integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
 		}
 		if iit.seekInFilesCache != nil && equalOrHigherTxNum-txNum > 0 { // > 0 to improve cache hit-rate
@@ -711,10 +711,10 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 	} else {
 		for i := 0; i < len(iit.files); i++ {
 			// [from,to) && from > to
-			if endTxNum >= 0 && int(iit.files[i].endTxNum) <= endTxNum {
+			if endTxNum >= 0 && iit.files[i].isBefore(uint64(endTxNum)) {
 				continue
 			}
-			if startTxNum >= 0 && iit.files[i].startTxNum > uint64(startTxNum) {
+			if startTxNum >= 0 && iit.files[i].isAfter(uint64(startTxNum)) {
 				break
 			}
 			if iit.files[i].src.index == nil { // assert

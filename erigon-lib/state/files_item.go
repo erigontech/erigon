@@ -242,6 +242,8 @@ type visibleFile struct {
 
 func (i *visibleFile) isSubSetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *visibleFile) isSubsetOf(j *visibleFile) bool { return i.src.isSubsetOf(j.src) } //nolint
+func (i *visibleFile) isBefore(txNum uint64) bool     { return i.endTxNum <= txNum }
+func (i *visibleFile) isAfter(txNum uint64) bool      { return i.startTxNum > txNum }
 
 func calcVisibleFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool, toTxNum uint64) (roItems []visibleFile) {
 	newVisibleFiles := make([]visibleFile, 0, files.Len())

@@ -27,6 +27,31 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
+func BenchmarkName(b *testing.B) {
+	aa := [10]visibleFile{{endTxNum: 100}}
+	aac := [10]*visibleFile{&visibleFile{}}
+	b.Run("1", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			aa[0].isBefore(10)
+		}
+	})
+	b.Run("2", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = aa[0].endTxNum <= 10
+		}
+	})
+	b.Run("4.1", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			aac[0].isBefore(10)
+		}
+	})
+	b.Run("4.2", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_ = aac[0].endTxNum <= 10
+		}
+	})
+}
+
 func TestGCReadAfterRemoveFile(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
