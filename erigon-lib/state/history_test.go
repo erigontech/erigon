@@ -924,7 +924,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 	}
 
 	var r HistoryRanges
-	maxSpan := h.aggregationStep * StepsInColdFile
+	maxSpan := h.aggregationStep * StepsInFrozenFile
 
 	for {
 		if stop := func() bool {

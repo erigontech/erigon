@@ -478,7 +478,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			var found bool
 			var startTxNum, endTxNum uint64
 			maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
-			maxSpan := ii.aggregationStep * StepsInColdFile
+			maxSpan := ii.aggregationStep * StepsInFrozenFile
 
 			for {
 				if stop := func() bool {

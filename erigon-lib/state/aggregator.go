@@ -801,7 +801,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	defer mxRunningMerges.Dec()
 
 	closeAll := true
-	maxSpan := StepsInColdFile * a.StepSize()
+	maxSpan := StepsInFrozenFile * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		return false, nil
