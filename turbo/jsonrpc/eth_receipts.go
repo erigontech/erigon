@@ -102,6 +102,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				}
 			}
 
+			if uint64(fromBlock) > latest {
+				return types.Logs{}, nil
+			}
 		}
 		end = latest
 		if crit.ToBlock != nil {
@@ -369,6 +372,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
 func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (res stream.U64, err error) {
 	for _, sub := range topics {
+		if len(sub) == 0 {
+			continue
+		}
 
 		var topicsUnion stream.U64
 		for _, topic := range sub {

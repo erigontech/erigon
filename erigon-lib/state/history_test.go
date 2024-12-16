@@ -82,7 +82,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 		iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
 			aggregationStep: 16, filenameBase: "hist", keysTable: keysTable, valuesTable: indexTable,
 		},
-		withLocalityIndex: false, compression: seg.CompressNone, historyLargeValues: largeValues,
+		compression: seg.CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, logger)
 	require.NoError(tb, err)
