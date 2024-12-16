@@ -42,7 +42,7 @@ func NewBorGenerator(blockReader services.FullBlockReader,
 }
 
 // GenerateBorReceipt generates the receipt for state sync transactions of a block
-func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.Tx, block *types.Block,
+func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx, block *types.Block,
 	msgs []*types.Message, chainConfig *chain.Config, blockReceipts []*types.Receipt) (*types.Receipt, error) {
 	if receipts, ok := g.receiptCache.Get(block.Hash()); ok {
 		return receipts, nil

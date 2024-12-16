@@ -71,7 +71,7 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 	return g.receiptsCache.Get(blockHash)
 }
 
-func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.Tx, txIndex int) (*ReceiptEnv, error) {
+func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, g.blockReader))
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), cfg, g.blockReader, txNumsReader, tx, txIndex)
 	if err != nil {
@@ -140,7 +140,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	return receipt, nil
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Tx, block *types.Block) (types.Receipts, error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}

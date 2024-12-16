@@ -741,3 +741,7 @@ func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc orde
 	panic("not supported")
 	// return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
 }
+
+func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
+	return m.db.(kv.TemporalTx).HistoryStartFrom(name)
+}

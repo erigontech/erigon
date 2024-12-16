@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 )
 
 type DynamicFeeTransaction struct {
@@ -108,7 +107,7 @@ func (tx *DynamicFeeTransaction) GetAccessList() AccessList {
 func (tx *DynamicFeeTransaction) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
 	// Add envelope size and type size
-	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
@@ -138,10 +137,10 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLe
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
-	payloadSize += rlp2.StringLen(tx.Data)
+	payloadSize += rlp.StringLen(tx.Data)
 	// size of AccessList
 	accessListLen = accessListSize(tx.AccessList)
-	payloadSize += rlp2.ListPrefixLen(accessListLen) + accessListLen
+	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen
 	// size of V
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
@@ -187,7 +186,7 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 
 func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -223,7 +222,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// prefix
-	if err := EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -248,7 +247,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
-	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// envelope

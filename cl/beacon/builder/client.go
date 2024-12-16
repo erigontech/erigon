@@ -76,7 +76,7 @@ func (b *builderClient) RegisterValidator(ctx context.Context, registers []*clty
 		return err
 	}
 	_, err = httpCall[json.RawMessage](ctx, b.httpClient, http.MethodPost, url, nil, bytes.NewBuffer(payload))
-	if err == ErrNoContent {
+	if errors.Is(err, ErrNoContent) {
 		// no content is ok
 		return nil
 	}
@@ -144,7 +144,7 @@ func (b *builderClient) GetStatus(ctx context.Context) error {
 	path := "/eth/v1/builder/status"
 	url := b.url.JoinPath(path).String()
 	_, err := httpCall[json.RawMessage](ctx, b.httpClient, http.MethodGet, url, nil, nil)
-	if err == ErrNoContent {
+	if errors.Is(err, ErrNoContent) {
 		// no content is ok, we just need to check if the server is up
 		return nil
 	}

@@ -883,6 +883,11 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		release()
 	}
 
+	if h.WithdrawalsHash == nil && len(b.Withdrawals) == 0 {
+		// Hack for Issue 12297
+		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
+		b.Withdrawals = nil
+	}
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {

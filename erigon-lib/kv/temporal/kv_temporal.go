@@ -102,7 +102,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
-func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
@@ -192,6 +192,10 @@ func (tx *Tx) Commit() error {
 	mdbxTx := tx.MdbxTx
 	tx.MdbxTx = nil
 	return mdbxTx.Commit()
+}
+
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.filesTx.HistoryStartFrom(name)
 }
 
 func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {
