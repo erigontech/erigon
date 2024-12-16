@@ -28,6 +28,7 @@ func (p Pool) Run(ctx context.Context) error {
 	p.logger.Info("running pool")
 	//
 	// TODO - start pool, sentinel listeners for keyper decryption keys and other necessary background goroutines
+	//        blocks until all sub-components have shutdown or have error-ed
 	//
 	return nil
 }
