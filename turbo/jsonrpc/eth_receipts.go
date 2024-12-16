@@ -102,6 +102,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				}
 			}
 
+			if uint64(fromBlock) > latest {
+				return types.Logs{}, nil
+			}
 		}
 		end = latest
 		if crit.ToBlock != nil {
