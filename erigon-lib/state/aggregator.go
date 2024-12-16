@@ -1857,30 +1857,9 @@ func (ac *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return ac.d[domain].GetLatest(k, tx)
 }
 
-// search key in all files of all domains and print file names
-func (ac *AggregatorRoTx) DebugKey(domain kv.Domain, k []byte) error {
-	l, err := ac.d[domain].DebugKVFilesWithKey(k)
-	if err != nil {
-		return err
-	}
-	if len(l) > 0 {
-		ac.a.logger.Info("[dbg] found in", "files", l)
-	}
-	return nil
-}
-func (ac *AggregatorRoTx) DebugEFKey(domain kv.Domain, k []byte) error {
-	return ac.d[domain].DebugEFKey(k)
-}
-
-func (ac *AggregatorRoTx) DebugInvertedIndexOfDomainAllValuesAreInRange(ctx context.Context, name kv.Domain, failFast bool, fromStep uint64) error {
-	return ac.d[name].ht.iit.DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-}
-
-func (ac *AggregatorRoTx) DebugInvertedIndexAllValuesAreInRange(ctx context.Context, name kv.InvertedIdxPos, failFast bool, fromStep uint64) error {
-	return ac.iis[name].DebugEFAllValuesAreInRange(ctx, failFast, fromStep)
-}
-
 // --- Domain part END ---
+
+func (ac *AggregatorRoTx) StepSize() uint64 { return ac.a.StepSize() }
 
 func (ac *AggregatorRoTx) Close() {
 	if ac == nil || ac.a == nil { // invariant: it's safe to call Close multiple times

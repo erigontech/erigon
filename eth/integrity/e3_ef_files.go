@@ -18,11 +18,14 @@ package integrity
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/state"
+	"github.com/erigontech/erigon/core/rawdb/rawtemporaldb"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -74,10 +77,17 @@ func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator, fail
 		}
 		defer tx.Rollback()
 
-		err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugInvertedIndexAllValuesAreInRange(ctx, kv.ReceiptHistoryIdx, failFast, fromStep)
+		aTx := tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx)
+		_, bn, err := rawdbv3.TxNums.FindBlockNum(tx, (64-1)*aTx.StepSize())
 		if err != nil {
 			return err
 		}
+		systemTxsAmount := int(bn * 2)
+		cnt, err := aTx.DebugInvertedIndexOfDomainCount(ctx, kv.ReceiptDomain, failFast, rawtemporaldb.CumulativeGasUsedInBlockKey, fromStep)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("cnt: %d, systemTxsAmount=%d\n", cnt, systemTxsAmount)
 		return nil
 	})
 
