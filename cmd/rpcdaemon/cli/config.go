@@ -943,6 +943,7 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 	// TODO(yperbasis): try to unify with CreateConsensusEngine
 	var eng consensus.Engine
 	if cc.Aura != nil {
+		// TODO(yperbasis): support Aura remoteConsensusEngine
 		return errors.New("aura remoteConsensusEngine is not supported yet")
 	} else if cc.Clique != nil {
 		return errors.New("clique remoteConsensusEngine is not supported")
@@ -957,11 +958,11 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 
 		borConfig := cc.Bor.(*borcfg.BorConfig)
 
-		e.engine = bor.NewRo(cc, borKv, blockReader,
+		eng = bor.NewRo(cc, borKv, blockReader,
 			bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
 			bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 	} else {
-		e.engine = ethash.NewFaker()
+		eng = ethash.NewFaker()
 	}
 
 	if cc.TerminalTotalDifficulty == nil {
