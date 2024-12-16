@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -199,6 +200,7 @@ type Ethereum struct {
 	txPoolFetch             *txpool.Fetch
 	txPoolSend              *txpool.Send
 	txPoolGrpcServer        txpoolproto.TxpoolServer
+	shutterPool             *shutter.Pool
 	notifyMiningAboutNewTxs chan struct{}
 	forkValidator           *engine_helpers.ForkValidator
 	downloader              *downloader.Downloader
@@ -221,6 +223,7 @@ type Ethereum struct {
 	polygonBridge       *bridge.Service
 	heimdallService     *heimdall.Service
 	stopNode            func() error
+	bgComponentsEg      errgroup.Group
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -642,31 +645,28 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	var txnProvider txnprovider.TxnProvider
 	config.TxPool.NoGossip = config.DisableTxPoolGossip
 	var miningRPC txpoolproto.MiningServer
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	if config.DeprecatedTxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
 	} else {
-		//cacheConfig := kvcache.DefaultCoherentCacheConfig
-		//cacheConfig.MetricsLabel = "txpool"
-		//cacheConfig.StateV3 = config.HistoryV3w
-
 		backend.newTxs = make(chan txpool.Announcements, 1024)
-		//defer close(newTxs)
 		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpoolutil.AllComponents(
 			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
 		)
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	var txnProvider txnprovider.TxnProvider
-	if config.Shutter.Enabled {
-		txnProvider = shutter.Pool{}
-	} else {
 		txnProvider = backend.txPool
+	}
+	if config.Shutter.Enabled {
+		if config.DeprecatedTxPool.Disable {
+			panic("can't enable shutter pool when devp2p txpool is disabled")
+		}
+		backend.shutterPool = shutter.NewPool(logger, config.Shutter, txnProvider)
+		txnProvider = backend.shutterPool
 	}
 
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
@@ -1637,6 +1637,10 @@ func (s *Ethereum) Start() error {
 		}
 	}
 
+	if s.shutterPool != nil {
+		s.bgComponentsEg.Go(func() error { return s.shutterPool.Run(s.sentryCtx) })
+	}
+
 	return nil
 }
 
@@ -1696,6 +1700,10 @@ func (s *Ethereum) Stop() error {
 		if err := s.silkworm.Close(); err != nil {
 			s.logger.Error("silkworm.Close error", "err", err)
 		}
+	}
+
+	if err := s.bgComponentsEg.Wait(); err != nil {
+		return err
 	}
 
 	return nil
