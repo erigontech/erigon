@@ -50,8 +50,8 @@ type filesItem struct {
 	existence            *ExistenceFilter
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
-	// Frozen: file of size StepsInColdFile. Completely immutable.
-	// Cold: file of size < StepsInColdFile. Immutable, but can be closed/removed after merge to bigger file.
+	// Frozen: file of size StepsInFrozenFile. Completely immutable.
+	// Cold: file of size < StepsInFrozenFile. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
 	frozen   bool         // immutable, don't need atomic
 	refcount atomic.Int32 // only for `frozen=false`
@@ -64,7 +64,7 @@ type filesItem struct {
 func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
-	frozen := endStep-startStep == StepsInColdFile
+	frozen := endStep-startStep == config3.StepsInFrozenFile
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 

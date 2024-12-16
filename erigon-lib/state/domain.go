@@ -51,10 +51,6 @@ var sortableBuffersPoolForPruning = sync.Pool{
 	},
 }
 
-// StepsInColdFile - files of this size are completely frozen/immutable.
-// files of smaller size are also immutable, but can be removed after merge to bigger files.
-const StepsInColdFile = 64
-
 var (
 	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
 	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
