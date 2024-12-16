@@ -1730,6 +1730,11 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return fin
 }
 
+// Returns the first known txNum found in history files of a given domain
+func (ac *AggregatorRoTx) HistoryStartFrom(domainName kv.Domain) uint64 {
+	return ac.d[domainName].HistoryStartFrom()
+}
+
 func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	switch name {
 	case kv.AccountsHistoryIdx:
