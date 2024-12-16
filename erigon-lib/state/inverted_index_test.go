@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -478,7 +479,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			var found bool
 			var startTxNum, endTxNum uint64
 			maxEndTxNum := ii.dirtyFilesEndTxNumMinimax()
-			maxSpan := ii.aggregationStep * StepsInColdFile
+			maxSpan := ii.aggregationStep * config3.StepsInFrozenFile
 
 			for {
 				if stop := func() bool {

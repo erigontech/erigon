@@ -359,7 +359,7 @@ func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addC
 		outState = f.currentState
 	}
 
-	// try and find the point of recconection
+	// try and find the point of recconnection
 	for copyReferencedState == nil {
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
 		if !isSegmentPresent {
