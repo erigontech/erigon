@@ -23,64 +23,6 @@ import (
 	"math/big"
 )
 
-//const ArbosVersion_FixRedeemGas = uint64(11)
-//const ArbosVersion_Stylus = uint64(30)
-//const ArbosVersion_StylusFixes = uint64(31)
-//const ArbosVersion_StylusChargingFixes = uint64(32)
-//
-//type ArbitrumChainParams struct {
-//	EnableArbOS               bool
-//	AllowDebugPrecompiles     bool
-//	DataAvailabilityCommittee bool
-//	InitialArbOSVersion       uint64
-//	InitialChainOwner         common.Address
-//	GenesisBlockNum           uint64
-//	MaxCodeSize               uint64 `json:"MaxCodeSize,omitempty"`     // Maximum bytecode to permit for a contract. 0 value implies params.DefaultMaxCodeSize
-//	MaxInitCodeSize           uint64 `json:"MaxInitCodeSize,omitempty"` // Maximum initcode to permit in a creation transaction and create instructions. 0 value implies params.DefaultMaxInitCodeSize
-//}
-//
-//func (c *chain.Config) IsArbitrum() bool {
-//	return c.ArbitrumChainParams.EnableArbOS
-//}
-//
-//func (c *chain.Config) IsArbitrumNitro(num *big.Int) bool {
-//	return c.IsArbitrum() && isBlockForked(new(big.Int).SetUint64(c.ArbitrumChainParams.GenesisBlockNum), num)
-//}
-//
-//func (c *chain.Config) MaxCodeSize() uint64 {
-//	if c.ArbitrumChainParams.MaxCodeSize == 0 {
-//		return DefaultMaxCodeSize
-//	}
-//	return c.ArbitrumChainParams.MaxCodeSize
-//}
-//
-//func (c *chain.Config) MaxInitCodeSize() uint64 {
-//	if c.ArbitrumChainParams.MaxInitCodeSize == 0 {
-//		return c.MaxCodeSize() * 2
-//	}
-//	return c.ArbitrumChainParams.MaxInitCodeSize
-//}
-//
-//func (c *chain.Config) DebugMode() bool {
-//	return c.ArbitrumChainParams.AllowDebugPrecompiles
-//}
-//
-//func (c *chain.Config) checkArbitrumCompatible(newcfg *chain.Config, head *big.Int) *ConfigCompatError {
-//	if c.IsArbitrum() != newcfg.IsArbitrum() {
-//		// This difference applies to the entire chain, so report that the genesis block is where the difference appears.
-//		return newBlockCompatError("isArbitrum", common.Big0, common.Big0)
-//	}
-//	if !c.IsArbitrum() {
-//		return nil
-//	}
-//	cArb := &c.ArbitrumChainParams
-//	newArb := &newcfg.ArbitrumChainParams
-//	if cArb.GenesisBlockNum != newArb.GenesisBlockNum {
-//		return newBlockCompatError("genesisblocknum", new(big.Int).SetUint64(cArb.GenesisBlockNum), new(big.Int).SetUint64(newArb.GenesisBlockNum))
-//	}
-//	return nil
-//}
-
 func ArbitrumOneParams() chain.ArbitrumChainParams {
 	return chain.ArbitrumChainParams{
 		EnableArbOS:               true,
@@ -302,4 +244,34 @@ var ArbitrumSupportedChainConfigs = []*chain.Config{
 	ArbitrumDevTestChainConfig(),
 	ArbitrumDevTestDASChainConfig(),
 	ArbitrumAnytrustGoerliTestnetChainConfig(),
+}
+
+// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
+// and accepted by the Ethereum core developers into the Ethash consensus.
+var AllEthashProtocolChanges = &chain.Config{
+	ChainID:                       big.NewInt(1337),
+	HomesteadBlock:                big.NewInt(0),
+	DAOForkBlock:                  nil,
+	DAOForkSupport:                false,
+	EIP150Block:                   big.NewInt(0),
+	EIP155Block:                   big.NewInt(0),
+	EIP158Block:                   big.NewInt(0),
+	ByzantiumBlock:                big.NewInt(0),
+	ConstantinopleBlock:           big.NewInt(0),
+	PetersburgBlock:               big.NewInt(0),
+	IstanbulBlock:                 big.NewInt(0),
+	MuirGlacierBlock:              big.NewInt(0),
+	BerlinBlock:                   big.NewInt(0),
+	LondonBlock:                   big.NewInt(0),
+	ArrowGlacierBlock:             big.NewInt(0),
+	GrayGlacierBlock:              big.NewInt(0),
+	MergeNetsplitBlock:            nil,
+	ShanghaiTime:                  nil,
+	CancunTime:                    nil,
+	PragueTime:                    nil,
+	TerminalTotalDifficulty:       nil,
+	TerminalTotalDifficultyPassed: true,
+	Ethash:                        new(chain.EthashConfig),
+	Clique:                        nil,
+	ArbitrumChainParams:           DisableArbitrumParams(),
 }

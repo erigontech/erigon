@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -79,8 +80,8 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	return n, blocks
 }
 
-func generateTestChain() (*core.Genesis, []*types.Block) {
-	genesis := &core.Genesis{
+func generateTestChain() (*types.Genesis, []*types.Block) {
+	genesis := &types.Genesis{
 		Config: params.AllEthashProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			testAddr:     {Balance: testBalance, Storage: map[common.Hash]common.Hash{testSlot: testValue}},
@@ -170,8 +171,8 @@ func testAccessList(t *testing.T, client *rpc.Client) {
 		From:     testAddr,
 		To:       &common.Address{},
 		Gas:      21000,
-		GasPrice: big.NewInt(875000000),
-		Value:    big.NewInt(1),
+		GasPrice: uint256.NewInt(875000000),
+		Value:    uint256.NewInt(1),
 	}
 	al, gas, vmErr, err := ec.CreateAccessList(context.Background(), msg)
 	if err != nil {
