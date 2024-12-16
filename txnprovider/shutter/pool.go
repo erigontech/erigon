@@ -25,7 +25,7 @@ func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.
 }
 
 func (p Pool) Run(ctx context.Context) error {
-	p.logger.Info("running shutter")
+	p.logger.Info("running pool")
 	//
 	// TODO - start pool, sentinel listeners for keyper decryption keys and other necessary background goroutines
 	//
