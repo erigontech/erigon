@@ -1,8 +1,6 @@
 package shutter
 
 import (
-	"fmt"
-
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon/params"
 )
@@ -24,7 +22,7 @@ func ConfigByChainName(chainName string) Config {
 	case networkname.Gnosis:
 		return gnosisConfig
 	default:
-		panic(fmt.Sprintf("missing shutter config for chain: %s", chainName))
+		panic("missing shutter config for chain: " + chainName)
 	}
 }
 
