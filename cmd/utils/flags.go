@@ -1100,7 +1100,7 @@ var (
 	}
 	ShutterEnabled = cli.BoolFlag{
 		Name:  "shutter",
-		Usage: "Enable the Shutter encrypted transactions provider (defaults to false)",
+		Usage: "Enable the Shutter encrypted transactions mempool (defaults to false)",
 	}
 	ShutterKeyperBootnodes = cli.StringSliceFlag{
 		Name:  "shutter.keyper.bootnodes",
