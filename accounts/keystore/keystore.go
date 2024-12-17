@@ -301,7 +301,7 @@ func (ks *KeyStore) SignHashWithPassphrase(a Account, passphrase string, hash []
 
 // SignTxWithPassphrase signs the transaction if the private key matching the
 // given address can be decrypted with the given passphrase.
-func (ks *KeyStore) SignTxWithPassphrase(a Account, passphrase string, tx types.Transaction, chainID *big.Int) (*types.Transaction, error) {
+func (ks *KeyStore) SignTxWithPassphrase(a Account, passphrase string, tx types.Transaction, chainID *big.Int) (types.Transaction, error) {
 	_, key, err := ks.getDecryptedKey(a, passphrase)
 	if err != nil {
 		return nil, err

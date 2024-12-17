@@ -1,6 +1,7 @@
 package ethclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -226,7 +227,7 @@ func (tx *rpcTransaction) UnmarshalJSON(msg []byte) error {
 }
 
 // TransactionByHash returns the transaction with the given hash.
-func (ec *Client) TransactionByHash(ctx context.Context, hash common.Hash) (tx *types.Transaction, isPending bool, err error) {
+func (ec *Client) TransactionByHash(ctx context.Context, hash common.Hash) (tx types.Transaction, isPending bool, err error) {
 	var json *rpcTransaction
 	err = ec.c.CallContext(ctx, &json, "eth_getTransactionByHash", hash)
 	if err != nil {
@@ -608,12 +609,12 @@ func (ec *Client) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64
 //
 // If the transaction was a contract creation use the TransactionReceipt method to get the
 // contract address after the transaction has been mined.
-func (ec *Client) SendTransaction(ctx context.Context, tx *types.Transaction) error {
-	data, err := tx.MarshalBinary()
-	if err != nil {
+func (ec *Client) SendTransaction(ctx context.Context, tx types.Transaction) error {
+	buf := new(bytes.Buffer)
+	if err := tx.MarshalBinary(buf); err != nil {
 		return err
 	}
-	return ec.c.CallContext(ctx, nil, "eth_sendRawTransaction", hexutility.Encode(data))
+	return ec.c.CallContext(ctx, nil, "eth_sendRawTransaction", hexutility.Encode(buf.Bytes()))
 }
 
 func toBlockNumArg(number *big.Int) string {

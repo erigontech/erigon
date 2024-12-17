@@ -31,7 +31,7 @@ type Backend struct {
 
 	//shutdownTracker *shutdowncheck.ShutdownTracker
 
-	chanTxs      chan *types.Transaction
+	chanTxs      chan types.Transaction
 	chanClose    chan struct{} //close coroutine
 	chanNewBlock chan struct{} //create new L2 block unless empty
 
@@ -50,7 +50,7 @@ func NewBackend(stack *node.Node, config *Config, chainDb ethdb.Database, publis
 
 		//shutdownTracker: shutdowncheck.NewShutdownTracker(chainDb),
 
-		chanTxs:      make(chan *types.Transaction, 100),
+		chanTxs:      make(chan types.Transaction, 100),
 		chanClose:    make(chan struct{}),
 		chanNewBlock: make(chan struct{}, 1),
 	}

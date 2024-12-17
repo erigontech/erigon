@@ -608,7 +608,7 @@ func (a *APIBackend) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) even
 }
 
 // Transaction pool API
-func (a *APIBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
+func (a *APIBackend) SendTx(ctx context.Context, signedTx types.Transaction) error {
 	return a.b.EnqueueL2Message(ctx, signedTx, nil)
 }
 
@@ -616,7 +616,7 @@ func (a *APIBackend) SendConditionalTx(ctx context.Context, signedTx types.Trans
 	return a.b.EnqueueL2Message(ctx, signedTx, options)
 }
 
-func (a *APIBackend) GetTransaction(ctx context.Context, txHash common.Hash) (bool, *types.Transaction, common.Hash, uint64, uint64, error) {
+func (a *APIBackend) GetTransaction(ctx context.Context, txHash common.Hash) (bool, types.Transaction, common.Hash, uint64, uint64, error) {
 	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(a.b.chainDb, txHash)
 	return tx != nil, tx, blockHash, blockNumber, index, nil
 }
@@ -626,7 +626,7 @@ func (a *APIBackend) GetPoolTransactions() (types.Transactions, error) {
 	return types.Transactions{}, nil
 }
 
-func (a *APIBackend) GetPoolTransaction(txHash common.Hash) *types.Transaction {
+func (a *APIBackend) GetPoolTransaction(txHash common.Hash) types.Transaction {
 	// Arbitrum doesn't have a pool
 	return nil
 }
@@ -643,11 +643,11 @@ func (a *APIBackend) Stats() (pending int, queued int) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a *APIBackend) TxPoolContent() (map[common.Address][]*types.Transaction, map[common.Address][]*types.Transaction) {
+func (a *APIBackend) TxPoolContent() (map[common.Address][]types.Transaction, map[common.Address][]types.Transaction) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (a *APIBackend) TxPoolContentFrom(addr common.Address) ([]*types.Transaction, []*types.Transaction) {
+func (a *APIBackend) TxPoolContentFrom(addr common.Address) ([]types.Transaction, []types.Transaction) {
 	panic("not implemented") // TODO: Implement
 }
 

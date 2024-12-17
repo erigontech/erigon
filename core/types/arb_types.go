@@ -1040,7 +1040,7 @@ func (d *ArbitrumDepositTx) decode(input []byte) error {
 //}
 
 type ArbitrumInternalTx struct {
-	ChainId *big.Int
+	ChainId *uint256.Int
 	Data    []byte
 }
 
@@ -1050,21 +1050,15 @@ func (t *ArbitrumInternalTx) Type() byte {
 
 func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
 	return &ArbitrumInternalTx{
-		new(big.Int).Set(t.ChainId),
+		t.ChainId.Clone(),
 		common.CopyBytes(t.Data),
 	}
 }
 
-func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int {
-	ub, ok := uint256.FromBig(tx.ChainId)
-	if !ok {
-		panic("invalid chain id")
-	}
-	return ub
-}
-func (tx *ArbitrumInternalTx) GetNonce() uint64       { return 0 }
-func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int { return uintZero }
-func (tx *ArbitrumInternalTx) GetTip() *uint256.Int   { return uintZero }
+func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int { return tx.ChainId }
+func (tx *ArbitrumInternalTx) GetNonce() uint64         { return 0 }
+func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int   { return uintZero }
+func (tx *ArbitrumInternalTx) GetTip() *uint256.Int     { return uintZero }
 func (tx *ArbitrumInternalTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	return uint256.NewInt(0)
 }
