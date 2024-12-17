@@ -256,6 +256,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			log.Warn("[chainTipSync] failed to flush block collector", "err", err)
 			return err
 		}
+		log.Info("[chainTipSync] flushed block collector")
 	}
 
 	logger.Debug("waiting for blocks...",
