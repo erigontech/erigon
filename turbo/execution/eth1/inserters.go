@@ -25,6 +25,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/metrics"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/rpc"
@@ -106,6 +107,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
+		log.Debug("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertHeaders: could not commit: %s", err)
