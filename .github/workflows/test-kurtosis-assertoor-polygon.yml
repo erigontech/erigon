@@ -1,0 +1,32 @@
+name: Kurtosis Assertoor Polygon GitHub Action
+
+env:
+  DOCKERHUB_REPOSITORY: "erigontech/erigon-polygon"
+  APP_REPO: "erigontech/erigon-polygon"
+
+on:
+  push:
+    branches:
+      - feat/assertoor-polygon
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  assertoor_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fast checkout git repository
+        uses: actions/checkout@v4
+
+      - name: Docker build current branch
+        run: |
+          docker build -t test/erigon-polygon:current .
+
+      - name: Run Polygon Kurtosis + assertoor tests
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        with:
+          enclave_name: "kurtosis-polygon-run1-${{ github.run_id }}"
+          ethereum_package_args: ".github/workflows/kurtosis/polygon-assertoor.io"
+          kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+          persistent_logs: "true"
