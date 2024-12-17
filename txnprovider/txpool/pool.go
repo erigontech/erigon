@@ -143,6 +143,7 @@ type TxPool struct {
 	maxBlobsPerBlock        uint64
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
+	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
 }
 
 type FeeCalculator interface {
@@ -211,6 +212,7 @@ func New(
 		maxBlobsPerBlock:        maxBlobsPerBlock,
 		feeCalculator:           feeCalculator,
 		logger:                  logger,
+		auths:                   map[common.Address]*metaTxn{},
 	}
 
 	if shanghaiTime != nil {
@@ -1237,6 +1239,30 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 			continue
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
+		if mt.TxnSlot.Type == SetCodeTxnType {
+			numAuths := len(mt.TxnSlot.AuthRaw)
+			foundDuplicate := false
+			for i := range numAuths {
+				signature := mt.TxnSlot.Authorizations[i]
+				signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+				if err != nil {
+					continue
+				}
+
+				if _, ok := p.auths[*signer]; ok {
+					foundDuplicate = true
+					break
+				}
+
+				p.auths[*signer] = mt
+			}
+
+			if foundDuplicate {
+				discardReasons[i] = txpoolcfg.ErrAuthorityReserved
+				continue
+			}
+		}
+
 		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
 			continue
@@ -1504,7 +1530,7 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	for _, txn := range minedTxns {
 		nonce, ok := noncesToRemove[txn.SenderID]
 		if !ok || txn.Nonce > nonce {
-			noncesToRemove[txn.SenderID] = txn.Nonce
+			noncesToRemove[txn.SenderID] = txn.Nonce // TODO: after 7702 nonce can be incremented more than once, may affect this
 		}
 	}
 

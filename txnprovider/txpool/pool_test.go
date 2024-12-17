@@ -28,21 +28,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/types/typestest"
-
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/types/typestest"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -165,6 +169,164 @@ func TestNonceFromAddress(t *testing.T) {
 			assert.Equal(txpoolcfg.NonceTooLow, reason, reason.String())
 		}
 	}
+}
+
+func TestMultipleAuthorizations(t *testing.T) {
+	ch := make(chan Announcements, 100)
+	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+
+	cfg := txpoolcfg.DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
+		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	assert.NoError(t, err)
+	require.True(t, pool != nil)
+	ctx := context.Background()
+	var stateVersionID uint64 = 0
+	pendingBaseFee := uint64(200000)
+	// start blocks from 0, set empty hash - then kvcache will also work on this
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		StateVersionId:      stateVersionID,
+		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1000000,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+
+	var addr1, addr2 [20]byte
+	addr2[0] = 1
+	v := types2.EncodeAccountBytesV3(0, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data:    v,
+	})
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr2),
+		Data:    v,
+	})
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	assert.NoError(t, err)
+
+	chainID := uint64(7078815900)
+	privateKey, err := crypto.GenerateKey()
+	assert.NoError(t, err)
+	authAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
+
+	var b [33]byte
+	data := bytes.NewBuffer(b[:])
+	data.Reset()
+
+	authLen := rlp.U64Len(chainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(0)
+	assert.NoError(t, rlp.EncodeStructSizePrefix(authLen, data, b[:]))
+	assert.NoError(t, rlp.EncodeInt(chainID, data, b[:]))
+	assert.NoError(t, rlp.EncodeOptionalAddress(&authAddress, data, b[:]))
+	assert.NoError(t, rlp.EncodeInt(0, data, b[:]))
+
+	hashData := []byte{params.SetCodeMagicPrefix}
+	hashData = append(hashData, data.Bytes()...)
+	hash := crypto.Keccak256Hash(hashData)
+
+	sig, err := crypto.Sign(hash.Bytes(), privateKey)
+	assert.NoError(t, err)
+
+	r := uint256.NewInt(0).SetBytes(sig[:32])
+	s := uint256.NewInt(0).SetBytes(sig[32:64])
+	yParity := sig[64]
+
+	var auth Signature
+	auth.ChainID.Set(uint256.NewInt(chainID))
+	auth.V.Set(uint256.NewInt(uint64(yParity)))
+	auth.R.Set(r)
+	auth.S.Set(s)
+
+	{
+		var txnSlots TxnSlots
+		txnSlot1 := &TxnSlot{
+			Tip:            *uint256.NewInt(300000),
+			FeeCap:         *uint256.NewInt(300000),
+			Gas:            100000,
+			Nonce:          0,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot1.IDHash[0] = 1
+		txnSlots.Append(txnSlot1, addr1[:], true)
+
+		txnSlot2 := &TxnSlot{
+			Tip:            *uint256.NewInt(300000),
+			FeeCap:         *uint256.NewInt(300000),
+			Gas:            100000,
+			Nonce:          0,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot2.IDHash[0] = 2
+		txnSlots.Append(txnSlot2, addr2[:], true)
+
+		logger := log.New()
+
+		if err = pool.senders.registerNewSenders(&txnSlots, logger); err != nil {
+			t.Error(err)
+		}
+
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.ErrAuthorityReserved})
+	}
+}
+
+func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
+	privateKey, err := crypto.GenerateKey()
+	assert.NoError(t, err)
+	pubKey := crypto.PubkeyToAddress(privateKey.PublicKey)
+	chainID := uint64(7078815900)
+
+	var b [33]byte
+	data := bytes.NewBuffer(b[:])
+	data.Reset()
+
+	// Encode RLP data exactly as in the previous implementation
+	authLen := rlp.U64Len(chainID)
+	authLen += 1 + length.Addr
+	authLen += rlp.U64Len(0) // nonce
+	assert.NoError(t, rlp.EncodeStructSizePrefix(authLen, data, b[:]))
+	assert.NoError(t, rlp.EncodeInt(chainID, data, b[:]))
+	assert.NoError(t, rlp.EncodeOptionalAddress(&pubKey, data, b[:]))
+	assert.NoError(t, rlp.EncodeInt(0, data, b[:]))
+
+	// Prepare hash data exactly as before
+	hashData := []byte{params.SetCodeMagicPrefix}
+	hashData = append(hashData, data.Bytes()...)
+	hash := crypto.Keccak256Hash(hashData)
+
+	// Sign the hash
+	sig, err := crypto.Sign(hash.Bytes(), privateKey)
+	assert.NoError(t, err)
+
+	// Separate signature components
+	r := uint256.NewInt(0).SetBytes(sig[:32])
+	s := uint256.NewInt(0).SetBytes(sig[32:64])
+	yParity := sig[64]
+
+	// Recover signer using the explicit RecoverSignerFromRLP function
+	recoveredAddress, err := types.RecoverSignerFromRLP(data.Bytes(), yParity, *r, *s)
+	assert.NoError(t, err)
+	assert.NotNil(t, recoveredAddress)
+
+	// Verify the recovered address matches the original public key address
+	assert.Equal(t, pubKey, *recoveredAddress)
 }
 
 func TestReplaceWithHigherFee(t *testing.T) {

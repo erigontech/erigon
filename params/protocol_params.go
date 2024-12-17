@@ -184,6 +184,7 @@ const (
 	SetCodeMagicPrefix = byte(0x05)
 )
 
+// EIP-7702: Set EOA account code
 var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
 
 // EIP-4788: Beacon block root in the EVM
