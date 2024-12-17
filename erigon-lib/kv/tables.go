@@ -581,6 +581,11 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesToIdx:           {Flags: DupSort},
 }
 
+var AuRaTablesCfg = TableCfg{
+	Epoch:        {},
+	PendingEpoch: {},
+}
+
 var BorTablesCfg = TableCfg{
 	BorFinality:             {Flags: DupSort},
 	BorTxLookup:             {Flags: DupSort},
