@@ -130,6 +130,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		currentSlot := cfg.ethClock.GetCurrentSlot()
 		count := (currentSlot - from) + 4
 
+		log.Debug("[startFetchingBlocksMissedByGossipAfterSomeTime] fetching blocks", "highestSeen", cfg.forkChoice.HighestSeen(), "target", args.targetSlot, "from", from, "count", count)
 		// Stop fetching if the highest seen block is greater than or equal to the target slot
 		if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 			return
@@ -137,6 +138,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 
 		// Fetch blocks from the specified range
 		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count)
+		log.Debug("[startFetchingBlocksMissedByGossipAfterSomeTime] after fetched blocks", "highestSeen", cfg.forkChoice.HighestSeen(), "target", args.targetSlot)
 		if err != nil {
 			// Send error to the error channel and return
 			errCh <- err
@@ -186,6 +188,12 @@ MainLoop:
 			for _, block := range blocks.Data {
 				// Check if the parent block is known
 				if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
+					// check if time is up
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
 					time.Sleep(time.Millisecond)
 					continue
 				}
