@@ -245,13 +245,15 @@ type ExecArgs struct {
 	Workers     int
 }
 
-func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
+func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *state.QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) (*HistoricalTraceWorker, *errgroup.Group) {
 	g, ctx := errgroup.WithContext(ctx)
 
 	// can afford big limits - because historical execution doesn't need conflicts-resolution
 	resultChannelLimit := workerCount * 128
 	heapLimit := workerCount * 128
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
+
+	applyWorker := NewHistoricalTraceWorker(consumer, in, rws, false, ctx, cfg, logger) //gnosis doesn't us
 
 	g.Go(func() (err error) {
 		defer func() {
@@ -270,7 +272,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		}()
 		return doHistoryReduce(consumer, cfg.ChainDB, ctx, toTxNum, outputTxNum, rws)
 	})
-	return g
+	return applyWorker, g
 }
 
 func doHistoryReduce(consumer TraceConsumer, db kv.TemporalRoDB, ctx context.Context, toTxNum uint64, outputTxNum *atomic.Uint64, rws *state.ResultsQueue) error {
@@ -390,7 +392,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	outTxNum := &atomic.Uint64{}
 	outTxNum.Store(fromTxNum)
 
-	workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
+	applyWorker, workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
 	defer workers.Wait()
 
 	workersExited := &atomic.Bool{}
@@ -459,6 +461,17 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				if err != nil {
 					return err
 				}
+			}
+			if WorkerCount == 1 {
+				applyWorker.RunTxTask(txTask)
+				if txTask.TxIndex >= 0 && !txTask.Final {
+					txTask.CreateReceipt(tx)
+				}
+				if err := consumer.Reduce(txTask, tx); err != nil {
+					return err
+				}
+			} else {
+				in.Add(ctx, txTask)
 			}
 			in.Add(ctx, txTask)
 			inputTxNum++
