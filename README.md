@@ -5,8 +5,7 @@ Blog: **[erigon.substack.com](https://erigon.substack.com/)**
 Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
-frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
-by default.
+frontier.
 
 <br>
 
@@ -74,8 +73,8 @@ by default.
 
 <!--te-->
 
-**Important defaults**: Erigon is an Archive Node by default: use `--prune.mode` if need make it smaller (not allowed to
-change after first start)
+**Important defaults**: Erigon 3 is a Full Node by default. (Erigon 2 was an [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.)
+Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if you run a validator on a small disk (not allowed to change after first start).
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
@@ -344,7 +343,7 @@ Caplin is be enabled by default. to disable it and enable the Engine API, use th
 on, an external Consensus Layer will not be need
 anymore.
 
-Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
+Caplin also has an archival mode for historical states and blocks. it can be enabled through the `--caplin.archive`
 flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
 e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is

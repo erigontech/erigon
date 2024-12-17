@@ -53,10 +53,6 @@ var sortableBuffersPoolForPruning = sync.Pool{
 	},
 }
 
-// StepsInColdFile - files of this size are completely frozen/immutable.
-// files of smaller size are also immutable, but can be removed after merge to bigger files.
-const StepsInColdFile = 64
-
 var (
 	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
 	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
@@ -1584,6 +1580,14 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 	return nil, false, 0, 0, nil
 }
 
+// Returns the first txNum from available history
+func (dt *DomainRoTx) HistoryStartFrom() uint64 {
+	if len(dt.ht.files) == 0 {
+		return 0
+	}
+	return dt.ht.files[0].startTxNum
+}
+
 func (dt *DomainRoTx) GetAsOfFile(key []byte, txNum uint64) ([]byte, bool, error) {
 	var v []byte
 	var foundStep uint64
@@ -2077,3 +2081,4 @@ func (dt *DomainRoTx) Files() (res []string) {
 	}
 	return append(res, dt.ht.Files()...)
 }
+func (dt *DomainRoTx) Name() kv.Domain { return dt.name }

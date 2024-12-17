@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
@@ -164,7 +165,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblAccountHistoryVals,
 			compression: seg.CompressNone,
 
-			withLocalityIndex: false, historyLargeValues: false,
+			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx},
@@ -184,7 +185,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblStorageHistoryVals,
 			compression: seg.CompressNone,
 
-			withLocalityIndex: false, historyLargeValues: false,
+			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx},
@@ -205,7 +206,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblCodeHistoryVals,
 			compression: seg.CompressKeys | seg.CompressVals,
 
-			withLocalityIndex: false, historyLargeValues: true,
+			historyLargeValues: true,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx},
@@ -226,8 +227,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblCommitmentHistoryVals,
 			compression: seg.CompressNone,
 
-			snapshotsDisabled: true,
-			withLocalityIndex: false, historyLargeValues: false,
+			snapshotsDisabled:  true,
+			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx},
@@ -245,7 +246,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblReceiptHistoryVals,
 			compression: seg.CompressNone,
 
-			withLocalityIndex: false, historyLargeValues: false,
+			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
 				aggregationStep: aggregationStep, keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx},
@@ -801,7 +802,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	defer mxRunningMerges.Dec()
 
 	closeAll := true
-	maxSpan := StepsInColdFile * a.StepSize()
+	maxSpan := config3.StepsInFrozenFile * a.StepSize()
 	r := aggTx.findMergeRange(toTxNum, maxSpan)
 	if !r.any() {
 		return false, nil
@@ -943,7 +944,7 @@ func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.
 
 	var pruneLimit uint64 = 1_000
 	if furiousPrune {
-		pruneLimit = 1_000_000
+		pruneLimit = 10_000_000
 		/* disabling this feature for now - seems it doesn't cancel even after prune finished
 		// start from a bit high limit to give time for warmup
 		// will disable warmup after first iteration and will adjust pruneLimit based on `time`
@@ -1727,6 +1728,11 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		}()
 	}()
 	return fin
+}
+
+// Returns the first known txNum found in history files of a given domain
+func (ac *AggregatorRoTx) HistoryStartFrom(domainName kv.Domain) uint64 {
+	return ac.d[domainName].HistoryStartFrom()
 }
 
 func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {

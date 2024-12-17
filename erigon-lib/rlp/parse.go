@@ -122,7 +122,7 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 	return
 }
 
-func List(payload []byte, pos int) (dataPos, dataLen int, err error) {
+func ParseList(payload []byte, pos int) (dataPos, dataLen int, err error) {
 	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
@@ -133,7 +133,7 @@ func List(payload []byte, pos int) (dataPos, dataLen int, err error) {
 	return
 }
 
-func String(payload []byte, pos int) (dataPos, dataLen int, err error) {
+func ParseString(payload []byte, pos int) (dataPos, dataLen int, err error) {
 	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
@@ -144,7 +144,7 @@ func String(payload []byte, pos int) (dataPos, dataLen int, err error) {
 	return
 }
 func StringOfLen(payload []byte, pos, expectedLen int) (dataPos int, err error) {
-	dataPos, dataLen, err := String(payload, pos)
+	dataPos, dataLen, err := ParseString(payload, pos)
 	if err != nil {
 		return 0, err
 	}
@@ -155,7 +155,7 @@ func StringOfLen(payload []byte, pos, expectedLen int) (dataPos int, err error) 
 }
 
 // U64 parses uint64 number from given payload at given position
-func U64(payload []byte, pos int) (int, uint64, error) {
+func ParseU64(payload []byte, pos int) (int, uint64, error) {
 	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
@@ -177,7 +177,7 @@ func U64(payload []byte, pos int) (int, uint64, error) {
 }
 
 // U32 parses uint64 number from given payload at given position
-func U32(payload []byte, pos int) (int, uint32, error) {
+func ParseU32(payload []byte, pos int) (int, uint32, error) {
 	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
@@ -199,8 +199,8 @@ func U32(payload []byte, pos int) (int, uint32, error) {
 }
 
 // U256 parses uint256 number from given payload at given position
-func U256(payload []byte, pos int, x *uint256.Int) (int, error) {
-	dataPos, dataLen, err := String(payload, pos)
+func ParseU256(payload []byte, pos int, x *uint256.Int) (int, error) {
+	dataPos, dataLen, err := ParseString(payload, pos)
 	if err != nil {
 		return 0, err
 	}
@@ -242,14 +242,14 @@ const ParseHashErrorPrefix = "parse hash payload"
 const ParseAnnouncementsErrorPrefix = "parse announcement payload"
 
 func ParseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int, error) {
-	pos, totalLen, err := List(payload, pos)
+	pos, totalLen, err := ParseList(payload, pos)
 	if err != nil {
 		return nil, nil, nil, pos, err
 	}
 	if pos+totalLen > len(payload) {
 		return nil, nil, nil, pos, fmt.Errorf("%s: totalLen %d is beyond the end of payload", ParseAnnouncementsErrorPrefix, totalLen)
 	}
-	pos, typesLen, err := String(payload, pos)
+	pos, typesLen, err := ParseString(payload, pos)
 	if err != nil {
 		return nil, nil, nil, pos, err
 	}
@@ -258,7 +258,7 @@ func ParseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int,
 	}
 	types := payload[pos : pos+typesLen]
 	pos += typesLen
-	pos, sizesLen, err := List(payload, pos)
+	pos, sizesLen, err := ParseList(payload, pos)
 	if err != nil {
 		return nil, nil, nil, pos, err
 	}
@@ -267,11 +267,11 @@ func ParseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int,
 	}
 	sizes := make([]uint32, typesLen)
 	for i := 0; i < len(sizes); i++ {
-		if pos, sizes[i], err = U32(payload, pos); err != nil {
+		if pos, sizes[i], err = ParseU32(payload, pos); err != nil {
 			return nil, nil, nil, pos, err
 		}
 	}
-	pos, hashesLen, err := List(payload, pos)
+	pos, hashesLen, err := ParseList(payload, pos)
 	if err != nil {
 		return nil, nil, nil, pos, err
 	}
