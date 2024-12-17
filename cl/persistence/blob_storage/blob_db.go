@@ -265,7 +265,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		}
 		if verifySignatureFn != nil {
 			// verify the signature of the sidecar head, we leave this step up to the caller to define
-			if err = verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
+			if err := verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
 				return 0, 0, err
 			}
 		}
