@@ -84,7 +84,7 @@ func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
 	}()
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
-	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
+	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender()]
 	if deferral {
 		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
 		// So we add this data dependency as a trigger
@@ -92,7 +92,7 @@ func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
 		rs.triggers[lastTxNum] = txTask
 	}
 	//fmt.Printf("senderTxNums[%x]=%d\n", *txTask.Sender, txTask.TxNum)
-	rs.senderTxNums[*txTask.Sender] = txTask.TxNum
+	rs.senderTxNums[*txTask.Sender()] = txTask.TxNum
 	return !deferral
 }
 
