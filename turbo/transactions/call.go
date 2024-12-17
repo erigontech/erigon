@@ -3,6 +3,7 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -92,7 +93,12 @@ func DoCall(
 		evm.Cancel()
 	}()
 
-	gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	gp := new(core.GasPool)
+	if gasCap == 0 {
+		gp.AddGas(math.MaxUint64)
+	} else {
+		gp.AddGas(gasCap)
+	}
 	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, err
