@@ -55,8 +55,8 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, txNum)
 }
 
-func (api *BaseAPI) getCachedReceipt(ctx context.Context, txNum uint64) (*types.Receipt, bool) {
-	return api.receiptsGenerator.GetCachedReceipt(ctx, txNum)
+func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
+	return api.receiptsGenerator.GetCachedReceipt(ctx, hash)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
