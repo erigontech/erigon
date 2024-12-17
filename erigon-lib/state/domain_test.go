@@ -621,6 +621,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 
 func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	asserts = true
+	defer func() { asserts = false }()
 
 	logger := log.New()
 	db, d := testDbAndDomain(t, logger)
