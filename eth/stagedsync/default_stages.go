@@ -215,7 +215,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return UnwindBlockHashStage(u, txc.Tx, blockHashCfg, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneBlockHashStage(p, tx, blockHashCfg, ctx)
+				return nil
 			},
 		},
 		{
@@ -228,7 +228,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return UnwindSendersStage(u, txc.Tx, senders, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneSendersStage(p, tx, senders, ctx)
+				return nil
 			},
 		},
 		{
@@ -319,7 +319,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return UnwindBlockHashStage(u, txc.Tx, blockHashCfg, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneBlockHashStage(p, tx, blockHashCfg, ctx)
+				return nil
 			},
 		},
 		{
@@ -345,7 +345,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return UnwindSendersStage(u, txc.Tx, senders, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneSendersStage(p, tx, senders, ctx)
+				return nil
 			},
 		},
 		{
