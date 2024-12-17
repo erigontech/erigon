@@ -7,33 +7,33 @@ import (
 )
 
 const singleByteWrite = `    if _, err := w.Write(b[:1]); err != nil {
-	return err
-}
+		return err
+	}
 `
 
-func matchTypeToRlpEncoding(b *bytes.Buffer, baseTyp types.Type, fieldName, tags string) {
+func matchTypeToRlpEncoding(b *bytes.Buffer, fieldType types.Type, fieldName, tags string) {
 
 	// TODO(racytech): see if we can use tags for optional, conditional and other types of encoding
 
-	_, ok := baseTyp.(*types.Struct)
+	_, ok := fieldType.(*types.Struct)
 	if ok { // if it's a struct
 		// TODO(racytech): think about a ways to handle nested structs, for now leave it uninmplemented
 		// hints: 1. nested structs should have EncodingSize pre-generated, just add
 		//			 `size += nestedStruct.EncodingSize()` to the buffer
 		//		  2. create recursive function that goes over the each field in the nested struct and calculates the
 		//			 size of the struct (unlikely)
-		panic("nested struct unimplemented")
+		// panic("nested struct unimplemented")
 	} else {
-		if ptyp, ok := baseTyp.(*types.Pointer); ok { // check for pointer first
+		if ptyp, ok := fieldType.(*types.Pointer); ok { // check for pointer first
 			pointerTypeEncoding(b, ptyp, fieldName)
-		} else if btyp, ok := baseTyp.(*types.Basic); ok {
+		} else if btyp, ok := fieldType.(*types.Basic); ok {
 			basicTypeEncoding(b, btyp, fieldName)
-		} else if styp, ok := baseTyp.(*types.Slice); ok {
+		} else if styp, ok := fieldType.(*types.Slice); ok {
 			sliceTypeEncoding(b, styp, fieldName)
-		} else if atyp, ok := baseTyp.(*types.Array); ok {
+		} else if atyp, ok := fieldType.(*types.Array); ok {
 			arrayTypeEncoding(b, atyp, fieldName)
 		} else {
-			panic(baseTyp.String())
+			panic(fieldType.String())
 		}
 	}
 }

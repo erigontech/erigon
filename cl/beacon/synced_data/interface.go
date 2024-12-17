@@ -18,6 +18,7 @@ package synced_data
 
 import (
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
@@ -33,4 +34,8 @@ type SyncedData interface {
 	HeadSlot() uint64
 	HeadRoot() common.Hash
 	CommitteeCount(epoch uint64) uint64
+	ValidatorPublicKeyByIndex(index int) (common.Bytes48, error)
+	ValidatorIndexByPublicKey(pubkey common.Bytes48) (uint64, bool, error)
+	HistoricalRootElementAtIndex(index int) (common.Hash, error)
+	HistoricalSummaryElementAtIndex(index int) (*cltypes.HistoricalSummary, error)
 }

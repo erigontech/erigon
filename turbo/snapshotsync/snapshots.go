@@ -542,6 +542,9 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 }
 
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+	if cfg.ChainName == "" {
+		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
+	}
 	enums := make([]snaptype.Enum, len(types))
 	for i, t := range types {
 		enums[i] = t.Enum()
@@ -1288,9 +1291,6 @@ func (s *RoSnapshots) delete(fileName string) error {
 					continue
 				}
 				sn.canDelete.Store(true)
-				if sn.refcount.Load() == 0 {
-					sn.closeAndRemoveFiles()
-				}
 				delSeg = sn
 				dirtySegments = s.dirty[t]
 				findDelSeg = false
@@ -1311,6 +1311,10 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	if s == nil {
 		return nil
 	}
+
+	v := s.View()
+	defer v.Close()
+
 	defer s.recalcVisibleFiles()
 	if err := s.delete(fileName); err != nil {
 		return fmt.Errorf("can't delete file: %w", err)

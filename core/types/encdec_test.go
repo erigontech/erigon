@@ -29,7 +29,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 )
 
 const RUNS = 10000 // for local tests increase this number
@@ -253,7 +252,7 @@ func (tr *TRand) RandRLPTransactions(size int) [][]byte {
 	for i := 0; i < size; i++ {
 		txn := make([]byte, 512)
 		txSize := tr.RandIntInRange(1, 500)
-		encodedSize := rlp2.EncodeString(tr.RandBytes(txSize), txn)
+		encodedSize := rlp.EncodeString2(tr.RandBytes(txSize), txn)
 		txns[i] = txn[:encodedSize]
 	}
 	return txns
@@ -435,6 +434,165 @@ func compareBodies(t *testing.T, a, b *Body) error {
 	return nil
 }
 
+func TestHashEncodeDecode(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	var b [32]byte
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandHash()
+		buf.Reset()
+		hrlp := hashRLP(enc)
+		if err := hrlp.encodeRLP(&buf, b[:]); err != nil {
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+		dec := hashRLP{}
+		if err := dec.decodeRLP(s); err != nil {
+			t.Errorf("error: Header.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		check(t, "hrlp, dec: ", hrlp, dec)
+	}
+}
+
+// func randHashSlice(tr *TRand) hashSliceRLP {
+// 	n := tr.RandIntInRange(1, 10)
+// 	sk := make([]libcommon.Hash, n)
+// 	for i := 0; i < n; i++ {
+// 		sk[i] = tr.RandHash()
+// 	}
+// 	return sk
+// }
+
+// func TestHashSliceEncodeDecode(t *testing.T) {
+// 	tr := NewTRand()
+// 	var buf bytes.Buffer
+// 	var b [32]byte
+// 	for i := 0; i < RUNS; i++ {
+// 		buf.Reset()
+// 		enc := randHashSlice(tr)
+// 		if err := enc.encodeRLP(&buf, b[:]); err != nil {
+// 			t.Errorf("error: hashSlice.EncodeRLP(): %v", err)
+// 		}
+
+// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+// 		dec := hashSliceRLP{}
+// 		if err := dec.decodeRLP(s); err != nil {
+// 			t.Errorf("error: hashSlice.DecodeRLP(): %v", err)
+// 			panic(err)
+// 		}
+// 		check(t, "enc, dec: ", len(enc), len(dec))
+// 		for i := 0; i < len(enc); i++ {
+// 			check(t, "enc, dec: ", enc[i], dec[i])
+// 		}
+// 	}
+// }
+
+// func TestAccessTupleEncodeDecodeRLP(t *testing.T) {
+// 	tr := NewTRand()
+// 	var buf bytes.Buffer
+// 	var b [32]byte
+// 	for i := 0; i < RUNS; i++ {
+// 		buf.Reset()
+// 		tup := tr.RandAccessTuple()
+// 		enc := AccessTupleRLP(tup)
+// 		if err := enc.encodeRLP(&buf, b[:]); err != nil {
+// 			t.Errorf("error: hashSlice.EncodeRLP(): %v", err)
+// 		}
+
+// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+// 		dec := AccessTupleRLP{}
+// 		if err := dec.decodeRLP(s); err != nil {
+// 			t.Errorf("error: hashSlice.DecodeRLP(): %v", err)
+// 			panic(err)
+// 		}
+
+// 		check(t, "AccessTuple: enc, dec: ", enc, dec)
+// 	}
+// }
+
+// func randAccessTupleSlice(tr *TRand) AccessListRLP {
+// 	n := tr.RandIntInRange(1, 3)
+// 	sk := make([]AccessTuple, n)
+// 	for i := 0; i < n; i++ {
+// 		sk[i] = tr.RandAccessTuple()
+// 	}
+// 	return sk
+// }
+
+// func TestAccessTupleSliceEncodeDecodeRLP(t *testing.T) {
+// 	tr := NewTRand()
+// 	var buf bytes.Buffer
+// 	var b [32]byte
+// 	for i := 0; i < RUNS; i++ {
+// 		buf.Reset()
+// 		enc := randAccessTupleSlice(tr)
+// 		if err := enc.encodeRLP(&buf, b[:]); err != nil {
+// 			t.Errorf("error: hashSlice.EncodeRLP(): %v", err)
+// 		}
+
+// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+// 		dec := AccessListRLP{}
+// 		if err := dec.decodeRLP(s); err != nil {
+// 			t.Errorf("error: hashSlice.DecodeRLP(): %v", err)
+// 			panic(err)
+// 		}
+// 		check(t, "enc, dec: ", len(enc), len(dec))
+// 		for i := 0; i < len(enc); i++ {
+// 			check(t, "enc, dec: ", enc[i], dec[i])
+// 		}
+// 	}
+// }
+
+func randTestingStruct(tr *TRand) *TestingStruct {
+	a := uint64(0)
+	return &TestingStruct{
+		_uintRLP:    &a,
+		_bigIntRLP:  *tr.RandBig(),
+		_uint256RLP: *tr.RandUint256(),
+		_addressRLP: tr.RandAddress(),
+		_hashRLP:    tr.RandHash(),
+		_stringRLP:  tr.RandBytes(tr.RandIntInRange(8, 256)),
+	}
+}
+
+func checkTestingStruct(t *testing.T, a, b *TestingStruct) {
+	check(t, "TestingStruct._uintRLP", a._uintRLP, b._uintRLP)
+	check(t, "TestingStruct._bigIntRLP", a._bigIntRLP, b._bigIntRLP)
+	check(t, "TestingStruct._uint256RLP", a._uint256RLP, b._uint256RLP)
+	check(t, "TestingStruct._addressRLP", a._addressRLP, b._addressRLP)
+	check(t, "TestingStruct._hashRLP", a._hashRLP, b._hashRLP)
+	check(t, "TestingStruct._stringRLP", a._stringRLP, b._stringRLP)
+}
+
+func TestTestingStructEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		buf.Reset()
+		enc := randTestingStruct(tr)
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: hashSlice.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+		dec := TestingStruct{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: hashSlice.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		checkTestingStruct(t, enc, &dec)
+	}
+}
+
 func TestTransactionEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
@@ -542,6 +700,27 @@ func TestWithdrawalEncodeDecodeRLP(t *testing.T) {
 		}
 
 		checkWithdrawals(t, enc, dec)
+	}
+}
+
+func TestTxRLPEncoding(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandTransaction(-1)
+		buf.Reset()
+		_txn := TxnToTxRLP(enc)
+		if err := _txn.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+		dec, err := DecodeRLPTransaction(s, false)
+		if err != nil {
+			t.Errorf("error: DecodeRLPTransaction: %v", err)
+		}
+		compareTransactions(t, enc, dec)
 	}
 }
 

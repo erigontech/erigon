@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain/networkid"
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	common2 "github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/metrics"
@@ -858,13 +857,18 @@ var (
 		Usage: "Max outbound traffic per second per peer",
 		Value: "256KB",
 	}
+	CaplinAdaptableTrafficRequirementsFlag = cli.BoolFlag{
+		Name:  "caplin.adaptable-maximum-traffic-requirements",
+		Usage: "Make the node adaptable to the maximum traffic requirement based on how many validators are being ran",
+		Value: true,
+	}
 	CaplinCheckpointSyncUrlFlag = cli.StringSliceFlag{
 		Name:  "caplin.checkpoint-sync-url",
 		Usage: "checkpoint sync endpoint",
 		Value: cli.NewStringSlice(),
 	}
 	CaplinSubscribeAllTopicsFlag = cli.BoolFlag{
-		Name:  "caplin.subscibe-all-topics",
+		Name:  "caplin.subscribe-all-topics",
 		Usage: "Subscribe to all gossip topics",
 		Value: false,
 	}
@@ -881,7 +885,7 @@ var (
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
-		Value: 64,
+		Value: 80,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -991,7 +995,7 @@ var (
 	BeaconApiWriteTimeoutFlag = cli.Uint64Flag{
 		Name:  "beacon.api.write.timeout",
 		Usage: "Sets the seconds for a write time out in the beacon api",
-		Value: 5,
+		Value: 31536000,
 	}
 	BeaconApiIdleTimeoutFlag = cli.Uint64Flag{
 		Name:  "beacon.api.ide.timeout",
@@ -1587,7 +1591,7 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(DbWriteMapFlag.Name) {
 		fullCfg.TxPool.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
 	}
-	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
+	cfg.CommitEvery = libcommon.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
@@ -1839,6 +1843,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if err != nil {
 		Fatalf("Option %s: %v", CaplinMaxOutboundTrafficPerPeerFlag.Name, err)
 	}
+	cfg.CaplinConfig.AdptableTrafficRequirements = ctx.Bool(CaplinAdaptableTrafficRequirementsFlag.Name)
 
 	cfg.CaplinConfig.SubscribeAllTopics = ctx.Bool(CaplinSubscribeAllTopicsFlag.Name)
 	cfg.CaplinConfig.MaxPeerCount = ctx.Uint64(CaplinMaxPeerCount.Name)
@@ -1870,6 +1875,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
 	cfg.Snapshot.Verify = ctx.Bool(DownloaderVerifyFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
+	cfg.Snapshot.ChainName = chain
 	if cfg.Snapshot.DownloaderAddr == "" {
 		downloadRateStr := ctx.String(TorrentDownloadRateFlag.Name)
 		uploadRateStr := ctx.String(TorrentUploadRateFlag.Name)

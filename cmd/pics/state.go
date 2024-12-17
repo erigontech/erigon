@@ -29,7 +29,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -118,7 +117,7 @@ func hexPalette() error {
 		return err
 	}
 	visual.StartGraph(f, true)
-	p := common.FromHex("0x000102030405060708090a0b0c0d0e0f")
+	p := libcommon.FromHex("0x000102030405060708090a0b0c0d0e0f")
 	visual.Horizontal(f, p, len(p), "p", visual.HexIndexColors, visual.HexFontColors, 0)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {

@@ -53,7 +53,7 @@ When a `snapshot-lock` file exists it is used rather than the chain.toml file to
 
 ### Deleting snapshot-lock.json
 
-If the snapshot-lock file is deleted it will be reacreated from the `chain.toml` file embeded in the Erigon process.  If the hashes change then the associated files will be re-downloaded.
+If the snapshot-lock file is deleted it will be recreated from the `chain.toml` file embedded in the Erigon process.  If the hashes change then the associated files will be re-downloaded.
 
 ### How to override downloads
 
@@ -75,6 +75,6 @@ It contains the following entries
 | Name | The unqualified name of the file being downloaded.  e.g. `v1-000000-000500-transactions.seg`.  This field is treated as the primary key for the table, there can only be one download per file. |
 | Hash | The hash of the file being downloaded.  This value can change if the external hash received either from `chain.toml` or `snapshot-lock.json` changes.  If the hash changes the entry is treated as a new download and the `Length` and `Completed` fields are reset. 
 | Length | The length of the file downloaded.  This may be available from the torrent info - but in general is only completed once the file has been downloaded. |
-| Created | The date and time that this record was created, or that the `Hash` field changed, effectively making this an new download. |
+| Created | The date and time that this record was created, or that the `Hash` field changed, effectively making this a new download. |
 | Completed | This is the date and time that the download was completed.  The presence of a completion date is also used as an indication of completion.  If the field is nil then the download is treated as incomplete |
 

@@ -6,37 +6,71 @@ import (
 	"go/types"
 )
 
-func matchTypeToEncodingSize(b *bytes.Buffer, baseTyp types.Type, fieldName, tags string) {
+func matchTypeToEncodingSize(b *bytes.Buffer, fieldType types.Type, fieldName, tags string) {
+
+	fmt.Println(fieldType.String())
 
 	// TODO(racytech): see if we can use tags for optional, conditional and other types of encoding
 
-	_, ok := baseTyp.(*types.Struct)
+	_, ok := fieldType.(*types.Struct)
 	if ok { // if it's a struct
 		// TODO(racytech): think about a ways to handle nested structs, for now leave it uninmplemented
 		// hints: 1. nested structs should have EncodingSize pre-generated, just add
 		//			 `size += nestedStruct.EncodingSize()` to the buffer
 		//		  2. create recursive function that goes over the each field in the nested struct and calculates the
 		//			 size of the struct (unlikely)
-		panic("nested struct unimplemented")
+		// panic("nested struct unimplemented")
 	} else {
-		if ptyp, ok := baseTyp.(*types.Pointer); ok { // check for pointer first
+		if ptyp, ok := fieldType.(*types.Pointer); ok { // check for pointer first
 			pointerTypeEncodingSize(b, ptyp, fieldName)
-		} else if btyp, ok := baseTyp.(*types.Basic); ok {
+		} else if btyp, ok := fieldType.(*types.Basic); ok {
 			basicTypeEncodingSize(b, btyp, fieldName)
-		} else if styp, ok := baseTyp.(*types.Slice); ok {
+		} else if styp, ok := fieldType.(*types.Slice); ok {
 			sliceTypeEncodingSize(b, styp, fieldName)
-		} else if atyp, ok := baseTyp.(*types.Array); ok {
+		} else if atyp, ok := fieldType.(*types.Array); ok {
 			arrayTypeEncodingSize(b, atyp, fieldName)
 		} else {
-			msg := fmt.Sprintf("unimplemented encodingSize for: %s\n", baseTyp.String())
+			msg := fmt.Sprintf("unimplemented encodingSize for: %s\n", fieldType.String())
 			panic(msg)
 		}
 	}
 }
 
 func pointerTypeEncodingSize(b *bytes.Buffer, typ *types.Pointer, fieldName string) {
-	panic("unimplemented pointer type")
+	matchedTyp, err := matchPointerType(typ.String())
+	if err != nil {
+		_exit(err.Error())
+	}
+	switch matchedTyp {
+	case str_uint64:
+		fmt.Fprintf(b, `    if obj.%s != nil {
+	    size += rlp.IntLenExcludingHead(*obj.%s) + 1
+	}
+`, fieldName, fieldName)
+	case str_bigInt:
+		fmt.Fprint(b, "    size += 1\n")
+		fmt.Fprintf(b, `    if obj.%s != nil {
+	    size += rlp.BigIntLenExcludingHead(obj.%s)
+	}
+`, fieldName, fieldName)
+	case str_uint256:
+		fmt.Fprintf(b, "    size += rlp.Uint256LenExcludingHead(obj.%s) + 1\n", fieldName)
+	case str_address:
+		fmt.Fprintf(b, `    if obj.%s != nil {
+			size += 20
+		}
+`, fieldName)
+	case str_hash:
+		fmt.Fprintf(b, `    if obj.%s != nil {
+	    size += 33
+	}
+`, fieldName)
+	default:
+		msg := fmt.Sprintf("unhandled case for matchedTyp: %s", matchedTyp)
+		panic(msg)
+	}
 }
+
 func basicTypeEncodingSize(b *bytes.Buffer, typ *types.Basic, fieldName string) {
 	fmt.Fprintf(b, "    size += ")
 	// fmt.Println("info: ", typ.Info())
