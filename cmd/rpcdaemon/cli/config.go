@@ -632,7 +632,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rootCancel()
 		}
 		if remoteCE != nil {
-			if !remoteCE.init(db, blockReader, remoteKvClient, logger) {
+			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
+				logger.Error("Failed to initialize remote consensus engine", "err", err)
 				rootCancel()
 			}
 		}
@@ -998,7 +999,7 @@ func (e *remoteConsensusEngine) validateEngineReady() error {
 // service startup or in a background goroutine, so that we do not depend on the liveness of other services when
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
-func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) bool {
+func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) error {
 	var cc *chain.Config
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -1012,24 +1013,36 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 		}
 		return nil
 	}); err != nil {
-		return false
+		return err
 	}
 
-	if cc.Bor != nil {
+	// TODO(yperbasis): try to unify with CreateConsensusEngine
+	var eng consensus.Engine
+	if cc.Aura != nil {
+		// TODO(yperbasis): support Aura remoteConsensusEngine
+		return errors.New("aura remoteConsensusEngine is not supported yet")
+	} else if cc.Clique != nil {
+		return errors.New("clique remoteConsensusEngine is not supported")
+	} else if cc.Bor != nil {
 		borKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.BorTablesCfg).
 			Open()
 
 		if err != nil {
-			return false
+			return err
 		}
 
-		e.engine = bor.NewRo(cc, borKv, blockReader, logger)
+		eng = bor.NewRo(cc, borKv, blockReader, logger)
 	} else {
-		e.engine = ethash.NewFaker()
+		eng = ethash.NewFaker()
 	}
 
-	return true
+	if cc.TerminalTotalDifficulty == nil {
+		e.engine = eng
+	} else {
+		e.engine = merge.New(eng)
+	}
+	return nil
 }
 
 func (e *remoteConsensusEngine) Author(header *types.Header) (libcommon.Address, error) {
