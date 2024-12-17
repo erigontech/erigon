@@ -473,7 +473,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			} else {
 				in.Add(ctx, txTask)
 			}
-			in.Add(ctx, txTask)
 			inputTxNum++
 
 			//select {
