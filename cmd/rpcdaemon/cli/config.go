@@ -698,17 +698,9 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		}
 	}
 
-	var apiHandler http.Handler
-	if !cfg.WebsocketEnabled || cfg.WebsocketPort != cfg.HttpPort {
-		apiHandler, err = createHandler(*cfg, defaultAPIList, httpHandler, nil, graphQLHandler, nil)
-		if err != nil {
-			return err
-		}
-	} else {
-		apiHandler, err = createHandler(*cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
-		if err != nil {
-			return err
-		}
+	apiHandler, err := createApiHandler(*cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler)
+	if err != nil {
+		return fmt.Errorf("could not create API handler: %w", err)
 	}
 
 	if cfg.HttpServerEnabled {
@@ -796,6 +788,26 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	<-ctx.Done()
 	logger.Info("Exiting...")
 	return nil
+}
+
+func createApiHandler(
+	cfg httpcfg.HttpCfg,
+	defaultAPIList []rpc.API,
+	httpHandler, wsHandler, graphQLHandler http.Handler,
+) (http.Handler, error) {
+	if !cfg.WebsocketEnabled || cfg.WebsocketPort != cfg.HttpPort {
+		apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, nil, graphQLHandler, nil)
+		if err != nil {
+			return nil, fmt.Errorf("could not create API handler without WS handler: %w", err)
+		}
+		return apiHandler, nil
+	}
+
+	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
+	if err != nil {
+		return nil, fmt.Errorf("could not create API handler with WS handler: %w", err)
+	}
+	return apiHandler, nil
 }
 
 type engineInfo struct {
