@@ -14,7 +14,6 @@ participants_matrix:
         - --network=gnosis
 network_params:
   network_id: 137 # Polygon network ID
-  chain_id: 137
   deposit_contract_address: "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0" # Polygon's deposit contract
   #electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
