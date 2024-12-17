@@ -85,6 +85,7 @@ func (b *blockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 }
 
 func (b *blockCollector) Flush(ctx context.Context) error {
+	log.Debug("[Caplin] Flushing blocks")
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.size == 0 {
