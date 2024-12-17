@@ -168,7 +168,7 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
-
+	log.Debug("[listenToIncomingBlocksUntilANewBlockIsReceived] listening for incoming blocks", "targetSlot", args.targetSlot, "highestSeen", cfg.forkChoice.HighestSeen())
 MainLoop:
 	for {
 		select {
@@ -184,6 +184,7 @@ MainLoop:
 			// Handle errors received on the error channel
 			return err
 		case blocks := <-respCh:
+			log.Info("[Caplin] Received blocks", "count", len(blocks.Data), "highestSeen", cfg.forkChoice.HighestSeen(), "beginSlot", blocks.Data[0].Block.Slot, "endSlot", blocks.Data[len(blocks.Data)-1].Block.Slot)
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
 				// Check if the parent block is known
@@ -232,6 +233,7 @@ MainLoop:
 			logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
 		}
 	}
+	log.Info("[Caplin] Finished syncing chain tip", "highestSeen", cfg.forkChoice.HighestSeen(), "targetSlot", args.targetSlot, "seenSlot", args.seenSlot)
 	return nil
 }
 
