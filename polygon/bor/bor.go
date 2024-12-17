@@ -371,26 +371,6 @@ func New(
 	return c
 }
 
-type rwWrapper struct {
-	kv.RoDB
-}
-
-func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("Update not implemented")
-}
-
-func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("UpdateNosync not implemented")
-}
-
-func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRw not implemented")
-}
-
-func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRwNosync not implemented")
-}
-
 // This is used by the rpcdaemon and tests which need read only access to the provided data services
 func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
 	genesisContracts GenesisContracts, logger log.Logger) *Bor {
@@ -408,7 +388,7 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 	return &Bor{
 		chainConfig: chainConfig,
 		config:      borConfig,
-		DB:          rwWrapper{db},
+		DB:          kv.RwWrapper{RoDB: db},
 		blockReader: blockReader,
 		logger:      logger,
 		Recents:     recents,
