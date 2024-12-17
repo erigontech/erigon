@@ -4,6 +4,7 @@ participants_matrix:
       el_image: test/erigon-polygon:current
       el_extra_params:
         - --chain=bor-mainnet
+        - --polygon.sync=true
   cl:
     - cl_type: lighthouse
       cl_extra_params:
