@@ -154,18 +154,10 @@ var (
 		Usage: "Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
 		Value: txpoolcfg.DefaultConfig.NoGossip,
 	}
-	TxPoolLocalsFlag = cli.StringFlag{
-		Name:  "txpool.locals",
-		Usage: "Comma separated accounts to treat as locals (no flush, priority inclusion)",
-	}
-	TxPoolNoLocalsFlag = cli.BoolFlag{
-		Name:  "txpool.nolocals",
-		Usage: "Disables price exemptions for locally submitted transactions",
-	}
 	TxPoolPriceLimitFlag = cli.Uint64Flag{
 		Name:  "txpool.pricelimit",
 		Usage: "Minimum gas price (fee cap) limit to enforce for acceptance into the pool",
-		Value: ethconfig.Defaults.DeprecatedTxPool.PriceLimit,
+		Value: txpoolcfg.DefaultConfig.MinFeeCap,
 	}
 	TxPoolPriceBumpFlag = cli.Uint64Flag{
 		Name:  "txpool.pricebump",
@@ -180,7 +172,7 @@ var (
 	TxPoolAccountSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.accountslots",
 		Usage: "Minimum number of executable transaction slots guaranteed per account",
-		Value: ethconfig.Defaults.DeprecatedTxPool.AccountSlots,
+		Value: txpoolcfg.DefaultConfig.AccountSlots,
 	}
 	TxPoolBlobSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.blobslots",
@@ -192,30 +184,20 @@ var (
 		Usage: "Total limit of number of all blobs in txs within the txpool",
 		Value: txpoolcfg.DefaultConfig.TotalBlobPoolLimit,
 	}
-	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
+	TxPoolGlobalSlotsFlag = cli.IntFlag{
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
-		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalSlots,
+		Value: txpoolcfg.DefaultConfig.PendingSubPoolLimit,
 	}
-	TxPoolGlobalBaseFeeSlotsFlag = cli.Uint64Flag{
+	TxPoolGlobalBaseFeeSlotsFlag = cli.IntFlag{
 		Name:  "txpool.globalbasefeeslots",
 		Usage: "Maximum number of non-executable transactions where only not enough baseFee",
-		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
+		Value: txpoolcfg.DefaultConfig.BaseFeeSubPoolLimit,
 	}
-	TxPoolAccountQueueFlag = cli.Uint64Flag{
-		Name:  "txpool.accountqueue",
-		Usage: "Maximum number of non-executable transaction slots permitted per account",
-		Value: ethconfig.Defaults.DeprecatedTxPool.AccountQueue,
-	}
-	TxPoolGlobalQueueFlag = cli.Uint64Flag{
+	TxPoolGlobalQueueFlag = cli.IntFlag{
 		Name:  "txpool.globalqueue",
 		Usage: "Maximum number of non-executable transaction slots for all accounts",
-		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
-	}
-	TxPoolLifetimeFlag = cli.DurationFlag{
-		Name:  "txpool.lifetime",
-		Usage: "Maximum amount of time non-executable transaction are queued",
-		Value: ethconfig.Defaults.DeprecatedTxPool.Lifetime,
+		Value: txpoolcfg.DefaultConfig.QueuedSubPoolLimit,
 	}
 	TxPoolTraceSendersFlag = cli.StringFlag{
 		Name:  "txpool.trace.senders",
@@ -1533,56 +1515,37 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
 	}
 }
 
-func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
-	cfg := &fullCfg.DeprecatedTxPool
+func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
+	cfg := txpoolcfg.DefaultConfig
 	if ctx.IsSet(TxPoolDisableFlag.Name) || TxPoolDisableFlag.Value {
 		cfg.Disable = true
 	}
-	if ctx.IsSet(TxPoolLocalsFlag.Name) {
-		locals := libcommon.CliString2Array(ctx.String(TxPoolLocalsFlag.Name))
-		for _, account := range locals {
-			if !libcommon.IsHexAddress(account) {
-				Fatalf("Invalid account in --txpool.locals: %s", account)
-			} else {
-				cfg.Locals = append(cfg.Locals, libcommon.HexToAddress(account))
-			}
-		}
-	}
-	if ctx.IsSet(TxPoolNoLocalsFlag.Name) {
-		cfg.NoLocals = ctx.Bool(TxPoolNoLocalsFlag.Name)
-	}
 	if ctx.IsSet(TxPoolPriceLimitFlag.Name) {
-		cfg.PriceLimit = ctx.Uint64(TxPoolPriceLimitFlag.Name)
+		cfg.MinFeeCap = ctx.Uint64(TxPoolPriceLimitFlag.Name)
 	}
 	if ctx.IsSet(TxPoolPriceBumpFlag.Name) {
 		cfg.PriceBump = ctx.Uint64(TxPoolPriceBumpFlag.Name)
 	}
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
-		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+		cfg.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
 	}
 	if ctx.IsSet(TxPoolAccountSlotsFlag.Name) {
 		cfg.AccountSlots = ctx.Uint64(TxPoolAccountSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolBlobSlotsFlag.Name) {
-		fullCfg.TxPool.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
+		cfg.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolTotalBlobPoolLimit.Name) {
-		fullCfg.TxPool.TotalBlobPoolLimit = ctx.Uint64(TxPoolTotalBlobPoolLimit.Name)
+		cfg.TotalBlobPoolLimit = ctx.Uint64(TxPoolTotalBlobPoolLimit.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalSlotsFlag.Name) {
-		cfg.GlobalSlots = ctx.Uint64(TxPoolGlobalSlotsFlag.Name)
-	}
-	if ctx.IsSet(TxPoolAccountQueueFlag.Name) {
-		cfg.AccountQueue = ctx.Uint64(TxPoolAccountQueueFlag.Name)
+		cfg.PendingSubPoolLimit = ctx.Int(TxPoolGlobalSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalQueueFlag.Name) {
-		cfg.GlobalQueue = ctx.Uint64(TxPoolGlobalQueueFlag.Name)
+		cfg.QueuedSubPoolLimit = ctx.Int(TxPoolGlobalQueueFlag.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalBaseFeeSlotsFlag.Name) {
-		cfg.GlobalBaseFeeQueue = ctx.Uint64(TxPoolGlobalBaseFeeSlotsFlag.Name)
-	}
-	if ctx.IsSet(TxPoolLifetimeFlag.Name) {
-		cfg.Lifetime = ctx.Duration(TxPoolLifetimeFlag.Name)
+		cfg.BaseFeeSubPoolLimit = ctx.Int(TxPoolGlobalBaseFeeSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolTraceSendersFlag.Name) {
 		// Parse the command separated flag
@@ -1594,12 +1557,15 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 		}
 	}
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
-		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+		cfg.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
 	}
 	if ctx.IsSet(DbWriteMapFlag.Name) {
-		fullCfg.TxPool.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
+		cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
 	}
+	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = libcommon.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
+	cfg.DBDir = dbDir
+	fullCfg.TxPool = cfg
 }
 
 func setShutter(ctx *cli.Context, chainName string, cfg *ethconfig.Config) {
@@ -1938,9 +1904,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 
-	setTxPool(ctx, cfg)
-	cfg.TxPool = ethconfig.DefaultTxPool2Config(cfg)
-	cfg.TxPool.DBDir = nodeConfig.Dirs.TxPool
+	setTxPool(ctx, nodeConfig.Dirs.TxPool, cfg)
 	setShutter(ctx, chain, cfg)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)

@@ -95,11 +95,10 @@ var Defaults = Config{
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
 	},
-	DeprecatedTxPool: DeprecatedDefaultTxPoolConfig,
-	TxPool:           txpoolcfg.DefaultConfig,
-	RPCGasCap:        50000000,
-	GPO:              FullNodeGPO,
-	RPCTxFeeCap:      1, // 1 ether
+	TxPool:      txpoolcfg.DefaultConfig,
+	RPCGasCap:   50000000,
+	GPO:         FullNodeGPO,
+	RPCTxFeeCap: 1, // 1 ether
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
@@ -211,9 +210,8 @@ type Config struct {
 	Aura   chain.AuRaConfig
 
 	// Transaction pool options
-	DeprecatedTxPool DeprecatedTxPoolConfig
-	TxPool           txpoolcfg.Config
-	Shutter          shutter.Config
+	TxPool  txpoolcfg.Config
+	Shutter shutter.Config
 
 	// Gas Price Oracle options
 	GPO gaspricecfg.Config
