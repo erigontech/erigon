@@ -24,7 +24,7 @@ import (
 
 type Generator struct {
 	receiptsCache      *lru.Cache[common.Hash, types.Receipts]
-	receiptCache       *lru.Cache[uint64, *types.Receipt]
+	receiptCache       *lru.Cache[common.Hash, *types.Receipt]
 	receiptsCacheTrace bool
 	receiptCacheTrace  bool
 
@@ -48,8 +48,12 @@ var (
 )
 
 func NewGenerator(blockReader services.FullBlockReader, engine consensus.EngineReader) *Generator {
-	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit)  //TODO: is handling both of them a good idea though...?
-	receiptCache, err := lru.New[uint64, *types.Receipt](receiptsCacheLimit * 1000) // think they should be connected in some of that way
+	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
+	if err != nil {
+		panic(err)
+	}
+
+	receiptCache, err := lru.New[common.Hash, *types.Receipt](receiptsCacheLimit * 1000) // think they should be connected in some of that way
 	if err != nil {
 		panic(err)
 	}
@@ -76,8 +80,8 @@ func (g *Generator) GetCachedReceipts(ctx context.Context, blockHash common.Hash
 	return g.receiptsCache.Get(blockHash)
 }
 
-func (g *Generator) GetCachedReceipt(ctx context.Context, txNum uint64) (*types.Receipt, bool) {
-	return g.receiptCache.Get(txNum)
+func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
+	return g.receiptCache.Get(hash)
 }
 
 func (g *Generator) PrepareEnv(ctx context.Context, block *types.Block, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
@@ -116,12 +120,12 @@ func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Rece
 	g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
 }
 
-func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
-	g.receiptCache.Add(txNum, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
+func (g *Generator) addToCacheReceipt(hash common.Hash, receipt *types.Receipt) {
+	g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated).
 }
 
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, index int, txNum uint64) (*types.Receipt, error) {
-	if receipt, ok := g.receiptCache.Get(txNum); ok {
+	if receipt, ok := g.receiptCache.Get(block.Transactions()[index].Hash()); ok {
 		return receipt, nil
 	}
 
@@ -154,7 +158,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].Index = uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(txNum, receipt)
+	g.addToCacheReceipt(receipt.TxHash, receipt)
 	return receipt, nil
 }
 
