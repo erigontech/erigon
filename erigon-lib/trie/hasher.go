@@ -21,7 +21,6 @@ package trie
 
 import (
 	"errors"
-	"fmt"
 	"hash"
 	"sync"
 
