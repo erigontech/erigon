@@ -1576,9 +1576,10 @@ func (s *Ethereum) Start() error {
 			stopErr := s.stopNode()
 			if stopErr != nil {
 				s.logger.Error("could not stop node", "err", stopErr)
+				err = fmt.Errorf("%w: %w", stopErr, err)
 			}
 
-			return fmt.Errorf("%w: %w", stopErr, err)
+			return err
 		})
 	} else {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
