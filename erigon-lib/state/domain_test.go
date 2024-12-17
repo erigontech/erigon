@@ -620,8 +620,6 @@ func TestDomain_ScanFiles(t *testing.T) {
 }
 
 func TestDomainRoTx_CursorParentCheck(t *testing.T) {
-	t.Parallel()
-
 	asserts = true
 
 	logger := log.New()

@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"math"
 	"path/filepath"
 	"sort"
@@ -1718,26 +1717,36 @@ func (dt *DomainRoTx) closeValsCursor() {
 		// dt.vcParentPtr.Store(0)
 	}
 }
+
+type canCheckClosed interface {
+	IsClosed() bool
+}
+
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if dt.valsC != nil { // run in assert mode only
 		if asserts {
 			if tx.ViewID() != dt.valCViewID {
 				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", sdTxImmutabilityInvariant, dt.d.filenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
 			}
-			if dt.d.largeValues {
-				if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && mc.IsClosed() {
-					panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
-				}
-			} else {
-				if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && mc.IsClosed() {
-					panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than DupCursor (=> than tx opened that cursor)", dt.d.filenameBase))
-				}
+			if mc, ok := dt.valsC.(canCheckClosed); !ok && mc.IsClosed() {
+				panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
 			}
+			// if dt.d.largeValues {
+			// 	if mc, ok := dt.valsC.(*mdbx.MdbxCursor); ok && mc.IsClosed() {
+			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.filenameBase))
+			// 	}
+			// } else {
+			// 	if mc, ok := dt.valsC.(*mdbx.MdbxDupSortCursor); ok && mc.IsClosed() {
+			// 		panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than DupCursor (=> than tx opened that cursor)", dt.d.filenameBase))
+			// 	}
+			// }
 		}
 		return dt.valsC, nil
 	}
 
-	dt.valCViewID = tx.ViewID()
+	if asserts {
+		dt.valCViewID = tx.ViewID()
+	}
 	if dt.d.largeValues {
 		dt.valsC, err = tx.Cursor(dt.d.valuesTable)
 		return dt.valsC, err
