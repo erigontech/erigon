@@ -97,7 +97,6 @@ import (
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconsensusconfig"
-	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
@@ -649,7 +648,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	config.TxPool.NoGossip = config.DisableTxPoolGossip
 	var miningRPC txpoolproto.MiningServer
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
-	if config.DeprecatedTxPool.Disable {
+	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
 	} else {
 		backend.newTxs = make(chan txpool.Announcements, 1024)
@@ -662,7 +661,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider = backend.txPool
 	}
 	if config.Shutter.Enabled {
-		if config.DeprecatedTxPool.Disable {
+		if config.TxPool.Disable {
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
 		backend.shutterPool = shutter.NewPool(logger, config.Shutter, txnProvider)
@@ -830,7 +829,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// to initialize it properly.
 	// 2) we cannot propose for block 1 regardless.
 
-	if !config.DeprecatedTxPool.Disable {
+	if !config.TxPool.Disable {
 		backend.txPoolFetch.ConnectCore()
 		backend.txPoolFetch.ConnectSentries()
 		var newTxsBroadcaster *txpool.NewSlotsStreams
@@ -1152,44 +1151,6 @@ func (s *Ethereum) Etherbase() (eb libcommon.Address, err error) {
 		return etherbase, nil
 	}
 	return libcommon.Address{}, errors.New("etherbase must be explicitly specified")
-}
-
-// isLocalBlock checks whether the specified block is mined
-// by local miner accounts.
-//
-// We regard two types of accounts as local miner account: etherbase
-// and accounts specified via `txpool.locals` flag.
-func (s *Ethereum) isLocalBlock(block *types.Block) bool { //nolint
-	s.lock.RLock()
-	etherbase := s.etherbase
-	s.lock.RUnlock()
-	return ethutils.IsLocalBlock(s.engine, etherbase, s.config.DeprecatedTxPool.Locals, block.Header())
-}
-
-// shouldPreserve checks whether we should preserve the given block
-// during the chain reorg depending on whether the author of block
-// is a local account.
-func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
-	// The reason we need to disable the self-reorg preserving for clique
-	// is it can be probable to introduce a deadlock.
-	//
-	// e.g. If there are 7 available signers
-	//
-	// r1   A
-	// r2     B
-	// r3       C
-	// r4         D
-	// r5   A      [X] F G
-	// r6    [X]
-	//
-	// In the round5, the inturn signer E is offline, so the worst case
-	// is A, F and G sign the block of round5 and reject the block of opponents
-	// and in the round6, the last available signer B is offline, the whole
-	// network is stuck.
-	if _, ok := s.engine.(*clique.Clique); ok {
-		return false
-	}
-	return s.isLocalBlock(block)
 }
 
 // StartMining starts the miner with the given number of CPU threads. If mining
