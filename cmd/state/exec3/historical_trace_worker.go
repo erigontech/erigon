@@ -253,7 +253,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	heapLimit := workerCount * 128
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
 
-	applyWorker := NewHistoricalTraceWorker(consumer, in, rws, false, ctx, cfg, logger) //gnosis doesn't us
+	applyWorker := NewHistoricalTraceWorker(consumer, in, rws, false, ctx, cfg, logger) //gnosis doesn't support un-ordered exec yet: https://github.com/erigontech/erigon/issues/12054
 
 	g.Go(func() (err error) {
 		defer func() {
