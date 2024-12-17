@@ -7,7 +7,7 @@ env:
 on:
   push:
     branches:
-      - feat/assertoor-polygon
+      - feat/assertor-polygon
   workflow_call:
   workflow_dispatch:
 
