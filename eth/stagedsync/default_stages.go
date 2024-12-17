@@ -495,7 +495,7 @@ func PolygonSyncStages(
 				return UnwindSendersStage(u, txc.Tx, senders, ctx)
 			},
 			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneSendersStage(p, tx, senders, ctx)
+				return nil
 			},
 		},
 		{
