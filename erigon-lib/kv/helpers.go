@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 )
 
-// Adapts an RoDB to the RwDB interface
+// Adapts an RoDB to the RwDB interface (invoking write operations results in error)
 type RwWrapper struct {
 	RoDB
 }

@@ -1019,10 +1019,18 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 	// TODO(yperbasis): try to unify with CreateConsensusEngine
 	var eng consensus.Engine
 	if cc.Aura != nil {
-		// TODO(yperbasis): support Aura remoteConsensusEngine
-		return errors.New("aura remoteConsensusEngine is not supported yet")
-	} else if cc.Clique != nil {
-		return errors.New("clique remoteConsensusEngine is not supported")
+		auraKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
+			WithBucketsConfig(kv.AuRaTablesCfg).
+			Open()
+
+		if err != nil {
+			return err
+		}
+
+		eng, err = aura.NewRo(cc.Aura, auraKv)
+		if err != nil {
+			return err
+		}
 	} else if cc.Bor != nil {
 		borKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.BorTablesCfg).
@@ -1033,6 +1041,8 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 		}
 
 		eng = bor.NewRo(cc, borKv, blockReader, logger)
+	} else if cc.Clique != nil {
+		return errors.New("clique remoteConsensusEngine is not supported")
 	} else {
 		eng = ethash.NewFaker()
 	}
