@@ -462,7 +462,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 					return err
 				}
 			}
-			if WorkerCount == 1 {
+			if WorkerCount == 1 { //gnosis doesn't support un-ordered exec yet: https://github.com/erigontech/erigon/issues/12054
 				applyWorker.RunTxTask(txTask)
 				if txTask.TxIndex >= 0 && !txTask.Final {
 					txTask.CreateReceipt(tx)
