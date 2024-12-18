@@ -1549,7 +1549,7 @@ func (s *Ethereum) Start() error {
 	} else if s.config.PolygonSync {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
-		go func() {
+		s.bgComponentsEg.Go(func() error {
 			// when we're running in stand alone mode we need to run the downloader before we start the
 			// polygon services becuase they will wait for it to complete before opening thier stores
 			// which make use of snapshots and expect them to be initialize
@@ -1569,15 +1569,18 @@ func (s *Ethereum) Start() error {
 			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)
 			if err == nil || errors.Is(err, context.Canceled) {
-				return
+				return err
 			}
 
 			s.logger.Error("polygon sync crashed - stopping node", "err", err)
-			err = s.stopNode()
-			if err != nil {
-				s.logger.Error("could not stop node", "err", err)
+			stopErr := s.stopNode()
+			if stopErr != nil {
+				s.logger.Error("could not stop node", "err", stopErr)
+				err = fmt.Errorf("%w: %w", stopErr, err)
 			}
-		}()
+
+			return err
+		})
 	} else {
 		diagnostics.Send(diagnostics.SyncStageList{StagesList: diagnostics.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
@@ -1663,7 +1666,11 @@ func (s *Ethereum) Stop() error {
 		}
 	}
 
-	return s.bgComponentsEg.Wait()
+	if err := s.bgComponentsEg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		s.logger.Error("bgComponentsEg.Wait error", "err", err)
+	}
+
+	return nil
 }
 
 func (s *Ethereum) ChainDB() kv.RwDB {
