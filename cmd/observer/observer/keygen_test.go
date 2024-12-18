@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 )
 

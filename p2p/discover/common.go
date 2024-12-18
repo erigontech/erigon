@@ -24,11 +24,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/crypto"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // UDPConn is a network connection on which discovery can operate.

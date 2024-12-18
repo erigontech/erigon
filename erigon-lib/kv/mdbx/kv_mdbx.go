@@ -35,7 +35,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/semaphore"
 

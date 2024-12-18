@@ -26,9 +26,9 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )

@@ -26,9 +26,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (

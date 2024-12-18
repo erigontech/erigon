@@ -12,9 +12,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/polygon/bor/bordb"
-	"github.com/ledgerwatch/log/v3"
 )
 
 //Naming:

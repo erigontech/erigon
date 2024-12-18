@@ -17,7 +17,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"go.uber.org/zap/buffer"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"

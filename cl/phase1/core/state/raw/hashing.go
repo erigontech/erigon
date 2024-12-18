@@ -5,9 +5,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {

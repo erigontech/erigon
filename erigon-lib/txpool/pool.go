@@ -40,7 +40,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"

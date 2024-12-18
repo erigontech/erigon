@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -32,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // This test case is a repro of an annoying bug that took us forever to catch.

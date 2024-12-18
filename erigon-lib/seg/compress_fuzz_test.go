@@ -25,7 +25,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func FuzzCompress(f *testing.F) {

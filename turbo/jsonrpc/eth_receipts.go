@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"

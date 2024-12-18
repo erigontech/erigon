@@ -18,7 +18,6 @@ package ethash
 
 import (
 	"encoding/binary"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"hash"
 	"math/big"
 	"reflect"
@@ -28,10 +27,12 @@ import (
 	"time"
 	"unsafe"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/bitutil"

@@ -9,10 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestFiltersDeadlock_Test(t *testing.T) {

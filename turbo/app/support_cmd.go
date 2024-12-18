@@ -19,9 +19,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 )
 

@@ -30,7 +30,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"

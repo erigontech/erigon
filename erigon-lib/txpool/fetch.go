@@ -32,9 +32,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

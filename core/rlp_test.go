@@ -25,7 +25,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/temporaltest"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/u256"

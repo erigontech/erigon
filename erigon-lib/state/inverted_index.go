@@ -34,7 +34,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 

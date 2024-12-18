@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -17,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestSenders(t *testing.T) {

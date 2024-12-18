@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"reflect"
 	"sort"
 	"strconv"
 	"testing"
 	"time"
+
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -18,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

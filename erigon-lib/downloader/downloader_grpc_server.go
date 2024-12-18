@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"

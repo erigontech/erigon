@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 )

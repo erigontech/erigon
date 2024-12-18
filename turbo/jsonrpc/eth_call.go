@@ -8,7 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"google.golang.org/grpc"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

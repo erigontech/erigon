@@ -21,7 +21,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"

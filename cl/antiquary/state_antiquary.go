@@ -12,6 +12,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -24,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // pool for buffers

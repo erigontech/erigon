@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

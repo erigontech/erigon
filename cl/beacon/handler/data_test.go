@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacontest"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -15,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )

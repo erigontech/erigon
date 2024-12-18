@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"

@@ -11,8 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func extractSlotFromSerializedBeaconState(beaconState []byte) (uint64, error) {

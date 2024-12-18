@@ -9,11 +9,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	coresnaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 )

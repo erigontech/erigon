@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func newTestServer(logger log.Logger) *Server {

@@ -28,8 +28,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common/math"

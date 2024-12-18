@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 

@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"

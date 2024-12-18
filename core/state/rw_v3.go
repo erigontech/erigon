@@ -12,7 +12,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/common"

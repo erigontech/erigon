@@ -5,8 +5,8 @@ import (
 	"github.com/google/btree"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"

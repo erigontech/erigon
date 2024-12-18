@@ -37,7 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/seg/patricia"
 	"github.com/ledgerwatch/erigon-lib/seg/sais"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary

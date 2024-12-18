@@ -4,7 +4,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"

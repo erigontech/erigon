@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
@@ -17,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const safetyMargin = 10_000 // We retire snapshots 10k blocks after the finalized head

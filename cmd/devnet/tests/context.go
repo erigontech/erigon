@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"

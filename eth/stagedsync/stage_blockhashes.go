@@ -6,9 +6,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type BlockHashesCfg struct {

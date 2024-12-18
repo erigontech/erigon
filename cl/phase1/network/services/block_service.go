@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/utils/eth_clock"
-	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
