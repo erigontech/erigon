@@ -183,6 +183,11 @@ const (
 
 	// EIP-7702
 	SetCodeMagicPrefix = byte(0x05)
+
+	// Arbiturm constants
+	BlobTxBlobGasPerBlob             = 1 << 17 // Gas consumption of a single data blob (== blob byte size)
+	BlobTxMinBlobGasprice            = 1       // Minimum gas price for a blob transaction
+	BlobTxBlobGaspriceUpdateFraction = 3338477 // Controls the maximum rate of change for blob gas price
 )
 
 var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
