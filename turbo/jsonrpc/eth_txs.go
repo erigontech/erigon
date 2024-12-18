@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"math/big"
@@ -76,7 +77,13 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, err
 		}
 
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txNum-txNumMin-2)) //TODO: what a magic and how to avoid it
+		if txNumMin+2 > txNum { //TODO: what a magic is this "2" and how to avoid it
+			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+		}
+
+		var txnIndex uint64 = txNum - txNumMin - 2
+
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
 		if err != nil {
 			return nil, err
 		}
@@ -87,7 +94,6 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 
 		blockHash := header.Hash()
-		var txnIndex uint64
 
 		// Add GasPrice for the DynamicFeeTransaction
 		var baseFee *big.Int
