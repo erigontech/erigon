@@ -55,6 +55,10 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, txNum)
 }
 
+func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
+	return api.receiptsGenerator.GetCachedReceipt(ctx, hash)
+}
+
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
 	return api.receiptsGenerator.GetCachedReceipts(ctx, hash)
 }
@@ -463,7 +467,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 	}
 
-	if txn == nil && chainConfig.Bor != nil {
+	if txn == nil && chainConfig.Bor != nil { //TODO: add tx gran here to.
 		receipts, err := api.getReceipts(ctx, tx, block)
 		if err != nil {
 			return nil, fmt.Errorf("getReceipts error: %w", err)
@@ -501,7 +505,6 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 	defer tx.Rollback()
-
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
