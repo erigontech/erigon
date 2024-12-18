@@ -180,7 +180,7 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 			return
 		}
 	}
-	log.Debug("processDownloadedBlockBatches", "newHighestBlockProcessed", newHighestBlockProcessed)
+	log.Debug("processDownloadedBlockBatches", "newHighestBlockProcessed", newHighestBlockProcessed, "beaconStateVersion", cfg.state.Version())
 	return
 }
 
