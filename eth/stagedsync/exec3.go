@@ -207,6 +207,9 @@ func ExecV3(ctx context.Context,
 ) error {
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
+	if parallel && cfg.chainConfig.ChainName == "gnosis" {
+		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
+	}
 
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
