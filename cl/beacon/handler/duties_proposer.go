@@ -43,7 +43,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	dependentRoot, err := a.getDependentRoot(epoch)
+	dependentRoot, err := a.getDependentRoot(epoch, false)
 	if err != nil {
 		return nil, err
 	}
