@@ -188,6 +188,7 @@ const (
 	BlobTxBlobGasPerBlob             = 1 << 17 // Gas consumption of a single data blob (== blob byte size)
 	BlobTxMinBlobGasprice            = 1       // Minimum gas price for a blob transaction
 	BlobTxBlobGaspriceUpdateFraction = 3338477 // Controls the maximum rate of change for blob gas price
+	BlobTxFieldElementsPerBlob       = 4096    // Number of field elements stored in a single data blob
 )
 
 var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}

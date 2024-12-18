@@ -49,6 +49,9 @@ type BlockContext struct {
 	BaseFee     *uint256.Int   // Provides information for BASEFEE
 	PrevRanDao  *common.Hash   // Provides information for PREVRANDAO
 	BlobBaseFee *uint256.Int   // Provides information for BLOBBASEFEE
+
+	//Arbitrum: current OS version
+	ArbOSVersion uint64
 }
 
 // TxContext provides the EVM with information about a transaction.
