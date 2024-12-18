@@ -253,7 +253,10 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	heapLimit := workerCount * 128
 	rws := state.NewResultsQueue(resultChannelLimit, heapLimit) // mapGroup owns (and closing) it
 
-	applyWorker := NewHistoricalTraceWorker(consumer, in, rws, false, ctx, cfg, logger) //gnosis doesn't support un-ordered exec yet: https://github.com/erigontech/erigon/issues/12054
+	if workerCount <= 1 {
+		applyWorker := NewHistoricalTraceWorker(consumer, in, rws, false, ctx, cfg, logger) //gnosis doesn't support un-ordered exec yet: https://github.com/erigontech/erigon/issues/12054
+		return applyWorker, g
+	}
 
 	g.Go(func() (err error) {
 		defer func() {
@@ -393,8 +396,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 	outTxNum.Store(fromTxNum)
 
 	applyWorker, workers := NewHistoricalTraceWorkers(consumer, cfg, ctx, toTxNum, in, WorkerCount, outTxNum, logger)
-	defer workers.Wait()
-
 	workersExited := &atomic.Bool{}
 	go func() {
 		workers.Wait()
@@ -462,7 +463,7 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 					return err
 				}
 			}
-			if WorkerCount == 1 { //gnosis doesn't support un-ordered exec yet: https://github.com/erigontech/erigon/issues/12054
+			if WorkerCount <= 1 { //gnosis doesn't support un-ordered exec yet: https://github.com/erigontech/erigon/issues/12054
 				applyWorker.RunTxTask(txTask)
 				if txTask.TxIndex >= 0 && !txTask.Final {
 					txTask.CreateReceipt(tx)
