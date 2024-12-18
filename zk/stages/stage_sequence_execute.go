@@ -212,7 +212,8 @@ func sequencingBatchStep(
 			}
 		}
 
-		if bad {
+		// write bad batch details unless config dictates we ignore them
+		if bad && !cfg.zk.IgnoreBadBatchesCheck {
 			return writeBadBatchDetails(batchContext, batchState, executionAt)
 		}
 	}

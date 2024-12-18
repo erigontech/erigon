@@ -783,6 +783,11 @@ var (
 		Usage: "A comma separated list of batch numbers that are known bad on the L1. These will automatically be marked as bad during L1 recovery",
 		Value: "",
 	}
+	IgnoreBadBatchesCheck = cli.BoolFlag{
+		Name:  "zkevm.ignore-bad-batches-check",
+		Usage: "Ignore bad batches",
+		Value: false,
+	}
 	InitialBatchCfgFile = cli.StringFlag{
 		Name:  "zkevm.initial-batch.config",
 		Usage: "The file that contains the initial (injected) batch data.",

@@ -73,7 +73,7 @@ but can be controlled via the following flags:
 To transplant the cache between datadirs, the `l1cache` dir can be copied. To use an upstream cdk-erigon node's L1 cache, the zkevm.l1-cache-enabled can be set to false, and the node provided the endpoint of the cache,
 instead of a regular L1 URL. e.g. `zkevm.l1-rpc-url=http://myerigonnode:6969?endpoint=http%3A%2F%2Fsepolia-rpc.com&chainid=2440`. NB: this node must be syncing the same network for any benefit!
 
-## Sequencer (WIP)
+## Sequencer
 
 Enable Sequencer: `CDK_ERIGON_SEQUENCER=1 ./build/bin/cdk-erigon <flags>`
 [Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
@@ -200,6 +200,7 @@ Sequencer specific config:
 - `zkevm.executor-strict`: Defaulted to true, but can be set to false when running the sequencer without verifications (use with extreme caution)
 - `zkevm.witness-full`: Defaulted to false.  Controls whether the full or partial witness is used with the executor.
 - `zkevm.reject-smart-contract-deployments`: Defaulted to false.  Controls whether smart contract deployments are rejected by the TxPool.
+- `zkevm.ignore-bad-batches-check`: Defaulted to false.  Controls whether the sequencer will ignore bad batches and continue to the next batch. <strong style='color:red'>WARNING: this is a very specific and dangerous mode of operation!</strong>
 
 Resource Utilisation config:
 - `zkevm.smt-regenerate-in-memory`: As documented above, allows SMT regeneration in memory if machine has enough RAM, for a speedup in initial sync.

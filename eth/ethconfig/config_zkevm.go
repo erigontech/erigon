@@ -97,6 +97,7 @@ type Zk struct {
 	ACLPrintHistory                int
 	InfoTreeUpdateInterval         time.Duration
 	BadBatches                     []uint64
+	IgnoreBadBatchesCheck          bool
 	SealBatchImmediatelyOnOverflow bool
 	MockWitnessGeneration          bool
 	WitnessCacheEnabled            bool
