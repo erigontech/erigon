@@ -170,6 +170,7 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 
 		// If block version is less than BellatrixVersion or shouldInsert is false, skip insertion
 		if block.Version() < clparams.BellatrixVersion || !shouldInsert {
+			log.Debug("skip insertion", "block", block.Block.Slot, "version", block.Version(), "shouldInsert", shouldInsert)
 			continue
 		}
 		// Add the block to the block collector
@@ -179,6 +180,7 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 			return
 		}
 	}
+	log.Debug("processDownloadedBlockBatches", "newHighestBlockProcessed", newHighestBlockProcessed)
 	return
 }
 
