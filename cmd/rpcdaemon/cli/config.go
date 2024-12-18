@@ -51,7 +51,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura"
+	"github.com/erigontech/erigon/consensus/aura"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/rawdb"
