@@ -210,6 +210,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
+			panic(err)
 			txTask.Error = err
 		} else {
 			txTask.Failed = applyRes.Failed()
