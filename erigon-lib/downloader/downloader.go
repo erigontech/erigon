@@ -46,7 +46,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"

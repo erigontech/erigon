@@ -30,7 +30,7 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/mmap"

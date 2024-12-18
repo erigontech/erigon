@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
@@ -29,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs

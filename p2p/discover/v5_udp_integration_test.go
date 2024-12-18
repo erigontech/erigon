@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // This test checks that pending calls are re-sent when a handshake happens.

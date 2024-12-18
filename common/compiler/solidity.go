@@ -26,7 +26,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 // Solidity contains information about the solidity compiler.

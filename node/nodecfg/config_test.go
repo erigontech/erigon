@@ -24,9 +24,9 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	node2 "github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Tests that datadirs can be successfully created, be them manually configured

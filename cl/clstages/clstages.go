@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 type StageGraph[CONFIG any, ARGUMENTS any] struct {

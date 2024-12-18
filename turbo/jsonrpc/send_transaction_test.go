@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -31,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {

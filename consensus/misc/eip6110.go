@@ -20,9 +20,9 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (

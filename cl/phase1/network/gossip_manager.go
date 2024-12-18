@@ -20,9 +20,9 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Gossip manager is sending all messages to fork choice or others

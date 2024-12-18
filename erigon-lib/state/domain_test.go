@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
 

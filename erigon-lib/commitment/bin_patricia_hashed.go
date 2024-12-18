@@ -25,7 +25,7 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/common"

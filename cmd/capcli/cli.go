@@ -58,7 +58,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/utils"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 

@@ -4,9 +4,9 @@ import (
 	"os"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // filesItem is "dirty" file - means file which can be:

@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolutil"
@@ -26,7 +27,6 @@ import (
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"

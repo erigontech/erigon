@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 )
 
 func (d *DiagnosticClient) setupHeadersDiagnostics(rootCtx context.Context) {

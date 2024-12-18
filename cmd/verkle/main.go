@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"go.uber.org/zap/buffer"
 
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"

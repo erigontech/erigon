@@ -6,9 +6,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Slot calculates the current slot number using the time and genesis slot.

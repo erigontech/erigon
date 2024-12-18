@@ -7,10 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"runtime"
 	"slices"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
@@ -22,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/ethdb"

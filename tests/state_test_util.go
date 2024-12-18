@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -46,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // StateTest checks transaction processing without block context.

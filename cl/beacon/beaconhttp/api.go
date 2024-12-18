@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var _ error = EndpointError{}

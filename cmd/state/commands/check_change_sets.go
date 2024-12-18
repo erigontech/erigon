@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"github.com/spf13/cobra"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"

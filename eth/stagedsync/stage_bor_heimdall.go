@@ -13,7 +13,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"

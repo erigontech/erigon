@@ -17,7 +17,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/eth/filters"
