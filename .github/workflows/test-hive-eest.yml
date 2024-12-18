@@ -20,10 +20,10 @@ jobs:
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
-          go-version: ">=1.22"
-          go-version-file: "hive/go.mod"
+          go-version: '>=1.22'
+          go-version-file: 'hive/go.mod'
 
-      # Targetting the clients/erigon/Dockerfile.git in the Hive director -
+      # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
       # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
         run: |
@@ -34,7 +34,7 @@ jobs:
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
           branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
           echo Building Hive with Erigon branch - $branch_name
-          sed -i "s/^ARG github=erigontech/\/erigon$/ARG github=erigontech\/erigon/" clients/erigon/Dockerfile
+          sed -i "s/^ARG github=erigontech\/erigon$/ARG github=erigontech\/erigon/" clients/erigon/Dockerfile
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
           if [[ "$branch_name" != "main" ]]; then
             sed -i "/$sync.parallel-state-flushing/d" clients/erigon/erigon.sh
@@ -79,3 +79,4 @@ jobs:
             fi
           }
           run_suite eest/consume-engine
+  
