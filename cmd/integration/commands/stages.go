@@ -1432,7 +1432,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
-	cfg.DeprecatedTxPool.Disable = true
+	cfg.TxPool.Disable = true
 	cfg.Genesis = genesis
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
