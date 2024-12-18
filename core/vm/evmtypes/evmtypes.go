@@ -51,7 +51,8 @@ type BlockContext struct {
 	BlobBaseFee *uint256.Int   // Provides information for BLOBBASEFEE
 
 	//Arbitrum: current OS version
-	ArbOSVersion uint64
+	ArbOSVersion   uint64
+	BaseFeeInBlock *uint256.Int // Copy of BaseFee to be used in arbitrum's geth hooks and precompiles when BaseFee is lowered to 0 when vm runs with NoBaseFee flag and 0 gas price. Is nil when BaseFee isn't lowered to 0
 }
 
 // TxContext provides the EVM with information about a transaction.

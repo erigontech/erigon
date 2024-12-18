@@ -22,6 +22,7 @@ package core
 import (
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -77,6 +78,13 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		transferFunc = consensus.Transfer
 		postApplyMessageFunc = nil
 	}
+
+	// assert if network is ARB0 to change pervrandao
+	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	if arbOsVersion > 0 {
+		difficultyHash := common.BigToHash(header.Difficulty)
+		prevRandDao = &difficultyHash
+	}
 	return evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
@@ -90,6 +98,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
+		BaseFeeInBlock:   baseFee.Clone(),
 	}
 }
 
