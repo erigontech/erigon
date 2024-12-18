@@ -1,7 +1,7 @@
 package snapcfg
 
 import (
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"testing"
 )
 

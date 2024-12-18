@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/erigontech/erigon-lib/gointerfaces/remote"
+	"github.com/erigontech/erigon-lib/gointerfaces/types"
 	"github.com/stretchr/testify/assert"
 )
 

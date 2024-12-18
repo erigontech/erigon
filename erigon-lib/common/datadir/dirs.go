@@ -23,8 +23,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/gofrs/flock"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 )
 
 // Dirs is the file system folder the node should use for any data storage

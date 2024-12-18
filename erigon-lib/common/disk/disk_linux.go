@@ -6,7 +6,7 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/shirou/gopsutil/v4/process"
 )
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )

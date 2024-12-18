@@ -10,20 +10,20 @@ built-into Erigon or run as separated process.
 
 ```shell
 # 1. Downloader by default run inside Erigon, by `--snapshots` flag:
-erigon --snapshots --datadir=<your_datadir> 
+erigon --snapshots --datadir=<your_datadir>
 ```
 
 ```shell
 # 2. It's possible to start Downloader as independent process, by `--snapshots --downloader.api.addr=127.0.0.1:9093` flags:
-make erigon downloader 
+make erigon downloader
 
 # Start downloader (can limit network usage by 512mb/sec: --torrent.download.rate=512mb --torrent.upload.rate=512mb)
 downloader --downloader.api.addr=127.0.0.1:9093 --torrent.port=42068 --datadir=<your_datadir>
 # --downloader.api.addr - is for internal communication with Erigon
-# --torrent.port=42068  - is for public BitTorrent protocol listen 
+# --torrent.port=42068  - is for public BitTorrent protocol listen
 
 # Erigon on startup does send list of .torrent files to Downloader and wait for 100% download accomplishment
-erigon --snapshots --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
+erigon --snapshots --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 ```
 
 Use `--snap.keepblocks=true` to don't delete retired blocks from DB
@@ -31,7 +31,7 @@ Use `--snap.keepblocks=true` to don't delete retired blocks from DB
 Any network/chain can start with snapshot sync:
 
 - node will download only snapshots registered in next
-  repo https://github.com/ledgerwatch/erigon-snapshot
+  repo https://github.com/erigontech/erigon-snapshot
 - node will move old blocks from DB to snapshots of 1K blocks size, then merge
   snapshots to bigger range, until
   snapshots of 500K blocks, then automatically start seeding new snapshot
@@ -42,15 +42,15 @@ Flag `--snapshots` is compatible with `--prune` flag
 
 ```shell
 # Need create new snapshots and start seeding them
- 
+
 # Create new snapshots (can change snapshot size by: --from=0 --to=1_000_000 --segment.size=500_000)
 # It will dump blocks from Database to .seg files:
-erigon snapshots retire --datadir=<your_datadir> 
+erigon snapshots retire --datadir=<your_datadir>
 
 # Create .torrent files (you can think about them as "checksum")
 downloader torrent_create --datadir=<your_datadir>
 
-# output format is compatible with https://github.com/ledgerwatch/erigon-snapshot
+# output format is compatible with https://github.com/erigontech/erigon-snapshot
 downloader torrent_hashes --datadir=<your_datadir>
 
 # Start downloader (read all .torrent files, and download/seed data)
@@ -60,18 +60,18 @@ downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 Additional info:
 
 ```shell
-# Snapshots creation does not require fully-synced Erigon - few first stages enough. For example:  
-STOP_AFTER_STAGE=Senders ./build/bin/erigon --snapshots=false --datadir=<your_datadir> 
+# Snapshots creation does not require fully-synced Erigon - few first stages enough. For example:
+STOP_AFTER_STAGE=Senders ./build/bin/erigon --snapshots=false --datadir=<your_datadir>
 # But for security - better have fully-synced Erigon
 
 
 # Erigon can use snapshots only after indexing them. Erigon will automatically index them but also can run (this step is not required for seeding):
-erigon snapshots index --datadir=<your_datadir> 
+erigon snapshots index --datadir=<your_datadir>
 ```
 
 ## Architecture
 
-Downloader works based on <your_datadir>/snapshots/*.torrent files. Such files
+Downloader works based on <your_datadir>/snapshots/\*.torrent files. Such files
 can be created 4 ways:
 
 - Erigon can do grpc call downloader.Download(list_of_hashes), it will trigger
@@ -86,7 +86,7 @@ can be created 4 ways:
 Erigon does:
 
 - connect to Downloader
-- share list of hashes (see https://github.com/ledgerwatch/erigon-snapshot )
+- share list of hashes (see https://github.com/erigontech/erigon-snapshot )
 - wait for download of all snapshots
 - when .seg available - automatically create .idx files - secondary indices, for
   example to find block by hash
@@ -145,7 +145,7 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 # See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file
 ```
 
---------- 
+---
 
 ## Utilities
 
@@ -158,7 +158,9 @@ downloader torrent_clean --datadir <datadir> # remote all .torrent files in data
 ```
 
 ## Remote manifest verify
+
 To check that remote webseeds has available manifest and all manifested files are available, has correct format of ETag, does not have dangling torrents etc.
+
 ```
 downloader manifest-verify --chain <chain> [--webseeds 'a','b','c']
 ```
@@ -179,4 +181,3 @@ crontab -e
 ```
 
 It does push to branch `auto`, before release - merge `auto` to `main` manually
-

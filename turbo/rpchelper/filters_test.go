@@ -4,17 +4,17 @@ import (
 	"context"
 	"testing"
 
+	"github.com/erigontech/erigon/core/types"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/types"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	"github.com/erigontech/erigon-lib/gointerfaces/remote"
 
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	types2 "github.com/erigontech/erigon-lib/gointerfaces/types"
 
-	"github.com/ledgerwatch/erigon-lib/log/v3"
-	"github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/eth/filters"
 )
 
 func createLog() *remote.SubscribeLogsReply {

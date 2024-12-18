@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/ledgerwatch/erigon-lib/common"
-	kv "github.com/ledgerwatch/erigon-lib/kv"
-	rlp "github.com/ledgerwatch/erigon/rlp"
+	common "github.com/erigontech/erigon-lib/common"
+	kv "github.com/erigontech/erigon-lib/kv"
+	rlp "github.com/erigontech/erigon/rlp"
 	gomock "go.uber.org/mock/gomock"
 )
 

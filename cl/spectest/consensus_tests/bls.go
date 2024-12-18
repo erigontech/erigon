@@ -1,7 +1,7 @@
 package consensus_tests
 
 import (
-	"github.com/ledgerwatch/erigon/spectest"
+	"github.com/erigontech/erigon/spectest"
 	"io/fs"
 	"testing"
 )

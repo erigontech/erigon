@@ -22,15 +22,15 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/secp256k1"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	libcrypto "github.com/ledgerwatch/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	libcrypto "github.com/erigontech/erigon-lib/crypto"
 
-	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/crypto"
 )
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")

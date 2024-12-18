@@ -395,7 +395,7 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
   Error !
   Directory $MyContext.Directory does not seem to be a properly cloned Erigon repository
   Please clone it using 
-  git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+  git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
 
 "@
     exit 1
@@ -414,7 +414,7 @@ $Erigon.Branch     = [string]@(git.exe rev-parse --abbrev-ref HEAD)
 $Erigon.Tag        = [string]@(git.exe describe --tags)
 
 $Erigon.BuildTags = "nosqlite,noboltdb"
-$Erigon.Package = "github.com/ledgerwatch/erigon"
+$Erigon.Package = "github.com/erigontech/erigon"
 
 $Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false -v"
 $Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Erigon.Commit) -X $($Erigon.Package)/params.GitBranch=$($Erigon.Branch) -X $($Erigon.Package)/params.GitTag=$($Erigon.Tag)"""

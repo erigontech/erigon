@@ -24,7 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/common/u256"
 )
 
 func TestTransactionSignatureIsValid(t *testing.T) {

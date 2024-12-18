@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
-	"github.com/ledgerwatch/erigon-snapshot/webseed"
+	"github.com/erigontech/erigon-lib/chain/networkname"
+	"github.com/erigontech/erigon-lib/downloader/snaptype"
+	snapshothashes "github.com/erigontech/erigon-snapshot"
+	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 )
@@ -22,8 +22,6 @@ var (
 	Mainnet = fromToml(snapshothashes.Mainnet)
 	// Holesky    = fromToml(snapshothashes.Holesky)
 	Sepolia    = fromToml(snapshothashes.Sepolia)
-	Goerli     = fromToml(snapshothashes.Goerli)
-	Mumbai     = fromToml(snapshothashes.Mumbai)
 	Amoy       = fromToml(snapshothashes.Amoy)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
 	Gnosis     = fromToml(snapshothashes.Gnosis)
@@ -383,8 +381,6 @@ var knownPreverified = map[string]Preverified{
 	networkname.MainnetChainName: Mainnet,
 	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
 	networkname.SepoliaChainName:    Sepolia,
-	networkname.GoerliChainName:     Goerli,
-	networkname.MumbaiChainName:     Mumbai,
 	networkname.AmoyChainName:       Amoy,
 	networkname.BorMainnetChainName: BorMainnet,
 	networkname.GnosisChainName:     Gnosis,
@@ -458,8 +454,6 @@ func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.V
 var KnownWebseeds = map[string][]string{
 	networkname.MainnetChainName:    webseedsParse(webseed.Mainnet),
 	networkname.SepoliaChainName:    webseedsParse(webseed.Sepolia),
-	networkname.GoerliChainName:     webseedsParse(webseed.Goerli),
-	networkname.MumbaiChainName:     webseedsParse(webseed.Mumbai),
 	networkname.AmoyChainName:       webseedsParse(webseed.Amoy),
 	networkname.BorMainnetChainName: webseedsParse(webseed.BorMainnet),
 	networkname.GnosisChainName:     webseedsParse(webseed.Gnosis),

@@ -24,10 +24,10 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/sysutils"
-	"github.com/ledgerwatch/erigon/cmd/diag/flags"
-	"github.com/ledgerwatch/erigon/cmd/diag/util"
+	"github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/sysutils"
+	"github.com/erigontech/erigon/cmd/diag/flags"
+	"github.com/erigontech/erigon/cmd/diag/util"
 )
 
 var (

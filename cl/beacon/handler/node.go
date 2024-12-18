@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentinel"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 )
 
 /*

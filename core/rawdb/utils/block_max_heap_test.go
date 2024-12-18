@@ -4,8 +4,8 @@ import (
 	"container/heap"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/rawdb/utils"
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/core/rawdb/utils"
 )
 
 func TestPush(t *testing.T) {

@@ -22,8 +22,8 @@ import (
 	"net/http"
 	"runtime/pprof"
 
-	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/sysutils"
+	diaglib "github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/sysutils"
 )
 
 func SetupSysInfoAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {

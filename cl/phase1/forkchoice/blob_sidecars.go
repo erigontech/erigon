@@ -1,7 +1,7 @@
 package forkchoice
 
 import (
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 func (f *ForkChoiceStore) AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error {

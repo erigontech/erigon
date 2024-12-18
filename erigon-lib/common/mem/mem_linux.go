@@ -8,7 +8,7 @@ import (
 
 	"github.com/shirou/gopsutil/v4/process"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/erigontech/erigon-lib/metrics"
 )
 
 var (

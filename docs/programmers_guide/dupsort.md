@@ -1,5 +1,4 @@
-DupSort feature explanation
-===========================
+# DupSort feature explanation
 
 If KV database has no concept of "Buckets/Tables/Collections" then all keys must have "Prefix". For example to store
 Block bodies and headers need use `b` and `h` prefixes:
@@ -30,8 +29,7 @@ Let's look at ChangeSets. If block N changed account A from value X to Y:
 - `A` - key inside Sub-Table
 - `X` - value inside Sub-Table
 
-MDBX supports
--------------
+## MDBX supports
 
 MDBX supports "tables" (it uses name DBI) and supports "sub-tables" (DupSort DBI).
 
@@ -40,7 +38,7 @@ MDBX supports "tables" (it uses name DBI) and supports "sub-tables" (DupSort DBI
     Duplicate keys may be used in the database. (Or, from another perspective,
     keys may have multiple data items, stored in sorted order.) By default
     keys must be unique and may have only a single data item.
-``` 
+```
 
 MDBX stores keys in Tree(B+Tree), and keys of sub-tables in sub-Tree (which is linked to Tree of table).
 
@@ -56,7 +54,7 @@ Common pattern to iterate over whole 'normal' table (without sub-table) in a pse
 cursor := transaction.OpenCursor(tableName)
 for k, v := cursor.Seek(key); k != nil; k, v = cursor.Next() {
     // logic works with 'k' and 'v' variables
-} 
+}
 ```
 
 Iterate over table with sub-table:
@@ -65,13 +63,12 @@ Iterate over table with sub-table:
 cursor := transaction.OpenCursor(tableName)
 for k, _ := cursor.SeekDup(subTableName, keyInSubTable); k != nil; k, _ = cursor.Next() {
     // logic works with 'k1', 'k' and 'v' variables
-} 
+}
 ```
 
 Enough straight forward. No performance penalty (only profit from smaller database size).
 
-MDBX in-depth
--------------
+## MDBX in-depth
 
 Max key size: 2022byte (same for key of sub-Table)
 Let's look at ChangeSets. If block N changed account A from value X to Y:  
@@ -86,12 +83,12 @@ Let's look at ChangeSets. If block N changed account A from value X to Y:
 ------------------------------------------------------------------------------------------
     table        | sub-table-name    |      keyAndValueJoinedTogether (no 'value' column)
 ------------------------------------------------------------------------------------------
-  'ChangeSets'   | 
-                 | {1}                | {A}+{X}   
+  'ChangeSets'   |
+                 | {1}                | {A}+{X}
                  |                    | {A2}+{X2}
-                 | {2}                | {A3}+{X3}   
+                 | {2}                | {A3}+{X3}
                  |                    | {A4}+{X4}
-                 | ...                | ...               
+                 | ...                | ...
 ```
 
 It's a bit unexpected, but doesn't change much. All operations are still work:
@@ -112,20 +109,19 @@ Loc - location hash (key of storage)
 ------------------------------------------------------------------------------------------
     table        | sub-table-name    |      keyAndValueJoinedTogether (no 'value' column)
 ------------------------------------------------------------------------------------------
-'StorageChanges' | 
+'StorageChanges' |
                  | {1}+{A}+{inc1}     | {Loc1}+{X}
                  |                    | {Loc2}+{X2}
                  |                    | {Loc3}+{X3}
                  | {2}+{A}+{inc1}     | {Loc4}+{X4}
                  |                    | {Loc5}+{X5}
                  |                    | {Loc6}+{X6}
-                 |                    | ...             
- ```
+                 |                    | ...
+```
 
 Because column "keyAndValueJoinedTogether" is stored as key - it has same size limit: 551byte
 
-MDBX, can you do better?
-------------------------
+## MDBX, can you do better?
 
 By default, for each key MDBX does store small metadata (size of data). Indices by nature - store much-much keys.
 
@@ -147,14 +143,10 @@ It means in 1 db call you can Get/Put up to 4Kb of sub-table keys.
 
 [see mdbx.h](https://github.com/erigontech/libmdbx/blob/master/mdbx.h)
 
-Erigon
----------
+## Erigon
 
 This article target is to show tricky concepts on examples. Future
 reading [here](./db_walkthrough.MD#table-history-of-accounts)
 
 Erigon supports multiple typed cursors, see the [KV
-Readme.md](https://github.com/ledgerwatch/erigon-lib/tree/main/kv)
-
-
-
+Readme.md](https://github.com/erigontech/erigon-lib/tree/main/kv)

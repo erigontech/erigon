@@ -3,8 +3,8 @@ package sync
 import (
 	"context"
 
-	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/core/types"
+	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/core/types"
 )
 
 type ExecutionClient interface {

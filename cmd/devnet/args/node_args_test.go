@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/args"
+	"github.com/erigontech/erigon/cmd/devnet/args"
 )
 
 func TestNodeArgs(t *testing.T) {
