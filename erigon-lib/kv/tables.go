@@ -816,6 +816,11 @@ var ChaindataTablesCfg = TableCfg{
 	RCodeIdx:                 {Flags: DupSort},
 }
 
+var AuRaTablesCfg = TableCfg{
+	Epoch:        {},
+	PendingEpoch: {},
+}
+
 var BorTablesCfg = TableCfg{
 	BorReceipts:       {Flags: DupSort},
 	BorFinality:       {Flags: DupSort},
