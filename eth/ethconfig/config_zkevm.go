@@ -122,3 +122,7 @@ func (c *Zk) HasExecutors() bool {
 func (c *Zk) ShouldImportInitialBatch() bool {
 	return c.InitialBatchCfgFile != ""
 }
+
+func (c *Zk) IsL1Recovery() bool {
+	return c.L1SyncStartBlock > 0
+}

@@ -47,7 +47,12 @@ func SpawnSequencingStage(
 	}
 
 	if lastBatch < highestBatchInDs {
-		return resequence(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs)
+		if err = cfg.dataStreamServer.UnwindToBatchStart(lastBatch + 1); err != nil {
+			return err
+		}
+		if !cfg.zk.IsL1Recovery() {
+			return resequence(s, u, ctx, cfg, historyCfg, lastBatch, highestBatchInDs)
+		}
 	}
 
 	if cfg.zk.SequencerResequence {
@@ -108,7 +113,7 @@ func sequencingBatchStep(
 		return nil
 	}
 
-	batchNumberForStateInitialization, err := prepareBatchNumber(sdb, forkId, lastBatch, cfg.zk.L1SyncStartBlock > 0)
+	batchNumberForStateInitialization, err := prepareBatchNumber(sdb, forkId, lastBatch, cfg.zk.IsL1Recovery())
 	if err != nil {
 		return err
 	}
@@ -116,7 +121,7 @@ func sequencingBatchStep(
 	var block *types.Block
 	runLoopBlocks := true
 	batchContext := newBatchContext(ctx, &cfg, &historyCfg, s, sdb)
-	batchState := newBatchState(forkId, batchNumberForStateInitialization, executionAt+1, cfg.zk.HasExecutors(), cfg.zk.L1SyncStartBlock > 0, cfg.txPool, resequenceBatchJob)
+	batchState := newBatchState(forkId, batchNumberForStateInitialization, executionAt+1, cfg.zk.HasExecutors(), cfg.zk.IsL1Recovery(), cfg.txPool, resequenceBatchJob)
 	blockDataSizeChecker := NewBlockDataChecker(cfg.zk.ShouldCountersBeUnlimited(batchState.isL1Recovery()))
 	streamWriter := newSequencerBatchStreamWriter(batchContext, batchState)
 
