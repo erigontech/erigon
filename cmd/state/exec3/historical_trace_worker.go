@@ -167,6 +167,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, constCall /* constCall */)
 		}
+		log.Warn("[dbg] Initialize", "n", header.Number.Uint64())
 		rw.execArgs.Engine.Initialize(rw.execArgs.ChainConfig, rw.chain, header, ibs, syscall, rw.logger, nil)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
@@ -179,6 +180,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */)
 		}
 
+		log.Warn("[dbg] Finalize", "n", header.Number.Uint64())
 		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, rw.logger)
 		if err != nil {
 			txTask.Error = err
@@ -208,6 +210,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *state.TxTask) {
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
 		// MA applytx
+		log.Warn("[dbg] ApplyMessage", "n", header.Number.Uint64())
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			panic(err)
