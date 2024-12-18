@@ -44,16 +44,16 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
 
 	metrics.DelayLoggingEnabled = ctx.Bool(LogBlockDelayFlag.Name)
 
-	consoleLevel, lErr := tryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name))
+	consoleLevel, lErr := TryGetLogLevel(ctx.String(LogConsoleVerbosityFlag.Name))
 	if lErr != nil {
 		// try verbosity flag
-		consoleLevel, lErr = tryGetLogLevel(ctx.String(LogVerbosityFlag.Name))
+		consoleLevel, lErr = TryGetLogLevel(ctx.String(LogVerbosityFlag.Name))
 		if lErr != nil {
 			consoleLevel = consoleDefaultLevel
 		}
 	}
 
-	dirLevel, dErr := tryGetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
+	dirLevel, dErr := TryGetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
 	if dErr != nil {
 		dirLevel = dirDefaultLevel
 	}
@@ -106,16 +106,16 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 		dirJson = false
 	}
 
-	consoleLevel, lErr := tryGetLogLevel(cmd.Flags().Lookup(LogConsoleVerbosityFlag.Name).Value.String())
+	consoleLevel, lErr := TryGetLogLevel(cmd.Flags().Lookup(LogConsoleVerbosityFlag.Name).Value.String())
 	if lErr != nil {
 		// try verbosity flag
-		consoleLevel, lErr = tryGetLogLevel(cmd.Flags().Lookup(LogVerbosityFlag.Name).Value.String())
+		consoleLevel, lErr = TryGetLogLevel(cmd.Flags().Lookup(LogVerbosityFlag.Name).Value.String())
 		if lErr != nil {
 			consoleLevel = log.LvlInfo
 		}
 	}
 
-	dirLevel, dErr := tryGetLogLevel(cmd.Flags().Lookup(LogDirVerbosityFlag.Name).Value.String())
+	dirLevel, dErr := TryGetLogLevel(cmd.Flags().Lookup(LogDirVerbosityFlag.Name).Value.String())
 	if dErr != nil {
 		dirLevel = log.LvlInfo
 	}
@@ -161,16 +161,16 @@ func SetupLogger(filePrefix string) log.Logger {
 	var consoleJson = *logJson || *logConsoleJson
 	var dirJson = logDirJson
 
-	consoleLevel, lErr := tryGetLogLevel(*logConsoleVerbosity)
+	consoleLevel, lErr := TryGetLogLevel(*logConsoleVerbosity)
 	if lErr != nil {
 		// try verbosity flag
-		consoleLevel, lErr = tryGetLogLevel(*logVerbosity)
+		consoleLevel, lErr = TryGetLogLevel(*logVerbosity)
 		if lErr != nil {
 			consoleLevel = log.LvlInfo
 		}
 	}
 
-	dirLevel, dErr := tryGetLogLevel(*logDirVerbosity)
+	dirLevel, dErr := TryGetLogLevel(*logDirVerbosity)
 	if dErr != nil {
 		dirLevel = log.LvlInfo
 	}
@@ -233,7 +233,7 @@ func initSeparatedLogging(
 	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
 }
 
-func tryGetLogLevel(s string) (log.Lvl, error) {
+func TryGetLogLevel(s string) (log.Lvl, error) {
 	lvl, err := log.LvlFromString(s)
 	if err != nil {
 		l, err := strconv.Atoi(s)

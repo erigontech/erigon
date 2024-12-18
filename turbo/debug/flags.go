@@ -193,7 +193,6 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *http.ServeMux, *http
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx("cdk-erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
-
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
 			return logger, nil, nil, err

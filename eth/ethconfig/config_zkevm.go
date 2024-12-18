@@ -5,7 +5,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Zk struct {
@@ -104,7 +104,7 @@ type Zk struct {
 	WitnessContractInclusion       []common.Address
 	RejectLowGasPriceTransactions  bool
 	RejectLowGasPriceTolerance     float64
-	LogLevel                       utils.LogLevel
+	LogLevel                       log.Lvl
 }
 
 var DefaultZkConfig = &Zk{}

@@ -40,7 +40,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/status-im/keycard-go/hexutils"
 
@@ -337,7 +336,7 @@ type TxPool struct {
 	// limbo specific fields where bad batch transactions identified by the executor go
 	limbo *Limbo
 
-	logLevel utils.LogLevel
+	logLevel log.Lvl
 }
 
 func CreateTxPoolBuckets(tx kv.RwTx) error {
@@ -368,7 +367,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
-	logLevel := utils.LogLevel("")
+	logLevel := log.LvlInfo
 	if ethCfg.Zk != nil {
 		logLevel = ethCfg.Zk.LogLevel
 	}

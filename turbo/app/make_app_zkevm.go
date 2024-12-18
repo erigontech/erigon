@@ -42,15 +42,15 @@ func MakeApp_zkEvm(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli
 			}
 		}
 
+		if _, _, _, err := debug.Setup(context, true); err != nil {
+			return err
+		}
+
 		// run default action
 		return action(context)
 	}
 
 	app.Flags = appFlags(cliFlags)
-	app.Before = func(ctx *cli.Context) error {
-		_, _, _, err := debug.Setup(ctx, true)
-		return err
-	}
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
 		return nil

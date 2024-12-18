@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -11,8 +10,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	utils2 "github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/urfave/cli/v2"
 )
 
@@ -156,7 +158,14 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		witnessInclusion = append(witnessInclusion, libcommon.HexToAddress(s))
 	}
 
-	logLevel := os.Getenv("LOG_LEVEL")
+	logLevel, lErr := logging.TryGetLogLevel(ctx.String(logging.LogConsoleVerbosityFlag.Name))
+	if lErr != nil {
+		// try verbosity flag
+		logLevel, lErr = logging.TryGetLogLevel(ctx.String(logging.LogVerbosityFlag.Name))
+		if lErr != nil {
+			logLevel = log.LvlInfo
+		}
+	}
 
 	cfg.Zk = &ethconfig.Zk{
 		L2ChainId:                              ctx.Uint64(utils.L2ChainIdFlag.Name),
@@ -245,7 +254,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		GasPriceHistoryCount:                   ctx.Uint64(utils.GasPriceHistoryCount.Name),
 		RejectLowGasPriceTransactions:          ctx.Bool(utils.RejectLowGasPriceTransactions.Name),
 		RejectLowGasPriceTolerance:             ctx.Float64(utils.RejectLowGasPriceTolerance.Name),
-		LogLevel:                               utils2.LogLevel(logLevel),
+		LogLevel:                               logLevel,
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)

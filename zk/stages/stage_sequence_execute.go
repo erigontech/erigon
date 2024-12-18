@@ -167,7 +167,7 @@ func sequencingBatchStep(
 		return err
 	}
 
-	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, sdb.hermezDb, logPrefix, cfg.zk.LogLevel.IsTraceLogLevelSet()); err != nil {
+	if err := utils.UpdateZkEVMBlockCfg(cfg.chainConfig, sdb.hermezDb, logPrefix, cfg.zk.LogLevel == log.LvlTrace); err != nil {
 		return err
 	}
 

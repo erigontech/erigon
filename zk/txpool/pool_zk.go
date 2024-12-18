@@ -32,7 +32,7 @@ func calcProtocolBaseFee(baseFee uint64) uint64 {
 }
 
 func (p *TxPool) Trace(msg string, ctx ...interface{}) {
-	if p.logLevel.IsTraceLogLevelSet() {
+	if p.logLevel == log.LvlTrace {
 		log.Trace(msg, ctx...)
 	}
 }
