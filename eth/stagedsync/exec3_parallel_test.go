@@ -98,7 +98,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	gasPool *core.GasPool,
 	rs *state.StateV3,
 	ibs *state.IntraBlockState,
-	stateWriter *state.StateWriterV3,
+	stateWriter state.StateWriter,
 	stateReader state.ResettableStateReader,
 	chainConfig *chain.Config,
 	chainReader consensus.ChainReader,
@@ -164,9 +164,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 		return &exec.Result{Err: exec.ErrExecAbortError{Dependency: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
-	return &exec.Result{
-		StateDb: ibs,
-	}
+	return &exec.Result{}
 }
 
 func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) []state.VersionedWrite {

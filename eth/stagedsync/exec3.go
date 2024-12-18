@@ -336,7 +336,7 @@ func ExecV3(ctx context.Context,
 	}
 	defer applyWorker.LogLRUStats()
 
-	applyWorker.ResetState(rs, accumulator)
+	applyWorker.ResetState(rs, nil, accumulator)
 
 	commitThreshold := cfg.batchSize.Bytes()
 
@@ -620,7 +620,7 @@ Loop:
 				break Loop
 			}
 
-			if shouldGenerateChangesets {
+			if true /*shouldGenerateChangesets*/ {
 				aggTx := executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx)
 				aggTx.RestrictSubsetFileDeletions(true)
 				start := time.Now()

@@ -395,6 +395,10 @@ func (so *stateObject) Nonce() uint64 {
 	return so.data.Nonce
 }
 
+func (so *stateObject) IsDirty() bool {
+	return so.dirtyCode || len(so.dirtyStorage) > 0 || so.data != so.original
+}
+
 // Never called, but must be present to allow stateObject to be used
 // as a vm.Account interface that also satisfies the vm.ContractRef
 // interface. Interfaces are awesome.

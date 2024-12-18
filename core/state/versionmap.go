@@ -17,9 +17,50 @@ const addressType = 1
 const stateType = 2
 const subpathType = 3
 
+const BalancePath = 1
+const NoncePath = 2
+const CodePath = 3
+const SelfDestructPath = 4
+
 const KeyLength = length.Addr + length.Hash + 2
 
 type VersionKey [KeyLength]byte
+
+func (k VersionKey) String() string {
+	var keyType string
+	var subpath string
+	var key string
+
+	switch k[KeyLength-1] {
+	case addressType:
+		keyType = "Address"
+		key = fmt.Sprintf("%x", k[0:length.Addr])
+	case stateType:
+		keyType = "State"
+		key = fmt.Sprintf("%x", k[0:length.Addr+length.Hash])
+	case subpathType:
+		switch k[KeyLength-2] {
+		case BalancePath:
+			keyType = "Balance"
+		case NoncePath:
+			keyType = "Nonce"
+		case CodePath:
+			keyType = "Code"
+		case SelfDestructPath:
+			keyType = "Destruct"
+		case 0:
+		default:
+			keyType = "Path"
+			subpath = fmt.Sprintf(" Unknown %d", k[KeyLength-2])
+		}
+		key = fmt.Sprintf("%x", k[0:length.Addr])
+	default:
+		keyType = "Unkwnown"
+		key = fmt.Sprintf("%x", k[0:length.Addr+length.Hash])
+	}
+
+	return fmt.Sprintf("%-8s %s%s", keyType, key, subpath)
+}
 
 func (k VersionKey) IsAddress() bool {
 	return k[KeyLength-1] == addressType
@@ -170,7 +211,7 @@ func (vm *VersionMap) MarkEstimate(k VersionKey, txIdx int) {
 	cells.rw.RLock()
 	defer cells.rw.RUnlock()
 	if ci, ok := cells.tm.Get(txIdx); !ok {
-		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIdx: %v, path, %x, cells keys: %v", txIdx, k, cells.tm.Keys()))
+		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x, cells keys: %v", txIdx, k, cells.tm.Keys()))
 	} else {
 		ci.flag = FlagEstimate
 	}

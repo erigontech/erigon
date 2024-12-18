@@ -36,7 +36,7 @@ type WriterV4 struct {
 func NewWriterV4(tx kv.TemporalPutDel) *WriterV4 {
 	return &WriterV4{
 		tx:    tx,
-		trace: false,
+		trace: true,
 	}
 }
 

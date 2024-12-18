@@ -1,9 +1,15 @@
 package state
 
 import (
+	"bytes"
+	"fmt"
+
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/heimdalr/dag"
+	"github.com/holiman/uint256"
 )
 
 const (
@@ -121,6 +127,115 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStor
 	return v, nil
 }
 
+func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stateWriter StateWriter) error {
+	stateObjects := map[libcommon.Address][]*stateObject{}
+
+	for i := range writes {
+		path := writes[i].Path
+		sr := writes[i].Val.(*IntraBlockState)
+
+		addr := path.GetAddress()
+
+		so, err := sr.getStateObject(addr)
+
+		if err != nil {
+			return err
+		}
+
+		if so != nil {
+			prevs, ok := stateObjects[addr]
+
+			if ok {
+				isPrev := false
+
+				for _, prev := range prevs {
+					if prev == so {
+						isPrev = true
+						break
+					}
+				}
+				if isPrev {
+					continue
+				}
+			} else {
+				stateObjects[addr] = []*stateObject{so}
+			}
+
+			if path.IsState() {
+				stateKey := path.GetStateKey()
+				var state uint256.Int
+				so.GetState(&stateKey, &state)
+				if len(prevs) > 0 {
+					var prevState uint256.Int
+					prevs[len(prevs)-1].GetState(&stateKey, &state)
+					if prevState.Eq(&state) {
+						continue
+					}
+				}
+				fmt.Println("STATE", fmt.Sprintf("%x %x", stateKey, state.Bytes()))
+			} else if path.IsAddress() {
+				continue
+			} else {
+				switch path.GetSubpath() {
+				case BalancePath:
+					b := so.Balance()
+					if len(prevs) > 0 {
+						prev := prevs[len(prevs)-1].Balance()
+						if prev.Eq(b) {
+							continue
+						}
+					}
+					fmt.Println("BAL", b)
+				case NoncePath:
+					n := so.Nonce()
+					if len(prevs) > 0 {
+						prev := prevs[len(prevs)-1].Nonce()
+						if prev == n {
+							continue
+						}
+					}
+					fmt.Println("NONCE", n)
+				case CodePath:
+					c, err := so.Code()
+					if err != nil {
+						return err
+					}
+					if len(prevs) > 0 {
+						prev, err := prevs[len(prevs)-1].Code()
+						if err != nil {
+							return err
+						}
+						if bytes.Equal(prev, c) {
+							continue
+						}
+					}
+					fmt.Println("CODE", c)
+					//s.SetCode(addr, c)
+				case SelfDestructPath:
+					if so.deleted {
+						//s.Selfdestruct(addr)
+					}
+				default:
+					panic(fmt.Errorf("unknown key type: %d", path.GetSubpath()))
+				}
+
+				stateObjects[addr] = append(prevs, so)
+			}
+		}
+	}
+
+	for addr, sos := range stateObjects {
+		for _, so := range sos {
+			if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, so.IsDirty(), nil); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
 	inputs     []VersionedReads
 	outputs    []VersionedWrites // write sets that should be checked during validation
@@ -133,93 +248,71 @@ func (io *VersionedIO) Inputs() []VersionedReads {
 }
 
 func (io *VersionedIO) ReadSet(txnIdx int) []VersionedRead {
-	if len(io.inputs) <= txnIdx {
+	if len(io.inputs) <= txnIdx+1 {
 		return nil
 	}
-	return io.inputs[txnIdx]
+	return io.inputs[txnIdx+1]
 }
 
 func (io *VersionedIO) WriteSet(txnIdx int) []VersionedWrite {
-	if len(io.outputs) <= txnIdx {
+	if len(io.outputs) <= txnIdx+1 {
 		return nil
 	}
-	return io.outputs[txnIdx]
+	return io.outputs[txnIdx+1]
 }
 
 func (io *VersionedIO) AllWriteSet(txnIdx int) []VersionedWrite {
-	if len(io.allOutputs) <= txnIdx {
+	if len(io.allOutputs) <= txnIdx+1 {
 		return nil
 	}
-	return io.allOutputs[txnIdx]
+	return io.allOutputs[txnIdx+1]
 }
 
 func (io *VersionedIO) HasWritten(txnIdx int, k VersionKey) bool {
-	if len(io.outputsSet) <= txnIdx {
+	if len(io.outputsSet) <= txnIdx+1 {
 		return false
 	}
-	_, ok := io.outputsSet[txnIdx][k]
+	_, ok := io.outputsSet[txnIdx+1][k]
 	return ok
 }
 
 func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
-		inputs:     make([]VersionedReads, numTx),
-		outputs:    make([]VersionedWrites, numTx),
-		outputsSet: make([]map[VersionKey]struct{}, numTx),
-		allOutputs: make([]VersionedWrites, numTx),
+		inputs:     make([]VersionedReads, numTx+1),
+		outputs:    make([]VersionedWrites, numTx+1),
+		outputsSet: make([]map[VersionKey]struct{}, numTx+1),
+		allOutputs: make([]VersionedWrites, numTx+1),
 	}
 }
 
-func (io *VersionedIO) RecordRead(txId int, input []VersionedRead) {
-	if len(io.inputs) <= txId {
-		io.inputs = append(io.inputs, make([]VersionedReads, txId+1-len(io.inputs))...)
+func (io *VersionedIO) RecordReads(txId int, input []VersionedRead) {
+	if len(io.inputs) <= txId+1 {
+		io.inputs = append(io.inputs, make([]VersionedReads, txId+2-len(io.inputs))...)
 	}
-	io.inputs[txId] = input
+	io.inputs[txId+1] = input
 }
 
-func (io *VersionedIO) RecordWrite(txId int, output []VersionedWrite) {
-	if len(io.outputs) <= txId {
-		io.outputs = append(io.outputs, make([]VersionedWrites, txId+1-len(io.outputs))...)
+func (io *VersionedIO) RecordWrites(txId int, output []VersionedWrite) {
+	if len(io.outputs) <= txId+1 {
+		io.outputs = append(io.outputs, make([]VersionedWrites, txId+2-len(io.outputs))...)
 	}
-	io.outputs[txId] = output
+	io.outputs[txId+1] = output
 
-	if len(io.outputsSet) <= txId {
-		io.outputsSet = append(io.outputsSet, make([]map[VersionKey]struct{}, txId+1-len(io.outputsSet))...)
+	if len(io.outputsSet) <= txId+1 {
+		io.outputsSet = append(io.outputsSet, make([]map[VersionKey]struct{}, txId+2-len(io.outputsSet))...)
 	}
-	io.outputsSet[txId] = make(map[VersionKey]struct{}, len(output))
+	io.outputsSet[txId+1] = make(map[VersionKey]struct{}, len(output))
 
 	for _, v := range output {
-		io.outputsSet[txId][v.Path] = struct{}{}
+		io.outputsSet[txId+1][v.Path] = struct{}{}
 	}
 }
 
 func (io *VersionedIO) RecordAllWrites(txId int, output []VersionedWrite) {
-	if len(io.allOutputs) <= txId {
-		io.allOutputs = append(io.allOutputs, make([]VersionedWrites, txId+1-len(io.allOutputs))...)
+	if len(io.allOutputs) <= txId+1 {
+		io.allOutputs = append(io.allOutputs, make([]VersionedWrites, txId+2-len(io.allOutputs))...)
 	}
-	io.allOutputs[txId] = output
-}
-
-func (io *VersionedIO) RecordReadAtOnce(inputs [][]VersionedRead) {
-	i := 0
-	for ; i < len(io.inputs) && i < len(inputs); i++ {
-		io.inputs[i] = inputs[i]
-	}
-
-	for ; i < len(inputs); i++ {
-		io.inputs = append(io.inputs, inputs[i])
-	}
-}
-
-func (io *VersionedIO) RecordAllWriteAtOnce(outputs [][]VersionedWrite) {
-	i := 0
-	for ; i < len(io.allOutputs) && i < len(outputs); i++ {
-		io.allOutputs[i] = outputs[i]
-	}
-
-	for ; i < len(outputs); i++ {
-		io.allOutputs = append(io.allOutputs, outputs[i])
-	}
+	io.allOutputs[txId+1] = output
 }
 
 type DAG struct {

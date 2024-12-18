@@ -52,7 +52,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *exec.QueueWithRetry
 	rs          *state.StateV3
-	stateWriter *state.StateWriterV3
+	stateWriter state.StateWriter
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -106,14 +106,19 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
-func (rw *Worker) ResetState(rs *state.StateV3, accumulator *shards.Accumulator) {
+func (rw *Worker) ResetState(rs *state.StateV3, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
 	rw.rs = rs
 	if rw.background {
 		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
 	} else {
 		rw.SetReader(state.NewReaderV3(rs.Domains()))
 	}
-	rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+
+	if stateWriter != nil {
+		rw.stateWriter = stateWriter
+	} else {
+		rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+	}
 }
 
 func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
@@ -188,17 +193,27 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task, isMining bool) *exec.Result 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
 	}
 
+	txIndex := txTask.Version().TxIndex
+
 	switch {
-	case txTask.Version().TxIndex == -1:
+	case txIndex == -1:
 	case txTask.IsBlockEnd():
 	default:
 		rw.callTracer.Reset()
 	}
 
+	txTask.Reset(rw.ibs)
+
+	if txIndex >= 0 {
+		rw.ibs.SetTxContext(txIndex)
+	}
+
 	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.rs, rw.ibs,
 		rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs, isMining)
 
-	result.Task = txTask
+	if result.Task == nil {
+		result.Task = txTask
+	}
 
 	switch {
 	case txTask.Version().TxIndex == -1:
@@ -211,7 +226,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task, isMining bool) *exec.Result 
 	return result
 }
 
-func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB,
+	rs *state.StateV3, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
+	engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultChSize := workerCount * 8
@@ -223,7 +240,7 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
 			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, isMining)
-			reconWorkers[i].ResetState(rs, accumulator)
+			reconWorkers[i].ResetState(rs, stateWriter, accumulator)
 		}
 		if background {
 			for i := 0; i < workerCount; i++ {

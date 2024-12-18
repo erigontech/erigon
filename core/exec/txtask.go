@@ -34,7 +34,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -48,7 +48,7 @@ type Task interface {
 		gasPool *core.GasPool,
 		rs *state.StateV3,
 		ibs *state.IntraBlockState,
-		stateWriter *state.StateWriterV3,
+		stateWriter state.StateWriter,
 		stateReader state.ResettableStateReader,
 		chainConfig *chain.Config,
 		chainReader consensus.ChainReader,
@@ -60,6 +60,7 @@ type Task interface {
 	VersionMap() *state.VersionMap
 	VersionedReads(ibs *state.IntraBlockState) []state.VersionedRead
 	VersionedWrites(ibs *state.IntraBlockState) []state.VersionedWrite
+	Reset(ibs *state.IntraBlockState)
 
 	TxHash() libcommon.Hash
 	TxSender() *libcommon.Address
@@ -80,7 +81,6 @@ type Result struct {
 	Err             error
 	TxIn            state.VersionedReads
 	TxOut           state.VersionedWrites
-	TxAllOut        state.VersionedWrites
 
 	TraceFroms map[libcommon.Address]struct{}
 	TraceTos   map[libcommon.Address]struct{}
@@ -132,10 +132,6 @@ type TxTask struct {
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 	ReadLists          state.ReadLists
 	WriteLists         state.WriteLists
-	AccountPrevs       map[string][]byte
-	AccountDels        map[string]*accounts.Account
-	StoragePrevs       map[string][]byte
-	CodePrevs          map[string]uint64
 	Logs               []*types.Log
 	// BlockReceipts is used only by Gnosis:
 	//  - it does store `proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})`
@@ -144,6 +140,8 @@ type TxTask struct {
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
 
+	Incarnation int
+
 	UsedGas uint64
 
 	Config *chain.Config
@@ -151,6 +149,9 @@ type TxTask struct {
 }
 
 func (t *TxTask) TxHash() libcommon.Hash {
+	if t.Tx == nil {
+		return libcommon.Hash{}
+	}
 	return t.Tx.Hash()
 }
 
@@ -250,7 +251,8 @@ func (t *TxTask) createReceipt(cumulativeGasUsed uint64) *types.Receipt {
 	//}
 	return receipt
 }
-func (t *TxTask) Reset() *TxTask {
+
+func (t *TxTask) Reset(ibs *state.IntraBlockState) {
 	t.BalanceIncreaseSet = nil
 	t.ReadLists.Return()
 	t.ReadLists = nil
@@ -258,7 +260,7 @@ func (t *TxTask) Reset() *TxTask {
 	t.WriteLists = nil
 	t.Logs = nil
 	t.Failed = false
-	return t
+	ibs.Reset()
 }
 
 func (txTask *TxTask) Execute(evm *vm.EVM,
@@ -268,7 +270,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	gasPool *core.GasPool,
 	rs *state.StateV3,
 	ibs *state.IntraBlockState,
-	stateWriter *state.StateWriterV3,
+	stateWriter state.StateWriter,
 	stateReader state.ResettableStateReader,
 	chainConfig *chain.Config,
 	chainReader consensus.ChainReader,
@@ -279,9 +281,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	stateReader.SetTxNum(txTask.TxNum)
 	rs.Domains().SetTxNum(txTask.TxNum)
 	stateReader.ResetReadSet()
-	stateWriter.ResetWriteSet()
+	if withReset, ok := stateWriter.(interface{ ResetWriteSet() }); ok {
+		withReset.ResetWriteSet()
+	}
 
-	ibs.Reset()
 	//ibs.SetTrace(true)
 
 	rules := txTask.Rules
@@ -321,10 +324,12 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			return core.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */)
 		}
 
-		if isMining {
-			_, txTask.Txs, txTask.BlockReceipts, _, err = engine.FinalizeAndAssemble(chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, chainReader, syscall, nil, txTask.Logger)
-		} else {
-			_, _, _, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, chainReader, syscall, txTask.Logger)
+		if !txTask.ShouldDelayFeeCalc() {
+			if isMining {
+				_, txTask.Txs, txTask.BlockReceipts, _, err = engine.FinalizeAndAssemble(chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, chainReader, syscall, nil, txTask.Logger)
+			} else {
+				_, _, _, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, chainReader, syscall, txTask.Logger)
+			}
 		}
 		if err != nil {
 			result.Err = err
@@ -342,7 +347,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	default:
 		gasPool.Reset(txTask.Tx.GetGas(), chainConfig.GetMaxBlobGasPerBlock())
 		vmCfg.SkipAnalysis = txTask.SkipAnalysis
-		ibs.SetTxContext(txTask.TxIndex)
 		msg := txTask.TxAsMessage
 		if msg.FeeCap().IsZero() && engine != nil {
 			// Only zero-gas transactions may be service ones
@@ -386,6 +390,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		if err != nil {
 			result.Err = err
 		} else {
+			result.ExecutionResult = applyRes
+			// TODO these can be removed - use result instead
 			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
@@ -398,15 +404,20 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		//for addr, bal := range txTask.BalanceIncreaseSet {
-		//	fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		//}
+		for addr, bal := range txTask.BalanceIncreaseSet {
+			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
+		}
 		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 			panic(err)
 		}
 		txTask.ReadLists = stateReader.ReadSet()
-		txTask.WriteLists = stateWriter.WriteSet()
-		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
+		if withWriteSet, ok := stateWriter.(interface {
+			WriteSet() map[string]*libstate.KvList
+		}); ok {
+			txTask.WriteLists = withWriteSet.WriteSet()
+		}
+		//Unused ?
+		//txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
 	}
 
 	return &result

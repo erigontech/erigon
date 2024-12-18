@@ -21,6 +21,8 @@
 package state
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -64,31 +66,54 @@ type WriterWithChangeSets interface {
 }
 
 type NoopWriter struct {
+	trace bool
 }
 
-var noopWriter = &NoopWriter{}
+var noopWriter = &NoopWriter{true}
 
-func NewNoopWriter() *NoopWriter {
-	return noopWriter
+func NewNoopWriter(trace ...bool) *NoopWriter {
+	if len(trace) == 0 {
+		return noopWriter
+	}
+	return &NoopWriter{trace[0]}
 }
 
 func (nw *NoopWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	if nw.trace {
+		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+	}
 	return nil
 }
 
 func (nw *NoopWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+	if nw.trace {
+		fmt.Printf("del acc: %x\n", address)
+	}
 	return nil
 }
 
 func (nw *NoopWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	if nw.trace {
+		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
+	}
 	return nil
 }
 
 func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	if *original == *value {
+		return nil
+	}
+	v := value.Bytes()
+	if nw.trace {
+		fmt.Printf("storage: %x,%x,%x\n", address, *key, v)
+	}
 	return nil
 }
 
 func (nw *NoopWriter) CreateContract(address common.Address) error {
+	if nw.trace {
+		fmt.Printf("create contract: %x\n", address)
+	}
 	return nil
 }
 

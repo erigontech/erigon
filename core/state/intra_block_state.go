@@ -93,8 +93,8 @@ type IntraBlockState struct {
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 
 	// Versioned storage used for parallel tx processing, versions
-	// are maintaned across transactions until they are rest at the
-	// block level
+	// are maintaned across transactions until they are reset
+	// at the block level
 	versionMap      *VersionMap
 	versionedWrites map[VersionKey]VersionedWrite
 	versionedReads  map[VersionKey]VersionedRead
@@ -150,6 +150,7 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 		state.stateObjectsDirty[addr] = struct{}{}
 	}
 
+	state.logs = make([]types.Logs, len(sdb.logs))
 	for hash, logs := range sdb.logs {
 		cpy := make([]*types.Log, len(logs))
 		for i, l := range logs {
@@ -191,14 +192,6 @@ func (sdb *IntraBlockState) Reset() {
 	//		"len(sdb.stateObjectsDirty)", len(sdb.stateObjectsDirty),
 	//		"len(sdb.balanceInc)", len(sdb.balanceInc))
 	//}
-
-	/*
-		sdb.nilAccounts = make(map[libcommon.Address]struct{})
-		sdb.stateObjects = make(map[libcommon.Address]*stateObject)
-		sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
-		sdb.logs = make(map[libcommon.Hash][]*types.Log)
-		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
-	*/
 
 	sdb.nilAccounts = make(map[libcommon.Address]struct{})
 	//clear(sdb.nilAccounts)
@@ -298,11 +291,6 @@ func (sdb *IntraBlockState) Empty(addr libcommon.Address) (bool, error) {
 	}
 	return so == nil || so.deleted || so.empty(), nil
 }
-
-const BalancePath = 1
-const NoncePath = 2
-const CodePath = 3
-const SelfDestructPath = 4
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
@@ -1233,7 +1221,7 @@ func (sdb *IntraBlockState) hasVersionedWrite(k VersionKey) bool {
 	return ok
 }
 
-// mvRecordWritten checks whether a state object is already present in the current MV writeMap.
+// recordWritten checks whether a state object is already present in the current MV writeMap.
 // If yes, it returns the object directly.
 // If not, it clones the object and inserts it into the writeMap before returning it.
 func (s *IntraBlockState) recordWritten(object *stateObject) *stateObject {
@@ -1307,7 +1295,7 @@ func (s *IntraBlockState) FlushVersionedWrites() {
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
 // of the current StateDB.
-func (sw *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
+func (s *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 	for i := range writes {
 		path := writes[i].Path
 		sr := writes[i].Val.(*IntraBlockState)
@@ -1325,13 +1313,13 @@ func (sw *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 			if err != nil {
 				return err
 			}
-			sw.SetIncarnation(addr, i)
+			s.SetIncarnation(addr, i)
 
 			if path.IsState() {
 				stateKey := path.GetStateKey()
 				var state uint256.Int
 				sr.GetState(addr, &stateKey, &state)
-				sw.SetState(addr, &stateKey, state)
+				s.SetState(addr, &stateKey, state)
 			} else if path.IsAddress() {
 				continue
 			} else {
@@ -1341,26 +1329,26 @@ func (sw *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 					if err != nil {
 						return err
 					}
-					sw.SetBalance(addr, b, writes[i].Reason)
+					s.SetBalance(addr, b, writes[i].Reason)
 				case NoncePath:
 					n, err := sr.GetNonce(addr)
 					if err != nil {
 						return err
 					}
-					sw.SetNonce(addr, n)
+					s.SetNonce(addr, n)
 				case CodePath:
 					c, err := sr.GetCode(addr)
 					if err != nil {
 						return err
 					}
-					sw.SetCode(addr, c)
+					s.SetCode(addr, c)
 				case SelfDestructPath:
 					stateObject, err := sr.getStateObject(addr)
 					if err != nil {
 						return err
 					}
 					if stateObject != nil && stateObject.deleted {
-						sw.Selfdestruct(addr)
+						s.Selfdestruct(addr)
 					}
 				default:
 					panic(fmt.Errorf("unknown key type: %d", path.GetSubpath()))
@@ -1370,3 +1358,4 @@ func (sw *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 	}
 	return nil
 }
+

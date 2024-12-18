@@ -47,7 +47,8 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 				Rules:      params.TestRules,
 				WriteLists: stateWriter.WriteSet(),
 			}
-			txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
+			// Unused
+			//txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
 			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
 			if err := rs.ApplyState4(context.Background(), txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
 				txTask.BalanceIncreaseSet, txTask.Logs, nil, nil,

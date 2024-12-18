@@ -424,7 +424,7 @@ func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriter
 	return &StateWriterV3{
 		rs:          rs,
 		accumulator: accumulator,
-		//trace: true,
+		trace: true,
 	}
 }
 
