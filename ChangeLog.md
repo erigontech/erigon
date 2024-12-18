@@ -26,6 +26,20 @@ ChangeLog
 
 ### Acknowledgements:
 
+## v3.0.0-alpha7
+
+### Improvements:
+
+- Faster eth_getTransactionReceipt with "txn-granularity cache" in https://github.com/erigontech/erigon/pull/13134 and "executing only 1 txn"  https://github.com/erigontech/erigon/pull/12424
+- Return PrunedError when trying to read unavailable historical data in https://github.com/erigontech/erigon/pull/13014
+
+### Fixes:
+
+- Fix trace_block returning "insufficient funds" (Issues #12525 and similar) with standalone rpcdaemon in https://github.com/erigontech/erigon/pull/13129
+
+
+### Acknowledgements:
+
 ## v3.0.0-alpha6
 
 ### Breaking changes
