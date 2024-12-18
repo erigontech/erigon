@@ -86,8 +86,8 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, err
 		}
 
-		var txnIndex uint64
 		blockHash := header.Hash()
+		var txnIndex uint64
 
 		// Add GasPrice for the DynamicFeeTransaction
 		var baseFee *big.Int
@@ -101,7 +101,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 				return nil, nil
 			}
 			borTx := bortypes.NewBorTransaction()
-			_, txCount, err := api._blockReader.Body(ctx, tx, header.Hash(), blockNum)
+			_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 			if err != nil {
 				return nil, err
 			}
