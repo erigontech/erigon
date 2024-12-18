@@ -22,6 +22,7 @@ require (
 	github.com/Giulio2002/bls v0.0.0-20241116091023-2ddcc8954ec0
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring v1.9.4
+	github.com/RoaringBitmap/roaring/v2 v2.4.2
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/sync v0.5.1
 	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8

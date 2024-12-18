@@ -17,6 +17,7 @@ require (
 
 require (
 	github.com/RoaringBitmap/roaring v1.9.4
+	github.com/RoaringBitmap/roaring/v2 v2.4.2
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.15.2
