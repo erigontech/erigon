@@ -104,11 +104,8 @@ func (s *L1Syncer) getNextEtherman() IEtherman {
 	s.ethermanMtx.Lock()
 	defer s.ethermanMtx.Unlock()
 
-	if s.ethermanIndex >= uint8(len(s.etherMans)) {
-		s.ethermanIndex = 0
-	}
-
-	etherman := s.etherMans[s.ethermanIndex]
+	// Use modulo to ensure the index wraps around automatically
+	etherman := s.etherMans[s.ethermanIndex%uint8(len(s.etherMans))]
 	s.ethermanIndex++
 
 	return etherman
@@ -482,10 +479,6 @@ func (s *L1Syncer) callSequencedBatchesMap(ctx context.Context, addr *common.Add
 	em := s.getNextEtherman()
 
 	resp, err := em.StorageAt(ctx, *addr, mkh, nil)
-	if err != nil {
-		return
-	}
-
 	if err != nil {
 		return
 	}

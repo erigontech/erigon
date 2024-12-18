@@ -252,10 +252,10 @@ func parseLogType(l1RollupId uint64, log *ethTypes.Log) (l1BatchInfo types.L1Bat
 	)
 
 	switch log.Topics[0] {
-	case contracts.SequencedBatchTopicPreEtrog:
+	case contracts.SequenceBatchesTopicPreEtrog:
 		batchLogType = logSequence
 		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
-	case contracts.SequencedBatchTopicEtrog:
+	case contracts.SequenceBatchesTopicEtrog:
 		batchLogType = logSequenceEtrog
 		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
 		l1InfoRoot = common.BytesToHash(log.Data[:32])

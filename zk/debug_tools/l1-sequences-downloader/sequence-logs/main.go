@@ -26,8 +26,8 @@ func main() {
 	}
 
 	seqTopics := [][]common.Hash{{
-		contracts.SequencedBatchTopicPreEtrog,
-		contracts.SequencedBatchTopicEtrog,
+		contracts.SequenceBatchesTopicPreEtrog,
+		contracts.SequenceBatchesTopicEtrog,
 	}}
 
 	seqAndVerifL1Contracts := []common.Address{common.HexToAddress(cfg.AddressRollup)}
@@ -101,9 +101,9 @@ func parseLogType(log *ethTypes.Log) (l1BatchInfo types.L1BatchInfo) {
 	)
 
 	switch log.Topics[0] {
-	case contracts.SequencedBatchTopicPreEtrog:
+	case contracts.SequenceBatchesTopicPreEtrog:
 		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
-	case contracts.SequencedBatchTopicEtrog:
+	case contracts.SequenceBatchesTopicEtrog:
 		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
 		l1InfoRoot = common.BytesToHash(log.Data[:32])
 	default:

@@ -128,7 +128,7 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 				return types.Log{
 					BlockNumber: latestBlockNumber.Uint64(),
 					Address:     l1ContractAddresses[0],
-					Topics:      []common.Hash{contracts.SequencedBatchTopicPreEtrog, batchNumHash},
+					Topics:      []common.Hash{contracts.SequenceBatchesTopicPreEtrog, batchNumHash},
 					TxHash:      txHash,
 					Data:        []byte{},
 				}, nil
@@ -154,7 +154,7 @@ func TestSpawnStageL1Syncer(t *testing.T) {
 				return types.Log{
 					BlockNumber: latestBlockNumber.Uint64(),
 					Address:     l1ContractAddresses[0],
-					Topics:      []common.Hash{contracts.SequencedBatchTopicEtrog, batchNumHash},
+					Topics:      []common.Hash{contracts.SequenceBatchesTopicEtrog, batchNumHash},
 					Data:        l1InfoRoot.Bytes(),
 					TxHash:      txHash,
 				}, nil

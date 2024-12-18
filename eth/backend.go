@@ -1048,8 +1048,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		seqAndVerifTopics := [][]libcommon.Hash{{
-			contracts.SequencedBatchTopicPreEtrog,
-			contracts.SequencedBatchTopicEtrog,
+			contracts.SequenceBatchesTopicPreEtrog,
+			contracts.SequenceBatchesTopicEtrog,
 			contracts.RollbackBatchesTopic,
 			contracts.VerificationTopicPreEtrog,
 			contracts.VerificationTopicEtrog,
@@ -1170,7 +1170,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				ethermanClients,
 				[]libcommon.Address{cfg.AddressZkevm, cfg.AddressRollup},
 				[][]libcommon.Hash{{
-					contracts.SequenceBatchesTopic,
+					contracts.SequenceBatchesTopicEtrog,
 				}},
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
