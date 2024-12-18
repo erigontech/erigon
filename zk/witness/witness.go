@@ -252,7 +252,9 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 
 		chainReader := stagedsync.NewChainReaderImpl(g.chainCfg, tx, nil, log.New())
 
-		vmConfig := vm.Config{}
+		vmConfig := vm.Config{
+			StatelessExec: true,
+		}
 		if _, err = core.ExecuteBlockEphemerallyZk(g.chainCfg, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, hermezDb, &prevStateRoot); err != nil {
 			return nil, fmt.Errorf("ExecuteBlockEphemerallyZk: %w", err)
 		}
