@@ -69,6 +69,7 @@ func NewBlockCollector(logger log.Logger, engine execution_client.ExecutionEngin
 
 // AddBlock adds the execution payload part of the block to the collector
 func (b *blockCollector) AddBlock(block *cltypes.BeaconBlock) error {
+	defer log.Info("[Caplin] Added block to collector", "block", block.Body.ExecutionPayload.BlockNumber)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	payload := block.Body.ExecutionPayload
@@ -165,6 +166,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 		if err := b.engine.InsertBlocks(ctx, blocksBatch, true); err != nil {
 			b.logger.Warn("failed to insert blocks", "err", err)
 		}
+		b.logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
 	}
 	b.size = 0
 	// Create a new collector
