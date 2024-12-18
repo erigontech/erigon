@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/go-chi/chi/v5"
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"

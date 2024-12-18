@@ -34,10 +34,10 @@ import (
 	"net"
 	"time"
 
-	"github.com/golang/snappy"
 	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/crypto/ecies"
 	"github.com/erigontech/erigon/rlp"
+	"github.com/golang/snappy"
 	"golang.org/x/crypto/sha3"
 )
 
