@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/state/argv"
 )
 
 type Aggregator struct {
@@ -227,7 +228,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblCommitmentHistoryVals,
 			compression: seg.CompressNone,
 
-			snapshotsDisabled:  true,
+			snapshotsDisabled:  !argv.AllowCommitmentHistory,
 			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,

@@ -35,11 +35,11 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
+	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/state/argv"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -98,6 +98,11 @@ var (
 	PruneBlocksDistanceFlag = cli.Uint64Flag{
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
+	}
+	CommitmentHistoryFlag = cli.BoolFlag{
+		Name:  "commitment.history",
+		Usage: "Allow to build commitment (proof) history files",
+		Value: false,
 	}
 	ExperimentsFlag = cli.StringFlag{
 		Name: "experiments",
@@ -310,6 +315,9 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.Prune = mode
+	if v := ctx.Bool(CommitmentHistoryFlag.Name); v {
+		argv.AllowCommitmentHistory = v
+	}
 	if ctx.String(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
 		if err != nil {
@@ -438,6 +446,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	mode.History = prune.Distance(distance)
 
 	cfg.Prune = mode
+	if v := f.Bool(CommitmentHistoryFlag.Name, CommitmentHistoryFlag.Value, CommitmentHistoryFlag.Usage); v != nil {
+		argv.AllowCommitmentHistory = *v
+	}
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))
