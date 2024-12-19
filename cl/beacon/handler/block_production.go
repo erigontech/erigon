@@ -546,7 +546,7 @@ func (a *ApiHandler) getBuilderPayload(
 		ethHeader.SetVersion(baseState.Version())
 	}
 	// check kzg commitments
-	if header != nil && baseState.Version() >= clparams.DenebVersion {
+	if baseState.Version() >= clparams.DenebVersion {
 		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
 			return nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
 		}

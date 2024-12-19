@@ -412,7 +412,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 
 	var baseFee *uint256.Int
-	if header != nil && header.BaseFee != nil {
+	if header.BaseFee != nil {
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {

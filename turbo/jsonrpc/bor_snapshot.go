@@ -656,7 +656,7 @@ func snapshot(ctx context.Context, api *BorImpl, db kv.Tx, borDb kv.Tx, header *
 	number := header.Number.Uint64()
 	hash := header.Hash()
 
-	for snap == nil {
+	for snap == nil { //nolint:govet
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
 			if s, err := loadSnapshot(api, db, borDb, hash); err == nil {
