@@ -70,7 +70,7 @@ jobs:
     - name: Delete Erigon Testbed Data Directory
       if: always()
       run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR
+        find $ERIGON_TESTBED_DATA_DIR -mindepth 1 -maxdepth 1 ! -name 'snapshots' -exec rm -rf {} +
 
     - name: Resume the Erigon instance dedicated to db maintenance
       run: |
