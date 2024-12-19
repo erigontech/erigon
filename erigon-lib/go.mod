@@ -16,7 +16,6 @@ require (
 )
 
 require (
-	github.com/RoaringBitmap/roaring v1.9.4
 	github.com/RoaringBitmap/roaring/v2 v2.4.2
 	github.com/anacrolix/dht/v2 v2.21.1
 	github.com/anacrolix/go-libutp v1.3.1
@@ -61,6 +60,7 @@ require (
 )
 
 require (
+	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20240503222823-736c933a666d // indirect
