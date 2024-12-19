@@ -823,6 +823,11 @@ var (
 		Usage: "Contracts that will have all of their storage added to the witness every time",
 		Value: "",
 	}
+	CrashOnReorg = cli.BoolFlag{
+		Name:  "zkevm.crash-on-reorg",
+		Usage: "Crash on reorg instead of attempting to recover",
+		Value: false,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",
