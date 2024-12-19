@@ -1,0 +1,49 @@
+name: Devtooling tests
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs every night at midnight UTC
+  
+env:
+  DEVTOOLING_IMAGE: xavierromero/devtooling:20241210
+
+jobs:
+
+  tests:
+    if: github.ref == 'refs/heads/zkevm'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout cdk-erigon
+        uses: actions/checkout@v4
+
+      - name: Setup kurtosis
+        uses: ./.github/actions/setup-kurtosis
+
+      - name: Set up env vars
+        run: |
+          echo "L2_PRV_KEY=0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625" >> $GITHUB_ENV
+          echo "L2_RPC_URL=$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" >> $GITHUB_ENV
+
+      - name: Run devtooling
+        run: docker run --name devtooling --network host --detach --rm -e L2_RPC_URL=$L2_RPC_URL -e L2_PRV_KEY=$L2_PRV_KEY ${{ env.DEVTOOLING_IMAGE }}
+
+      - name: Check Block Number
+        run: docker exec devtooling x cast bn
+
+      - name: Check Boundaries
+        run: docker exec devtooling x scripted -f /files/scripted/boundaries.json
+
+      - name: Check Block Number
+        run: docker exec devtooling x cast bn
+
+      - name: zkEVM Test Vectors
+        run: docker exec devtooling x run-zktv
+
+      - name: Check Block Number
+        run: docker exec devtooling x cast bn
+
+      - name: John fuzzed tests
+        run: docker exec devtooling x run-fuzzed
+
+      - name: Check Block Number
+        run: docker exec devtooling x cast bn
