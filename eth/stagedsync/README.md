@@ -45,7 +45,7 @@ state.unwindOrder = []*Stage{
 	}
 ```
 
-## Preprocessing with [ETL](https://github.com/ledgerwatch/erigon-lib/tree/main/etl)
+## Preprocessing with [ETL](https://github.com/erigontech/erigon-lib/tree/main/etl)
 
 Some stages use our ETL framework to sort data by keys before inserting it into the database.
 
@@ -125,7 +125,6 @@ This stage can spawn unwinds if the block execution fails.
 
 Translation each marked for translation contract (from EVM to TEVM)
 
-
 ### Stage 9: [VerkleTrie](/eth/stagedsync/stage_verkle_trie.go)
 
 [TODO]
@@ -155,7 +154,6 @@ Though, to make sure that some APIs work and keep the compatibility with the oth
 If the hashed state is not empty, then we are looking at the History ChangeSets and update only the items that were changed.
 
 This stage doesn't use a network connection.
-
 
 ### Stages [12, 13](/eth/stagedsync/stage_indexes.go), [14](/eth/stagedsync/stage_log_index.go), [15](/eth/stagedsync/stage_call_traces.go) and [16](/eth/stagedsync/stage_txlookup.go): Generate Indexes
 

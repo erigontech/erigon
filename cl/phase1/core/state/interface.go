@@ -1,6 +1,6 @@
 package state
 
-import libcommon "github.com/ledgerwatch/erigon-lib/common"
+import libcommon "github.com/erigontech/erigon-lib/common"
 
 // BeaconStateReader is an interface for reading the beacon state.
 //

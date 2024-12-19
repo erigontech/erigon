@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/stretchr/testify/require"
 )
 

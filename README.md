@@ -7,37 +7,38 @@ by default.
 An accessible and complete version of the documentation is available at **[erigon.gitbook.io](https://erigon.gitbook.io)**.
 <br>
 
-![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ledgerwatch_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ledgerwatch_erigon)
+![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech/_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech/_erigon)
 
 <!--ts-->
 
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
-    + [Getting Started](#getting-started)
-    + [Logging](#logging)
-    + [Testnets](#testnets)
-    + [Block Production](#block-production-pow-miner-or-pos-validator)
-    + [Windows](#windows)
-    + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
-    + [Beacon Chain](#beacon-chain-consensus-layer)
-    + [Dev Chain](#dev-chain)
-    + [Caplin (Internal Consensus Layer)](#caplin)
+
+  - [Getting Started](#getting-started)
+  - [Logging](#logging)
+  - [Testnets](#testnets)
+  - [Block Production](#block-production-pow-miner-or-pos-validator)
+  - [Windows](#windows)
+  - [GoDoc](https://godoc.org/github.com/erigontech/erigon)
+  - [Beacon Chain](#beacon-chain-consensus-layer)
+  - [Dev Chain](#dev-chain)
+  - [Caplin (Internal Consensus Layer)](#caplin)
 
 - [Key features](#key-features)
-    + [More Efficient State Storage](#more-efficient-state-storage)
-    + [Faster Initial Sync](#faster-initial-sync)
-    + [JSON-RPC daemon](#json-rpc-daemon)
-    + [Run all components by docker-compose](#run-all-components-by-docker-compose)
-    + [Grafana dashboard](#grafana-dashboard)
-    + [Internal Consensus Layer](#caplin)
+  - [More Efficient State Storage](#more-efficient-state-storage)
+  - [Faster Initial Sync](#faster-initial-sync)
+  - [JSON-RPC daemon](#json-rpc-daemon)
+  - [Run all components by docker-compose](#run-all-components-by-docker-compose)
+  - [Grafana dashboard](#grafana-dashboard)
+  - [Internal Consensus Layer](#caplin)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
-    + [Erigon Discord Server](#erigon-discord-server)
-    + [Reporting security issues/concerns](#reporting-security-issues/concerns)
-    + [Team](#team)
+  - [Erigon Discord Server](#erigon-discord-server)
+  - [Reporting security issues/concerns](#reporting-security-issues/concerns)
+  - [Team](#team)
 - [Known issues](#known-issues)
-    + [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
+  - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
 
 <!--te-->
 
@@ -49,18 +50,17 @@ in `erigon --help`). We don't allow change this flag after first start.
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
-System Requirements
-===================
+# System Requirements
 
-* For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.3TiB state (as of March 2024),
+- For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.3TiB state (as of March 2024),
   643GiB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
   see `--prune*` flags): 1.1TiB (March 2024).
 
-* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
+- Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 
-* Gnosis Chain Archive: 1.7TiB (March 2024). Gnosis Chain Full node (`--prune=hrtc` flag): 530GiB (March 2024).
+- Gnosis Chain Archive: 1.7TiB (March 2024). Gnosis Chain Full node (`--prune=hrtc` flag): 530GiB (March 2024).
 
-* Polygon Mainnet Archive: 8.5TiB (December 2023). `--prune.*.older 15768000`: 5.1Tb (September 2023). Polygon Mumbai Archive:
+- Polygon Mainnet Archive: 8.5TiB (December 2023). `--prune.*.older 15768000`: 5.1Tb (September 2023). Polygon Mumbai Archive:
   1TB. (April 2022).
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
@@ -71,28 +71,27 @@ RAM: >=16GB, 64-bit architecture.
 [Golang version >= 1.21](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
-and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
+and [here](https://erigontech/.github.io/turbo_geth_release.html#Disk-space).</code>
 
-Usage
-=====
+# Usage
 
 ### Getting Started
 
 For building the latest release (this will be suitable for most users just wanting to run a node):
 
 ```sh
-git clone --branch release/<x.xx> --single-branch https://github.com/ledgerwatch/erigon.git
+git clone --branch release/<x.xx> --single-branch https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
 ./build/bin/erigon
 ```
 
-You can check [the list of releases](https://github.com/ledgerwatch/erigon/releases) for release notes.
+You can check [the list of releases](https://github.com/erigontech/erigon/releases) for release notes.
 
 For building the bleeding edge development branch:
 
 ```sh
-git clone --recurse-submodules https://github.com/ledgerwatch/erigon.git
+git clone --recurse-submodules https://github.com/erigontech/erigon.git
 cd erigon
 git checkout devel
 make erigon
@@ -105,7 +104,7 @@ download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloade
 
 Use `--datadir` to choose where to store data.
 
-Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet, 
+Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
 `--chain=mumbai` for Polygon Mumbai and `--chain=amoy` for Polygon Amoy.
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
 Erigon (https://docs.gnosischain.com/node/manual/beacon).
@@ -119,7 +118,7 @@ Running `make help` will list and describe the convenience commands available in
   free space (for merge recent files to bigger one).
 - temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
 - txpool: pending transactions. safe to remove.
-- nodes:  p2p peers. safe to remove.
+- nodes: p2p peers. safe to remove.
 
 ### Logging
 
@@ -176,7 +175,7 @@ If you would like to give Erigon a try, but do not have spare 2TB on your drive,
 of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 
 ```sh
-git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+git clone --recurse-submodules -j8 https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
 ./build/bin/erigon --datadir=<your_datadir> --chain=goerli
@@ -192,12 +191,11 @@ the chain in `--chain`.
 
 Support only remote-miners.
 
-* To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
-* Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
+- To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
+- Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
   , `--miner.gastarget`
-* JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
-* JSON-RPC supports websocket methods: newPendingTransaction
-
+- JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
+- JSON-RPC supports websocket methods: newPendingTransaction
 
 <code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
 
@@ -205,20 +203,21 @@ Support only remote-miners.
 
 Windows users may run erigon in 3 possible ways:
 
-* Build executable binaries natively for Windows using provided `wmake.ps1` PowerShell script. Usage syntax is the same
+- Build executable binaries natively for Windows using provided `wmake.ps1` PowerShell script. Usage syntax is the same
   as `make` command so you have to run `.\wmake.ps1 [-target] <targetname>`. Example: `.\wmake.ps1 erigon` builds erigon
   executable. All binaries are placed in `.\build\bin\` subfolder. There are some requirements for a successful native
   build on windows :
-    * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
-      likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.21
-    * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
-      following point)
-    * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
-      then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
-      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`. Make sure
-      Windows System "Path" variable has:
-      C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
+
+  - [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
+    likely you already have it
+  - [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.21
+  - GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
+    following point)
+  - If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
+    then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
+    to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`. Make sure
+    Windows System "Path" variable has:
+    C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 
   **Important note about Anti-Viruses**
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's
@@ -229,9 +228,9 @@ Windows users may run erigon in 3 possible ways:
   for `build\bin\mdbx\CMakeFiles` sub-folder of the cloned repo or you can run erigon using the following other two
   options
 
-* Use Docker :  see [docker-compose.yml](./docker-compose.yml)
+- Use Docker : see [docker-compose.yml](./docker-compose.yml)
 
-* Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
+- Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
   would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (
   eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact
   those mount points use `DrvFS` which is a [network file system](#blocks-execution-is-slow-on-cloud-network-drives)
@@ -308,15 +307,15 @@ secret path created by Erigon.
 
 ### Caplin
 
-Caplin is a full-fledged validating Consensus Client like Prysm, Lighthouse, Teku, Nimbus and Lodestar. Its goal is: 
+Caplin is a full-fledged validating Consensus Client like Prysm, Lighthouse, Teku, Nimbus and Lodestar. Its goal is:
 
-* provide better stability
-* Validation of the chain
-* Stay in sync
-* keep the execution of blocks on chain tip
-* serve the  Beacon API using a fast and compact data model alongside low CPU and memory usage.
+- provide better stability
+- Validation of the chain
+- Stay in sync
+- keep the execution of blocks on chain tip
+- serve the Beacon API using a fast and compact data model alongside low CPU and memory usage.
 
- The main reason why developed a new Consensus Layer is to experiment with the possible benefits that could come with it.  For example, The Engine API does not work well with Erigon. The Engine API sends data one block at a time, which does not suit how Erigon works. Erigon is designed to handle many blocks simultaneously and needs to sort and process data efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the Engine API.
+The main reason why developed a new Consensus Layer is to experiment with the possible benefits that could come with it. For example, The Engine API does not work well with Erigon. The Engine API sends data one block at a time, which does not suit how Erigon works. Erigon is designed to handle many blocks simultaneously and needs to sort and process data efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the Engine API.
 
 #### Caplin's Usage.
 
@@ -324,7 +323,7 @@ Caplin can be enabled through the `--internalcl` flag. from that point on, an ex
 
 Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive` flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
-e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead to a 6 GB higher RAM usage.
+e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. \*\*NOTE: Caplin is not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead to a 6 GB higher RAM usage.
 
 ### Multiple Instances / One Machine
 
@@ -346,11 +345,10 @@ Quote your path if it has spaces.
 
 <code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
 
-Key features
-============
+# Key features
 
 <code>🔬 See more
-detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It
+detailed [overview of functionality and current limitations](https://erigontech/.github.io/turbo_geth_release.html). It
 is being updated on recurring basis.</code>
 
 ### More Efficient State Storage
@@ -362,7 +360,7 @@ is being updated on recurring basis.</code>
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
-<code> 🔬 See our detailed ETL explanation [here](https://github.com/ledgerwatch/erigon-lib/blob/main/etl/README.md).</code>
+<code> 🔬 See our detailed ETL explanation [here](https://github.com/erigontech/erigon-lib/blob/main/etl/README.md).</code>
 
 **Plain state**.
 
@@ -384,17 +382,17 @@ to sync Ethereum mainnet in under 2 days if you have a fast enough network conne
 
 Examples of stages are:
 
-* Downloading headers;
+- Downloading headers;
 
-* Downloading block bodies;
+- Downloading block bodies;
 
-* Recovering senders' addresses;
+- Recovering senders' addresses;
 
-* Executing blocks;
+- Executing blocks;
 
-* Validating root hashes and building intermediate hashes for the state Merkle trie;
+- Validating root hashes and building intermediate hashes for the state Merkle trie;
 
-* [...]
+- [...]
 
 ### JSON-RPC daemon
 
@@ -450,9 +448,9 @@ make user_macos
 
 There is a `.env.example` file in the root of the repo.
 
-* `DOCKER_UID` - The UID of the docker user
-* `DOCKER_GID` - The GID of the docker user
-* `XDG_DATA_HOME` - The data directory which will be mounted to the docker containers
+- `DOCKER_UID` - The UID of the docker user
+- `DOCKER_GID` - The GID of the docker user
+- `XDG_DATA_HOME` - The data directory which will be mounted to the docker containers
 
 If not specified, the UID/GID will use the current user.
 
@@ -509,7 +507,7 @@ sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${E
 
 Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
 and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
-See: https://github.com/ledgerwatch/erigon/pull/2392/files
+See: https://github.com/erigontech/erigon/pull/2392/files
 
 If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix
 the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a
@@ -528,18 +526,14 @@ old data
 
 Disabled by default. To enable see `./build/bin/erigon --help` for flags `--prune`
 
-Documentation
-==============
+# Documentation
 
 The `./docs` directory includes a lot of useful but outdated documentation. For code located
 in the `./cmd` directory, their respective documentation can be found in `./cmd/*/README.md`.
 A more recent collation of developments and happenings in Erigon can be found in the
 [Erigon Blog](https://erigon.substack.com/).
 
-
-
-FAQ
-================
+# FAQ
 
 ### How much RAM do I need
 
@@ -554,7 +548,7 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 #### `erigon` ports
 
 | Component | Port  | Protocol  | Purpose                     | Should Expose |
-|-----------|-------|-----------|-----------------------------|---------------|
+| --------- | ----- | --------- | --------------------------- | ------------- |
 | engine    | 9090  | TCP       | gRPC Server                 | Private       |
 | engine    | 42069 | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | 8551  | TCP       | Engine API (JWT auth)       | Private       |
@@ -570,25 +564,25 @@ node.
 
 #### `caplin` ports
 
-| Component | Port | Protocol | Purpose          | Should Expose |
-|-----------|------|----------|------------------|---------------|
-| sentinel  | 4000 | UDP      | Peering          | Public        |
-| sentinel  | 4001 | TCP      | Peering          | Public        |
+| Component | Port | Protocol | Purpose | Should Expose |
+| --------- | ---- | -------- | ------- | ------------- |
+| sentinel  | 4000 | UDP      | Peering | Public        |
+| sentinel  | 4001 | TCP      | Peering | Public        |
 
 If you are using `--internalcl` aka `caplin` as your consensus client, then also look at the chart above
 
 #### `beaconAPI` ports
 
-| Component | Port | Protocol | Purpose          | Should Expose |
-|-----------|------|----------|------------------|---------------|
-| REST  | 5555 | TCP      | REST          | Public        |
+| Component | Port | Protocol | Purpose | Should Expose |
+| --------- | ---- | -------- | ------- | ------------- |
+| REST      | 5555 | TCP      | REST    | Public        |
 
 If you are using `--internalcl` aka `caplin` as your consensus client and `--beacon.api` then also look at the chart above
 
 #### `shared` ports
 
 | Component | Port | Protocol | Purpose | Should Expose |
-|-----------|------|----------|---------|---------------|
+| --------- | ---- | -------- | ------- | ------------- |
 | all       | 6060 | TCP      | pprof   | Private       |
 | all       | 6060 | TCP      | metrics | Private       |
 
@@ -632,7 +626,7 @@ Running erigon from `build/bin` as a separate user might produce an error:
 
     error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
 
-The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon` or `/opt/erigon` as the installation path, for example:
+The library needs to be _installed_ for another user using `make DIST=<path> install`. You could use `$HOME/erigon` or `/opt/erigon` as the installation path, for example:
 
     make DIST=/opt/erigon install
 
@@ -671,11 +665,9 @@ https://github.com/mathMakesArt/Erigon-on-RPi-4
 
 ### How to change db pagesize
 
-[post](https://github.com/ledgerwatch/erigon/blob/devel/cmd/integration/Readme.md#copy-data-to-another-db)
+[post](https://github.com/erigontech/erigon/blob/devel/cmd/integration/Readme.md#copy-data-to-another-db)
 
-
-Getting in touch
-================
+# Getting in touch
 
 ### Erigon Discord Server
 
@@ -687,8 +679,7 @@ your name, occupation, a brief explanation of why you want to join the Discord, 
 
 Send an email to `security [at] torquem.ch`.
 
-Known issues
-============
+# Known issues
 
 ### `htop` shows incorrect memory usage
 
@@ -706,8 +697,8 @@ Erigon at all.
 Next tools show correct memory usage of Erigon:
 
 - `vmmap -summary PID | grep -i "Physical footprint"`. Without `grep` you can see details
-    - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size`
-      shows OS pages cache size.
+  - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size`
+    shows OS pages cache size.
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in
   browser `localhost:3000`, credentials `admin/admin`)
 - `cat /proc/<PID>/smaps`
@@ -726,7 +717,7 @@ Next tools show correct memory usage of Erigon:
 
 ### Blocks Execution is slow on cloud-network-drives
 
-Please read https://github.com/ledgerwatch/erigon/issues/1516#issuecomment-811958891
+Please read https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
 non-batched way.
 

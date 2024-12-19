@@ -18,7 +18,7 @@ package common
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common"
 	"testing"
 )
 

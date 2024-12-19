@@ -3,7 +3,7 @@ package solid_test
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
 )
 

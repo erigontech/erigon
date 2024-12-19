@@ -4,13 +4,13 @@ import (
 	"context"
 	"sync/atomic"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/gointerfaces/remote"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/p2p"
 )
 
 // ApiBackend - interface which must be used by API layer

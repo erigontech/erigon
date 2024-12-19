@@ -3,8 +3,8 @@ package logger
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/common"
+	types2 "github.com/erigontech/erigon-lib/types"
 	"github.com/stretchr/testify/require"
 )
 

@@ -3,11 +3,11 @@ package sentry
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/erigontech/erigon-lib/gointerfaces"
+	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentry"
+	"github.com/erigontech/erigon/core/forkid"
+	"github.com/erigontech/erigon/eth/protocols/eth"
+	"github.com/erigontech/erigon/p2p"
 )
 
 func readAndValidatePeerStatusMessage(

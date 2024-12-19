@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/erigon/cmd/state/stats"
+	"github.com/erigontech/erigon/cmd/state/stats"
 	"github.com/spf13/cobra"
 )
 

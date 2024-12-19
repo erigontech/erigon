@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon-lib/types/ssz"
 )
 
 /*

@@ -20,8 +20,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon/turbo/node"
+	diaglib "github.com/erigontech/erigon-lib/diagnostics"
+	"github.com/erigontech/erigon/turbo/node"
 	"github.com/urfave/cli/v2"
 )
 

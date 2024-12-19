@@ -7,10 +7,10 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/gballet/go-verkle"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 var _ = (*headerMarshaling)(nil)
