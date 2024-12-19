@@ -92,7 +92,7 @@ func getCounterLimits(forkId uint16) *Counters {
 		memAlign:   applyDeduction(forkId, totalSteps>>5),
 		keccaks:    applyDeduction(forkId, int(math.Floor(float64(totalSteps)/155286)*44)),
 		padding:    applyDeduction(forkId, int(math.Floor(float64(totalSteps)/56))),
-		poseidon:   applyDeduction(forkId, int(math.Floor(float64(totalSteps)/30))),
+		poseidon:   applyDeduction(forkId, int(math.Floor(float64(totalSteps)/31))),
 		sha256:     applyDeduction(forkId, int(math.Floor(float64(totalSteps-1)/31488))*7),
 	}
 
