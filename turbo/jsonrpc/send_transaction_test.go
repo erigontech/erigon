@@ -101,17 +101,28 @@ func TestSendRawTransaction(t *testing.T) {
 	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
 
-	select {
-	case got := <-txsCh:
-		require.Equal(expectedValue, got[0].GetValue().Uint64())
-	case <-time.After(20 * time.Second): // Sometimes the channel times out on github actions
-		t.Log("Timeout waiting for txn from channel")
-		jsonTx, err := api.GetTransactionByHash(ctx, txHash, nil)
-		require.NoError(err)
-		jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
-		require.True(ok)
-		require.Equal(expectedValue, jsonTxRPCTransaction.Value.Uint64())
-	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case got := <-txsCh:
+			require.Equal(expectedValue, got[0].GetValue().Uint64())
+		case <-time.After(10 * time.Second):
+			for i := 0; i < 20; i++ {
+				jsonTx, err := api.GetTransactionByHash(ctx, txHash, nil)
+				if err == nil {
+					jsonTxRPCTransaction, ok := jsonTx.(jsonrpc.RPCTransaction)
+					if ok && jsonTxRPCTransaction.Value.Uint64() == expectedValue {
+						close(done)
+						return
+					}
+				}
+				time.Sleep(time.Second)
+			}
+			t.Fatal("Timed out waiting for transaction")
+		}
+		close(done)
+	}()
+	<-done
 
 	//send same tx second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
