@@ -184,6 +184,7 @@ const (
 	SetCodeMagicPrefix = byte(0x05)
 )
 
+// EIP-7702: Set EOA account code
 var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
 var DelegatedCodeHash = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
 
