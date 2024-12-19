@@ -38,7 +38,7 @@ func (p *TxPool) Trace(msg string, ctx ...interface{}) {
 }
 
 // onSenderStateChange is the function that recalculates ephemeral fields of transactions and determines
-// which sub pool they will need to go to. Sice this depends on other transactions from the same sender by with lower
+// which sub pool they will need to go to. Since this depends on other transactions from the same sender by with lower
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
 // for a given senderID
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, byNonce *BySenderAndNonce,
@@ -286,6 +286,9 @@ func (p *TxPool) MarkForDiscardFromPendingBest(txHash common.Hash) {
 }
 
 func (p *TxPool) RemoveMinedTransactions(ctx context.Context, tx kv.Tx, blockGasLimit uint64, ids []common.Hash) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	cache := p.cache()
 
 	p.lock.Lock()

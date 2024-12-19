@@ -246,6 +246,9 @@ func sequencingBatchStep(
 	// once the batch ticker has ticked we need a signal to close the batch after the next block is done
 	batchTimedOut := false
 
+	minedTxsToRemove := make([]common.Hash, 0)
+	var header *types.Header
+
 	for blockNumber := executionAt + 1; runLoopBlocks; blockNumber++ {
 		if batchTimedOut {
 			log.Debug(fmt.Sprintf("[%s] Closing batch due to timeout", logPrefix))
@@ -285,7 +288,8 @@ func sequencingBatchStep(
 			}
 		}
 
-		header, parentBlock, err := prepareHeader(sdb.tx, blockNumber-1, batchState.blockState.getDeltaTimestamp(), batchState.getBlockHeaderForcedTimestamp(), batchState.forkId, batchState.getCoinbase(&cfg), cfg.chainConfig, cfg.miningConfig)
+		var parentBlock *types.Block
+		header, parentBlock, err = prepareHeader(sdb.tx, blockNumber-1, batchState.blockState.getDeltaTimestamp(), batchState.getBlockHeaderForcedTimestamp(), batchState.forkId, batchState.getCoinbase(&cfg), cfg.chainConfig, cfg.miningConfig)
 		if err != nil {
 			return err
 		}
@@ -609,12 +613,8 @@ func sequencingBatchStep(
 			return err
 		}
 
-		if err := cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, batchState.blockState.builtBlockElements.txSlots); err != nil {
-			return err
-		}
-		if err := cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, batchState.blockState.transactionsToDiscard); err != nil {
-			return err
-		}
+		minedTxsToRemove = append(minedTxsToRemove, batchState.blockState.transactionsToDiscard...)
+		minedTxsToRemove = append(minedTxsToRemove, batchState.blockState.builtBlockElements.txSlots...)
 
 		if batchState.isLimboRecovery() {
 			stateRoot := block.Root()
@@ -689,7 +689,15 @@ func sequencingBatchStep(
 
 	log.Info(fmt.Sprintf("[%s] Finish batch %d...", batchContext.s.LogPrefix(), batchState.batchNumber))
 
-	return sdb.tx.Commit()
+	if err := sdb.tx.Commit(); err != nil {
+		return err
+	}
+
+	if err = cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, minedTxsToRemove); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func removeInclusionTransaction(orig []types.Transaction, index int) []types.Transaction {
