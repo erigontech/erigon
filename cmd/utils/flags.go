@@ -823,8 +823,8 @@ var (
 		Usage: "Contracts that will have all of their storage added to the witness every time",
 		Value: "",
 	}
-	CrashOnReorg = cli.BoolFlag{
-		Name:  "zkevm.crash-on-reorg",
+	PanicOnReorg = cli.BoolFlag{
+		Name:  "zkevm.panic-on-reorg",
 		Usage: "Crash on reorg instead of attempting to recover",
 		Value: false,
 	}

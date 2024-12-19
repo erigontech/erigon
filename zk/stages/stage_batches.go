@@ -691,8 +691,8 @@ func rollback(
 		return 0, fmt.Errorf("SaveStageProgress: %w", err)
 	}
 
-	if cfg.zkCfg.CrashOnReorg {
-		return 0, fmt.Errorf("Reorg detected: Datastream block number: %d", latestDSBlockNum)
+	if cfg.zkCfg.PanicOnReorg {
+		panic(fmt.Sprintf("Reorg detected: Datastream block number: %d", latestDSBlockNum))
 	}
 
 	log.Warn(fmt.Sprintf("[%s] Unwinding to block %d (%s)", logPrefix, unwindBlockNum, unwindBlockHash))

@@ -72,7 +72,7 @@ type Zk struct {
 	DataStreamWriteTimeout                 time.Duration
 	DataStreamInactivityTimeout            time.Duration
 	DataStreamInactivityCheckInterval      time.Duration
-	CrashOnReorg                           bool
+	PanicOnReorg                           bool
 
 	RebuildTreeAfter      uint64
 	IncrementTreeAlways   bool
