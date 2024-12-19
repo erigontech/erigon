@@ -652,17 +652,17 @@ func toCallArg(msg ethereum.CallMsg) interface{} {
 	if msg.SkipL1Charging {
 		arg["skipL1Charging"] = msg.SkipL1Charging
 	}
-	if msg.GasFeeCap != nil {
-		arg["maxFeePerGas"] = (*hexutil.Big)(msg.GasFeeCap)
+	if msg.FeeCap != nil {
+		arg["maxFeePerGas"] = (*hexutil.Big)(msg.FeeCap.ToBig())
 	}
-	if msg.GasTipCap != nil {
-		arg["maxPriorityFeePerGas"] = (*hexutil.Big)(msg.GasTipCap)
+	if msg.Tip != nil {
+		arg["maxPriorityFeePerGas"] = (*hexutil.Big)(msg.Tip.ToBig())
 	}
 	if msg.AccessList != nil {
 		arg["accessList"] = msg.AccessList
 	}
-	if msg.BlobGasFeeCap != nil {
-		arg["maxFeePerBlobGas"] = (*hexutil.Big)(msg.BlobGasFeeCap)
+	if msg.MaxFeePerBlobGas != nil {
+		arg["maxFeePerBlobGas"] = (*hexutil.Big)(msg.MaxFeePerBlobGas.ToBig())
 	}
 	if msg.BlobHashes != nil {
 		arg["blobVersionedHashes"] = msg.BlobHashes

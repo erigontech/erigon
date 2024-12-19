@@ -228,19 +228,19 @@ func toCallArg(msg ethereum.CallMsg) interface{} {
 		arg["input"] = hexutil.Bytes(msg.Data)
 	}
 	if msg.Value != nil {
-		arg["value"] = (*hexutil.Big)(msg.Value)
+		arg["value"] = (*hexutil.Big)(msg.Value.ToBig())
 	}
 	if msg.Gas != 0 {
 		arg["gas"] = hexutil.Uint64(msg.Gas)
 	}
 	if msg.GasPrice != nil {
-		arg["gasPrice"] = (*hexutil.Big)(msg.GasPrice)
+		arg["gasPrice"] = (*hexutil.Big)(msg.GasPrice.ToBig())
 	}
-	if msg.GasFeeCap != nil {
-		arg["maxFeePerGas"] = (*hexutil.Big)(msg.GasFeeCap)
+	if msg.FeeCap != nil {
+		arg["maxFeePerGas"] = (*hexutil.Big)(msg.FeeCap.ToBig())
 	}
-	if msg.GasTipCap != nil {
-		arg["maxPriorityFeePerGas"] = (*hexutil.Big)(msg.GasTipCap)
+	if msg.Tip != nil {
+		arg["maxPriorityFeePerGas"] = (*hexutil.Big)(msg.Tip.ToBig())
 	}
 	if msg.AccessList != nil {
 		arg["accessList"] = msg.AccessList

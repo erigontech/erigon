@@ -151,6 +151,8 @@ type CallMsg struct {
 	AccessList     types.AccessList      // EIP-2930 access list.
 	BlobHashes     []libcommon.Hash      // EIP-4844 versioned blob hashes.
 	Authorizations []types.Authorization // EIP-3074 authorizations.
+
+	SkipL1Charging bool // L1 charging is disabled when SkipL1Charging is true
 }
 
 // A ContractCaller provides contract calls, essentially transactions that are executed by

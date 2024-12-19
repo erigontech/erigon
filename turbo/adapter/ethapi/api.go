@@ -743,17 +743,18 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	}
 	return fields, nil
 }
+*/
 
 // SendTxArgs represents the arguments to submit a new transaction into the transaction pool.
 type SendTxArgs struct {
-	From     libcommon.Address  `json:"from"`
-	To       *libcommon.Address `json:"to"`
-	Gas      *hexutil.Uint64 `json:"gas"`
-	GasPrice *hexutil.Big    `json:"gasPrice"`
-	MaxPriorityFeePerGas      *hexutil.Big    `json:"tip"`
-	MaxFeePerGas   *hexutil.Big    `json:"feeCap"`
-	Value    *hexutil.Big    `json:"value"`
-	Nonce    *hexutil.Uint64 `json:"nonce"`
+	From                 libcommon.Address  `json:"from"`
+	To                   *libcommon.Address `json:"to"`
+	Gas                  *hexutil.Uint64    `json:"gas"`
+	GasPrice             *hexutil.Big       `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.Big       `json:"tip"`
+	MaxFeePerGas         *hexutil.Big       `json:"feeCap"`
+	Value                *hexutil.Big       `json:"value"`
+	Nonce                *hexutil.Uint64    `json:"nonce"`
 	// We accept "data" and "input" for backwards-compatibility reasons. "input" is the
 	// newer name and should be preferred by clients.
 	Data  *hexutil.Bytes `json:"data"`
@@ -882,16 +883,17 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 					Value: value,
 					Data:  input,
 				},
-				MaxPriorityFeePerGas:        tip,
-				MaxFeePerGas:     feeCap,
-				ChainID:    chainId,
-				AccessList: *args.AccessList,
+				MaxPriorityFeePerGas: tip,
+				MaxFeePerGas:         feeCap,
+				ChainID:              chainId,
+				AccessList:           *args.AccessList,
 			}
 		}
 	}
 	return tx
 }
 
+/*
 // SubmitTransaction is a helper function that submits txn to txPool and logs a message.
 func SubmitTransaction(ctx context.Context, b Backend, txn types.Transaction) (libcommon.Hash, error) {
 	// If the transaction fee cap is already specified, ensure the
