@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -338,28 +338,28 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
-func mergeEfs(preval, val, buf []byte) ([]byte, error) {
-	preef, _ := eliasfano32.ReadEliasFano(preval)
-	ef, _ := eliasfano32.ReadEliasFano(val)
-	preIt := preef.Iterator()
-	efIt := ef.Iterator()
-	newEf := eliasfano32.NewEliasFano(preef.Count()+ef.Count(), ef.Max())
+func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64, experimentalEFOptimization bool) ([]byte, error) {
+	preSeq := multiencseq.ReadMultiEncSeq(preBaseNum, preval)
+	seq := multiencseq.ReadMultiEncSeq(baseNum, val)
+	preIt := preSeq.Iterator(0)
+	efIt := seq.Iterator(0)
+	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max(), experimentalEFOptimization)
 	for preIt.HasNext() {
 		v, err := preIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newEf.AddOffset(v)
+		newSeq.AddOffset(v)
 	}
 	for efIt.HasNext() {
 		v, err := efIt.Next()
 		if err != nil {
 			return nil, err
 		}
-		newEf.AddOffset(v)
+		newSeq.AddOffset(v)
 	}
-	newEf.Build()
-	return newEf.AppendBytes(buf), nil
+	newSeq.Build()
+	return newSeq.AppendBytes(buf), nil
 }
 
 type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, error)
@@ -603,12 +603,13 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 			val, _ := g.Next(nil)
 			//fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
 			heap.Push(&cp, &CursorItem{
-				t:        FILE_CURSOR,
-				dg:       g,
-				key:      key,
-				val:      val,
-				endTxNum: item.endTxNum,
-				reverse:  true,
+				t:          FILE_CURSOR,
+				dg:         g,
+				key:        key,
+				val:        val,
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				reverse:    true,
 			})
 		}
 	}
@@ -622,13 +623,28 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
+
+		// Pre-rebase the first sequence
+		preSeq := multiencseq.ReadMultiEncSeq(cp[0].startTxNum, lastVal)
+		preIt := preSeq.Iterator(0)
+		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max(), iit.ii.experimentalEFOptimization)
+		for preIt.HasNext() {
+			v, err := preIt.Next()
+			if err != nil {
+				return nil, err
+			}
+			newSeq.AddOffset(v)
+		}
+		newSeq.Build()
+		lastVal = newSeq.AppendBytes(nil)
+
 		var mergedOnce bool
 
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if mergedOnce {
-				if lastVal, err = mergeEfs(ci1.val, lastVal, nil); err != nil {
+				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum, iit.ii.experimentalEFOptimization); err != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.filenameBase, err)
 				}
 			} else {
@@ -768,13 +784,14 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				key, _ := g.Next(nil)
 				val, _ := g.Next(nil)
 				heap.Push(&cp, &CursorItem{
-					t:        FILE_CURSOR,
-					dg:       g,
-					dg2:      g2,
-					key:      key,
-					val:      val,
-					endTxNum: item.endTxNum,
-					reverse:  false,
+					t:          FILE_CURSOR,
+					dg:         g,
+					dg2:        g2,
+					key:        key,
+					val:        val,
+					startTxNum: item.startTxNum,
+					endTxNum:   item.endTxNum,
+					reverse:    false,
 				})
 			}
 		}
@@ -790,7 +807,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			// Advance all the items that have this key (including the top)
 			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 				ci1 := heap.Pop(&cp).(*CursorItem)
-				count := eliasfano32.Count(ci1.val)
+				count := multiencseq.Count(ci1.startTxNum, ci1.val)
 				for i := uint64(0); i < count; i++ {
 					if !ci1.dg2.HasNext() {
 						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.dg2.FileName(), i, count, lastKey, ci1.key))
@@ -853,10 +870,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			for g.HasNext() {
 				keyBuf, _ = g.Next(nil)
 				valBuf, _ = g.Next(nil)
-				ef, _ := eliasfano32.ReadEliasFano(valBuf)
-				efIt := ef.Iterator()
-				for efIt.HasNext() {
-					txNum, err := efIt.Next()
+				seq := multiencseq.ReadMultiEncSeq(indexIn.startTxNum, valBuf)
+				it := seq.Iterator(0)
+				for it.HasNext() {
+					txNum, err := it.Next()
 					if err != nil {
 						return nil, nil, err
 					}
