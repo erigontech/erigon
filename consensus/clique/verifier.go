@@ -176,7 +176,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		headers []*types.Header
 		snap    *Snapshot
 	)
-	for snap == nil {
+	for snap == nil { //nolint:govet
 		// If an in-memory snapshot was found, use that
 		if s, ok := c.recents.Get(hash); ok {
 			snap = s
