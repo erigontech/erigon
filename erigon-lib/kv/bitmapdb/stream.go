@@ -17,7 +17,7 @@
 package bitmapdb
 
 import (
-	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 )
 
 type BitmapStream struct {
