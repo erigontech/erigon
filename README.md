@@ -87,6 +87,10 @@ rebuilding the chain from the L1 data.  This can be used in tandem with unwindin
 to limit the chain to a certain block height before starting the L1 recovery (useful if you have an RPC node available to speed up the process).
 
 **Important Note:**
+**This mode is not supported for pre-forkid8 networks. In their case, the node should be synced up to forkid8 and then switch to sequencer recover mode.**
+
+
+**Important Note:**
 **If using the `zkevm.sync-limit` flag you need to go to the boundary of a batch+1 block so if batch 41 ends at block 99
 then set the sync limit flag to 100.**
 

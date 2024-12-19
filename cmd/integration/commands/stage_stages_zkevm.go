@@ -96,13 +96,11 @@ func unwindZk(ctx context.Context, db kv.RwDB) error {
 
 	stateStages.DisableStages(stages.Snapshots)
 
-	err = stateStages.UnwindToBatch(unwindBatchNo, tx)
-	if err != nil {
+	if err := stateStages.UnwindToBatch(unwindBatchNo, tx); err != nil {
 		return err
 	}
 
-	err = stateStages.RunUnwind(db, wrap.TxContainer{Tx: tx})
-	if err != nil {
+	if err := stateStages.RunUnwind(db, wrap.TxContainer{Tx: tx}); err != nil {
 		return err
 	}
 

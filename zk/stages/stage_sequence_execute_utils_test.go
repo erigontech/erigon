@@ -10,6 +10,7 @@ import (
 	dsTypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	zktx "github.com/ledgerwatch/erigon/zk/tx"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
+	gomock "go.uber.org/mock/gomock"
 )
 
 type mockChecker struct {
@@ -135,33 +136,6 @@ func Test_CheckForBadBatch(t *testing.T) {
 	}
 }
 
-type mockForkDb struct {
-	allForks   []uint64
-	allBatches []uint64
-	batchForks map[uint64]uint64
-}
-
-func (m mockForkDb) GetAllForkHistory() ([]uint64, []uint64, error) {
-	return m.allForks, m.allBatches, nil
-}
-
-func (m mockForkDb) GetLatestForkHistory() (uint64, uint64, error) {
-	return m.allForks[len(m.allForks)-1], m.allBatches[len(m.allBatches)-1], nil
-
-}
-
-func (m mockForkDb) GetForkId(batch uint64) (uint64, error) {
-	return m.batchForks[batch], nil
-}
-
-func (m mockForkDb) WriteForkIdBlockOnce(forkId, block uint64) error {
-	return nil
-}
-
-func (m mockForkDb) WriteForkId(batch, forkId uint64) error {
-	return nil
-}
-
 func Test_PrepareForkId_DuringRecovery(t *testing.T) {
 	tests := map[string]struct {
 		lastBatch  uint64
@@ -170,6 +144,20 @@ func Test_PrepareForkId_DuringRecovery(t *testing.T) {
 		batchForks map[uint64]uint64
 		expected   uint64
 	}{
+		"no fork ids found": {
+			lastBatch:  0,
+			allForks:   []uint64{},
+			allBatches: []uint64{},
+			batchForks: map[uint64]uint64{1: 1},
+			expected:   0,
+		},
+		"not found": {
+			lastBatch:  0,
+			allForks:   []uint64{1, 2, 3},
+			allBatches: []uint64{2, 3, 4},
+			batchForks: map[uint64]uint64{1: 1},
+			expected:   0,
+		},
 		"simple case": {
 			lastBatch:  2,
 			allForks:   []uint64{1, 2, 3},
@@ -195,13 +183,25 @@ func Test_PrepareForkId_DuringRecovery(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			mock := mockForkDb{
-				allForks:   test.allForks,
-				allBatches: test.allBatches,
-				batchForks: test.batchForks,
+			mockCtrl := gomock.NewController(t)
+			defer mockCtrl.Finish()
+			forkDbMock := NewMockForkDb(mockCtrl)
+			forkDbMock.EXPECT().GetAllForkHistory().Return(test.allForks, test.allBatches, nil).Times(1)
+
+			if test.expected != 0 {
+				forkDbMock.EXPECT().GetForkId(test.lastBatch).Return(0, nil).Times(1)
+				forkDbMock.EXPECT().WriteForkIdBlockOnce(test.expected, uint64(2)).Return(nil).Times(1)
 			}
 
-			forkId, err := prepareForkId(test.lastBatch, 1, mock)
+			if test.expected == 0 && len(test.allBatches) > 0 { // handle the panic case
+				defer func() {
+					if r := recover(); r == nil {
+						t.Errorf("The code did not panic")
+					}
+				}()
+			}
+
+			forkId, err := prepareForkId(test.lastBatch, 1, forkDbMock)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

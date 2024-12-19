@@ -88,7 +88,7 @@ func sequencingBatchStep(
 	defer log.Info(fmt.Sprintf("[%s] Finished sequencing stage", logPrefix))
 
 	// at this point of time the datastream could not be ahead of the executor
-	if err = validateIfDatastreamIsAheadOfExecution(s, ctx, cfg); err != nil {
+	if err := validateIfDatastreamIsAheadOfExecution(s, ctx, cfg); err != nil {
 		return err
 	}
 
@@ -98,7 +98,7 @@ func sequencingBatchStep(
 	}
 	defer sdb.tx.Rollback()
 
-	if err = cfg.infoTreeUpdater.WarmUp(sdb.tx); err != nil {
+	if err := cfg.infoTreeUpdater.WarmUp(sdb.tx); err != nil {
 		return err
 	}
 
@@ -138,14 +138,14 @@ func sequencingBatchStep(
 
 	// injected batch
 	if executionAt == 0 {
-		if err = processInjectedInitialBatch(batchContext, batchState); err != nil {
+		if err := processInjectedInitialBatch(batchContext, batchState); err != nil {
 			return err
 		}
 
-		if err = cfg.dataStreamServer.WriteWholeBatchToStream(logPrefix, sdb.tx, sdb.hermezDb.HermezDbReader, lastBatch, injectedBatchBatchNumber); err != nil {
+		if err := cfg.dataStreamServer.WriteWholeBatchToStream(logPrefix, sdb.tx, sdb.hermezDb.HermezDbReader, lastBatch, injectedBatchBatchNumber); err != nil {
 			return err
 		}
-		if err = stages.SaveStageProgress(sdb.tx, stages.DataStream, 1); err != nil {
+		if err := stages.SaveStageProgress(sdb.tx, stages.DataStream, 1); err != nil {
 			return err
 		}
 
@@ -166,8 +166,7 @@ func sequencingBatchStep(
 				return err
 			}
 			if isUnwinding {
-				err = sdb.tx.Commit()
-				if err != nil {
+				if err := sdb.tx.Commit(); err != nil {
 					// do not set shouldCheckForExecutionAndDataStreamAlighment=false because of the error
 					return err
 				}
@@ -202,7 +201,7 @@ func sequencingBatchStep(
 		log.Info(fmt.Sprintf("[%s] L1 recovery beginning for batch", logPrefix), "batch", batchState.batchNumber)
 
 		// let's check if we have any L1 data to recover
-		if err = batchState.batchL1RecoveryData.loadBatchData(sdb); err != nil {
+		if err := batchState.batchL1RecoveryData.loadBatchData(sdb); err != nil {
 			return err
 		}
 
@@ -322,7 +321,7 @@ func sequencingBatchStep(
 		batchState.blockState.builtBlockElements.resetBlockBuildingArrays()
 
 		parentRoot := parentBlock.Root()
-		if err = handleStateForNewBlockStarting(batchContext, ibs, blockNumber, batchState.batchNumber, header.Time, &parentRoot, l1TreeUpdate, shouldWriteGerToContract); err != nil {
+		if err := handleStateForNewBlockStarting(batchContext, ibs, blockNumber, batchState.batchNumber, header.Time, &parentRoot, l1TreeUpdate, shouldWriteGerToContract); err != nil {
 			return err
 		}
 

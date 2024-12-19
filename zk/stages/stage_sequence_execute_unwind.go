@@ -25,10 +25,10 @@ func UnwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.Stage
 		}
 		defer tx.Rollback()
 	}
-	logPrefix := u.LogPrefix()
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	if err = unwindSequenceExecutionStage(u, s, tx, ctx, cfg, initialCycle, logger); err != nil {
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
+
+	if err := unwindSequenceExecutionStage(u, s, tx, ctx, cfg, initialCycle, logger); err != nil {
 		return err
 	}
 
@@ -53,7 +53,7 @@ func unwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.Stage
 		return err
 	}
 
-	if err = stagedsync.UnwindExecutionStageDbWrites(ctx, u, s, tx); err != nil {
+	if err := stagedsync.UnwindExecutionStageDbWrites(ctx, u, s, tx); err != nil {
 		return err
 	}
 
@@ -61,7 +61,7 @@ func unwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.Stage
 		return err
 	}
 
-	if err = updateSequencerProgress(tx, u.UnwindPoint, fromBatch, true); err != nil {
+	if err := updateSequencerProgress(tx, u.UnwindPoint, fromBatch, true); err != nil {
 		return err
 	}
 
@@ -107,35 +107,35 @@ func UnwindSequenceExecutionStageDbWrites(ctx context.Context, u *stagedsync.Unw
 	}
 
 	// only seq
-	if err = hermezDb.DeleteLatestUsedGers(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err := hermezDb.DeleteLatestUsedGers(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate latest used gers error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.DeleteBlockGlobalExitRoots(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err := hermezDb.DeleteBlockGlobalExitRoots(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate block ger error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.DeleteBlockL1BlockHashes(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err := hermezDb.DeleteBlockL1BlockHashes(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate block l1 block hash error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.DeleteBlockL1InfoTreeIndexes(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err := hermezDb.DeleteBlockL1InfoTreeIndexes(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate block l1 info tree index error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.DeleteBlockL1InfoTreeIndexesProgress(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err := hermezDb.DeleteBlockL1InfoTreeIndexesProgress(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate block l1 info tree index error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.DeleteBlockBatches(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err := hermezDb.DeleteBlockBatches(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate block batches error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.DeleteForkIds(fromBatchForForkIdDeletion, toBatch); err != nil {
+	if err := hermezDb.DeleteForkIds(fromBatchForForkIdDeletion, toBatch); err != nil {
 		return fmt.Errorf("truncate fork id error: %v", err)
 	}
 	// only seq
-	if err = hermezDb.DeleteBatchCounters(u.UnwindPoint+1, s.BlockNumber); err != nil {
+	if err := hermezDb.DeleteBatchCounters(u.UnwindPoint+1, s.BlockNumber); err != nil {
 		return fmt.Errorf("truncate block batches error: %v", err)
 	}
 
