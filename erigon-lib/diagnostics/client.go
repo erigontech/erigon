@@ -25,8 +25,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon-lib/common"
+	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -120,6 +122,33 @@ func (d *DiagnosticClient) Setup() {
 	d.setupSpeedtestDiagnostics(rootCtx)
 	d.runSaveProcess(rootCtx)
 
+
+	 // Create gRPC connection
+	 conn, err := grpc.Dial("localhost:9098", grpc.WithInsecure())
+	 if err != nil {
+		 log.Warn("Failed to connect to txpool service: %v", err)
+	 }
+	 defer conn.Close()
+ 
+	 txpool_proto_client := txpool.NewTxpoolClient(conn)
+	 ctx := context.Background()
+ 
+	 // Subscribe to new transactions
+	 stream, err := txpool_proto_client.OnAdd(ctx, &txpool.OnAddRequest{})
+	 if err != nil {
+		 log.Warn("Failed to subscribe to new transactions: %v", err)
+		 return
+	 }
+
+	// Receive new transactions
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			log.Warn("Failed to receive new transaction: %v", err)
+			break
+		}
+		log.Info("Received new transaction", "tx", msg)
+	}
 	//d.logDiagMsgs()
 }
 

@@ -152,6 +152,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 
 			const amount = 50
 			for {
+				startTime := time.Now()
+				fmt.Println("mining exec stage")
 				txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
 				if err != nil {
 					return err
@@ -174,6 +176,8 @@ func SpawnMiningExecStage(s *StageState, txc wrap.TxContainer, cfg MiningExecCfg
 				if len(txns) < amount {
 					break
 				}
+
+				fmt.Println("mining exec stage time", time.Since(startTime))
 			}
 
 			metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)

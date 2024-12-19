@@ -143,6 +143,17 @@ type TxPool struct {
 	maxBlobsPerBlock        uint64
 	feeCalculator           FeeCalculator
 	logger                  log.Logger
+	testarr []TnxApp
+	addResults [][]byte
+	blockResults map[uint64][][]byte
+}
+type Tnxcounteer struct {
+	blockTxns uint64
+	poolTxns uint64
+}
+type TnxApp struct {
+	blocks uint64
+	stats Tnxcounteer
 }
 
 type FeeCalculator interface {
@@ -271,7 +282,76 @@ func (p *TxPool) Start(ctx context.Context) error {
 	})
 }
 
+func (p* TxPool) CheckTransactionsInBlock(minedTxns TxnSlots, blockNumber uint64) {
+	//get all transactions in pending list
+	best := p.pending.best.ms
+	//worst := p.pending.worst.ms
+	//allTogather := append(best, worst...)
+
+	
+
+
+	notInPool := [][32]byte{}
+
+	for _, txn := range minedTxns.Txns {
+		if(p.blockResults == nil) {
+			p.blockResults = make(map[uint64][][]byte)
+		}
+
+		p.blockResults[blockNumber] = append(p.blockResults[blockNumber], txn.IDHash[:])
+		found := false
+		for _, mt := range best {
+			if bytes.Equal(mt.TxnSlot.IDHash[:], txn.IDHash[:]) {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			notInPool = append(notInPool, txn.IDHash)
+		}
+	}
+
+	p.testarr = append(p.testarr, TnxApp{blocks: blockNumber, stats: Tnxcounteer{blockTxns: uint64(len(minedTxns.Txns)), poolTxns: uint64(len(notInPool))}})
+	fmt.Println("Transactions not in pool", len(notInPool), "total", len(minedTxns.Txns))
+	
+	//Calculate and print total transactions and total transactions not in pool and percentage of transactions in pool
+	totalTxns := 0
+	totalTxnsNotInPool := 0
+	for _, t := range p.testarr {
+		totalTxns += int(t.stats.blockTxns)
+		totalTxnsNotInPool += int(t.stats.poolTxns)
+	}
+
+	fmt.Println("Total transactions", totalTxns, "Total transactions not in pool", totalTxnsNotInPool, "Percentage of transactions in pool", (float64(totalTxns - totalTxnsNotInPool) / float64(totalTxns)) * 100)
+
+
+
+	//compare hashes in pool vs hashes in blocks to calculate how mush hashes are missing in pool. hashes in block stored in map p.blockResults for poll is stored in p.addResults
+	blkH := p.blockResults[blockNumber]
+	poolH := p.addResults
+	missing := []byte{}
+	for _, h := range blkH {
+		found := false
+		for _, ph := range poolH {
+			if bytes.Equal(h, ph) {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			missing = append(missing, h...)
+		}
+	}
+
+	fmt.Println("Missing hashes in pool", len(missing), "total", len(poolH), "total in block", len(blkH), "block", blockNumber, "percentage", (float64(len(missing)) / float64(len(blkH)) * 100))
+}
+
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+	p.CheckTransactionsInBlock(minedTxns, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight)
+	startTime := time.Now()
+	fmt.Println("OnNewBlock", "block number", stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 	defer newBlockTimer.ObserveDuration(time.Now())
 
 	coreDB, cache := p.coreDBWithCache()
@@ -426,10 +506,13 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
+	fmt.Println("OnNewBlock", "duration", time.Since(startTime), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+
 	return nil
 }
 
 func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
+	//startTime := time.Now()
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v\n%s", r, stack.Trace().String())
@@ -643,6 +726,7 @@ func (p *TxPool) Started() bool {
 }
 
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (bool, int, error) {
+	startTime := time.Now()
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -727,6 +811,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			p.pending.Remove(mt, "best", p.logger)
 		}
 	}
+
+	p.logger.Debug("[txpool] YieldBest", "duration", time.Since(startTime), "count", count, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
 	return true, count, nil
 }
 
@@ -1142,6 +1228,8 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 }
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	startTime := time.Now()
+	fmt.Println("[AddLocalTxns] start, pendingSise=", p.pending.Len(), "baseFeeSize=", p.baseFee.Len(), "queuedSize=", p.queued.Len())
 	coreDb, cache := p.coreDBWithCache()
 	coreTx, err := coreDb.BeginRo(ctx)
 	if err != nil {
@@ -1196,6 +1284,8 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 		default:
 		}
 	}
+
+	fmt.Println("[AddLocalTxns] end, pendingSise=", p.pending.Len(), "baseFeeSize=", p.baseFee.Len(), "queuedSize=", p.queued.Len(), "duration=", time.Since(startTime))
 	return reasons, nil
 }
 
@@ -1228,6 +1318,14 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
 	for i, txn := range newTxns.Txns {
+
+
+		if(p.addResults == nil) {
+			p.addResults = [][]byte{}
+		}
+
+		p.addResults = append(p.addResults, txn.IDHash[:])
+
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
 			// In case if the transition is stuck, "poke" it to rebroadcast
