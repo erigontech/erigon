@@ -20,6 +20,7 @@
 package ethapi
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -841,7 +842,7 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 		input = *args.Data
 	}
 
-	var txn types.Transaction
+	var tx types.Transaction
 	gasPrice, _ := uint256.FromBig((*big.Int)(args.GasPrice))
 	value, _ := uint256.FromBig((*big.Int)(args.Value))
 	if args.AccessList == nil {
