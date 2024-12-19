@@ -55,7 +55,7 @@ func GetAccInputDataCalcFunction(l1InfoRoot common.Hash, decodedSequenceInterfac
 		totalSequenceBatches = len(decodedSequence.Batches)
 	case *SequenceBatchesCalldataValidiumBanana:
 		accInputHashCalcFn = func(prevAccInputHash common.Hash, index int) *common.Hash {
-			return utils.CalculateBananaValidiumAccInputHash(prevAccInputHash, decodedSequence.Batches[index].TransactionHash, l1InfoRoot, decodedSequence.MaxSequenceTimestamp, decodedSequence.L2Coinbase, decodedSequence.Batches[index].ForcedBlockHashL1)
+			return utils.CalculateBananaValidiumAccInputHash(prevAccInputHash, decodedSequence.Batches[index].TransactionsHash, l1InfoRoot, decodedSequence.MaxSequenceTimestamp, decodedSequence.L2Coinbase, decodedSequence.Batches[index].ForcedBlockHashL1)
 		}
 		totalSequenceBatches = len(decodedSequence.Batches)
 	default:
@@ -119,6 +119,10 @@ func DecodeSequenceBatchesCalldata(data []byte) (calldata interface{}, err error
 		} else {
 			return decodeBananaSequenceBatchesValidiumCallData(unpackedCalldata), nil
 		}
+	case contracts.SequenceBatchesValidiumBanana:
+		if method.Name == sequenceBatchesValidiumMethodName {
+			return decodeBananaSequenceBatchesValidiumCallData(unpackedCalldata), nil
+		}
 	default:
 		return nil, fmt.Errorf("no decoder found for method signature: %s", methodSig)
 	}
@@ -166,7 +170,7 @@ func decodeBananaSequenceBatchesCallData(unpackedCalldata map[string]interface{}
 }
 
 type SequencedBatchValidiumBanana struct {
-	TransactionHash      common.Hash
+	TransactionsHash     common.Hash
 	ForcedGlobalExitRoot common.Hash
 	ForcedTimestamp      uint64
 	ForcedBlockHashL1    common.Hash
@@ -180,7 +184,7 @@ type SequenceBatchesCalldataValidiumBanana struct {
 
 func decodeBananaSequenceBatchesValidiumCallData(unpackedCalldata map[string]interface{}) *SequenceBatchesCalldataValidiumBanana {
 	unpackedbatches := unpackedCalldata["batches"].([]struct {
-		TransactionHash      [32]uint8 `json:"transactionHash"`
+		TransactionsHash     [32]uint8 `json:"transactionsHash"`
 		ForcedGlobalExitRoot [32]uint8 `json:"forcedGlobalExitRoot"`
 		ForcedTimestamp      uint64    `json:"forcedTimestamp"`
 		ForcedBlockHashL1    [32]uint8 `json:"forcedBlockHashL1"`
@@ -194,7 +198,7 @@ func decodeBananaSequenceBatchesValidiumCallData(unpackedCalldata map[string]int
 
 	for i, batch := range unpackedbatches {
 		calldata.Batches[i] = SequencedBatchValidiumBanana{
-			TransactionHash:      common.BytesToHash(batch.TransactionHash[:]),
+			TransactionsHash:     common.BytesToHash(batch.TransactionsHash[:]),
 			ForcedGlobalExitRoot: common.BytesToHash(batch.ForcedGlobalExitRoot[:]),
 			ForcedTimestamp:      batch.ForcedTimestamp,
 			ForcedBlockHashL1:    common.BytesToHash(batch.ForcedBlockHashL1[:]),
