@@ -1,7 +1,7 @@
 # Author: Michele@DevOpsTeam.Erigon
 # Maintainers: DevOps@DevOpsTeam.Erigon
 # Description: This workflow is responsible for backing up the dashboards of the Erigon project.
-# Status: Testing - not mergeable yet
+# Status: Mergeable for testing
 
 name: Dashboards backup
 
