@@ -20,4 +20,7 @@ package argv
 var (
 	// Allows to collect and build history for commitment domain.
 	AllowCommitmentHistory = false // --commitment.history
+
+	// Use multiencoding for .ef of different sizes
+	ExperimentalEFOptimization bool // --experimental.ef-optimization
 )

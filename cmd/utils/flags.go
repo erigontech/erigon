@@ -23,6 +23,7 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/erigontech/erigon-lib/state/argv"
 	"math/big"
 	"path/filepath"
 	"runtime"
@@ -1997,6 +1998,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(ExperimentalEFOptimizationFlag.Name) {
 		cfg.ExperimentalEFOptimization = ctx.Bool(ExperimentalEFOptimizationFlag.Name)
+		argv.ExperimentalEFOptimization = cfg.ExperimentalEFOptimization
 	}
 }
 

@@ -402,6 +402,9 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if ctx.Bool(utils.DisableIPV4.Name) {
 		cfg.Downloader.ClientConfig.DisableIPv4 = true
 	}
+	if ctx.Bool(utils.ExperimentalEFOptimizationFlag.Name) {
+		cfg.ExperimentalEFOptimization, argv.ExperimentalEFOptimization = true, true
+	}
 
 	if ctx.Bool(utils.ChaosMonkeyFlag.Name) {
 		cfg.ChaosMonkey = true

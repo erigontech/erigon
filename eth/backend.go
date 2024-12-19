@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/state/argv"
 	"io/fs"
 	"math/big"
 	"net"
@@ -1475,8 +1476,9 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		logger.Info("****** NEW .EF FILES ARE -NOT- BACKWARDS    ******")
 		logger.Info("****** COMPATIBLE                           ******")
 		logger.Info("**************************************************")
+		argv.ExperimentalEFOptimization = true
 	}
-	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger, snConfig.ExperimentalEFOptimization)
+	agg, err := libstate.NewAggregator(ctx, dirs, config3.DefaultStepSize, db, logger)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
