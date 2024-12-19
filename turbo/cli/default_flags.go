@@ -237,4 +237,6 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.ShutterEnabled,
 	&utils.ShutterKeyperBootnodes,
+
+	&utils.ExperimentalEFOptimizationFlag,
 }

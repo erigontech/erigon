@@ -45,7 +45,7 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *Aggregato
 	dirs := datadir.New(b.TempDir())
 	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	b.Cleanup(db.Close)
-	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)
+	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger, false)
 	require.NoError(b, err)
 	b.Cleanup(agg.Close)
 	return db, agg

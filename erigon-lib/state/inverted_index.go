@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 )
 
@@ -91,6 +92,8 @@ type iiCfg struct {
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
 	indexList idxList
+
+	experimentalEFOptimization bool
 }
 
 type iiVisible struct {
@@ -598,8 +601,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		if !bytes.Equal(k, key) {
 			continue
 		}
-		eliasVal, _ := g.Next(nil)
-		equalOrHigherTxNum, found = eliasfano32.Seek(eliasVal, txNum)
+		encodedSeq, _ := g.Next(nil)
+		equalOrHigherTxNum, found = multiencseq.Seek(iit.files[i].startTxNum, encodedSeq, txNum)
 		if !found {
 			continue
 		}
@@ -689,7 +692,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		indexTable:  iit.ii.valuesTable,
 		orderAscend: asc,
 		limit:       limit,
-		ef:          eliasfano32.NewEliasFano(1, 1),
+		seq:         &multiencseq.SequenceReader{},
 	}
 	if asc {
 		for i := len(iit.files) - 1; i >= 0; i-- {
@@ -1076,7 +1079,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 	coll.writer = seg.NewWriter(comp, ii.compression)
 
 	var (
-		prevEf      []byte
+		prevSeq     []byte
 		prevKey     []byte
 		initialized bool
 		bitmap      = bitmapdb.NewBitmap64()
@@ -1096,20 +1099,20 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 			return nil
 		}
 
-		ef := eliasfano32.NewEliasFano(bitmap.GetCardinality(), bitmap.Maximum())
+		seqBuilder := multiencseq.NewBuilder(step*ii.aggregationStep, bitmap.GetCardinality(), bitmap.Maximum(), ii.experimentalEFOptimization)
 		it := bitmap.Iterator()
 		for it.HasNext() {
-			ef.AddOffset(it.Next())
+			seqBuilder.AddOffset(it.Next())
 		}
 		bitmap.Clear()
-		ef.Build()
+		seqBuilder.Build()
 
-		prevEf = ef.AppendBytes(prevEf[:0])
+		prevSeq = seqBuilder.AppendBytes(prevSeq[:0])
 
 		if err = coll.writer.AddWord(prevKey); err != nil {
 			return fmt.Errorf("add %s efi index key [%x]: %w", ii.filenameBase, prevKey, err)
 		}
-		if err = coll.writer.AddWord(prevEf); err != nil {
+		if err = coll.writer.AddWord(prevSeq); err != nil {
 			return fmt.Errorf("add %s efi index val: %w", ii.filenameBase, err)
 		}
 
