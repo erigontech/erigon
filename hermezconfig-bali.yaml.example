@@ -3,7 +3,7 @@ chain: hermez-bali
 http: true
 private.api.addr: localhost:9092
 zkevm.l2-chain-id: 2440
-zkevm.l2-sequencer-rpc-url: https://rpc-legacy.internal.zkevm-rpc.com/
+zkevm.l2-sequencer-rpc-url: https://rpc.internal.zkevm-rpc.com/
 zkevm.l2-datastreamer-url: datastream.internal.zkevm-rpc.com:6900
 zkevm.l1-chain-id: 11155111
 zkevm.l1-rpc-url: https://rpc.sepolia.org
