@@ -10,7 +10,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/utils"
 
-	"github.com/c2h5oh/datasize"
+	// "github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
 
-	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
+	// "github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -35,189 +35,189 @@ type optionsCfg struct {
 
 const DumpSize = uint64(20000000000)
 
-func IncrementVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
-	start := time.Now()
+// func IncrementVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+// 	start := time.Now()
 
-	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
-	if err != nil {
-		logger.Error("Error while opening database", "err", err.Error())
-		return err
-	}
-	defer db.Close()
+// 	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
+// 	if err != nil {
+// 		logger.Error("Error while opening database", "err", err.Error())
+// 		return err
+// 	}
+// 	defer db.Close()
 
-	vDb, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
-	if err != nil {
-		logger.Error("Error while opening db transaction", "err", err.Error())
-		return err
-	}
-	defer vDb.Close()
+// 	vDb, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
+// 	if err != nil {
+// 		logger.Error("Error while opening db transaction", "err", err.Error())
+// 		return err
+// 	}
+// 	defer vDb.Close()
 
-	vTx, err := vDb.BeginRw(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer vTx.Rollback()
+// 	vTx, err := vDb.BeginRw(cfg.ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer vTx.Rollback()
 
-	tx, err := db.BeginRo(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+// 	tx, err := db.BeginRo(cfg.ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer tx.Rollback()
 
-	from, err := stages.GetStageProgress(vTx, stages.VerkleTrie)
-	if err != nil {
-		return err
-	}
+// 	from, err := stages.GetStageProgress(vTx, stages.VerkleTrie)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	to, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return err
-	}
-	verkleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir, logger)
-	defer verkleWriter.Close()
-	if err := verkletrie.IncrementAccount(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to, cfg.tmpdir); err != nil {
-		return err
-	}
-	if _, err := verkletrie.IncrementStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to, cfg.tmpdir); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, to); err != nil {
-		return err
-	}
+// 	to, err := stages.GetStageProgress(tx, stages.Execution)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	verkleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir, logger)
+// 	defer verkleWriter.Close()
+// 	if err := verkletrie.IncrementAccount(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to, cfg.tmpdir); err != nil {
+// 		return err
+// 	}
+// 	if _, err := verkletrie.IncrementStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter, from, to, cfg.tmpdir); err != nil {
+// 		return err
+// 	}
+// 	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, to); err != nil {
+// 		return err
+// 	}
 
-	logger.Info("Finished", "elapesed", time.Since(start))
-	return vTx.Commit()
-}
+// 	logger.Info("Finished", "elapesed", time.Since(start))
+// 	return vTx.Commit()
+// }
 
-func RegeneratePedersenHashstate(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
-	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
-	if err != nil {
-		logger.Error("Error while opening database", "err", err.Error())
-		return err
-	}
-	defer db.Close()
+// func RegeneratePedersenHashstate(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+// 	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
+// 	if err != nil {
+// 		logger.Error("Error while opening database", "err", err.Error())
+// 		return err
+// 	}
+// 	defer db.Close()
 
-	vDb, err := openDB(ctx, cfg.stateDb, log.Root(), false)
-	if err != nil {
-		logger.Error("Error while opening db transaction", "err", err.Error())
-		return err
-	}
-	defer vDb.Close()
+// 	vDb, err := openDB(ctx, cfg.stateDb, log.Root(), false)
+// 	if err != nil {
+// 		logger.Error("Error while opening db transaction", "err", err.Error())
+// 		return err
+// 	}
+// 	defer vDb.Close()
 
-	vTx, err := vDb.BeginRw(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer vTx.Rollback()
+// 	vTx, err := vDb.BeginRw(cfg.ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer vTx.Rollback()
 
-	tx, err := db.BeginRo(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+// 	tx, err := db.BeginRo(cfg.ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer tx.Rollback()
 
-	verleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir, logger)
+// 	verleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir, logger)
 
-	if err := verkletrie.RegeneratePedersenAccounts(vTx, tx, uint64(cfg.workersCount), verleWriter); err != nil {
-		return err
-	}
-	if err := verkletrie.RegeneratePedersenCode(vTx, tx, uint64(cfg.workersCount), verleWriter); err != nil {
-		return err
-	}
+// 	if err := verkletrie.RegeneratePedersenAccounts(vTx, tx, uint64(cfg.workersCount), verleWriter); err != nil {
+// 		return err
+// 	}
+// 	if err := verkletrie.RegeneratePedersenCode(vTx, tx, uint64(cfg.workersCount), verleWriter); err != nil {
+// 		return err
+// 	}
 
-	if err := verkletrie.RegeneratePedersenStorage(vTx, tx, uint64(cfg.workersCount), verleWriter); err != nil {
-		return err
-	}
-	return vTx.Commit()
-}
+// 	if err := verkletrie.RegeneratePedersenStorage(vTx, tx, uint64(cfg.workersCount), verleWriter); err != nil {
+// 		return err
+// 	}
+// 	return vTx.Commit()
+// }
 
-func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
-	start := time.Now()
-	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
-	if err != nil {
-		logger.Error("Error while opening database", "err", err.Error())
-		return err
-	}
-	defer db.Close()
+// func GenerateVerkleTree(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+// 	start := time.Now()
+// 	db, err := openDB(ctx, cfg.stateDb, log.Root(), true)
+// 	if err != nil {
+// 		logger.Error("Error while opening database", "err", err.Error())
+// 		return err
+// 	}
+// 	defer db.Close()
 
-	vDb, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
-	if err != nil {
-		logger.Error("Error while opening db transaction", "err", err.Error())
-		return err
-	}
-	defer vDb.Close()
+// 	vDb, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
+// 	if err != nil {
+// 		logger.Error("Error while opening db transaction", "err", err.Error())
+// 		return err
+// 	}
+// 	defer vDb.Close()
 
-	vTx, err := vDb.BeginRw(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer vTx.Rollback()
+// 	vTx, err := vDb.BeginRw(cfg.ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer vTx.Rollback()
 
-	tx, err := db.BeginRo(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+// 	tx, err := db.BeginRo(cfg.ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer tx.Rollback()
 
-	verkleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir, logger)
+// 	verkleWriter := verkletrie.NewVerkleTreeWriter(vTx, cfg.tmpdir, logger)
 
-	if err := verkletrie.RegeneratePedersenAccounts(vTx, tx, uint64(cfg.workersCount), verkleWriter); err != nil {
-		return err
-	}
-	if err := verkletrie.RegeneratePedersenCode(vTx, tx, uint64(cfg.workersCount), verkleWriter); err != nil {
-		return err
-	}
+// 	if err := verkletrie.RegeneratePedersenAccounts(vTx, tx, uint64(cfg.workersCount), verkleWriter); err != nil {
+// 		return err
+// 	}
+// 	if err := verkletrie.RegeneratePedersenCode(vTx, tx, uint64(cfg.workersCount), verkleWriter); err != nil {
+// 		return err
+// 	}
 
-	if err := verkletrie.RegeneratePedersenStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter); err != nil {
-		return err
-	}
+// 	if err := verkletrie.RegeneratePedersenStorage(vTx, tx, uint64(cfg.workersCount), verkleWriter); err != nil {
+// 		return err
+// 	}
 
-	// Verkle Tree to be built
-	logger.Info("Started Verkle Tree creation")
+// 	// Verkle Tree to be built
+// 	logger.Info("Started Verkle Tree creation")
 
-	var root libcommon.Hash
-	if root, err = verkleWriter.CommitVerkleTreeFromScratch(); err != nil {
-		return err
-	}
+// 	var root libcommon.Hash
+// 	if root, err = verkleWriter.CommitVerkleTreeFromScratch(); err != nil {
+// 		return err
+// 	}
 
-	logger.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", common.Bytes2Hex(root[:]))
+// 	logger.Info("Verkle Tree Generation completed", "elapsed", time.Since(start), "root", common.Bytes2Hex(root[:]))
 
-	var progress uint64
-	if progress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, progress); err != nil {
-		return err
-	}
-	return vTx.Commit()
-}
+// 	var progress uint64
+// 	if progress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+// 		return err
+// 	}
+// 	if err := stages.SaveStageProgress(vTx, stages.VerkleTrie, progress); err != nil {
+// 		return err
+// 	}
+// 	return vTx.Commit()
+// }
 
-func analyseOut(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
-	db, err := openDB(ctx, cfg.verkleDb, logger, false)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
+// func analyseOut(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+// 	db, err := openDB(ctx, cfg.verkleDb, logger, false)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer db.Close()
 
-	tx, err := db.BeginRw(cfg.ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+// 	tx, err := db.BeginRw(cfg.ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	defer tx.Rollback()
 
-	buckets, err := tx.ListBuckets()
-	if err != nil {
-		return err
-	}
-	for _, bucket := range buckets {
-		size, err := tx.BucketSize(bucket)
-		if err != nil {
-			return err
-		}
-		logger.Info("Bucket Analysis", "name", bucket, "size", datasize.ByteSize(size).HumanReadable())
-	}
-	return nil
-}
+// 	buckets, err := tx.ListBuckets()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	for _, bucket := range buckets {
+// 		size, err := tx.BucketSize(bucket)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		logger.Info("Bucket Analysis", "name", bucket, "size", datasize.ByteSize(size).HumanReadable())
+// 	}
+// 	return nil
+// }
 
 func dump(ctx context.Context, cfg optionsCfg) error {
 	db, err := openDB(ctx, cfg.verkleDb, log.Root(), false)
@@ -421,12 +421,152 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 	return nil
 }
 
+func dump_pre_images(ctx context.Context, cfg optionsCfg, logger log.Logger) error {
+	db, err := openDB(ctx, cfg.stateDb, logger, false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRw(cfg.ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	logInterval := time.NewTicker(120 * time.Second)
+	accFile, err := os.Create("acc_pre_images.dat")
+	accHashKeysFile, err := os.Create("acc_hashed_keys.dat")
+	storageFile, err := os.Create("storage_pre_images.dat")
+	storageHashKeysFile, err := os.Create("storage_hashed_keys.dat")
+	if err != nil {
+		return err
+	}
+	// collector := etl.NewCollector(".", "/tmp", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	accCollector := etl.NewCollector(".", cfg.tmpdir+"/tmpAcc", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	storageCollector := etl.NewCollector(".", cfg.tmpdir+"/tmpStg", etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	defer accCollector.Close()
+	defer storageCollector.Close()
+	stateCursor, err := tx.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	num, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	logger.Info("Current Block Number", "num", num)
+	var currentIncarnation uint64
+	var currentAddress libcommon.Address
+	var addressHash libcommon.Hash
+	var keyCounter, accCounter, storageCounter uint64
+	var notCurrAddrCounter = 0
+	var notCurrIncarnation = 0
+	acc := accounts.Account{}
+
+	// var buf buffer.Buffer
+	for k, v, err := stateCursor.First(); k != nil; k, _, err = stateCursor.Next() {
+		if err != nil {
+			return err
+		}
+		keyCounter++
+		if len(k) == 20 {
+			currentAddress = libcommon.BytesToAddress(k)
+			addressHash = utils.Sha256(currentAddress[:])
+			if err := acc.DecodeForStorage(v); err != nil {
+				return err
+			}
+
+			// Storage will have incarnation 1 by default, acc incarnation will be incremented on SelfDestruct
+			currentIncarnation = acc.Incarnation + 1
+
+			if err := accCollector.Collect(addressHash[:], k); err != nil {
+				return err
+			}
+			accCounter++
+		} else {
+			// logger.Info("Iterating through storage key", "k", k, "k[28:]", k[28:])
+
+			address := libcommon.BytesToAddress(k[:20])
+			if address != currentAddress {
+				notCurrAddrCounter++
+				continue
+			}
+			inc := binary.BigEndian.Uint64(k[20:])
+			if inc != currentIncarnation {
+				notCurrIncarnation++
+				continue
+			}
+			storageHash := utils.Sha256(k[28:])
+			if err := storageCollector.Collect(storageHash[:], k[28:]); err != nil {
+				return err
+			}
+			// buf.Write(k[28:])
+			// buf.Write(storageHash[:])
+			storageCounter++
+		}
+
+		select {
+		case <-logInterval.C:
+			logger.Info("Computing preimages to state key", "key", common.Bytes2Hex(k), "accCounter", accCounter, "storageCounter", storageCounter)
+		default:
+		}
+	}
+	// if err := collector.Collect(addressHash[:], buf.Bytes()); err != nil {
+	// 	return err
+	// }
+	// db2, err := openDB(ctx, cfg.stateDb, logger, false)
+	logger.Info("Beginning writing file ", "keyCounter", keyCounter, "accCounter", accCounter, "storageCounter", storageCounter)
+
+	accCounter = 0
+	storageCounter = 0
+	accCollector.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		_, err := accFile.Write(v)
+		if err != nil {
+			return err
+		}
+		_, err = accHashKeysFile.Write(k)
+		if err != nil { 
+			return err
+		}
+		accCounter++
+		select {
+		case <-logInterval.C:
+			logger.Info("Computing preimages to state key", "acc", common.Bytes2Hex(k), "accCounter", accCounter)
+		default:
+		}
+		return err
+	}, etl.TransformArgs{})
+
+	storageCollector.Load(tx, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		_, err := storageFile.Write(v)
+		if err != nil {
+			return err
+		}
+		_, err = storageHashKeysFile.Write(k)
+		if err != nil {
+			return err
+		}
+		storageCounter++
+		select {
+		case <-logInterval.C:
+			logger.Info("Computing preimages to state key", "key", common.Bytes2Hex(k), "storageCounter", storageCounter)
+		default:
+		}
+		return err
+	}, etl.TransformArgs{})
+
+	logger.Info("Finished writing file ", "keyCounter", keyCounter, "accCounter", accCounter, "storageCounter", storageCounter, "notCurrIncarnation", notCurrIncarnation, "notCurrAddrCounter", notCurrAddrCounter)
+	return nil
+}
+
 func main() {
 	ctx := context.Background()
-	mainDb := flag.String("state-chaindata", "chaindata", "path to the chaindata database file")
+	// mainDb := flag.String("state-chaindata", "chaindata", "path to the chaindata database file")
+	mainDb := flag.String("datadir", "chaindata", "path to the chaindata database file")
 	verkleDb := flag.String("verkle-chaindata", "out", "path to the output chaindata database file")
 	workersCount := flag.Uint("workers", 5, "amount of goroutines")
-	tmpdir := flag.String("tmpdir", "/tmp/etl-temp", "amount of goroutines")
+	tmpdir := flag.String("tmpdir", "/tmp/etl-temp", "temporary directory for temp files")
 	action := flag.String("action", "", "action to execute (hashstate, bucketsizes, verkle)")
 	disableLookups := flag.Bool("disable-lookups", false, "disable lookups generation (more compact database)")
 
@@ -444,32 +584,23 @@ func main() {
 	}
 	switch *action {
 	case "hashstate":
-		if err := RegeneratePedersenHashstate(ctx, opt, logger); err != nil {
-			logger.Error("Error", "err", err.Error())
-		}
+		// if err := RegeneratePedersenHashstate(ctx, opt, logger); err != nil {
+		// 	logger.Error("Error", "err", err.Error())
+		// }
 	case "bucketsizes":
-		if err := analyseOut(ctx, opt, logger); err != nil {
-			logger.Error("Error", "err", err.Error())
-		}
+		// if err := analyseOut(ctx, opt, logger); err != nil {
+		// 	logger.Error("Error", "err", err.Error())
+		// }
 	case "verkle":
-		if err := GenerateVerkleTree(ctx, opt, logger); err != nil {
-			logger.Error("Error", "err", err.Error())
-		}
+		// if err := GenerateVerkleTree(ctx, opt, logger); err != nil {
+		// 	logger.Error("Error", "err", err.Error())
+		// }
 	case "incremental":
-		if err := IncrementVerkleTree(ctx, opt, logger); err != nil {
-			logger.Error("Error", "err", err.Error())
-		}
-	case "dump":
-		log.Info("Dumping in dump.txt")
-		if err := dump(ctx, opt); err != nil {
-			log.Error("Error", "err", err.Error())
-		}
-	case "acc_preimages":
-		if err := dump_acc_preimages(ctx, opt); err != nil {
-			logger.Error("Error", "err", err.Error())
-		}
-	case "storage_preimages":
-		if err := dump_storage_preimages(ctx, opt, logger); err != nil {
+		// if err := IncrementVerkleTree(ctx, opt, logger); err != nil {
+		// 	logger.Error("Error", "err", err.Error())
+		// }
+	case "dump_preimages":
+		if err := dump_pre_images(ctx, opt, logger); err != nil {
 			logger.Error("Error", "err", err.Error())
 		}
 	default:

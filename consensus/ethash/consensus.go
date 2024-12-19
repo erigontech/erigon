@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
+	// "github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
