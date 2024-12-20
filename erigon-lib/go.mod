@@ -3,7 +3,6 @@ module github.com/erigontech/erigon-lib
 go 1.22.0
 
 require (
-	github.com/erigontech/interfaces v0.0.0-20241024161200-024ffe1cabff
 	github.com/erigontech/mdbx-go v0.27.24
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
@@ -20,7 +19,6 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/edsrzf/mmap-go v1.1.0
-	github.com/erigontech/erigon-snapshot v0.0.0-00010101000000-000000000000
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.8.1
 	github.com/google/btree v1.1.2
@@ -49,6 +47,8 @@ require (
 
 require (
 	github.com/cespare/xxhash v1.1.0 // indirect
+	github.com/erigontech/erigon-snapshot v1.3.0 // indirect
+	github.com/erigontech/interfaces v0.0.0-20241211040849-58b88a185510 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/pion/udp v0.1.4 // indirect
 	golang.org/x/mod v0.17.0 // indirect
