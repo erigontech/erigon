@@ -19,11 +19,15 @@ type ValueFetcher[SKey any, SVal any] interface {
 }
 
 type ValueProcessor[SKey any, SVal any] interface {
-	Process(sourceKey SKey, value SVal) (data any, shouldSkip bool, err error)
+	Process(sourceKey SKey, value SVal) (data SVal, shouldSkip bool, err error)
 }
 
 type ValuePutter[SVal any] interface {
 	Put(tsId uint64, forkId []byte, value SVal, tx kv.RwTx) error
+}
+
+type CanFreeze interface {
+	Evaluate(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (bool, error)
 }
 
 type Appendable[SKey any, SVal any] interface {
@@ -34,6 +38,8 @@ type Appendable[SKey any, SVal any] interface {
 
 	SetFreezer(freezer Freezer[*AppendableCollation])
 	SetIndexBuilders(ib []IndexBuilder)
+	SetCanFreeze(canFreeze CanFreeze)
+	SetRoSnapshots(rosnapshots *RoSnapshots[*AppendableCollation])
 
 	// freeze
 	Collate(ctx context.Context, stepKeyTo uint64, tx kv.Tx) (AppendableCollation, created bool, err error)
@@ -47,18 +53,22 @@ type Appendable[SKey any, SVal any] interface {
 	Put(tsId uint64, forkId []byte, value SVal, rwTx kv.RwTx) error
 }
 
-// NOTE: Freezer & FreezeConfig should be agnostic of any appendable stuff
+type Collector func(values []byte) error
+
+// NOTE: Freezer should be agnostic of any appendable stuff
 type Freezer[CollationType MinimalCollation] interface {
 	// stepKeyFrom/To represent tsNum which the snapshot should range
-	Freeze(ctx context.Context, stepKeyTo uint64, roDB kv.RoDB) (collation CollationType, lastKeyValue uint64, err error)
-	FreezeConfig() *FreezeConfig
+	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller
+	// to ensure this.
+	Freeze(ctx context.Context, stepKeyFrom uint64, stepKeyTo uint64, roDB kv.RoDB) (collation CollationType, lastKeyValue uint64, err error)
+	SetCollector(coll Collector)
 	GetCompressorWorkers() uint64
 	SetCompressorWorkers(uint64)
 }
 
-type FreezeConfig struct {
-	stepSize     uint64 // range width (#stepKeys) of snapshot file
-	stepSizeInDb uint64 // number of element to leave in db
+type SnapshotConfig struct {
+	StepSize     uint64 // range width (#stepKeys) of snapshot file
+	LeaveStepKeyInDb uint64 // number of element to leave in db
 	// note that both of these are in terms of the "step key" rather than tsNum.
 	// e.g. for txs, we decide to leave x number of blocks in db, and as a result,
 	// the transactions of those x blocks will also be left in db.
@@ -75,7 +85,7 @@ type MinimalCollation interface {
 
 type AppendableCollation struct {
 	valuesComp  *seg.Compressor
-	valuesPath  string  // TODO: should be a struct which contains version, step, appendable name/type
+	valuesPath  string // TODO: should be a struct which contains version, step, appendable name/type
 	valuesCount int
 }
 
