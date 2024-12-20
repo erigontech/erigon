@@ -257,8 +257,6 @@ type Config struct {
 	SilkwormRpcLogDumpResponse   bool
 	SilkwormRpcNumWorkers        uint32
 	SilkwormRpcJsonCompatibility bool
-
-	DisableTxPoolGossip bool
 }
 
 type Sync struct {
