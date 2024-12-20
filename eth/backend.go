@@ -645,7 +645,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	var txnProvider txnprovider.TxnProvider
-	config.TxPool.NoGossip = config.DisableTxPoolGossip
 	var miningRPC txpoolproto.MiningServer
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	if config.TxPool.Disable {
