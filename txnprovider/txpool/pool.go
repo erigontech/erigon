@@ -346,7 +346,7 @@ func New(
 	return res, nil
 }
 
-func (p *TxPool) Start(ctx context.Context) error {
+func (p *TxPool) start(ctx context.Context) error {
 	if p.started.Load() {
 		return nil
 	}
@@ -1852,7 +1852,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
 
-	if err := p.Start(ctx); err != nil {
+	if err := p.start(ctx); err != nil {
 		p.logger.Error("[txpool] Failed to start", "err", err)
 		return err
 	}
