@@ -1001,13 +1001,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 			return err
 		}
 	} else if pruneTo > 0 {
-		p, err := sync.PruneStageState(stages.Senders, s.BlockNumber, tx, db, true)
-		if err != nil {
-			return err
-		}
-		if err = stagedsync.PruneSendersStage(p, tx, cfg, ctx); err != nil {
-			return err
-		}
+		//noop
 		return nil
 	} else {
 		if err = stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx, logger); err != nil {
@@ -1432,7 +1426,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *params.Minin
 
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
-	cfg.DeprecatedTxPool.Disable = true
+	cfg.TxPool.Disable = true
 	cfg.Genesis = genesis
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig

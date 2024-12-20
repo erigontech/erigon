@@ -944,7 +944,7 @@ func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.
 
 	var pruneLimit uint64 = 1_000
 	if furiousPrune {
-		pruneLimit = 1_000_000
+		pruneLimit = 10_000_000
 		/* disabling this feature for now - seems it doesn't cancel even after prune finished
 		// start from a bit high limit to give time for warmup
 		// will disable warmup after first iteration and will adjust pruneLimit based on `time`

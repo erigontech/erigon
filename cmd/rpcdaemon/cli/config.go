@@ -69,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -632,7 +633,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			rootCancel()
 		}
 		if remoteCE != nil {
-			if !remoteCE.init(db, blockReader, remoteKvClient, logger) {
+			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
+				logger.Error("Failed to initialize remote consensus engine", "err", err)
 				rootCancel()
 			}
 		}
@@ -978,6 +980,8 @@ type remoteConsensusEngine struct {
 	engine consensus.Engine
 }
 
+var _ consensus.Engine = (*remoteConsensusEngine)(nil)
+
 func (e *remoteConsensusEngine) HasEngine() bool {
 	return e.engine != nil
 }
@@ -998,7 +1002,7 @@ func (e *remoteConsensusEngine) validateEngineReady() error {
 // service startup or in a background goroutine, so that we do not depend on the liveness of other services when
 // starting up rpcdaemon and do not block startup (avoiding "cascade outage" scenario). In this case the DB dependency
 // can be a remote DB service running on another machine.
-func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) bool {
+func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) error {
 	var cc *chain.Config
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -1012,24 +1016,46 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 		}
 		return nil
 	}); err != nil {
-		return false
+		return err
 	}
 
-	if cc.Bor != nil {
+	// TODO(yperbasis): try to unify with CreateConsensusEngine
+	var eng consensus.Engine
+	if cc.Aura != nil {
+		auraKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
+			WithBucketsConfig(kv.AuRaTablesCfg).
+			Open()
+
+		if err != nil {
+			return err
+		}
+
+		eng, err = aura.NewRo(cc.Aura, auraKv)
+		if err != nil {
+			return err
+		}
+	} else if cc.Bor != nil {
 		borKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.BorTablesCfg).
 			Open()
 
 		if err != nil {
-			return false
+			return err
 		}
 
-		e.engine = bor.NewRo(cc, borKv, blockReader, logger)
+		eng = bor.NewRo(cc, borKv, blockReader, logger)
+	} else if cc.Clique != nil {
+		return errors.New("clique remoteConsensusEngine is not supported")
 	} else {
-		e.engine = ethash.NewFaker()
+		eng = ethash.NewFaker()
 	}
 
-	return true
+	if cc.TerminalTotalDifficulty == nil {
+		e.engine = eng
+	} else {
+		e.engine = merge.New(eng)
+	}
+	return nil
 }
 
 func (e *remoteConsensusEngine) Author(header *types.Header) (libcommon.Address, error) {
@@ -1072,12 +1098,12 @@ func (e *remoteConsensusEngine) Close() error {
 	return e.engine.Close()
 }
 
-func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger) {
+func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)
 	}
 
-	e.engine.Initialize(config, chain, header, state, syscall, logger, nil)
+	e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 }
 
 func (e *remoteConsensusEngine) GetTransferFunc() evmtypes.TransferFunc {
@@ -1112,7 +1138,7 @@ func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *st
 	panic("remoteConsensusEngine.Finalize not supported")
 }
 
-func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ consensus.Call, _ log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
+func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ consensus.Call, _ log.Logger) (*types.Block, types.Transactions, types.Receipts, types.FlatRequests, error) {
 	panic("remoteConsensusEngine.FinalizeAndAssemble not supported")
 }
 

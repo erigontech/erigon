@@ -178,9 +178,6 @@ func (b *CachingBeaconState) _initializeValidatorsPhase0() error {
 		if err != nil {
 			return err
 		}
-		if err != nil {
-			return err
-		}
 		attestation := &solid.Attestation{
 			AggregationBits: pa.AggregationBits,
 			Data:            attestationData,

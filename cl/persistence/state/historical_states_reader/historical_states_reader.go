@@ -749,9 +749,6 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64) (*soli
 			}
 			return true
 		})
-		if err != nil {
-			return nil, nil, err
-		}
 	}
 	return currentEpochAttestations, previousEpochAttestations, nil
 }
@@ -789,9 +786,6 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 
 	currentIdxs := solid.NewParticipationBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	previousIdxs := solid.NewParticipationBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
-	if err != nil {
-		return nil, nil, err
-	}
 
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
@@ -864,9 +858,6 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 			}
 			return true
 		})
-		if err != nil {
-			return nil, nil, err
-		}
 	}
 	return currentIdxs, previousIdxs, nil
 }
