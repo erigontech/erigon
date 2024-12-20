@@ -619,6 +619,61 @@ func TestDomain_ScanFiles(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
+func TestDomainRoTx_CursorParentCheck(t *testing.T) {
+	asserts = true
+	defer func() { asserts = false }()
+
+	logger := log.New()
+	db, d := testDbAndDomain(t, logger)
+	ctx, require := context.Background(), require.New(t)
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	val := []byte("value1")
+	writer.SetTxNum(1)
+	writer.addValue([]byte("key1"), nil, val)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(err)
+	err = tx.Commit()
+	require.NoError(err)
+
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	_, _, _, err = dc.GetLatest([]byte("key1"), tx)
+	require.NoError(err)
+
+	cursor, err := dc.valsCursor(tx)
+	require.NoError(err)
+	require.NotNil(cursor)
+	tx.Rollback()
+
+	otherTx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer otherTx.Rollback()
+	//dc.valsC.Close()
+	//dc.valsC = nil
+
+	defer func() {
+		r := recover()
+		require.NotNil(r)
+		//re := r.(error)
+		//fmt.Println(re)
+		//require.ErrorIs(re, sdTxImmutabilityInvariant)
+	}()
+
+	_, _, _, err = dc.GetLatest([]byte("key1"), otherTx)
+	require.NoError(err)
+}
+
 func TestDomain_Delete(t *testing.T) {
 	t.Parallel()
 

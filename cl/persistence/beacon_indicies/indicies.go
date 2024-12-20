@@ -253,7 +253,7 @@ func PruneSignedHeaders(tx kv.RwTx, from uint64) error {
 		return err
 	}
 	for k, _, err := cursor.Seek(base_encoding.Encode64ToBytes4(from)); err == nil && k != nil; k, _, err = cursor.Prev() {
-		if err != nil {
+		if err != nil { //nolint:govet
 			return err
 		}
 		if err := cursor.DeleteCurrent(); err != nil {

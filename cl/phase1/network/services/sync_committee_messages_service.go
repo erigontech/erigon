@@ -160,9 +160,6 @@ func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltyp
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	signingRoot, err := utils.Sha256(msg.BeaconBlockRoot[:], domain), nil
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	signingRoot := utils.Sha256(msg.BeaconBlockRoot[:], domain)
 	return msg.Signature[:], signingRoot[:], publicKey[:], nil
 }

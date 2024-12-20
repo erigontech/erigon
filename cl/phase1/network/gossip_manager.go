@@ -131,7 +131,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
 		return nil
 	}
-	if err != nil {
+	if err != nil { //nolint:govet
 		g.sentinel.BanPeer(ctx, data.Peer)
 		return err
 	}
