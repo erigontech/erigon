@@ -508,10 +508,10 @@ func doDebugKey(cliCtx *cli.Context) error {
 
 	view := agg.BeginFilesRo()
 	defer view.Close()
-	if err := view.DebugKey(domain, key); err != nil {
+	if err := view.IntegrityKey(domain, key); err != nil {
 		return err
 	}
-	if err := view.DebugEFKey(domain, key); err != nil {
+	if err := view.IntegirtyInvertedIndexKey(domain, key); err != nil {
 		return err
 	}
 	return nil
