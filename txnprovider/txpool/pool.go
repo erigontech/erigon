@@ -30,7 +30,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
@@ -157,90 +156,6 @@ type FeeCalculator interface {
 	CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice, blockGasLimit uint64, err error)
 }
 
-func Assemble(
-	ctx context.Context,
-	cfg txpoolcfg.Config,
-	chainDB kv.RwDB,
-	cache kvcache.Cache,
-	sentryClients []sentry.SentryClient,
-	stateChangesClient StateChangesClient,
-	feeCalculator FeeCalculator,
-	builderNotifyNewTxns func(),
-	logger log.Logger,
-) (*TxPool, txpoolproto.TxpoolServer, error) {
-	opts := mdbx.New(kv.TxPoolDB, logger).Path(cfg.DBDir).
-		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
-		WriteMergeThreshold(3 * 8192).
-		PageSize(16 * datasize.KB).
-		GrowthStep(16 * datasize.MB).
-		DirtySpace(uint64(128 * datasize.MB)).
-		MapSize(1 * datasize.TB).
-		WriteMap(cfg.MdbxWriteMap)
-
-	if cfg.MdbxPageSize > 0 {
-		opts = opts.PageSize(cfg.MdbxPageSize)
-	}
-	if cfg.MdbxDBSizeLimit > 0 {
-		opts = opts.MapSize(cfg.MdbxDBSizeLimit)
-	}
-	if cfg.MdbxGrowthStep > 0 {
-		opts = opts.GrowthStep(cfg.MdbxGrowthStep)
-	}
-
-	poolDB, err := opts.Open(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, poolDB, true, logger)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	maxBlobsPerBlock := chainConfig.GetMaxBlobsPerBlock()
-
-	shanghaiTime := chainConfig.ShanghaiTime
-	var agraBlock *big.Int
-	if chainConfig.Bor != nil {
-		agraBlock = chainConfig.Bor.GetAgraBlock()
-	}
-	cancunTime := chainConfig.CancunTime
-	pragueTime := chainConfig.PragueTime
-	if cfg.OverridePragueTime != nil {
-		pragueTime = cfg.OverridePragueTime
-	}
-
-	newTxns := make(chan Announcements, 1024)
-	newSlotsStreams := &NewSlotsStreams{}
-	pool, err := New(
-		ctx,
-		newTxns,
-		poolDB,
-		chainDB,
-		cfg,
-		cache,
-		*chainID,
-		shanghaiTime,
-		agraBlock,
-		cancunTime,
-		pragueTime,
-		maxBlobsPerBlock,
-		feeCalculator,
-		sentryClients,
-		stateChangesClient,
-		builderNotifyNewTxns,
-		newSlotsStreams,
-		logger,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	grpcServer := NewGrpcServer(ctx, pool, poolDB, newSlotsStreams, *chainID, logger)
-	return pool, grpcServer, nil
-}
-
 func New(
 	ctx context.Context,
 	newTxns chan Announcements,
@@ -254,13 +169,14 @@ func New(
 	cancunTime *big.Int,
 	pragueTime *big.Int,
 	maxBlobsPerBlock uint64,
-	feeCalculator FeeCalculator,
 	sentryClients []sentry.SentryClient,
 	stateChangesClient StateChangesClient,
 	builderNotifyNewTxns func(),
 	newSlotsStreams *NewSlotsStreams,
 	logger log.Logger,
+	opts ...Option,
 ) (*TxPool, error) {
+	options := applyOpts(opts...)
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
 		return nil, err
@@ -306,7 +222,7 @@ func New(
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		maxBlobsPerBlock:        maxBlobsPerBlock,
-		feeCalculator:           feeCalculator,
+		feeCalculator:           options.feeCalculator,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
@@ -341,8 +257,8 @@ func New(
 		res.pragueTime = &pragueTimeU64
 	}
 
-	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, coreDB, poolDB, chainID, logger)
-	res.p2pSender = NewSend(ctx, sentryClients, logger)
+	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, chainID, logger, opts...)
+	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
 	return res, nil
 }
 
@@ -1861,7 +1777,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			err := ctx.Err()
-			_, flushErr := p.flush(ctx)
+			_, flushErr := p.flush(context.Background()) // need background ctx since the other one is cancelled
 			if flushErr != nil {
 				err = fmt.Errorf("%w: %w", flushErr, err)
 			}

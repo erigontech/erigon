@@ -29,7 +29,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -46,6 +45,7 @@ import (
 	proto_downloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	ptypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -127,11 +127,8 @@ type MockSentry struct {
 	Notifications *shards.Notifications
 
 	// TxPool
-	TxPoolFetch      *txpool.Fetch
-	TxPoolSend       *txpool.Send
-	TxPoolGrpcServer *txpool.GrpcServer
 	TxPool           *txpool.TxPool
-	txPoolDB         kv.RwDB
+	TxPoolGrpcServer txpoolproto.TxpoolServer
 
 	HistoryV3      bool
 	agg            *libstate.Aggregator
@@ -321,6 +318,17 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	if tb != nil {
 		tb.Cleanup(mock.Close)
 	}
+
+	// Committed genesis will be shared between download and mock sentry
+	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, datadir.New(tmpdir), mock.Log)
+	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
+		if tb != nil {
+			tb.Fatal(err)
+		} else {
+			panic(err)
+		}
+	}
+
 	blockWriter := blockio.NewBlockWriter()
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
@@ -336,66 +344,33 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
-		newTxs := make(chan txpool.Announcements, 1024)
-		if tb != nil {
-			tb.Cleanup(func() {
-				close(newTxs)
-			})
-		}
-		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
-		shanghaiTime := mock.ChainConfig.ShanghaiTime
-		cancunTime := mock.ChainConfig.CancunTime
-		pragueTime := mock.ChainConfig.PragueTime
-		maxBlobsPerBlock := mock.ChainConfig.GetMaxBlobsPerBlock()
-		mock.txPoolDB = memdb.NewWithLabel(tmpdir, kv.TxPoolDB)
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
-		newSlotsStreams := &txpool.NewSlotsStreams{}
-		mock.TxPool, err = txpool.New(
+		mock.TxPool, mock.TxPoolGrpcServer, err = txpool.Assemble(
 			ctx,
-			newTxs,
-			mock.txPoolDB,
-			mock.DB, poolCfg,
+			poolCfg,
+			mock.DB,
 			kvcache.NewDummy(),
-			*chainID, shanghaiTime,
-			nil, /* agraBlock */
-			cancunTime,
-			pragueTime,
-			maxBlobsPerBlock,
-			nil, /* feeCalculator */
 			sentries,
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
-			newSlotsStreams,
 			logger,
+			txpool.WithP2PFetcherWg(&mock.ReceiveWg),
+			txpool.WithP2PSenderWg(nil),
+			txpool.WithFeeCalculator(nil),
+			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
+				return memdb.NewWithLabel(tmpdir, kv.TxPoolDB), nil
+			}),
 		)
 		if err != nil {
 			tb.Fatal(err)
 		}
 
-		mock.TxPoolFetch = txpool.NewFetch(mock.Ctx, sentries, mock.TxPool, stateChangesClient, mock.DB, mock.txPoolDB, *chainID, logger)
-		mock.TxPoolFetch.SetWaitGroup(&mock.ReceiveWg)
-		mock.TxPoolSend = txpool.NewSend(mock.Ctx, sentries, logger)
-		mock.TxPoolGrpcServer = txpool.NewGrpcServer(mock.Ctx, mock.TxPool, mock.txPoolDB, newSlotsStreams, *chainID, logger)
-
-		mock.TxPoolFetch.ConnectCore()
 		mock.StreamWg.Add(1)
-		mock.TxPoolFetch.ConnectSentries()
-		mock.StreamWg.Wait()
-
 		mock.bgComponentsEg.Go(func() error { return mock.TxPool.Run(ctx) })
+		mock.StreamWg.Wait()
 	}
 
-	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, datadir.New(tmpdir), mock.Log)
-	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
-		if tb != nil {
-			tb.Fatal(err)
-		} else {
-			panic(err)
-		}
-	}
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
-
 	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		terseLogger := log.New()

@@ -87,7 +87,6 @@ import (
 	"github.com/erigontech/erigon/consensus/clique"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -658,7 +657,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			kvcache.NewDummy(),
 			sentries,
 			stateDiffClient,
-			misc.Eip1559FeeCalculator,
 			blockBuilderNotifyNewTxns,
 			logger,
 		)

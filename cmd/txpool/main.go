@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/consensus/misc"
 	"github.com/erigontech/erigon/ethdb/privateapi"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/logging"
@@ -189,7 +188,6 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		kvcache.New(cacheConfig),
 		sentryClients,
 		kvClient,
-		misc.Eip1559FeeCalculator,
 		notifyMiner,
 		logger,
 	)

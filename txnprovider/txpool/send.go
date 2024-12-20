@@ -40,16 +40,14 @@ type Send struct {
 	logger        log.Logger
 }
 
-func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, logger log.Logger) *Send {
+func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, logger log.Logger, opts ...Option) *Send {
+	options := applyOpts(opts...)
 	return &Send{
 		ctx:           ctx,
 		sentryClients: sentryClients,
 		logger:        logger,
+		wg:            options.p2pSenderWg,
 	}
-}
-
-func (f *Send) SetWaitGroup(wg *sync.WaitGroup) {
-	f.wg = wg
 }
 
 const (
