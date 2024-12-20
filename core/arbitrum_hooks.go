@@ -29,7 +29,7 @@ import (
 )
 
 // Installs an Arbitrum TxProcessor, enabling ArbOS for this state transition (see vm/evm_arbitrum.go)
-var ReadyEVMForL2 func(evm *vm.EVM, msg *Message)
+var ReadyEVMForL2 func(evm *vm.EVM, msg Message)
 
 // Allows ArbOS to swap out or return early from an RPC message to support the NodeInterface virtual contract
 var InterceptRPCMessage = func(

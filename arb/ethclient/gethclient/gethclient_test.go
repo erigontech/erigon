@@ -60,7 +60,7 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	}
 	// Create Ethereum Service
 	config := &ethconfig.Config{Genesis: genesis}
-	ethservice, err := eth.New(n, config)
+	ethservice, err := eth.New(context.Background(), n, config, log.New())
 	if err != nil {
 		t.Fatalf("can't create new ethereum service: %v", err)
 	}
@@ -192,8 +192,8 @@ func testAccessList(t *testing.T, client *rpc.Client) {
 		From:     testAddr,
 		To:       nil,
 		Gas:      100000,
-		GasPrice: big.NewInt(1000000000),
-		Value:    big.NewInt(1),
+		GasPrice: uint256.NewInt(1000000000),
+		Value:    uint256.NewInt(1),
 		Data:     common.FromHex("0x608060806080608155fd"),
 	}
 	al, gas, vmErr, err = ec.CreateAccessList(context.Background(), msg)
@@ -369,7 +369,7 @@ func testSubscribePendingTransactions(t *testing.T, client *rpc.Client) {
 		t.Fatal(err)
 	}
 	// Create transaction
-	tx := types.NewTransaction(0, common.Address{1}, big.NewInt(1), 22000, big.NewInt(1), nil)
+	tx := types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 22000, uint256.NewInt(1), nil)
 	signer := types.LatestSignerForChainID(chainID)
 	signature, err := crypto.Sign(signer.Hash(tx).Bytes(), testKey)
 	if err != nil {
@@ -403,7 +403,7 @@ func testSubscribeFullPendingTransactions(t *testing.T, client *rpc.Client) {
 		t.Fatal(err)
 	}
 	// Create transaction
-	tx := types.NewTransaction(1, common.Address{1}, big.NewInt(1), 22000, big.NewInt(1), nil)
+	tx := types.NewTransaction(1, common.Address{1}, uint256.NewInt(1), 22000, uint256.NewInt(1), nil)
 	signer := types.LatestSignerForChainID(chainID)
 	signature, err := crypto.Sign(signer.Hash(tx).Bytes(), testKey)
 	if err != nil {
@@ -431,8 +431,8 @@ func testCallContract(t *testing.T, client *rpc.Client) {
 		From:     testAddr,
 		To:       &common.Address{},
 		Gas:      21000,
-		GasPrice: big.NewInt(1000000000),
-		Value:    big.NewInt(1),
+		GasPrice: uint256.NewInt(1000000000),
+		Value:    uint256.NewInt(1),
 	}
 	// CallContract without override
 	if _, err := ec.CallContract(context.Background(), msg, big.NewInt(0), nil); err != nil {
@@ -541,8 +541,8 @@ func testCallContractWithBlockOverrides(t *testing.T, client *rpc.Client) {
 		From:     testAddr,
 		To:       &common.Address{},
 		Gas:      50000,
-		GasPrice: big.NewInt(1000000000),
-		Value:    big.NewInt(1),
+		GasPrice: uint256.NewInt(1000000000),
+		Value:    uint256.NewInt(1),
 	}
 	override := OverrideAccount{
 		// Returns coinbase address.

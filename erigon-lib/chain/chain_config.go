@@ -537,6 +537,8 @@ type Rules struct {
 	IsCancun, IsNapoli                                bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
+	IsArbitrum, IsStylus                              bool
+	ArbOSVersion                                      uint64
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
