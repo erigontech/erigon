@@ -61,7 +61,7 @@ func runErigon(ctx *cli.Context) error {
 	//err := eri.Serve()
 
 	//if err != nil {
-	//	log.Error("error while serving a Erigon node", "err", err)
+	//	log.Error("error while serving an Erigon node", "err", err)
 	//  return err
 	//}
 	return nil
