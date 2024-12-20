@@ -494,7 +494,6 @@ func (w *domainBufferedWriter) SetTxNum(v uint64) {
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
 	discardHistory := discard || dt.d.historyDisabled
-
 	w := &domainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
@@ -1361,6 +1360,11 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 			return nil
 		})
 	}
+}
+
+// TODO: exported for idx_optimize.go
+func BuildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+	return buildAccessor(ctx, d, compressed, idxPath, values, cfg, ps, logger)
 }
 
 func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {

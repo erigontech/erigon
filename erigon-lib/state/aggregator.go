@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/erigontech/erigon-lib/state/argv"
 )
 
 type Aggregator struct {
@@ -168,7 +169,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx},
+				aggregationStep: aggregationStep, keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
+				experimentalEFOptimization: argv.ExperimentalEFOptimization},
 		},
 	}
 	if a.d[kv.AccountsDomain], err = NewDomain(cfg, logger); err != nil {
@@ -188,7 +190,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx},
+				aggregationStep: aggregationStep, keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
+				experimentalEFOptimization: argv.ExperimentalEFOptimization},
 		},
 	}
 	if a.d[kv.StorageDomain], err = NewDomain(cfg, logger); err != nil {
@@ -209,7 +212,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			historyLargeValues: true,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx},
+				aggregationStep: aggregationStep, keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
+				experimentalEFOptimization: argv.ExperimentalEFOptimization},
 		},
 	}
 	if a.d[kv.CodeDomain], err = NewDomain(cfg, logger); err != nil {
@@ -227,11 +231,13 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblCommitmentHistoryVals,
 			compression: seg.CompressNone,
 
-			snapshotsDisabled:  true,
+			historyDisabled: !argv.AllowCommitmentHistory,
+			// snapshotsDisabled:  true, // allow to write commitment history but not collect it in snapshots
 			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx},
+				aggregationStep: aggregationStep, keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
+				experimentalEFOptimization: argv.ExperimentalEFOptimization},
 		},
 	}
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, logger); err != nil {
@@ -249,28 +255,34 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx},
+				aggregationStep: aggregationStep, keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
+				experimentalEFOptimization: argv.ExperimentalEFOptimization},
 		},
 	}
 	if a.d[kv.ReceiptDomain], err = NewDomain(cfg, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
+	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger, argv.ExperimentalEFOptimization); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, db, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
+	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, db, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger, argv.ExperimentalEFOptimization); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger, argv.ExperimentalEFOptimization); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
+	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger, argv.ExperimentalEFOptimization); err != nil {
 		return nil, err
 	}
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
 
 	return a, nil
+}
+
+// TODO: exported for idx_optimize.go
+func GetStateIndicesSalt(baseDir string) (salt *uint32, err error) {
+	return getStateIndicesSalt(baseDir)
 }
 
 // getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -317,7 +329,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
-func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, db kv.RoDB, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
+func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, db kv.RoDB, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger, experimentalEFOptimization bool) error {
 	idxCfg := iiCfg{
 		salt: salt, dirs: dirs, db: db,
 		aggregationStep: aggregationStep,
@@ -325,6 +337,8 @@ func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadi
 		keysTable:       indexKeysTable,
 		valuesTable:     indexTable,
 		compression:     seg.CompressNone,
+
+		experimentalEFOptimization: experimentalEFOptimization,
 	}
 	var err error
 	a.iis[idx], err = NewInvertedIndex(idxCfg, logger)

@@ -260,6 +260,8 @@ type Config struct {
 	SilkwormRpcJsonCompatibility bool
 
 	DisableTxPoolGossip bool
+
+	ExperimentalEFOptimization bool
 }
 
 type Sync struct {
