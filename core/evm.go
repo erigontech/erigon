@@ -22,7 +22,6 @@ package core
 import (
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
@@ -82,7 +81,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libco
 	// assert if network is ARB0 to change pervrandao
 	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
 	if arbOsVersion > 0 {
-		difficultyHash := common.BigToHash(header.Difficulty)
+		difficultyHash := libcommon.BigToHash(header.Difficulty)
 		prevRandDao = &difficultyHash
 	}
 	return evmtypes.BlockContext{
