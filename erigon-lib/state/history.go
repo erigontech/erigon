@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
