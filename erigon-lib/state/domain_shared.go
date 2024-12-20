@@ -120,7 +120,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 	}
 	sd.SetTx(tx)
 
-	sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
+	// sd.aggTx.a.DiscardHistory(kv.CommitmentDomain)
 
 	for id, ii := range sd.aggTx.iis {
 		sd.iiWriters[id] = ii.NewWriter()
