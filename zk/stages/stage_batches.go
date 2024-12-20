@@ -690,6 +690,11 @@ func rollback(
 	if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, batchNum-1); err != nil {
 		return 0, fmt.Errorf("SaveStageProgress: %w", err)
 	}
+
+	if cfg.zkCfg.PanicOnReorg {
+		panic(fmt.Sprintf("Reorg detected: Datastream block number: %d", latestDSBlockNum))
+	}
+
 	log.Warn(fmt.Sprintf("[%s] Unwinding to block %d (%s)", logPrefix, unwindBlockNum, unwindBlockHash))
 
 	u.UnwindTo(unwindBlockNum, stagedsync.BadBlock(unwindBlockHash, fmt.Errorf("unwind to block %d", unwindBlockNum)))
