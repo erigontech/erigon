@@ -360,24 +360,6 @@ func (sdb *IntraBlockState) ResolveCode(addr libcommon.Address) ([]byte, error) 
 	return sdb.GetCode(addr)
 }
 
-func (sdb *IntraBlockState) ResolveCodeSize(addr libcommon.Address) (int, error) {
-	// eip-7702
-	size, err := sdb.GetCodeSize(addr)
-	if err != nil {
-		return 0, err
-	}
-	if size == types.DelegateDesignationCodeSize {
-		// might be delegated designation
-		code, err := sdb.ResolveCode(addr)
-		if err != nil {
-			return 0, err
-		}
-		return len(code), nil
-	}
-
-	return size, nil
-}
-
 func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (libcommon.Address, bool, error) {
 	// eip-7702
 	code, err := sdb.GetCode(addr)
