@@ -495,6 +495,7 @@ func (w *domainBufferedWriter) SetTxNum(v uint64) {
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
 	discardHistory := discard || dt.d.historyDisabled
 
+	fmt.Printf("newWriter: %s discHistory %t\n", dt.name.String(), discardHistory)
 	w := &domainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
