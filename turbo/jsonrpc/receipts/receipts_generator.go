@@ -127,7 +127,12 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if receipts, ok := g.receiptsCache.Get(header.Hash()); ok && len(receipts) > index {
 		return receipts[index], nil
 	}
+	if receipt, ok := g.receiptCache.Get(txn.Hash()); ok {
+		return receipt, nil
+	}
+
 	var receipt *types.Receipt
+
 	genEnv, err := g.PrepareEnv(ctx, header, cfg, tx, index)
 	if err != nil {
 		return nil, err
