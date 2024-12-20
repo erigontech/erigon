@@ -518,7 +518,6 @@ Loop:
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
-		blockReceipts := make(types.Receipts, len(txs))
 		// During the first block execution, we may have half-block data in the snapshots.
 		// Thus, we need to skip the first txs in the block, however, this causes the GasUsed to be incorrect.
 		// So we skip that check for the first block, if we find half-executed data.
@@ -537,7 +536,6 @@ Loop:
 				Uncles:             b.Uncles(),
 				Rules:              rules,
 				Txs:                txs,
-				BlockHash:          b.Hash(),
 				SkipAnalysis:       skipAnalysis,
 				GetHashFn:          getHashFn,
 				EvmBlockContext:    blockContext,
@@ -546,10 +544,7 @@ Loop:
 
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
-
-				BlockReceipts: blockReceipts,
-
-				Config: chainConfig,
+				Config:           chainConfig,
 			}
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)

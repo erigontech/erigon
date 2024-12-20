@@ -132,8 +132,8 @@ func StageExecuteBlocksCfg(
 		historyV3:         true,
 		syncCfg:           syncCfg,
 		silkworm:          silkworm,
-		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
-		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
+		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs),
+		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs),
 	}
 }
 

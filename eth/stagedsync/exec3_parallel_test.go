@@ -102,8 +102,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	stateReader state.ResettableStateReader,
 	chainConfig *chain.Config,
 	chainReader consensus.ChainReader,
-	dirs datadir.Dirs,
-	isMining bool) *exec.Result {
+	dirs datadir.Dirs) *exec.Result {
 	// Sleep for 50 microsecond to simulate setup time
 	sleep(time.Microsecond * 50)
 

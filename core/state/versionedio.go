@@ -172,7 +172,6 @@ func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stat
 						continue
 					}
 				}
-				fmt.Println("STATE", fmt.Sprintf("%x %x", stateKey, state.Bytes()))
 			} else if path.IsAddress() {
 				continue
 			} else {
@@ -185,7 +184,6 @@ func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stat
 							continue
 						}
 					}
-					fmt.Println("BAL", b)
 				case NoncePath:
 					n := so.Nonce()
 					if len(prevs) > 0 {
@@ -194,7 +192,6 @@ func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stat
 							continue
 						}
 					}
-					fmt.Println("NONCE", n)
 				case CodePath:
 					c, err := so.Code()
 					if err != nil {
@@ -209,11 +206,11 @@ func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stat
 							continue
 						}
 					}
-					fmt.Println("CODE", c)
-					//s.SetCode(addr, c)
 				case SelfDestructPath:
-					if so.deleted {
-						//s.Selfdestruct(addr)
+					if len(prevs) > 0 {
+						if so.deleted == prevs[len(prevs)-1].deleted {
+							continue
+						}
 					}
 				default:
 					panic(fmt.Errorf("unknown key type: %d", path.GetSubpath()))

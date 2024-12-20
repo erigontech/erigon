@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cmd/state/exec3"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	state2 "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus"
@@ -38,10 +40,12 @@ func (se *serialExecutor) processEvents(ctx context.Context, commitThreshold uin
 }
 
 func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profile bool) (cont bool, err error) {
+	blockReceipts := make([]*types.Receipt, 0, len(tasks))
+
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
 
-		result := se.applyWorker.RunTxTaskNoLock(txTask, se.isMining)
+		result := se.applyWorker.RunTxTaskNoLock(txTask)
 
 		if err := func() error {
 			if errors.Is(result.Err, context.Canceled) {
@@ -52,32 +56,62 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 			}
 
 			se.txCount++
-			se.usedGas += txTask.UsedGas
-			mxExecGas.Add(float64(txTask.UsedGas))
+			se.usedGas += result.ExecutionResult.UsedGas
+			mxExecGas.Add(float64(result.ExecutionResult.UsedGas))
 			mxExecTransactions.Add(1)
 
 			if txTask.Tx != nil {
 				se.blobGasUsed += txTask.Tx.GetBlobGas()
 			}
 
-			txTask.CreateReceipt(se.applyTx)
-
 			if txTask.IsBlockEnd() {
+				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+				// End of block transaction in a block
+				ibs := state.New(state.NewReaderParallelV3(se.rs.Domains()))
+
+				syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+					return core.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */)
+				}
+
+				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
+
+				if se.isMining {
+					_, txTask.Txs, blockReceipts, _, err = se.cfg.engine.FinalizeAndAssemble(
+						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
+						blockReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
+				} else {
+					_, _, _, err = se.cfg.engine.Finalize(
+						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
+						blockReceipts, txTask.Withdrawals, chainReader, syscall, se.logger)
+				}
+
 				if !se.isMining && !se.inMemExec && !se.skipPostEvaluation && !se.execStage.CurrentSyncCycle.IsInitialCycle {
 					// note this assumes the bloach reciepts is a fixed array shared by
 					// all tasks - if that changes this will need to change - robably need to
 					// add this to the executor
-					se.cfg.notifications.RecentLogs.Add(txTask.BlockReceipts)
+					se.cfg.notifications.RecentLogs.Add(blockReceipts)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNum) && !se.cfg.vmConfig.NoReceipts && !se.isMining
 				if txTask.BlockNum > 0 && !se.skipPostEvaluation { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, txTask.BlockReceipts, txTask.Header, se.isMining); err != nil {
+					if err := core.BlockPostValidation(se.usedGas, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
 
 				se.outputBlockNum.SetUint64(txTask.BlockNum)
+			} else if txTask.TxIndex >= 0 {
+				var prev *types.Receipt
+				if txTask.TxIndex > 0 {
+					prev = blockReceipts[txTask.TxIndex-1]
+				}
+				receipt, err := result.CreateReceipt(prev)
+				if err != nil {
+					return err
+				}
+				blockReceipts = append(blockReceipts, receipt)
+
 			}
+
 			if se.cfg.syncCfg.ChaosMonkey {
 				chaosErr := chaos_monkey.ThrowRandomConsensusError(se.execStage.CurrentSyncCycle.IsInitialCycle, txTask.TxIndex, se.cfg.badBlockHalt, result.Err)
 				if chaosErr != nil {
@@ -117,7 +151,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 		if !task.IsBlockEnd() {
 			var receipt *types.Receipt
 			if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
-				receipt = txTask.BlockReceipts[txTask.TxIndex]
+				receipt = blockReceipts[txTask.TxIndex]
 			}
 			if err := rawtemporaldb.AppendReceipt(se.doms, receipt, se.blobGasUsed); err != nil {
 				return false, err
@@ -126,7 +160,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 
 		// MA applystate
 		if err := se.rs.ApplyState4(ctx, txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
-			txTask.BalanceIncreaseSet, txTask.Logs, result.TraceFroms, result.TraceTos,
+			txTask.BalanceIncreaseSet, result.Logs, result.TraceFroms, result.TraceTos,
 			txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
 			return false, err
 		}

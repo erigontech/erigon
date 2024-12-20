@@ -1314,7 +1314,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 				return err
 			}
 			s.SetIncarnation(addr, i)
-
+	
 			if path.IsState() {
 				stateKey := path.GetStateKey()
 				var state uint256.Int
@@ -1358,4 +1358,3 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 	}
 	return nil
 }
-

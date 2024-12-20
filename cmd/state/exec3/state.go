@@ -75,7 +75,7 @@ type Worker struct {
 	isMining bool
 }
 
-func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs, isMining bool) *Worker {
+func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *exec.ResultsQueue, engine consensus.Engine, dirs datadir.Dirs) *Worker {
 	w := &Worker{
 		lock:        lock,
 		logger:      logger,
@@ -95,8 +95,6 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		taskGasPool: new(core.GasPool),
 
 		dirs: dirs,
-
-		isMining: isMining,
 	}
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer}
@@ -138,7 +136,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 func (rw *Worker) Run() error {
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		//fmt.Println("RTX", txTask.Version().BlockNum, txTask.Version().TxIndex, txTask.Version().TxNum, txTask.IsBlockEnd())
-		result := rw.RunTxTask(txTask, rw.isMining)
+		result := rw.RunTxTask(txTask)
 		if err := rw.resultCh.Add(rw.ctx, result); err != nil {
 			return err
 		}
@@ -146,10 +144,10 @@ func (rw *Worker) Run() error {
 	return nil
 }
 
-func (rw *Worker) RunTxTask(txTask exec.Task, isMining bool) *exec.Result {
+func (rw *Worker) RunTxTask(txTask exec.Task) *exec.Result {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	return rw.RunTxTaskNoLock(txTask, isMining)
+	return rw.RunTxTaskNoLock(txTask)
 }
 
 // Needed to set history reader when need to offset few txs from block beginning and does not break processing,
@@ -171,7 +169,7 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 	}
 }
 
-func (rw *Worker) RunTxTaskNoLock(txTask exec.Task, isMining bool) *exec.Result {
+func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 	if txTask.IsHistoric() && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
@@ -209,7 +207,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task, isMining bool) *exec.Result 
 	}
 
 	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.rs, rw.ibs,
-		rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs, isMining)
+		rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs)
 
 	if result.Task == nil {
 		result.Task = txTask
@@ -239,7 +237,7 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 		ctx, cancel := context.WithCancel(ctx)
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
-			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, isMining)
+			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
 			reconWorkers[i].ResetState(rs, stateWriter, accumulator)
 		}
 		if background {
@@ -266,7 +264,7 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 			//applyWorker.ResetTx(nil)
 		}
 	}
-	applyWorker = NewWorker(lock, logger, ctx, false, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, isMining)
+	applyWorker = NewWorker(lock, logger, ctx, false, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
 
 	return reconWorkers, applyWorker, rws, clear, wait
 }

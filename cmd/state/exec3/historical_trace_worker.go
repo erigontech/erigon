@@ -79,7 +79,8 @@ type HistoricalTraceWorker struct {
 type TraceConsumer struct {
 	NewTracer func() GenericTracer
 	//Reduce receiving results of execution. They are sorted and have no gaps.
-	Reduce func(task *exec.Result, tx kv.Tx) error
+	Reduce        func(task *exec.Result, tx kv.Tx) error
+	blockReciepts []*types.Receipt
 }
 
 func NewHistoricalTraceWorker(
@@ -173,16 +174,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 		if txTask.BlockNum == 0 {
 			break
 		}
-
-		// End of block transaction in a block
-		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, rw.execArgs.ChainConfig, ibs, header, rw.execArgs.Engine, false /* constCall */)
-		}
-
-		_, _, _, err := rw.execArgs.Engine.Finalize(rw.execArgs.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, rw.logger)
-		if err != nil {
-			result.Err = err
-		}
 	default:
 		rw.taskGasPool.Reset(txTask.Tx.GetGas(), txTask.Tx.GetBlobGas())
 		if tracer := rw.consumer.NewTracer(); tracer != nil {
@@ -208,15 +199,11 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmConfig, rules)
 
 		// MA applytx
-		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
-		if err != nil {
-			result.Err = err
-		} else {
-			txTask.Failed = applyRes.Failed()
-			txTask.UsedGas = applyRes.UsedGas
+		result.ExecutionResult, result.Err = core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+		if result.Err == nil {
 			// Update the state with pending changes
 			ibs.SoftFinalise()
-			txTask.Logs = ibs.GetRawLogs(txTask.TxIndex)
+			result.Logs = ibs.GetRawLogs(txTask.TxIndex)
 		}
 	}
 
@@ -282,7 +269,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 				return err
 			}
 
-			processedTxNum, _, err := processResultQueueHistorical(consumer, rws, outputTxNum.Load(), ttx, true)
+			processedTxNum, _, err := processResultQueueHistorical(&consumer, rws, outputTxNum.Load(), ttx, true)
 			if err != nil {
 				return fmt.Errorf("processResultQueueHistorical: %w", err)
 			}
@@ -340,9 +327,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	return g, applyWorker, clearFunc
 }
 
-func processResultQueueHistorical(consumer TraceConsumer, rws *exec.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueueHistorical(consumer *TraceConsumer, rws *exec.ResultsQueue, outputTxNumIn uint64, tx kv.TemporalTx, forceStopAtBlockEnd bool) (outputTxNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
-	defer rwsIt.Close()
 
 	var i int
 	outputTxNum = outputTxNumIn
@@ -354,8 +340,18 @@ func processResultQueueHistorical(consumer TraceConsumer, rws *exec.ResultsQueue
 
 		txTask := result.Task.(*exec.TxTask)
 
-		if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
-			result.CreateReceipt(tx)
+		if txTask.IsBlockEnd() {
+			consumer.blockReciepts = nil
+		} else if txTask.TxIndex >= 0 {
+			var prev *types.Receipt
+			if txTask.TxIndex > 0 {
+				prev = consumer.blockReciepts[txTask.TxIndex-1]
+			}
+			receipt, err := result.CreateReceipt(prev)
+			if err != nil {
+				return outputTxNum, false, err
+			}
+			consumer.blockReciepts = append(consumer.blockReciepts, receipt)
 		}
 
 		if err := consumer.Reduce(result, tx); err != nil {
@@ -453,8 +449,8 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 		}
 		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
 
-		blockReceipts := make(types.Receipts, len(txs))
 		rules := chainConfig.Rules(blockNum, b.Time())
+		blockReceipts := make([]*types.Receipt, 0, len(txs))
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec.TxTask{
@@ -466,7 +462,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				Uncles:          b.Uncles(),
 				Rules:           rules,
 				Txs:             txs,
-				BlockHash:       b.Hash(),
 				SkipAnalysis:    skipAnalysis,
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
@@ -474,7 +469,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: true,
-				BlockReceipts:    blockReceipts,
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
@@ -500,7 +494,27 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 			if WorkerCount == 1 {
 				result := applyWorker.RunTxTask(txTask)
 				if txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
-					txTask.CreateReceipt(tx)
+					var prev *types.Receipt
+					if txTask.TxIndex > 0 {
+						prev = blockReceipts[txTask.TxIndex-1]
+					}
+					receipt, err := result.CreateReceipt(prev)
+					if err != nil {
+						return err
+					}
+					blockReceipts = append(blockReceipts, receipt)
+				} else {
+					// End of block transaction in a block
+					ibs := state.New(applyWorker.stateReader)
+					syscall := func(contract common.Address, data []byte) ([]byte, error) {
+						return core.SysCallContract(contract, data, cfg.ChainConfig, ibs, header, cfg.Engine, false /* constCall */)
+					}
+
+					_, _, _, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(header), ibs, txTask.Txs,
+						txTask.Uncles, blockReceipts,txTask.Withdrawals, applyWorker.chain, syscall, logger)
+					if err != nil {
+						result.Err = err
+					}
 				}
 				if err := consumer.Reduce(result, tx); err != nil {
 					return err
