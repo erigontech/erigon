@@ -494,8 +494,6 @@ func (w *domainBufferedWriter) SetTxNum(v uint64) {
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
 	discardHistory := discard || dt.d.historyDisabled
-
-	fmt.Printf("newWriter: %s discHistory %t\n", dt.name.String(), discardHistory)
 	w := &domainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
@@ -949,9 +947,6 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			coll.Close()
 		}
 	}()
-	if d.filenameBase == "commitment" {
-		fmt.Printf("hist collated %s, snapDisabled=%t; keys %d\n", d.filenameBase, d.History.snapshotsDisabled, coll.HistoryCollation.historyCount)
-	}
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.compressCfg, log.LvlTrace, d.logger); err != nil {

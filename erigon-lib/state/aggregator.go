@@ -231,7 +231,8 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 			valuesTable: kv.TblCommitmentHistoryVals,
 			compression: seg.CompressNone,
 
-			snapshotsDisabled:  !argv.AllowCommitmentHistory,
+			historyDisabled: !argv.AllowCommitmentHistory,
+			// snapshotsDisabled:  true, // allow to write commitment history but not collect it in snapshots
 			historyLargeValues: false,
 
 			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
