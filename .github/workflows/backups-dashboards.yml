@@ -85,12 +85,12 @@ jobs:
         /tmp/dashboard-backup ${{ matrix.dashboard }}
   
 
-  pulizie_di_primavera:
+  housekeeping:
     needs: [preparation, backup_dashboard]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: housekeeping
+      - name: cleaning up
         uses: geekyeggo/delete-artifact@v2
         with:
           name: |
