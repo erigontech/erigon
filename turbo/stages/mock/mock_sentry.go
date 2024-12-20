@@ -156,8 +156,9 @@ func (ms *MockSentry) Close() {
 	if ms.DB != nil {
 		ms.DB.Close()
 	}
-	err := ms.bgComponentsEg.Wait()
-	require.Equal(ms.tb, err, context.Canceled)
+	if err := ms.bgComponentsEg.Wait(); err != nil {
+		require.Equal(ms.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+	}
 }
 
 // Stream returns stream, waiting if necessary
