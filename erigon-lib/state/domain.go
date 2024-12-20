@@ -949,7 +949,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		}
 	}()
 	if d.filenameBase == "commitment" {
-		fmt.Printf("hist collated %s; keys %d\n", d.filenameBase, coll.HistoryCollation.historyCount)
+		fmt.Printf("hist collated %s, snapDisabled=%t; keys %d\n", d.filenameBase, d.History.snapshotsDisabled, coll.HistoryCollation.historyCount)
 	}
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
