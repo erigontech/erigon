@@ -79,6 +79,12 @@ func TestTraceBlockByNumber(t *testing.T) {
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
+		if tx == nil {
+			t.Errorf("nil tx")
+		}
+		if tx.BlockHash == nil {
+			t.Errorf("nil block hash")
+		}
 		txcount, err := ethApi.GetBlockTransactionCountByHash(m.Ctx, *tx.BlockHash)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
