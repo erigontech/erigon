@@ -67,7 +67,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		SilkwormRpcLogDumpResponse     bool
 		SilkwormRpcNumWorkers          uint32
 		SilkwormRpcJsonCompatibility   bool
-		DisableTxPoolGossip            bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -114,7 +113,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.SilkwormRpcLogDumpResponse = c.SilkwormRpcLogDumpResponse
 	enc.SilkwormRpcNumWorkers = c.SilkwormRpcNumWorkers
 	enc.SilkwormRpcJsonCompatibility = c.SilkwormRpcJsonCompatibility
-	enc.DisableTxPoolGossip = c.DisableTxPoolGossip
 	return &enc, nil
 }
 
@@ -165,7 +163,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		SilkwormRpcLogDumpResponse     *bool
 		SilkwormRpcNumWorkers          *uint32
 		SilkwormRpcJsonCompatibility   *bool
-		DisableTxPoolGossip            *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -302,9 +299,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.SilkwormRpcJsonCompatibility != nil {
 		c.SilkwormRpcJsonCompatibility = *dec.SilkwormRpcJsonCompatibility
-	}
-	if dec.DisableTxPoolGossip != nil {
-		c.DisableTxPoolGossip = *dec.DisableTxPoolGossip
 	}
 	return nil
 }
