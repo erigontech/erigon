@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -540,6 +541,10 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 }
 
 func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	if strings.Contains(w.historyValsTable, "commit") {
+		fmt.Printf("flush %s discard=%t\n", w.historyValsTable, w.discard)
+	}
+
 	if w.discard {
 		return nil
 	}

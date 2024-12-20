@@ -948,6 +948,9 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 			coll.Close()
 		}
 	}()
+	if d.filenameBase == "commitment" {
+		fmt.Printf("hist collated %s; keys %d\n", d.filenameBase, coll.HistoryCollation.historyCount)
+	}
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.compressCfg, log.LvlTrace, d.logger); err != nil {
