@@ -35,16 +35,14 @@ import (
 // does not initiate any messages by self
 type Send struct {
 	ctx           context.Context
-	pool          Pool
 	wg            *sync.WaitGroup
 	sentryClients []sentryproto.SentryClient // sentry clients that will be used for accessing the network
 	logger        log.Logger
 }
 
-func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, pool Pool, logger log.Logger) *Send {
+func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, logger log.Logger) *Send {
 	return &Send{
 		ctx:           ctx,
-		pool:          pool,
 		sentryClients: sentryClients,
 		logger:        logger,
 	}

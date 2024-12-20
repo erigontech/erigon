@@ -30,7 +30,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -137,13 +139,11 @@ type MockSentry struct {
 	BlockReader    services.FullBlockReader
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
+	bgComponentsEg errgroup.Group
 }
 
 func (ms *MockSentry) Close() {
 	ms.cancel()
-	if ms.txPoolDB != nil {
-		ms.txPoolDB.Close()
-	}
 	if ms.Engine != nil {
 		ms.Engine.Close()
 	}
@@ -156,6 +156,8 @@ func (ms *MockSentry) Close() {
 	if ms.DB != nil {
 		ms.DB.Close()
 	}
+	err := ms.bgComponentsEg.Wait()
+	require.Equal(ms.tb, err, context.Canceled)
 }
 
 // Stream returns stream, waiting if necessary
@@ -345,24 +347,41 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		pragueTime := mock.ChainConfig.PragueTime
 		maxBlobsPerBlock := mock.ChainConfig.GetMaxBlobsPerBlock()
 		mock.txPoolDB = memdb.NewWithLabel(tmpdir, kv.TxPoolDB)
-		mock.TxPool, err = txpool.New(newTxs, mock.txPoolDB, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime, nil /* agraBlock */, cancunTime, pragueTime, maxBlobsPerBlock, nil, logger)
+		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
+		newSlotsStreams := &txpool.NewSlotsStreams{}
+		mock.TxPool, err = txpool.New(
+			ctx,
+			newTxs,
+			mock.txPoolDB,
+			mock.DB, poolCfg,
+			kvcache.NewDummy(),
+			*chainID, shanghaiTime,
+			nil, /* agraBlock */
+			cancunTime,
+			pragueTime,
+			maxBlobsPerBlock,
+			nil, /* feeCalculator */
+			sentries,
+			stateChangesClient,
+			func() {}, /* builderNotifyNewTxns */
+			newSlotsStreams,
+			logger,
+		)
 		if err != nil {
 			tb.Fatal(err)
 		}
 
-		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
-
 		mock.TxPoolFetch = txpool.NewFetch(mock.Ctx, sentries, mock.TxPool, stateChangesClient, mock.DB, mock.txPoolDB, *chainID, logger)
 		mock.TxPoolFetch.SetWaitGroup(&mock.ReceiveWg)
-		mock.TxPoolSend = txpool.NewSend(mock.Ctx, sentries, mock.TxPool, logger)
-		mock.TxPoolGrpcServer = txpool.NewGrpcServer(mock.Ctx, mock.TxPool, mock.txPoolDB, *chainID, logger)
+		mock.TxPoolSend = txpool.NewSend(mock.Ctx, sentries, logger)
+		mock.TxPoolGrpcServer = txpool.NewGrpcServer(mock.Ctx, mock.TxPool, mock.txPoolDB, newSlotsStreams, *chainID, logger)
 
 		mock.TxPoolFetch.ConnectCore()
 		mock.StreamWg.Add(1)
 		mock.TxPoolFetch.ConnectSentries()
 		mock.StreamWg.Wait()
 
-		go txpool.MainLoop(mock.Ctx, mock.TxPool, newTxs, mock.TxPoolSend, mock.TxPoolGrpcServer.NewSlotsStreams, func() {})
+		mock.bgComponentsEg.Go(func() error { return mock.TxPool.Run(ctx) })
 	}
 
 	// Committed genesis will be shared between download and mock sentry
