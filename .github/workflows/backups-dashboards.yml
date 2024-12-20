@@ -1,7 +1,7 @@
 # Author: Michele@DevOpsTeam.Erigon
 # Maintainers: DevOps@DevOpsTeam.Erigon
 # Description: This workflow is responsible for backing up the dashboards of the Erigon project.
-# Status: Mergeable for testing
+# Status: Production (further improvements are planned though)
 
 name: Dashboards backup
 
@@ -23,7 +23,7 @@ on:
   
 jobs:
   # 
-  # NOTE: This workflow splits the backup process in 3 jobs even though 2 (or even 1 if you're particularly naive) would have been enough. I decided to do that just as a reference for passing data between jobs. The overhead is minimal.
+  # NOTE: This workflow splits the backup process in 2 jobs to spot any pulling issue early on
   #
   preparation:
     runs-on: ubuntu-latest
@@ -85,12 +85,12 @@ jobs:
         /tmp/dashboard-backup ${{ matrix.dashboard }}
   
 
-  pulizie_di_primavera:
+  housekeeping:
     needs: [preparation, backup_dashboard]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: housekeeping
+      - name: cleaning up
         uses: geekyeggo/delete-artifact@v2
         with:
           name: |
