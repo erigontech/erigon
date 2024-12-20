@@ -30,14 +30,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/kv"
-
 	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
 )
@@ -74,7 +73,7 @@ func TestFetch(t *testing.T) {
 	wg.Wait()
 }
 
-func TestSendTxPropagate(t *testing.T) {
+func TestSendTxnPropagate(t *testing.T) {
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
 	t.Run("few remote byHash", func(t *testing.T) {
