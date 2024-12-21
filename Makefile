@@ -122,7 +122,7 @@ docker-compose: validate_docker_build_args setup_xdg_data_home
 
 ## dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
-	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
+	$(GO_DBG_BUILD) -v -o $(GOBIN)/ ./cmd/...
 
 %.cmd:
 	@# Note: $* is replaced by the command name
