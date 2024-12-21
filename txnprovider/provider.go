@@ -26,6 +26,12 @@ import (
 )
 
 type TxnProvider interface {
+	// ProvideTxns provides transactions ready to be included in a block for block building. Available request options:
+	//   - WithParentBlockNum
+	//   - WithAmount
+	//   - WithGasTarget
+	//   - WithBlobGasTarget
+	//   - WithTxnIdsFilter
 	ProvideTxns(ctx context.Context, opts ...ProvideOption) ([]types.Transaction, error)
 }
 
