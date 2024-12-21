@@ -48,13 +48,11 @@ ifeq ($(shell uname -s), Darwin)
 endif
 
 # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
-BUILD_TAGS = nosqlite,noboltdb,debug
+BUILD_TAGS = nosqlite,noboltdb
 
-#TODO: silkwarm need to support new mdbx version
-#ifneq ($(shell #"$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
-#	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
-#endif
-BUILD_TAGS := $(BUILD_TAGS),nosilkworm
+ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
+	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
+endif
 
 GOPRIVATE = github.com/erigontech/silkworm-go
 
@@ -119,12 +117,12 @@ docker-compose: validate_docker_build_args setup_xdg_data_home
 
 ## dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
-	$(GO_DBG_BUILD) -v -o $(GOBIN)/ ./cmd/...
+	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
 %.cmd:
 	@# Note: $* is replaced by the command name
 	@echo "Building $*"
-	cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
+	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
