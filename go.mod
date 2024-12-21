@@ -11,7 +11,7 @@ replace (
 
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.39.0-alpha.0.20241221105634-bb0030008032
+	github.com/erigontech/mdbx-go v0.39.0-alpha.0.20241221111805-89596065cfd9
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/erigontech/silkworm-go v0.18.0
 )
@@ -186,7 +186,7 @@ require (
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20241017200806-017d972448fc // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
-	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20240503222823-736c933a666d // indirect
+	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20241129212102-9c50ad6b591e // indirect
 	github.com/imdario/mergo v0.3.11 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/ipfs/go-cid v0.4.1 // indirect
