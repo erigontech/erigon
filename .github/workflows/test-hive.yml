@@ -24,7 +24,7 @@ jobs:
       - name: Setup go env and cache
         uses: actions/setup-go@v5
         with:
-          go-version: '>=1.22'
+          go-version: '>=1.23'
           go-version-file: 'hive/go.mod'
 
       # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
