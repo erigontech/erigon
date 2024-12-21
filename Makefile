@@ -53,9 +53,10 @@ endif
 # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
 BUILD_TAGS = nosqlite,noboltdb,debug
 
-ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
+#ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
+#	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
+#endif
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
-endif
 
 GOPRIVATE = github.com/erigontech/silkworm-go
 
