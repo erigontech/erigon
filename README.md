@@ -1,6 +1,6 @@
 # Erigon
 
-Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
+Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
 Blog: **[erigon.substack.com](https://erigon.substack.com/)**
 Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
 
