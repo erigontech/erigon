@@ -331,9 +331,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	applyWorker := cfg.applyWorker
-	if isMining {
-		applyWorker = cfg.applyWorkerMining
-	}
 	defer applyWorker.LogLRUStats()
 
 	applyWorker.ResetState(rs, nil, accumulator)
@@ -532,7 +529,6 @@ Loop:
 				TxIndex:            txIndex,
 				BlockNum:           blockNum,
 				Header:             header,
-				Coinbase:           b.Coinbase(),
 				Uncles:             b.Uncles(),
 				Rules:              rules,
 				Txs:                txs,

@@ -69,7 +69,7 @@ type NoopWriter struct {
 	trace bool
 }
 
-var noopWriter = &NoopWriter{true}
+var noopWriter = &NoopWriter{}
 
 func NewNoopWriter(trace ...bool) *NoopWriter {
 	if len(trace) == 0 {

@@ -33,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
-	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
@@ -51,7 +50,8 @@ type Task interface {
 		stateReader state.ResettableStateReader,
 		chainConfig *chain.Config,
 		chainReader consensus.ChainReader,
-		dirs datadir.Dirs) *Result
+		dirs datadir.Dirs,
+		calcFees bool) *Result
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
@@ -68,7 +68,6 @@ type Task interface {
 
 	IsBlockEnd() bool
 	IsHistoric() bool
-	ShouldDelayFeeCalc() bool
 
 	// elements in dependencies -> transaction indexes on which transaction i is dependent on
 	Dependencies() []int
@@ -79,6 +78,7 @@ type Result struct {
 	Task
 	ExecutionResult *evmtypes.ExecutionResult
 	Err             error
+	Coinbase        libcommon.Address
 	TxIn            state.VersionedReads
 	TxOut           state.VersionedWrites
 
@@ -174,7 +174,6 @@ type TxTask struct {
 	Tx                 types.Transaction
 	Txs                types.Transactions
 	Uncles             []*types.Header
-	Coinbase           libcommon.Address
 	Withdrawals        types.Withdrawals
 	Sender             *libcommon.Address
 	SkipAnalysis       bool
@@ -184,8 +183,6 @@ type TxTask struct {
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
-	ReadLists          state.ReadLists
-	WriteLists         state.WriteLists
 
 	Incarnation int
 
@@ -247,16 +244,8 @@ func (t *TxTask) IsHistoric() bool {
 	return t.HistoryExecution
 }
 
-func (t *TxTask) ShouldDelayFeeCalc() bool {
-	return false
-}
-
 func (t *TxTask) Reset(ibs *state.IntraBlockState) {
 	t.BalanceIncreaseSet = nil
-	t.ReadLists.Return()
-	t.ReadLists = nil
-	t.WriteLists.Return()
-	t.WriteLists = nil
 	ibs.Reset()
 }
 
@@ -271,7 +260,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	stateReader state.ResettableStateReader,
 	chainConfig *chain.Config,
 	chainReader consensus.ChainReader,
-	dirs datadir.Dirs) *Result {
+	dirs datadir.Dirs,
+	calcFees bool) *Result {
 	var result Result
 
 	stateReader.SetTxNum(txTask.TxNum)
@@ -309,12 +299,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
 		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		result.ExecutionResult = &evmtypes.ExecutionResult{}
 	case txTask.IsBlockEnd():
 		if txTask.BlockNum == 0 {
 			break
 		}
 
-		if !txTask.ShouldDelayFeeCalc() {
+		if calcFees {
 			/*
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
@@ -336,8 +327,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
 			//	txTask.Error = err
 			//}
+			result.ExecutionResult = &evmtypes.ExecutionResult{}
 			result.TraceTos = map[libcommon.Address]struct{}{}
-			result.TraceTos[txTask.Coinbase] = struct{}{}
+			result.TraceTos[txTask.Header.Coinbase] = struct{}{}
 			for _, uncle := range txTask.Uncles {
 				result.TraceTos[uncle.Coinbase] = struct{}{}
 			}
@@ -356,10 +348,12 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 		evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmCfg, rules)
 
+		result.Coinbase = evm.Context.Coinbase
+
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (*evmtypes.ExecutionResult, error) {
 			// Apply the transaction to the current state (included in the env).
-			if txTask.ShouldDelayFeeCalc() {
+			if !calcFees {
 				applyRes, err := core.ApplyMessageNoFeeBurnOrTip(evm, txTask.TxMessage(), gasPool, true, false)
 
 				if applyRes == nil || err != nil {
@@ -402,14 +396,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 			panic(err)
 		}
-		txTask.ReadLists = stateReader.ReadSet()
-		if withWriteSet, ok := stateWriter.(interface {
-			WriteSet() map[string]*libstate.KvList
-		}); ok {
-			txTask.WriteLists = withWriteSet.WriteSet()
-		}
-		//Unused ?
-		//txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
 	}
 
 	return &result

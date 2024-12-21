@@ -21,6 +21,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -540,6 +541,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
+		fmt.Println("Coinbase", hex.EncodeToString(coinbase.Bytes()), amount, coinbaseInitBalance)
+
 		if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
@@ -559,6 +562,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			}
 
 			if !st.noFeeBurnAndTip {
+				burnInitBalance, _ := st.state.GetBalance(*burntContractAddress)
+				fmt.Println("Burnt", hex.EncodeToString(burntContractAddress.Bytes()), burnAmount, burnInitBalance)
 				st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
 			}
 		}

@@ -193,10 +193,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 
 	txIndex := txTask.Version().TxIndex
 
-	switch {
-	case txIndex == -1:
-	case txTask.IsBlockEnd():
-	default:
+	if txIndex != -1 && !txTask.IsBlockEnd() {
 		rw.callTracer.Reset()
 	}
 
@@ -207,16 +204,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 	}
 
 	result := txTask.Execute(rw.evm, rw.vmCfg, rw.engine, rw.genesis, rw.taskGasPool, rw.rs, rw.ibs,
-		rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs)
+		rw.stateWriter, rw.stateReader, rw.chainConfig, rw.chain, rw.dirs, true)
 
 	if result.Task == nil {
 		result.Task = txTask
 	}
 
-	switch {
-	case txTask.Version().TxIndex == -1:
-	case txTask.IsBlockEnd():
-	default:
+	if txIndex != -1 && !txTask.IsBlockEnd() {
 		result.TraceFroms = rw.callTracer.Froms()
 		result.TraceTos = rw.callTracer.Tos()
 	}

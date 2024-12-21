@@ -90,7 +90,7 @@ type ExecuteBlockCfg struct {
 	silkworm        *silkworm.Silkworm
 	blockProduction bool
 
-	applyWorker, applyWorkerMining *exec3.Worker
+	applyWorker *exec3.Worker
 }
 
 func StageExecuteBlocksCfg(
@@ -133,7 +133,6 @@ func StageExecuteBlocksCfg(
 		syncCfg:           syncCfg,
 		silkworm:          silkworm,
 		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs),
-		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs),
 	}
 }
 

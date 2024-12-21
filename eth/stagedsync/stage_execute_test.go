@@ -41,20 +41,18 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
 			txTask := &exec.TxTask{
-				TxNum:      n,
-				TxIndex:    0,
-				BlockNum:   n,
-				Rules:      params.TestRules,
-				WriteLists: stateWriter.WriteSet(),
+				TxNum:    n,
+				TxIndex:  0,
+				BlockNum: n,
+				Rules:    params.TestRules,
 			}
 			// Unused
 			//txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
 			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
-			if err := rs.ApplyState4(context.Background(), txTask.BlockNum, txTask.TxNum, txTask.ReadLists, txTask.WriteLists,
-				txTask.BalanceIncreaseSet, nil, nil, nil, txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
+			if err := rs.ApplyState4(context.Background(), txTask.BlockNum, txTask.TxNum, nil, txTask.BalanceIncreaseSet,
+				nil, nil, nil, txTask.Config, txTask.Rules, txTask.PruneNonEssentials, txTask.HistoryExecution); err != nil {
 				panic(err)
 			}
-			txTask.ReadLists, txTask.WriteLists = nil, nil
 			_, err := rs.Domains().ComputeCommitment(context.Background(), true, txTask.BlockNum, "")
 			if err != nil {
 				panic(err)

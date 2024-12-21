@@ -458,7 +458,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				TxIndex:         txIndex,
 				BlockNum:        blockNum,
 				Header:          header,
-				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
 				Rules:           rules,
 				Txs:             txs,

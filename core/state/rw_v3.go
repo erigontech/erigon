@@ -125,7 +125,6 @@ func (rs *StateV3) SetTxNum(txNum, blockNum uint64) {
 func (rs *StateV3) ApplyState4(ctx context.Context,
 	blockNum uint64,
 	txNum uint64,
-	readLists ReadLists,
 	writeLists WriteLists,
 	balanceIncreases map[common.Address]uint256.Int,
 	logs []*types.Log,
@@ -143,7 +142,6 @@ func (rs *StateV3) ApplyState4(ctx context.Context,
 	if err := rs.applyState(writeLists, balanceIncreases, rs.domains, rules); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
-	readLists.Return()
 	writeLists.Return()
 
 	if err := rs.ApplyLogsAndTraces4(logs, traceFroms, traceTos, rs.domains, pruneNonEssentials, config); err != nil {
@@ -424,7 +422,7 @@ func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriter
 	return &StateWriterV3{
 		rs:          rs,
 		accumulator: accumulator,
-		trace: true,
+		trace:       true,
 	}
 }
 
@@ -759,7 +757,7 @@ var writeListPool = sync.Pool{
 }
 
 func newWriteList() WriteLists {
-	v := writeListPool.Get().(map[string]*state.KvList)
+	v := writeListPool.Get().(WriteLists)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
