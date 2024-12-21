@@ -31,8 +31,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/consensus/clique"
@@ -320,6 +318,16 @@ func NewAuRa(spec *chain.AuRaConfig, db kv.RwDB) (*AuRa, error) {
 	}
 	c.step.canPropose.Store(true)
 
+	return c, nil
+}
+
+// NewRo is used by the RPC daemon
+func NewRo(spec *chain.AuRaConfig, db kv.RoDB) (*AuRa, error) {
+	c, err := NewAuRa(spec, kv.RwWrapper{RoDB: db})
+	if err != nil {
+		return nil, err
+	}
+	c.e.readonly = true
 	return c, nil
 }
 

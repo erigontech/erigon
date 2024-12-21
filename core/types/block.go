@@ -32,12 +32,10 @@ import (
 
 	"github.com/gballet/go-verkle"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 )
 
 var (
@@ -149,11 +147,11 @@ func (h *Header) EncodingSize() int {
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(h.Time)
 	// size of Extra
-	encodingSize += rlp2.StringLen(h.Extra)
+	encodingSize += rlp.StringLen(h.Extra)
 
 	if len(h.AuRaSeal) != 0 {
 		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep)
-		encodingSize += rlp2.ListPrefixLen(len(h.AuRaSeal)) + len(h.AuRaSeal)
+		encodingSize += rlp.ListPrefixLen(len(h.AuRaSeal)) + len(h.AuRaSeal)
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
@@ -186,12 +184,12 @@ func (h *Header) EncodingSize() int {
 
 	if h.Verkle {
 		// Encoding of Verkle Proof
-		encodingSize += rlp2.StringLen(h.VerkleProof)
+		encodingSize += rlp.StringLen(h.VerkleProof)
 		var tmpBuffer bytes.Buffer
 		if err := rlp.Encode(&tmpBuffer, h.VerkleKeyVals); err != nil {
 			panic(err)
 		}
-		encodingSize += rlp2.ListPrefixLen(tmpBuffer.Len()) + tmpBuffer.Len()
+		encodingSize += rlp.ListPrefixLen(tmpBuffer.Len()) + tmpBuffer.Len()
 	}
 
 	return encodingSize
@@ -203,7 +201,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// Prefix
-	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 32
@@ -595,30 +593,30 @@ func (h *Header) Hash() (hash libcommon.Hash) {
 	return hash
 }
 
-var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
+var headerSize = libcommon.StorageSize(reflect.TypeOf(Header{}).Size())
 
 // Size returns the approximate memory used by all internal contents. It is used
 // to approximate and limit the memory consumption of various caches.
-func (h *Header) Size() common.StorageSize {
+func (h *Header) Size() libcommon.StorageSize {
 	s := headerSize
-	s += common.StorageSize(len(h.Extra) + libcommon.BitLenToByteLen(h.Difficulty.BitLen()) + libcommon.BitLenToByteLen(h.Number.BitLen()))
+	s += libcommon.StorageSize(len(h.Extra) + libcommon.BitLenToByteLen(h.Difficulty.BitLen()) + libcommon.BitLenToByteLen(h.Number.BitLen()))
 	if h.BaseFee != nil {
-		s += common.StorageSize(libcommon.BitLenToByteLen(h.BaseFee.BitLen()))
+		s += libcommon.StorageSize(libcommon.BitLenToByteLen(h.BaseFee.BitLen()))
 	}
 	if h.WithdrawalsHash != nil {
-		s += common.StorageSize(32)
+		s += libcommon.StorageSize(32)
 	}
 	if h.BlobGasUsed != nil {
-		s += common.StorageSize(8)
+		s += libcommon.StorageSize(8)
 	}
 	if h.ExcessBlobGas != nil {
-		s += common.StorageSize(8)
+		s += libcommon.StorageSize(8)
 	}
 	if h.ParentBeaconBlockRoot != nil {
-		s += common.StorageSize(32)
+		s += libcommon.StorageSize(32)
 	}
 	if h.RequestsHash != nil {
-		s += common.StorageSize(32)
+		s += libcommon.StorageSize(32)
 	}
 	return s
 }
@@ -772,16 +770,16 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 	for _, txn := range rb.Transactions {
 		txsLen += len(txn)
 	}
-	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
+	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
 	unclesLen += encodingSizeGeneric(rb.Uncles)
-	payloadSize += rlp2.ListPrefixLen(unclesLen) + unclesLen
+	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if rb.Withdrawals != nil {
 		withdrawalsLen += encodingSizeGeneric(rb.Withdrawals)
-		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
+		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
@@ -792,11 +790,11 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Transactions
-	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
 	for _, txn := range rb.Transactions {
@@ -862,12 +860,12 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 
 	// size of Uncles
 	unclesLen += encodingSizeGeneric(bfs.Uncles)
-	payloadSize += rlp2.ListPrefixLen(unclesLen) + unclesLen
+	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bfs.Withdrawals != nil {
 		withdrawalsLen += encodingSizeGeneric(bfs.Withdrawals)
-		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
+		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, unclesLen, withdrawalsLen
@@ -879,7 +877,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	defer pooledBuf.Put(b)
 
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 
@@ -942,16 +940,16 @@ func (bb Body) EncodingSize() int {
 func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
 	txsLen += encodingSizeGeneric(bb.Transactions)
-	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
+	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
 	unclesLen += encodingSizeGeneric(bb.Uncles)
-	payloadSize += rlp2.ListPrefixLen(unclesLen) + unclesLen
+	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bb.Withdrawals != nil {
 		withdrawalsLen += encodingSizeGeneric(bb.Withdrawals)
-		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
+		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
@@ -963,7 +961,7 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Transactions
@@ -1179,20 +1177,20 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Header
 	headerLen := bb.header.EncodingSize()
-	payloadSize += rlp2.ListPrefixLen(headerLen) + headerLen
+	payloadSize += rlp.ListPrefixLen(headerLen) + headerLen
 
 	// size of Transactions
 	txsLen += encodingSizeGeneric(bb.transactions)
-	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
+	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
 	unclesLen += encodingSizeGeneric(bb.uncles)
-	payloadSize += rlp2.ListPrefixLen(unclesLen) + unclesLen
+	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
 	if bb.withdrawals != nil {
 		withdrawalsLen += encodingSizeGeneric(bb.withdrawals)
-		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
+		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
@@ -1210,7 +1208,7 @@ func (bb *Block) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Header
@@ -1324,14 +1322,14 @@ func (b *Body) RawBody() *RawBody {
 
 // Size returns the true RLP encoded storage size of the block, either by encoding
 // and returning it, or returning a previously cached value.
-func (b *Block) Size() common.StorageSize {
+func (b *Block) Size() libcommon.StorageSize {
 	if size := b.size.Load(); size > 0 {
-		return common.StorageSize(size)
+		return libcommon.StorageSize(size)
 	}
 	c := writeCounter(0)
 	rlp.Encode(&c, b)
 	b.size.Store(uint64(c))
-	return common.StorageSize(c)
+	return libcommon.StorageSize(c)
 }
 
 // SanityCheck can be used to prevent that unbounded fields are
@@ -1380,7 +1378,7 @@ func (b *Block) HashCheck(fullCheck bool) error {
 	return nil
 }
 
-type writeCounter common.StorageSize
+type writeCounter libcommon.StorageSize
 
 func (c *writeCounter) Write(b []byte) (int, error) {
 	*c += writeCounter(len(b))
@@ -1465,18 +1463,18 @@ func (b *Block) Hash() libcommon.Hash { return b.header.Hash() }
 type Blocks []*Block
 
 func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxnID BaseTxnID, txCount uint32, err error) {
-	pos, _, err := rlp2.List(payload, 0)
+	pos, _, err := rlp.ParseList(payload, 0)
 	if err != nil {
 		return baseTxnID, txCount, err
 	}
 	var btID uint64
-	pos, btID, err = rlp2.U64(payload, pos)
+	pos, btID, err = rlp.ParseU64(payload, pos)
 	if err != nil {
 		return baseTxnID, txCount, err
 	}
 	baseTxnID = BaseTxnID(btID)
 
-	_, txCount, err = rlp2.U32(payload, pos)
+	_, txCount, err = rlp.ParseU32(payload, pos)
 	if err != nil {
 		return baseTxnID, txCount, err
 	}
@@ -1497,13 +1495,13 @@ type rlpEncodable interface {
 func encodingSizeGeneric[T rlpEncodable](arr []T) (_len int) {
 	for _, item := range arr {
 		size := item.EncodingSize()
-		_len += rlp2.ListPrefixLen(size) + size
+		_len += rlp.ListPrefixLen(size) + size
 	}
 	return
 }
 
 func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) error {
-	if err := EncodeStructSizePrefix(_len, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(_len, w, b); err != nil {
 		return err
 	}
 	for _, item := range arr {

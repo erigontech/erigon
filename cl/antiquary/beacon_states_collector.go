@@ -107,7 +107,6 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 
-	var err error
 	slot := state.Slot()
 	epoch := slot / i.beaconCfg.SlotsPerEpoch
 	// Setup state events handlers
@@ -121,9 +120,6 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		events.AddValidator(uint64(index), v)
 		return true
 	})
-	if err != nil {
-		return err
-	}
 	roundedSlotToDump := slot - (slot % clparams.SlotsPerDump)
 
 	if err := antiquateField(ctx, roundedSlotToDump, state.RawBalances(), i.buf, i.compressor, i.balancesDumpsCollector); err != nil {

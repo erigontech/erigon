@@ -331,7 +331,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: mockFinalizedCheckPoint.Root,
 				}
 				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
-				t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
+				//t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
 				t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
 			},
 			args: args{

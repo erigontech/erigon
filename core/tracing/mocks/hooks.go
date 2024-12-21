@@ -16,7 +16,7 @@ import (
 	common "github.com/erigontech/erigon-lib/common"
 	tracing "github.com/erigontech/erigon/core/tracing"
 	types "github.com/erigontech/erigon/core/types"
-	uint256 "github.com/holiman/uint
+	uint256 "github.com/holiman/uint256"
 	gomock "go.uber.org/mock/gomock"
 )
 

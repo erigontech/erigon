@@ -43,7 +43,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	dependentRoot, err := a.getDependentRoot(epoch)
+	dependentRoot, err := a.getDependentRoot(epoch, false)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 		duties := make([]proposerDuties, len(indicies))
 		for i, validatorIndex := range indicies {
 			var pk libcommon.Bytes48
-			pk, err := state_accessors.ReadPublicKeyByIndex(tx, validatorIndex)
+			pk, err := a.syncedData.ValidatorPublicKeyByIndex(int(validatorIndex))
 			if err != nil {
 				return nil, err
 			}

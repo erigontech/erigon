@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -90,15 +91,14 @@ var Defaults = Config{
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
-		GasLimit: 30_000_000,
+		GasLimit: 36_000_000,
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
 	},
-	DeprecatedTxPool: DeprecatedDefaultTxPoolConfig,
-	TxPool:           txpoolcfg.DefaultConfig,
-	RPCGasCap:        50000000,
-	GPO:              FullNodeGPO,
-	RPCTxFeeCap:      1, // 1 ether
+	TxPool:      txpoolcfg.DefaultConfig,
+	RPCGasCap:   50000000,
+	GPO:         FullNodeGPO,
+	RPCTxFeeCap: 1, // 1 ether
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
@@ -210,8 +210,8 @@ type Config struct {
 	Aura   chain.AuRaConfig
 
 	// Transaction pool options
-	DeprecatedTxPool DeprecatedTxPoolConfig
-	TxPool           txpoolcfg.Config
+	TxPool  txpoolcfg.Config
+	Shutter shutter.Config
 
 	// Gas Price Oracle options
 	GPO gaspricecfg.Config

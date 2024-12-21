@@ -43,6 +43,10 @@ func NewRawUint64List(limit int, u []uint64) *RawUint64List {
 	}
 }
 
+func (arr *RawUint64List) SetCap(c int) {
+	arr.c = c
+}
+
 func (arr *RawUint64List) Clear() {
 	arr.cachedHash = libcommon.Hash{}
 	arr.u = arr.u[:0]

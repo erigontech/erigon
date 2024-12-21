@@ -20,19 +20,16 @@
 package types
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
-	"math/bits"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 )
 
 // AccessTuple is the element type of an access list.
@@ -110,7 +107,7 @@ func (tx *AccessListTx) Unwrap() Transaction {
 func (tx *AccessListTx) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
 	// Add envelope size and type size
-	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 // payloadSize calculates the RLP encoding size of transaction, without TxType and envelope
@@ -138,10 +135,10 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, access
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
 	// size of Data
-	payloadSize += rlp2.StringLen(tx.Data)
+	payloadSize += rlp.StringLen(tx.Data)
 	// size of AccessList
 	accessListLen = accessListSize(tx.AccessList)
-	payloadSize += rlp2.ListPrefixLen(accessListLen) + accessListLen
+	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen
 	// size of V
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
@@ -161,8 +158,8 @@ func accessListSize(al AccessList) int {
 		// size of StorageKeys
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(tuple.StorageKeys)
-		tupleLen += rlp2.ListPrefixLen(storageLen) + storageLen
-		accessListLen += rlp2.ListPrefixLen(tupleLen) + tupleLen
+		tupleLen += rlp.ListPrefixLen(storageLen) + storageLen
+		accessListLen += rlp.ListPrefixLen(tupleLen) + tupleLen
 	}
 	return accessListLen
 }
@@ -172,14 +169,14 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 		tupleLen := 21
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(al[i].StorageKeys)
-		tupleLen += rlp2.ListPrefixLen(storageLen) + storageLen
-		if err := EncodeStructSizePrefix(tupleLen, w, b); err != nil {
+		tupleLen += rlp.ListPrefixLen(storageLen) + storageLen
+		if err := rlp.EncodeStructSizePrefix(tupleLen, w, b); err != nil {
 			return err
 		}
 		if err := rlp.EncodeOptionalAddress(&al[i].Address, w, b); err != nil { // TODO(racytech): change addr to []byte?
 			return err
 		}
-		if err := EncodeStructSizePrefix(storageLen, w, b); err != nil {
+		if err := rlp.EncodeStructSizePrefix(storageLen, w, b); err != nil {
 			return err
 		}
 		b[0] = 128 + 32
@@ -190,23 +187,6 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 			if _, err := w.Write(al[i].StorageKeys[idx][:]); err != nil {
 				return err
 			}
-		}
-	}
-	return nil
-}
-
-func EncodeStructSizePrefix(size int, w io.Writer, b []byte) error { // TODO(racytech): move it to rlp package?
-	if size >= 56 {
-		beSize := libcommon.BitLenToByteLen(bits.Len(uint(size)))
-		binary.BigEndian.PutUint64(b[1:], uint64(size))
-		b[8-beSize] = byte(beSize) + 247
-		if _, err := w.Write(b[8-beSize : 9]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = byte(size) + 192
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -232,7 +212,7 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 
 func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -274,7 +254,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	// prefix
-	if err := EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -301,7 +281,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
-	envelopeSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// envelope

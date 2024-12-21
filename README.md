@@ -5,8 +5,7 @@ Blog: **[erigon.substack.com](https://erigon.substack.com/)**
 Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
-frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
-by default.
+frontier.
 
 <br>
 
@@ -52,7 +51,7 @@ by default.
     - [Run local devnet](#run-local-devnet)
     - [Docker permissions error](#docker-permissions-error)
     - [Public RPC](#public-rpc)
-    - [RaspberyPI](#raspberypi)
+    - [RaspberryPI](#raspberrypi)
     - [Run all components by docker-compose](#run-all-components-by-docker-compose)
         - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
         - [Environment Variables](#environment-variables)
@@ -74,8 +73,8 @@ by default.
 
 <!--te-->
 
-**Important defaults**: Erigon is an Archive Node by default: use `--prune.mode` if need make it smaller (not allowed to
-change after first start)
+**Important defaults**: Erigon 3 is a Full Node by default. (Erigon 2 was an [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.)
+Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if you run a validator on a small disk (not allowed to change after first start).
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
@@ -344,7 +343,7 @@ Caplin is be enabled by default. to disable it and enable the Engine API, use th
 on, an external Consensus Layer will not be need
 anymore.
 
-Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
+Caplin also has an archival mode for historical states and blocks. it can be enabled through the `--caplin.archive`
 flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
 e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is
@@ -552,7 +551,7 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 - `--http.corsdomain="*"` is bad-practice: set exact hostname or IP
 - protect from DOS by reducing: `--rpc.batch.concurrency`, `--rpc.batch.limit`
 
-### RaspberyPI
+### RaspberryPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
 
@@ -589,7 +588,7 @@ targets `make user_linux` or `make user_macos`.
 
 #### Run
 
-Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker,
+Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writable by the user UID/GID in docker,
 which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time. If a build or service startup is failing
 due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
@@ -751,7 +750,7 @@ Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS page
 memory.
 
 **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimisations: "reduce Disk random access".
+main Erigon optimizations: "reduce Disk random access".
 "Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
 running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
 same Disk.
@@ -769,7 +768,7 @@ What can do:
     - use latency-critical cloud-drives
     - or attached-NVMe (at least for initial sync)
 - increase RAM
-- if you throw anough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
+- if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 - Use `--db.pagesize=64kb` (less fragmentation, more IO)
 - Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
 - Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)

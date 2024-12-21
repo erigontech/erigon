@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
-	rlp "github.com/erigontech/erigon-lib/rlp2"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // Send - does send concrete P2P messages to Sentry. Same as Fetch but for outbound traffic
@@ -157,7 +157,7 @@ func (f *Send) AnnouncePooledTxns(types []byte, sizes []uint32, hashes Hashes, m
 			}
 
 			switch protocols[protocolIndex] {
-			case 66, 67:
+			case 67:
 				if i > prevI {
 					req := &sentryproto.SendMessageToRandomPeersRequest{
 						Data: &sentryproto.OutboundMessageData{

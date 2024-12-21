@@ -26,8 +26,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/common"
-	common2 "github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/direct"
 	"github.com/erigontech/erigon-lib/gointerfaces"
@@ -162,7 +161,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	cfg.DBDir = dirs.TxPool
 
-	cfg.CommitEvery = common2.RandomizeDuration(commitEvery)
+	cfg.CommitEvery = libcommon.RandomizeDuration(commitEvery)
 	cfg.PendingSubPoolLimit = pendingPoolLimit
 	cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 	cfg.QueuedSubPoolLimit = queuedPoolLimit
@@ -180,7 +179,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	cfg.TracedSenders = make([]string, len(traceSenders))
 	for i, senderHex := range traceSenders {
-		sender := common.HexToAddress(senderHex)
+		sender := libcommon.HexToAddress(senderHex)
 		cfg.TracedSenders[i] = string(sender[:])
 	}
 
@@ -210,7 +209,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 }
 
 func main() {
-	ctx, cancel := common.RootContext()
+	ctx, cancel := libcommon.RootContext()
 	defer cancel()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {

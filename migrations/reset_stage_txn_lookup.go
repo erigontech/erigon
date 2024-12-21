@@ -14,30 +14,34 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package txnprovider
+package migrations
 
 import (
 	"context"
-
-	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/log/v3"
+	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 )
 
-var _ TxnProvider = UnorderedTxnPoolProvider{}
+// for new txn index.
+var ResetStageTxnLookup = Migration{
+	Name: "reset_stage_txn_lookup",
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-// UnorderedTxnPoolProvider provides all the available transactions in the devp2p transaction pool without any ordering.
-type UnorderedTxnPoolProvider struct {
-	txnPool *txpool.TxPool
-}
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
 
-func (t UnorderedTxnPoolProvider) Priority() uint64 {
-	//TODO implement me
-	panic("implement me")
-}
+		if err := reset2.ResetTxLookup(tx); err != nil {
+			return err
+		}
 
-func (t UnorderedTxnPoolProvider) Yield(_ context.Context, _ ...YieldOption) ([]types.Transaction, error) {
-	//TODO implement me
-	//     for this we can implement a function YieldAllTxns in txpool.TxPool which uses the p.all attribute
-	//     data structure
-	panic("implement me")
+		return tx.Commit()
+	},
 }
