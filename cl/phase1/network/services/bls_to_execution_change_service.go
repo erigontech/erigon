@@ -23,6 +23,7 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
