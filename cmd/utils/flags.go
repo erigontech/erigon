@@ -1568,6 +1568,9 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(DbWriteMapFlag.Name) {
 		cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
 	}
+	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
+		cfg.NoGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
+	}
 	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = libcommon.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 	cfg.DBDir = dbDir
@@ -1991,10 +1994,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TrustedSetupFile.Name) {
 		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
-	}
-
-	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
-		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
 }
 
