@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	_ "runtime/cgo"
 
 	"github.com/urfave/cli/v2"
 
