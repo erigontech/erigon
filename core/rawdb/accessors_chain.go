@@ -31,6 +31,8 @@ import (
 
 	"github.com/gballet/go-verkle"
 
+	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -38,7 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/log/v3"
+
 	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb/utils"
 	"github.com/erigontech/erigon/core/types"
