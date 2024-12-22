@@ -566,24 +566,33 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 			return err
 		}
 	}
-	for ; k != nil; k, _, err = hi.valsCDup.NextNoDup() {
-		if err != nil {
-			return err
-		}
+	for k != nil {
 		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
 		if err != nil {
 			return err
 		}
 		if v == nil {
+			next, ok := kv.NextSubtree(k)
+			if !ok {
+				hi.nextKey = nil
+				return nil
+			}
+			k, _, err = hi.valsCDup.Seek(next)
+			if err != nil {
+				return err
+			}
 			continue
 		}
 		foundTxNumVal := v[:8]
-		if hi.endTxNum >= 0 && int(binary.BigEndian.Uint64(foundTxNumVal)) >= hi.endTxNum {
-			continue
+		if hi.endTxNum < 0 || int(binary.BigEndian.Uint64(foundTxNumVal)) < hi.endTxNum {
+			hi.nextKey = k
+			hi.nextVal = v[8:]
+			return nil
 		}
-		hi.nextKey = k
-		hi.nextVal = v[8:]
-		return nil
+		k, _, err = hi.valsCDup.NextNoDup()
+		if err != nil {
+			return err
+		}
 	}
 	hi.nextKey = nil
 	return nil
