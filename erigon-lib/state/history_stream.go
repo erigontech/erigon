@@ -283,10 +283,11 @@ func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 		}
 		seek = next
 	}
-	for k, _, err := hi.valsCDup.Seek(seek); k != nil; k, _, err = hi.valsCDup.NextNoDup() {
-		if err != nil {
-			return err
-		}
+	k, _, err := hi.valsCDup.Seek(seek)
+	if err != nil {
+		return err
+	}
+	for k != nil {
 		if hi.toPrefix != nil && bytes.Compare(k, hi.toPrefix) >= 0 {
 			break
 		}
@@ -295,8 +296,16 @@ func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 			return err
 		}
 		if v == nil {
+			seek, ok := kv.NextSubtree(k)
+			if !ok {
+				break
+			}
+			if k, _, err = hi.valsCDup.Seek(seek); err != nil {
+				panic(err)
+			}
 			continue
 		}
+
 		hi.nextKey = k
 		hi.nextVal = v[8:]
 		return nil
