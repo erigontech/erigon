@@ -373,12 +373,20 @@ func (it *InvertedIterator1) advanceInDb() {
 		if v, err = it.cursor.SeekBothRange(k, it.startTxKey[:]); err != nil {
 			panic(err)
 		}
-		if v != nil {
-			txNum := binary.BigEndian.Uint64(v)
-			if txNum < it.endTxNum {
-				it.nextDbKey = append(it.nextDbKey[:0], k...)
-				return
+		if v == nil {
+			seek, ok := kv.NextSubtree(k)
+			if !ok {
+				break
 			}
+			if k, _, err = it.cursor.Seek(seek); err != nil {
+				panic(err)
+			}
+			continue
+		}
+		txNum := binary.BigEndian.Uint64(v)
+		if txNum < it.endTxNum {
+			it.nextDbKey = append(it.nextDbKey[:0], k...)
+			return
 		}
 		if k, _, err = it.cursor.NextNoDup(); err != nil {
 			panic(err)
