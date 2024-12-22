@@ -11,7 +11,7 @@ replace (
 
 require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.39.0-alpha.0.20241221111805-89596065cfd9
+	github.com/erigontech/mdbx-go v0.39.0-alpha.0.20241222104823-3b6fa1fd9015
 	github.com/erigontech/secp256k1 v1.1.0
 	github.com/erigontech/silkworm-go v0.18.0
 )
