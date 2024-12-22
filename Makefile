@@ -24,7 +24,6 @@ CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR
 #CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
 CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
-#CGO_CFLAGS += -DMDBX_DEBUG=2 # to enable more logs
 
 # If it is arm64 or aarch64, then we need to use portable version of blst. use or with stringw "arm64" and "aarch64" to support both
 ifeq ($(shell uname -m), arm64)
@@ -40,6 +39,9 @@ ifeq ($(shell uname -m),x86_64)
 endif
 
 CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3
+
+CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
+CGO_LDFLAGS += -O3 -g
 
 ifeq ($(shell uname -s), Darwin)
 	ifeq ($(filter-out 13.%,$(shell sw_vers --productVersion)),)
