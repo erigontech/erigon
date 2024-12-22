@@ -1338,7 +1338,6 @@ func (c *MdbxDupSortCursor) NextNoDup() ([]byte, []byte, error) {
 		if mdbx.IsNotFound(err) {
 			return nil, nil, nil
 		}
-		panic(err)
 		return []byte{}, nil, fmt.Errorf("in NextNoDup: %w", err)
 	}
 	return k, v, nil
