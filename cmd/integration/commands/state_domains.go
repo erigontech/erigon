@@ -249,36 +249,35 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 
 	// now start the file indexing
 	for i, fileName := range filesNamesToIndex {
-		wordsFile, err := seg.OpenRawWordsFile(path.Join(dirs.SnapDomain, fileName))
-		if err != nil {
-			return fmt.Errorf("failed to open file %s: %w", fileName, err)
-		}
-		defer wordsFile.Close()
 		isKey := true
 		dat := make([]byte, 4)
 		count := 0
+
+		dec, err := seg.NewDecompressor(path.Join(dirs.SnapDomain, fileName))
+		if err != nil {
+			return fmt.Errorf("failed to create decompressor: %w", err)
+		}
+		defer dec.Close()
+		getter := dec.MakeGetter()
 		fmt.Printf("Indexing file %s\n", fileName)
-		if err := wordsFile.ForEach(func(v []byte, compressed bool) error {
-			if len(v) == 0 {
-				return nil
-			}
+		var buf []byte
+		for getter.HasNext() {
 			if !isKey {
 				isKey = !isKey
 				return nil
 			}
+			buf, _ = getter.Next(buf)
 			binary.BigEndian.PutUint32(dat, uint32(i))
-			if err := tx.Put(tbl, v, dat); err != nil {
-				return fmt.Errorf("failed to put key %x: %w", v, err)
-			}
+			// if err := tx.Put(tbl, v, dat); err != nil {
+			// 	return fmt.Errorf("failed to put key %x: %w", v, err)
+			// }
 			isKey = !isKey
 			count++
-			fmt.Println("count: ", count, "keyLength: ", len(v))
+			fmt.Println("count: ", count, "keyLength: ", len(buf))
 			if count%100000 == 0 {
 				fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
 			}
 			return nil
-		}); err != nil {
-			return fmt.Errorf("failed to iterate over file %s: %w", fileName, err)
 		}
 		fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
 	}
