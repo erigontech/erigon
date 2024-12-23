@@ -12,6 +12,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	state2 "github.com/erigontech/erigon-lib/state"
@@ -45,7 +46,7 @@ type APIBackend struct {
 	b           *Backend
 	blockReader services.FullBlockReader
 
-	dbForAPICalls ethdb.Database
+	dbForAPICalls kv.TemporalRwDB
 
 	fallbackClient types.FallbackClient
 	sync           SyncProgressBackend
@@ -79,7 +80,7 @@ func CreateFallbackClient(fallbackClientUrl string, fallbackClientTimeout time.D
 	}
 	var fallbackClient types.FallbackClient
 	var err error
-	fallbackClient, err = rpc.Dial(fallbackClientUrl)
+	fallbackClient, err = rpc.Dial(fallbackClientUrl, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("failed creating fallback connection: %w", err)
 	}
@@ -322,7 +323,7 @@ func (a *APIBackend) FeeHistory(
 	return big.NewInt(int64(oldestBlock)), rewards, basefees, gasUsed, nil
 }
 
-func (a *APIBackend) ChainDb() ethdb.Database {
+func (a *APIBackend) ChainDb() kv.TemporalRwDB {
 	return a.dbForAPICalls
 }
 
@@ -453,7 +454,7 @@ func (a *APIBackend) BlockByNumberOrHash(ctx context.Context, blockNrOrHash rpc.
 	return nil, errors.New("invalid arguments; neither block nor hash specified")
 }
 
-func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *core.BlockChain, maxRecreateStateDepth int64, header *types.Header, err error) (*state.IntraBlockState, *types.Header, error) {
+func StateAndHeaderFromHeader(ctx context.Context, chainDb kv.TemporalRwDB, bc *core.BlockChain, maxRecreateStateDepth int64, header *types.Header, err error) (*state.IntraBlockState, *types.Header, error) {
 	if err != nil {
 		return nil, header, err
 	}
@@ -485,10 +486,10 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *c
 	}
 	liveState, liveStateRelease, err := stateFor(bc.StateCache())(header)
 	if err == nil {
-		liveStatesReferencedCounter.Inc(1)
+		liveStatesReferencedCounter.Inc()
 		liveState.SetArbFinalizer(func(*state.ArbitrumExtraData) {
 			liveStateRelease()
-			liveStatesDereferencedCounter.Inc(1)
+			liveStatesDereferencedCounter.Inc()
 		})
 		return liveState, header, nil
 	}
@@ -506,10 +507,10 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *c
 	}
 	// make sure that we haven't found the state in diskdb
 	if lastHeader == header {
-		liveStatesReferencedCounter.Inc(1)
+		liveStatesReferencedCounter.Inc()
 		lastState.SetArbFinalizer(func(*state.ArbitrumExtraData) {
 			lastStateRelease()
-			liveStatesDereferencedCounter.Inc(1)
+			liveStatesDereferencedCounter.Inc()
 		})
 		return lastState, header, nil
 	}
@@ -530,10 +531,10 @@ func StateAndHeaderFromHeader(ctx context.Context, chainDb ethdb.Database, bc *c
 		return nil, nil, fmt.Errorf("failed to recreate state: %w", err)
 	}
 	// we are setting finalizer instead of returning a StateReleaseFunc to avoid changing ethapi.Backend interface to minimize diff to upstream
-	recreatedStatesReferencedCounter.Inc(1)
+	recreatedStatesReferencedCounter.Inc()
 	statedb.SetArbFinalizer(func(*state.ArbitrumExtraData) {
 		release()
-		recreatedStatesDereferencedCounter.Inc(1)
+		recreatedStatesDereferencedCounter.Inc()
 	})
 	return statedb, header, err
 }

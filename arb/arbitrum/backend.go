@@ -3,15 +3,15 @@ package arbitrum
 import (
 	"context"
 
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/arb/arbitrum_types"
-	"github.com/erigontech/erigon/arb/ethdb"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/bloombits"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/event"
-	// "github.com/erigontech/erigon/internal/shutdowncheck"
+
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -21,7 +21,7 @@ type Backend struct {
 	stack      *node.Node
 	apiBackend *APIBackend
 	config     *Config
-	chainDb    ethdb.Database
+	chainDb    kv.TemporalRwDB
 
 	txFeed event.Feed
 	scope  event.SubscriptionScope
@@ -38,7 +38,7 @@ type Backend struct {
 	filterSystem *filters.FilterSystem
 }
 
-func NewBackend(stack *node.Node, config *Config, chainDb ethdb.Database, publisher ArbInterface, filterConfig filters.Config) (*Backend, *filters.FilterSystem, error) {
+func NewBackend(stack *node.Node, config *Config, chainDb kv.TemporalRwDB, publisher ArbInterface, filterConfig filters.Config) (*Backend, *filters.FilterSystem, error) {
 	backend := &Backend{
 		arb:     publisher,
 		stack:   stack,
@@ -78,7 +78,7 @@ func (b *Backend) APIs() []rpc.API                  { return b.apiBackend.GetAPI
 func (b *Backend) ArbInterface() ArbInterface       { return b.arb }
 func (b *Backend) BlockChain() *core.BlockChain     { return b.arb.BlockChain() }
 func (b *Backend) BloomIndexer() *core.ChainIndexer { return b.bloomIndexer }
-func (b *Backend) ChainDb() ethdb.Database          { return b.chainDb }
+func (b *Backend) ChainDb() kv.TemporalRwDB         { return b.chainDb }
 func (b *Backend) Engine() consensus.Engine         { return b.arb.BlockChain().Engine() }
 func (b *Backend) Stack() *node.Node                { return b.stack }
 

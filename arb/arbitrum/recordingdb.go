@@ -176,7 +176,7 @@ type RecordingDatabase struct {
 	references int64
 }
 
-func NewRecordingDatabase(config *RecordingDatabaseConfig, sd *state2.SharedDomains, ethdb ethdb.Database, blockchain *core.BlockChain) *RecordingDatabase {
+func NewRecordingDatabase(config *RecordingDatabaseConfig, sd *state2.SharedDomains, ethdb kv.TemporalRwDB, blockchain *core.BlockChain) *RecordingDatabase {
 	//hashConfig := *hashdb.Defaults
 	//hashConfig.CleanCacheSize = config.TrieCleanCache
 	//trieConfig := triedb.Config{
