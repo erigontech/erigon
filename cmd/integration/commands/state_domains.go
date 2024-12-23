@@ -205,7 +205,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	filesNamesToIndex := []string{}
-	if err := filepath.Walk(dirs.SnapCaplin, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(dirs.SnapDomain, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
