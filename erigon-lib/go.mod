@@ -19,6 +19,8 @@ require (
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/edsrzf/mmap-go v1.1.0
+	github.com/erigontech/erigon-snapshot v1.3.0
+	github.com/erigontech/interfaces v0.0.0-20241211040849-58b88a185510
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.8.1
 	github.com/google/btree v1.1.2
@@ -47,8 +49,6 @@ require (
 
 require (
 	github.com/cespare/xxhash v1.1.0 // indirect
-	github.com/erigontech/erigon-snapshot v1.3.0 // indirect
-	github.com/erigontech/interfaces v0.0.0-20241211040849-58b88a185510 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/pion/udp v0.1.4 // indirect
 	golang.org/x/mod v0.17.0 // indirect
