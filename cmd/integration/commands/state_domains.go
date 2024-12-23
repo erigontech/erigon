@@ -18,12 +18,17 @@ package commands
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/seg"
 	state3 "github.com/erigontech/erigon-lib/state"
 
 	"github.com/spf13/cobra"
@@ -33,7 +38,9 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
+	downloadertype "github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/mdbx"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
@@ -52,6 +59,9 @@ func init() {
 	withStartTx(readDomains)
 
 	rootCmd.AddCommand(readDomains)
+
+	withDataDir(purifyDomains)
+	rootCmd.AddCommand(purifyDomains)
 }
 
 // if trie variant is not hex, we could not have another rootHash with to verify it
@@ -118,6 +128,158 @@ var readDomains = &cobra.Command{
 			return
 		}
 	},
+}
+
+var purifyDomains = &cobra.Command{
+	Use:     "purify_domains",
+	Short:   `Regenerate kv files without repeating keys.`,
+	Example: "go run ./cmd/integration purify_domains --datadir=... --verbosity=3",
+	Args:    cobra.ArbitraryArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		dirs := datadir.New(datadirCli)
+		// Iterate over all the files in  dirs.SnapDomain and print them
+		domainDir := dirs.SnapDomain
+
+		// make a temporary dir
+		tmpDir, err := os.MkdirTemp("purifyTemp", "") // make a temporary dir to store the keys
+		if err != nil {
+			fmt.Println("Error creating temporary directory: ", err)
+			return
+		}
+		// make a temporary DB to store the keys
+
+		purifyDB := mdbx.MustOpen(tmpDir)
+		defer purifyDB.Close()
+
+		purificationDomains := []string{"account", "storage", "code", "commitment"}
+		for _, domain := range purificationDomains {
+			if err := makePurifiableIndexDB(purifyDB, dirs, log.New(), domain); err != nil {
+				fmt.Println("Error making purifiable index DB: ", err)
+				return
+			}
+		}
+		// 2. Walk through the domainDir and process each file
+		err = filepath.Walk(domainDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			// Skip directories
+			if info.IsDir() {
+				return nil
+			}
+			// Here you can decide if you only want to process certain file extensions
+			// e.g., .kv files
+			if filepath.Ext(path) != ".kv" {
+				// Skip non-kv files if that's your domain’s format
+				return nil
+			}
+
+			fmt.Printf("Processing file: %s\n", path)
+
+			// // Purify the file (remove duplicate keys)
+			// if err := purifyKVFile(path); err != nil {
+			// 	return fmt.Errorf("failed to purify file %s: %w", path, err)
+			// }
+			return nil
+		})
+		if err != nil {
+			fmt.Printf("error walking the path %q: %v\n", domainDir, err)
+		}
+
+	},
+}
+
+func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
+	var tbl string
+	switch domain {
+	case "account":
+		tbl = kv.TblAccountVals
+	case "storage":
+		tbl = kv.TblStorageVals
+	case "code":
+		tbl = kv.TblCodeVals
+	case "commitment":
+		tbl = kv.TblCommitmentVals
+	default:
+		return fmt.Errorf("invalid domain %s", domain)
+	}
+	// Iterate over all the files in  dirs.SnapDomain and print them
+	filesNamesToIndex := []string{}
+	if err := filepath.Walk(dirs.SnapCaplin, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.Contains(info.Name(), domain) {
+			return nil
+		}
+		// Here you can decide if you only want to process certain file extensions
+		// e.g., .kv files
+		if filepath.Ext(path) != ".kv" {
+			// Skip non-kv files if that's your domain’s format
+			return nil
+		}
+
+		fmt.Printf("Add file to indexing of %s: %s\n", domain, path)
+
+		filesNamesToIndex = append(filesNamesToIndex, info.Name())
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to walk through the domainDir %s: %w", domain, err)
+	}
+	// sort the files by name
+	sort.Slice(filesNamesToIndex, func(i, j int) bool {
+		res, ok, _ := downloadertype.ParseFileName(dirs.SnapDomain, filesNamesToIndex[i])
+		if !ok {
+			panic("invalid file name")
+		}
+		res2, ok, _ := downloadertype.ParseFileName(dirs.SnapDomain, filesNamesToIndex[j])
+		if !ok {
+			panic("invalid file name")
+		}
+		return res.From < res2.From
+	})
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+
+	// now start the file indexing
+	for i, fileName := range filesNamesToIndex {
+		wordsFile, err := seg.OpenRawWordsFile(path.Join(dirs.SnapDomain, fileName))
+		if err != nil {
+			return fmt.Errorf("failed to open file %s: %w", fileName, err)
+		}
+		defer wordsFile.Close()
+		isKey := true
+		dat := make([]byte, 4)
+		count := 0
+		if err := wordsFile.ForEach(func(v []byte, compressed bool) error {
+			if !isKey {
+				isKey = !isKey
+				return nil
+			}
+			binary.BigEndian.PutUint32(dat, uint32(i))
+			if err := tx.Put(tbl, v, dat); err != nil {
+				return fmt.Errorf("failed to put key %x: %w", v, err)
+			}
+			isKey = !isKey
+			if count%100000 == 0 {
+				fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("failed to iterate over file %s: %w", fileName, err)
+		}
+		fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	return nil
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
