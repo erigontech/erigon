@@ -268,6 +268,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 				return fmt.Errorf("failed to put key %x: %w", v, err)
 			}
 			isKey = !isKey
+			count++
 			if count%100000 == 0 {
 				fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
 			}
