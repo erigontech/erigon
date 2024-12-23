@@ -259,6 +259,9 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		count := 0
 		fmt.Printf("Indexing file %s\n", fileName)
 		if err := wordsFile.ForEach(func(v []byte, compressed bool) error {
+			if len(v) == 0 {
+				return nil
+			}
 			if !isKey {
 				isKey = !isKey
 				return nil
