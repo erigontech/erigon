@@ -44,7 +44,7 @@ type Task interface {
 		engine consensus.Engine,
 		genesis *types.Genesis,
 		gasPool *core.GasPool,
-		rs *state.StateV3,
+		rs *state.StateV3Buffered,
 		ibs *state.IntraBlockState,
 		stateWriter state.StateWriter,
 		stateReader state.ResettableStateReader,
@@ -254,7 +254,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	engine consensus.Engine,
 	genesis *types.Genesis,
 	gasPool *core.GasPool,
-	rs *state.StateV3,
+	rs *state.StateV3Buffered,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	stateReader state.ResettableStateReader,
@@ -267,10 +267,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	stateReader.SetTxNum(txTask.TxNum)
 	rs.Domains().SetTxNum(txTask.TxNum)
 	stateReader.ResetReadSet()
-	if withReset, ok := stateWriter.(interface{ ResetWriteSet() }); ok {
-		withReset.ResetWriteSet()
-	}
-
+	
 	//ibs.SetTrace(true)
 
 	rules := txTask.Rules
@@ -465,6 +462,7 @@ func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + len(q.newTasks)
 // Add "new task" (which was never executed yet). May block internal channel is full.
 // Expecting already-ordered tasks.
 func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
+	fmt.Println("ADD", t.Version())
 	select {
 	case <-ctx.Done():
 		return
@@ -476,6 +474,7 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 // All failed tasks have higher priority than new one.
 // No limit on amount of txs added by this method.
 func (q *QueueWithRetry) ReTry(t Task) {
+	fmt.Println("RETRY", t.Version())
 	q.retiresLock.Lock()
 	heap.Push(&q.retires, t)
 	q.retiresLock.Unlock()
@@ -595,7 +594,8 @@ func (q *ResultsQueue) Add(ctx context.Context, task *Result) error {
 	}
 	return nil
 }
-func (q *ResultsQueue) drainNoBlock(ctx context.Context, task *Result) error {
+
+func (q *ResultsQueue) Drain(ctx context.Context, task *Result) error {
 	q.Lock()
 	defer q.Unlock()
 	if task != nil {
@@ -649,31 +649,11 @@ func (q *ResultsQueueIter) PopNext() *Result {
 	return heap.Pop(q.q.results).(*Result)
 }
 
-func (q *ResultsQueue) Drain(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case txTask, ok := <-q.resultCh:
-		if !ok {
-			return nil
-		}
-		if err := q.drainNoBlock(ctx, txTask); err != nil {
-			return err
-		}
-	case <-q.ticker.C:
-		// Corner case: workers processed all new tasks (no more q.resultCh events) when we are inside Drain() func
-		// it means - naive-wait for new q.resultCh events will not work here (will cause dead-lock)
-		//
-		// "Drain everything but don't block" - solves the prbolem, but shows poor performance
-		if q.Len() > 0 {
-			return nil
-		}
-		return q.Drain(ctx)
-	}
-	return nil
+func (q *ResultsQueue) ResultCh() chan *Result {
+	return q.resultCh
 }
 
-func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) error { return q.drainNoBlock(ctx, nil) }
+func (q *ResultsQueue) DrainNonBlocking(ctx context.Context) error { return q.Drain(ctx, nil) }
 
 func (q *ResultsQueue) DropResults(ctx context.Context, f func(t *Result)) {
 	q.Lock()

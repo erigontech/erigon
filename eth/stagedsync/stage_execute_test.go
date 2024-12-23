@@ -32,7 +32,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 	if err != nil {
 		panic(err)
 	}
-	rs := state.NewStateV3(domains, logger)
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, logger))
 	stateWriter := state.NewStateWriterBufferedV3(rs, nil)
 	stateWriter.SetTx(tx)
 

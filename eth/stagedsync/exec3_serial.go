@@ -200,7 +200,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, useExternalT
 		return t2, err
 	}
 	se.doms.SetTxNum(txNum)
-	se.rs = state.NewStateV3(se.doms, se.logger)
+	se.rs = state.NewStateV3Buffered(state.NewStateV3(se.doms, se.logger))
 
 	se.applyWorker.ResetTx(se.applyTx)
 	se.applyWorker.ResetState(se.rs, nil, se.accumulator)

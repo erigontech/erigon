@@ -51,7 +51,7 @@ type Worker struct {
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
 	in          *exec.QueueWithRetry
-	rs          *state.StateV3
+	rs          *state.StateV3Buffered
 	stateWriter state.StateWriter
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
@@ -104,7 +104,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
-func (rw *Worker) ResetState(rs *state.StateV3, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
+func (rw *Worker) ResetState(rs *state.StateV3Buffered, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
 	rw.rs = rs
 	if rw.background {
 		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
@@ -115,7 +115,7 @@ func (rw *Worker) ResetState(rs *state.StateV3, stateWriter state.StateWriter, a
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		rw.stateWriter = state.NewStateWriterV3(rs, accumulator)
+		rw.stateWriter = state.NewStateWriterV3(rs.StateV3, accumulator)
 	}
 }
 
@@ -177,9 +177,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.IsHistoric() && rw.historyMode {
 		if rw.background {
-			rw.SetReader(state.NewReaderParallelV3(rw.rs.Domains()))
+			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderParallelV3(rw.rs.Domains())))
 		} else {
-			rw.SetReader(state.NewReaderV3(rw.rs.Domains()))
+			rw.SetReader(state.NewBufferedReader(rw.rs, state.NewReaderV3(rw.rs.Domains())))
 		}
 	}
 	if rw.background && rw.chainTx == nil {
@@ -219,7 +219,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 }
 
 func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB,
-	rs *state.StateV3, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
+	rs *state.StateV3Buffered, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 

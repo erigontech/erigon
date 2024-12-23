@@ -207,7 +207,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.logSize = 0
 	sdb.versionMap = nil
 	sdb.versionedReads = nil
-	sdb.versionedReads = nil
+	sdb.versionedWrites = nil
 	sdb.dep = -1
 }
 
@@ -295,13 +295,9 @@ func (sdb *IntraBlockState) Empty(addr libcommon.Address) (bool, error) {
 // GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetBalance(addr libcommon.Address) (*uint256.Int, error) {
-	return versionedRead(sdb, SubpathKey(addr, BalancePath), u256.Num0, func(s *IntraBlockState) (*uint256.Int, error) {
-		stateObject, err := s.getStateObject(addr)
-		if err != nil {
-			return nil, err
-		}
-		if stateObject != nil && !stateObject.deleted {
-			return stateObject.Balance(), nil
+	return versionedRead(sdb, SubpathKey(addr, BalancePath), u256.Num0, func(s *stateObject) (*uint256.Int, error) {
+		if s != nil && !s.deleted {
+			return s.Balance(), nil
 		}
 		return u256.Num0, nil
 	})
@@ -309,13 +305,9 @@ func (sdb *IntraBlockState) GetBalance(addr libcommon.Address) (*uint256.Int, er
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) (uint64, error) {
-	return versionedRead(sdb, SubpathKey(addr, NoncePath), 0, func(s *IntraBlockState) (uint64, error) {
-		stateObject, err := s.getStateObject(addr)
-		if err != nil {
-			return 0, err
-		}
-		if stateObject != nil && !stateObject.deleted {
-			return stateObject.Nonce(), nil
+	return versionedRead(sdb, SubpathKey(addr, NoncePath), 0, func(s *stateObject) (uint64, error) {
+		if s != nil && !s.deleted {
+			return s.Nonce(), nil
 		}
 		return 0, nil
 	})
@@ -328,19 +320,15 @@ func (sdb *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr libcommon.Address) ([]byte, error) {
-	return versionedRead(sdb, SubpathKey(addr, CodePath), nil, func(s *IntraBlockState) ([]byte, error) {
-		stateObject, err := s.getStateObject(addr)
-		if err != nil {
-			return nil, err
-		}
-		if stateObject != nil && !stateObject.deleted {
-			if s.trace {
-				code, _ := stateObject.Code()
+	return versionedRead(sdb, SubpathKey(addr, CodePath), nil, func(s *stateObject) ([]byte, error) {
+		if s != nil && !s.deleted {
+			if sdb.trace {
+				code, _ := s.Code()
 				fmt.Printf("GetCode %x, returned %d\n", addr, len(code))
 			}
-			return stateObject.Code()
+			return s.Code()
 		}
-		if s.trace {
+		if sdb.trace {
 			fmt.Printf("GetCode %x, returned nil\n", addr)
 		}
 		return nil, nil
@@ -349,18 +337,14 @@ func (sdb *IntraBlockState) GetCode(addr libcommon.Address) ([]byte, error) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) (int, error) {
-	return versionedRead(sdb, SubpathKey(addr, CodePath), 0, func(s *IntraBlockState) (int, error) {
-		stateObject, err := s.getStateObject(addr)
-		if err != nil {
-			return 0, err
-		}
-		if stateObject == nil || stateObject.deleted {
+	return versionedRead(sdb, SubpathKey(addr, CodePath), 0, func(s *stateObject) (int, error) {
+		if s == nil || s.deleted {
 			return 0, nil
 		}
-		if stateObject.code != nil {
-			return len(stateObject.code), nil
+		if s.code != nil {
+			return len(s.code), nil
 		}
-		l, err := s.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation)
+		l, err := sdb.stateReader.ReadAccountCodeSize(addr, s.data.Incarnation)
 		if err != nil {
 			return l, err
 		}
@@ -370,15 +354,11 @@ func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) (int, error) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) (libcommon.Hash, error) {
-	return versionedRead(sdb, SubpathKey(addr, CodePath), libcommon.Hash{}, func(s *IntraBlockState) (libcommon.Hash, error) {
-		stateObject, err := s.getStateObject(addr)
-		if err != nil {
-			return libcommon.Hash{}, err
-		}
-		if stateObject == nil || stateObject.deleted {
+	return versionedRead(sdb, SubpathKey(addr, CodePath), libcommon.Hash{}, func(s *stateObject) (libcommon.Hash, error) {
+		if s == nil || s.deleted {
 			return libcommon.Hash{}, nil
 		}
-		return stateObject.data.CodeHash, nil
+		return s.data.CodeHash, nil
 	})
 }
 
@@ -442,13 +422,9 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (lib
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error {
-	_, err := versionedRead(sdb, StateKey(addr, *key), nil, func(s *IntraBlockState) (*uint256.Int, error) {
-		stateObject, err := s.getStateObject(addr)
-		if err != nil {
-			return nil, err
-		}
-		if stateObject != nil && !stateObject.deleted {
-			stateObject.GetState(key, value)
+	_, err := versionedRead(sdb, StateKey(addr, *key), nil, func(s *stateObject) (*uint256.Int, error) {
+		if s != nil && !s.deleted {
+			s.GetState(key, value)
 		} else {
 			value.Clear()
 		}
@@ -460,13 +436,9 @@ func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error {
-	_, err := versionedRead(sdb, StateKey(addr, *key), nil, func(s *IntraBlockState) (*uint256.Int, error) {
-		stateObject, err := s.getStateObject(addr)
-		if err != nil {
-			return value, err
-		}
-		if stateObject != nil && !stateObject.deleted {
-			stateObject.GetCommittedState(key, value)
+	_, err := versionedRead(sdb, StateKey(addr, *key), nil, func(s *stateObject) (*uint256.Int, error) {
+		if s != nil && !s.deleted {
+			s.GetCommittedState(key, value)
 		} else {
 			value.Clear()
 		}
@@ -476,21 +448,17 @@ func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libco
 }
 
 func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) (bool, error) {
-	return versionedRead(sdb, SubpathKey(addr, SelfDestructPath), false, func(s *IntraBlockState) (bool, error) {
-		stateObject, err := s.getStateObject(addr)
-		if err != nil {
-			return false, err
-		}
-		if stateObject == nil {
+	return versionedRead(sdb, SubpathKey(addr, SelfDestructPath), false, func(s *stateObject) (bool, error) {
+		if s == nil {
 			return false, nil
 		}
-		if stateObject.deleted {
+		if s.deleted {
 			return false, nil
 		}
-		if stateObject.createdContract {
+		if s.createdContract {
 			return false, nil
 		}
-		return stateObject.selfdestructed, nil
+		return s.selfdestructed, nil
 	})
 }
 
@@ -764,34 +732,34 @@ func (sdb *IntraBlockState) GetTransientState(addr libcommon.Address, key libcom
 }
 
 func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject, error) {
-	return versionedRead(sdb, AddressKey(addr), nil, func(s *IntraBlockState) (*stateObject, error) {
+	return versionedRead(sdb, AddressKey(addr), nil, func(s *stateObject) (*stateObject, error) {
 		// Prefer 'live' objects.
-		if obj := s.stateObjects[addr]; obj != nil {
-			return obj, nil
+		if s != nil {
+			return s, nil
 		}
 
 		// Load the object from the database.
-		if _, ok := s.nilAccounts[addr]; ok {
-			if bi, ok := s.balanceInc[addr]; ok && !bi.transferred && s.versionMap == nil {
-				return s.createObject(addr, nil), nil
+		if _, ok := sdb.nilAccounts[addr]; ok {
+			if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
+				return sdb.createObject(addr, nil), nil
 			}
 			return nil, nil
 		}
-		account, err := s.stateReader.ReadAccountData(addr)
+		account, err := sdb.stateReader.ReadAccountData(addr)
 		if err != nil {
 			return nil, err
 		}
 		if account == nil {
-			s.nilAccounts[addr] = struct{}{}
-			if bi, ok := s.balanceInc[addr]; ok && !bi.transferred && s.versionMap == nil {
-				return s.createObject(addr, nil), nil
+			sdb.nilAccounts[addr] = struct{}{}
+			if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
+				return sdb.createObject(addr, nil), nil
 			}
 			return nil, nil
 		}
 
 		// Insert into the live set.
 		obj := newObject(sdb, addr, account, account)
-		s.setStateObject(addr, obj)
+		sdb.setStateObject(addr, obj)
 		return obj, nil
 	})
 }
@@ -1206,19 +1174,19 @@ func (s *IntraBlockState) versionWritten(k VersionKey) {
 		s.versionedWrites[k] = VersionedWrite{
 			Path: k,
 			V:    s.Version(),
-			Val:  s,
+			Val:  s.stateObjects[k.GetAddress()],
 		}
 	}
 }
 
-func (sdb *IntraBlockState) hasVersionedWrite(k VersionKey) bool {
+func (sdb *IntraBlockState) versionedWrite(k VersionKey) (VersionedWrite, bool) {
 	if sdb.versionMap == nil || sdb.versionedWrites == nil {
-		return false
+		return VersionedWrite{}, false
 	}
 
-	_, ok := sdb.versionedWrites[k]
+	v, ok := sdb.versionedWrites[k]
 
-	return ok
+	return v, ok
 }
 
 // recordWritten checks whether a state object is already present in the current MV writeMap.
@@ -1231,7 +1199,7 @@ func (s *IntraBlockState) recordWritten(object *stateObject) *stateObject {
 
 	addrKey := AddressKey(object.Address())
 
-	if s.hasVersionedWrite(addrKey) {
+	if _, ok := s.versionedWrite(addrKey); ok {
 		return object
 	}
 
@@ -1298,56 +1266,34 @@ func (s *IntraBlockState) FlushVersionedWrites() {
 func (s *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 	for i := range writes {
 		path := writes[i].Path
-		sr := writes[i].Val.(*IntraBlockState)
-
+		so := writes[i].Val.(*stateObject)
 		addr := path.GetAddress()
 
-		so, err := sr.getStateObject(addr)
-
-		if err != nil {
-			return err
-		}
-
 		if so != nil {
-			i, err := sr.GetIncarnation(addr)
-			if err != nil {
-				return err
-			}
+			i := so.data.Incarnation
 			s.SetIncarnation(addr, i)
-	
+
 			if path.IsState() {
 				stateKey := path.GetStateKey()
 				var state uint256.Int
-				sr.GetState(addr, &stateKey, &state)
+				so.GetState(&stateKey, &state)
 				s.SetState(addr, &stateKey, state)
 			} else if path.IsAddress() {
 				continue
 			} else {
 				switch path.GetSubpath() {
 				case BalancePath:
-					b, err := sr.GetBalance(addr)
-					if err != nil {
-						return err
-					}
-					s.SetBalance(addr, b, writes[i].Reason)
+					s.SetBalance(addr, so.Balance(), writes[i].Reason)
 				case NoncePath:
-					n, err := sr.GetNonce(addr)
-					if err != nil {
-						return err
-					}
-					s.SetNonce(addr, n)
+					s.SetNonce(addr, so.Nonce())
 				case CodePath:
-					c, err := sr.GetCode(addr)
+					c, err := so.Code()
 					if err != nil {
 						return err
 					}
 					s.SetCode(addr, c)
 				case SelfDestructPath:
-					stateObject, err := sr.getStateObject(addr)
-					if err != nil {
-						return err
-					}
-					if stateObject != nil && stateObject.deleted {
+					if so.deleted {
 						s.Selfdestruct(addr)
 					}
 				default:

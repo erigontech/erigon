@@ -307,7 +307,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewStateV3(doms, logger)
+	rs := state.NewStateV3Buffered(state.NewStateV3(doms, logger))
 
 	////TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
@@ -383,11 +383,12 @@ func ExecV3(ctx context.Context,
 			progress:                 progress,
 		}
 
-		executorCancel := pe.run(ctx, maxTxNum)
+		executorResults := make(chan *blockResult, 100)
+		executorCancel := pe.run(ctx, executorResults)
 		defer executorCancel()
 
 		defer func() {
-			processed.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, pe.outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			processed.Log("Done", executor.readState().StateV3, nil, pe.rws, 0 /*txCount - TODO*/, logGas, pe.outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = pe
@@ -414,7 +415,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			processed.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, se.outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			processed.Log("Done", executor.readState().StateV3, nil, nil, se.txCount, logGas, se.outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = se
@@ -657,7 +658,7 @@ Loop:
 				}
 
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState(), nil, nil, count, logGas, executor.(*serialExecutor).outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+				progress.Log("", executor.readState().StateV3, nil, nil, count, logGas, executor.(*serialExecutor).outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {

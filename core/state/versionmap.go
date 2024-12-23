@@ -321,8 +321,8 @@ func ValidateVersion(txIdx int, lastInputOutput *VersionedIO, versionedData *Ver
 		mvResult := versionedData.Read(rd.Path, txIdx)
 		switch mvResult.Status() {
 		case MVReadResultDone:
-			// Having a write record for a path in VersionedMap doesn't necessarily mean there is a conflict, because VersionedMap
-			// is a superset of the actual write set.
+			// Having a write record for a path in VersionedMap doesn't necessarily mean there is a conflict, 
+			// because VersionedMap is a superset of the actual write set.
 			// Check if the write record is actually in write set. If not, skip the key.
 			// if mvResult.depIdx >= 0 && !lastInputOutput.HasWritten(mvResult.depIdx, rd.Path) {
 			// 	continue

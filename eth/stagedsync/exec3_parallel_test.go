@@ -96,7 +96,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	engine consensus.Engine,
 	genesis *types.Genesis,
 	gasPool *core.GasPool,
-	rs *state.StateV3,
+	rs *state.StateV3Buffered,
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter,
 	stateReader state.ResettableStateReader,
@@ -186,8 +186,6 @@ func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) []state.Versione
 
 	return reads
 }
-
-func (t *testExecTask) settle() {}
 
 func (t *testExecTask) Sender() common.Address {
 	return t.sender
@@ -488,7 +486,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 				db:          db,
 			},
 			doms:           domains,
-			rs:             state.NewStateV3(domains, logger),
+			rs:             state.NewStateV3Buffered(state.NewStateV3(domains, logger)),
 			outputTxNum:    &atomic.Uint64{},
 			outputBlockNum: stages.SyncMetrics[stages.Execution],
 			logger:         logger,
@@ -496,11 +494,12 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorCancel := pe.run(context.Background(), uint64(len(tasks)))
+	blockResults := make(chan *blockResult, 100)
+	executorCancel := pe.run(context.Background(), blockResults)
 	defer executorCancel()
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(t, pe, tasks, false, validation, metadata)
+	_, err = executeParallelWithCheck(t, pe, tasks, blockResults, false, validation, metadata)
 
 	assert.NoError(t, err, "error occur during parallel execution")
 
@@ -528,7 +527,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 type propertyCheck func(*parallelExecutor) error
 
-func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
+func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.Task, results chan *blockResult, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
 	}
@@ -539,17 +538,15 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 		return
 	}
 
-	pe.wait(context.Background())
+	defer pe.wait(context.Background())
+
+	blockResult := <-results
 
 	if check != nil {
 		err = check(pe)
 	}
 
-	if blockStatus, ok := pe.blockStatus[1]; ok {
-		return blockStatus.result, nil
-	}
-
-	return
+	return blockResult, err
 }
 
 func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
@@ -586,7 +583,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 				db:          db,
 			},
 			doms:           domains,
-			rs:             state.NewStateV3(domains, logger),
+			rs:             state.NewStateV3Buffered(state.NewStateV3(domains, logger)),
 			outputTxNum:    &atomic.Uint64{},
 			outputBlockNum: stages.SyncMetrics[stages.Execution],
 			logger:         logger,
@@ -594,10 +591,11 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorCancel := pe.run(context.Background(), uint64(len(tasks)))
+	blockResults := make(chan *blockResult, 100)
+	executorCancel := pe.run(context.Background(), blockResults)
 	defer executorCancel()
 
-	res, err := executeParallelWithCheck(t, pe, tasks, true, validation, false)
+	res, err := executeParallelWithCheck(t, pe, tasks, blockResults, true, validation, false)
 
 	assert.NoError(t, err, "error occur during parallel execution")
 

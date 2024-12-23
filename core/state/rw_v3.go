@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/holiman/uint256"
 
@@ -289,9 +290,29 @@ func (rs *StateV3) ReadsValid(readLists map[string]*state.KvList) bool {
 	return rs.domains.ReadsValid(readLists)
 }
 
+type bufferedAccount struct {
+	data    *accounts.Account
+	code    []byte
+	storage map[libcommon.Hash]uint256.Int
+}
+
+type StateV3Buffered struct {
+	*StateV3
+	accounts      map[common.Address]*bufferedAccount
+	accountsMutex sync.RWMutex
+}
+
+func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
+	bufferedState := &StateV3Buffered{
+		StateV3:  state,
+		accounts: map[common.Address]*bufferedAccount{},
+	}
+	return bufferedState
+}
+
 // StateWriterBufferedV3 - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type StateWriterBufferedV3 struct {
-	rs           *StateV3
+	rs           *StateV3Buffered
 	trace        bool
 	writeLists   map[string]*state.KvList
 	accountPrevs map[string][]byte
@@ -301,12 +322,12 @@ type StateWriterBufferedV3 struct {
 	accumulator  *shards.Accumulator
 }
 
-func NewStateWriterBufferedV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
+func NewStateWriterBufferedV3(rs *StateV3Buffered, accumulator *shards.Accumulator) *StateWriterBufferedV3 {
 	return &StateWriterBufferedV3{
 		rs:          rs,
 		writeLists:  newWriteList(),
 		accumulator: accumulator,
-		//trace:      true,
+		trace:       true,
 	}
 }
 
@@ -353,6 +374,15 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 	}
 	w.writeLists[kv.AccountsDomain.String()].Push(string(address[:]), value)
 
+	w.rs.accountsMutex.Lock()
+	obj, ok := w.rs.accounts[address]
+	if !ok {
+		obj = &bufferedAccount{}
+	}
+	obj.data = account
+	w.rs.accounts[address] = obj
+	w.rs.accountsMutex.Unlock()
+
 	return nil
 }
 
@@ -364,6 +394,16 @@ func (w *StateWriterBufferedV3) UpdateAccountCode(address common.Address, incarn
 		w.accumulator.ChangeCode(address, incarnation, code)
 	}
 	w.writeLists[kv.CodeDomain.String()].Push(string(address[:]), code)
+
+	w.rs.accountsMutex.Lock()
+	obj, ok := w.rs.accounts[address]
+	if !ok {
+		obj = &bufferedAccount{}
+	}
+	obj.code = code
+	w.rs.accounts[address] = obj
+	w.rs.accountsMutex.Unlock()
+
 	return nil
 }
 
@@ -375,6 +415,9 @@ func (w *StateWriterBufferedV3) DeleteAccount(address common.Address, original *
 		w.accumulator.DeleteAccount(address)
 	}
 	w.writeLists[kv.AccountsDomain.String()].Push(string(address.Bytes()), nil)
+	w.rs.accountsMutex.Lock()
+	delete(w.rs.accounts, address)
+	w.rs.accountsMutex.Unlock()
 	return nil
 }
 
@@ -392,6 +435,20 @@ func (w *StateWriterBufferedV3) WriteAccountStorage(address common.Address, inca
 		v := value.Bytes()
 		w.accumulator.ChangeStorage(address, incarnation, k, v)
 	}
+	w.rs.accountsMutex.Lock()
+	obj, ok := w.rs.accounts[address]
+	if !ok {
+		obj = &bufferedAccount{}
+	}
+	if obj.storage == nil {
+		obj.storage = map[common.Hash]uint256.Int{
+			*key: *value,
+		}
+	} else {
+		obj.storage[*key] = *value
+	}
+	w.rs.accounts[address] = obj
+	w.rs.accountsMutex.Unlock()
 	return nil
 }
 
@@ -740,6 +797,109 @@ func (r *ReaderParallelV3) ReadAccountIncarnation(address common.Address) (uint6
 	return 0, nil
 }
 
+type bufferedReader struct {
+	reader        ResettableStateReader
+	bufferedState *StateV3Buffered
+}
+
+func NewBufferedReader(bufferedState *StateV3Buffered, reader ResettableStateReader) ResettableStateReader {
+	return &bufferedReader{reader: reader, bufferedState: bufferedState}
+}
+
+func (r *bufferedReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	r.bufferedState.accountsMutex.RLock()
+	so, ok := r.bufferedState.accounts[address]
+	r.bufferedState.accountsMutex.RUnlock()
+
+	if ok && so.data != nil {
+		return so.data, nil
+	}
+
+	return r.reader.ReadAccountData(address)
+}
+
+func (r *bufferedReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	r.bufferedState.accountsMutex.RLock()
+	so, ok := r.bufferedState.accounts[address]
+	r.bufferedState.accountsMutex.RUnlock()
+
+	if ok && so.data != nil {
+		return so.data, nil
+	}
+
+	return r.reader.ReadAccountDataForDebug(address)
+}
+
+func (r *bufferedReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	r.bufferedState.accountsMutex.RLock()
+	so, ok := r.bufferedState.accounts[address]
+	r.bufferedState.accountsMutex.RUnlock()
+
+	if ok && so.storage != nil {
+		if value, ok := so.storage[*key]; ok {
+			return value.Bytes(), nil
+		}
+	}
+
+	return r.reader.ReadAccountStorage(address, incarnation, key)
+}
+
+func (r *bufferedReader) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+	r.bufferedState.accountsMutex.RLock()
+	so, ok := r.bufferedState.accounts[address]
+	r.bufferedState.accountsMutex.RUnlock()
+
+	if ok && len(so.code) != 0 {
+		return so.code, nil
+	}
+
+	return r.reader.ReadAccountCode(address, incarnation)
+}
+
+func (r *bufferedReader) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+	r.bufferedState.accountsMutex.RLock()
+	so, ok := r.bufferedState.accounts[address]
+	r.bufferedState.accountsMutex.RUnlock()
+
+	if ok && len(so.code) != 0 {
+		return len(so.code), nil
+	}
+
+	return r.reader.ReadAccountCodeSize(address, incarnation)
+}
+
+func (r *bufferedReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	r.bufferedState.accountsMutex.RLock()
+	so, ok := r.bufferedState.accounts[address]
+	r.bufferedState.accountsMutex.RUnlock()
+
+	if ok && so.data != nil {
+		return so.data.Incarnation, nil
+	}
+
+	return r.reader.ReadAccountIncarnation(address)
+}
+
+func (r *bufferedReader) SetTx(tx kv.Tx) {
+	r.reader.SetTx(tx)
+}
+
+func (r *bufferedReader) SetTxNum(txn uint64) {
+	r.reader.SetTxNum(txn)
+}
+
+func (r *bufferedReader) DiscardReadList() {
+	r.reader.DiscardReadList()
+}
+
+func (r *bufferedReader) ReadSet() map[string]*state.KvList {
+	return r.reader.ReadSet()
+}
+
+func (r *bufferedReader) ResetReadSet() {
+	r.reader.ResetReadSet()
+}
+
 type WriteLists map[string]*state.KvList
 
 func (v WriteLists) Return() {
@@ -747,6 +907,7 @@ func (v WriteLists) Return() {
 }
 
 var writeListPool = sync.Pool{
+
 	New: func() any {
 		return WriteLists{
 			kv.AccountsDomain.String(): {},

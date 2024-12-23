@@ -265,6 +265,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
+			st.state.GetNonce(st.msg.From())
 			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
 				st.msg.From().Hex(), msgNonce, stNonce)
 		} else if stNonce > msgNonce {

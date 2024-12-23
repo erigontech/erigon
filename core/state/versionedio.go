@@ -34,10 +34,10 @@ type VersionedReads []VersionedRead
 type VersionedWrites []VersionedWrite
 
 // hasNewWrite: returns true if the current set has a new write compared to the input
-func (txo VersionedWrites) HasNewWrite(cmpSet []VersionedWrite) bool {
-	if len(txo) == 0 {
+func (writes VersionedWrites) HasNewWrite(cmpSet []VersionedWrite) bool {
+	if len(writes) == 0 {
 		return false
-	} else if len(cmpSet) == 0 || len(txo) > len(cmpSet) {
+	} else if len(cmpSet) == 0 || len(writes) > len(cmpSet) {
 		return true
 	}
 
@@ -47,7 +47,7 @@ func (txo VersionedWrites) HasNewWrite(cmpSet []VersionedWrite) bool {
 		cmpMap[cmpSet[i].Path] = true
 	}
 
-	for _, v := range txo {
+	for _, v := range writes {
 		if !cmpMap[v.Path] {
 			return true
 		}
@@ -56,91 +56,13 @@ func (txo VersionedWrites) HasNewWrite(cmpSet []VersionedWrite) bool {
 	return false
 }
 
-func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStorage func(sdb *IntraBlockState) (T, error)) (T, error) {
-	if s.versionMap == nil {
-		return readStorage(s)
-	}
-
-	if s.hasVersionedWrite(k) {
-		return readStorage(s)
-	}
-
-	if !k.IsAddress() {
-		// If we are reading subpath from a deleted account, return default value instead of reading from MVHashmap
-		addr := k.GetAddress()
-		stateObject, err := s.getStateObject(addr)
-		if err != nil {
-			return defaultV, err
-		}
-		if stateObject == nil || stateObject.deleted {
-			readStorage(s)
-			return defaultV, nil
-		}
-	}
-
-	res := s.versionMap.Read(k, s.txIndex)
-
-	var v T
-	var err error
-	var vr = VersionedRead{
-		V: Version{
-			TxIndex:     res.DepIdx(),
-			Incarnation: res.Incarnation(),
-		},
-		Path: k,
-	}
-
-	switch res.Status() {
-	case MVReadResultDone:
-		{
-			v, err = readStorage(res.Value().(*IntraBlockState))
-			vr.Kind = ReadKindMap
-		}
-	case MVReadResultDependency:
-		{
-			s.dep = res.DepIdx()
-			panic("Found denpendency")
-		}
-	case MVReadResultNone:
-		{
-			v, err = readStorage(s)
-			vr.Kind = ReadKindStorage
-		}
-	default:
-		return defaultV, nil
-	}
-
-	if err != nil {
-		return defaultV, err
-	}
-
-	if s.versionedReads == nil {
-		s.versionedReads = map[VersionKey]VersionedRead{}
-	}
-
-	// TODO: I assume we don't want to overwrite an existing read because this could - for example - change a storage
-	//  read to map if the same value is read multiple times.
-	if _, ok := s.versionedReads[k]; !ok {
-		s.versionedReads[k] = vr
-	}
-
-	return v, nil
-}
-
-func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stateWriter StateWriter) error {
+func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObject, error) {
 	stateObjects := map[libcommon.Address][]*stateObject{}
 
 	for i := range writes {
 		path := writes[i].Path
-		sr := writes[i].Val.(*IntraBlockState)
-
+		so := writes[i].Val.(*stateObject)
 		addr := path.GetAddress()
-
-		so, err := sr.getStateObject(addr)
-
-		if err != nil {
-			return err
-		}
 
 		if so != nil {
 			prevs, ok := stateObjects[addr]
@@ -195,12 +117,12 @@ func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stat
 				case CodePath:
 					c, err := so.Code()
 					if err != nil {
-						return err
+						return nil, err
 					}
 					if len(prevs) > 0 {
 						prev, err := prevs[len(prevs)-1].Code()
 						if err != nil {
-							return err
+							return nil, err
 						}
 						if bytes.Equal(prev, c) {
 							continue
@@ -219,6 +141,87 @@ func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stat
 				stateObjects[addr] = append(prevs, so)
 			}
 		}
+
+	}
+	return stateObjects, nil
+}
+
+func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStorage func(sdb *stateObject) (T, error)) (T, error) {
+	if s.versionMap == nil {
+		so := s.stateObjects[k.GetAddress()]
+		if !k.IsAddress() {
+			var err error
+			if so, err = s.getStateObject(k.GetAddress()); err != nil {
+				return defaultV, err
+			}
+		}
+		return readStorage(so)
+	}
+
+	if v, ok := s.versionedWrite(k); ok {
+		return readStorage(v.Val.(*stateObject))
+	}
+
+	res := s.versionMap.Read(k, s.txIndex)
+
+	var v T
+	var err error
+	var vr = VersionedRead{
+		V: Version{
+			TxIndex:     res.DepIdx(),
+			Incarnation: res.Incarnation(),
+		},
+		Path: k,
+	}
+
+	switch res.Status() {
+	case MVReadResultDone:
+		{
+			v, err = readStorage(res.Value().(*stateObject))
+			vr.Kind = ReadKindMap
+		}
+	case MVReadResultDependency:
+		{
+			s.dep = res.DepIdx()
+			panic("Found denpendency")
+		}
+	case MVReadResultNone:
+		{
+			var so *stateObject
+			if !k.IsAddress() {
+				so, err = s.getStateObject(k.GetAddress())
+			}
+			if err == nil {
+				v, err = readStorage(so)
+			}
+			vr.Kind = ReadKindStorage
+		}
+	default:
+		return defaultV, nil
+	}
+
+	if err != nil {
+		return defaultV, err
+	}
+
+	if s.versionedReads == nil {
+		s.versionedReads = map[VersionKey]VersionedRead{}
+	}
+
+	// TODO: I assume we don't want to overwrite an existing read because this could - for example - change a storage
+	//  read to map if the same value is read multiple times.
+	if _, ok := s.versionedReads[k]; !ok {
+		s.versionedReads[k] = vr
+	}
+
+	return v, nil
+}
+
+func ApplyVersionedWrites(chainRules *chain.Rules, writes []VersionedWrite, stateWriter StateWriter) error {
+	stateObjects, err := VersionedWrites(writes).stateObjects()
+
+	if err != nil {
+		return err
 	}
 
 	for addr, sos := range stateObjects {
