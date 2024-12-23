@@ -188,9 +188,6 @@ func (b *CachingBeaconState) BaseReward(index uint64) (uint64, error) {
 // It grabs values from cache as needed
 func (b *CachingBeaconState) SyncRewards() (proposerReward, participantReward uint64, err error) {
 	activeBalance := b.GetTotalActiveBalance()
-	if err != nil {
-		return 0, 0, err
-	}
 	totalActiveIncrements := activeBalance / b.BeaconConfig().EffectiveBalanceIncrement
 	baseRewardPerInc := b.BaseRewardPerIncrement()
 	totalBaseRewards := baseRewardPerInc * totalActiveIncrements

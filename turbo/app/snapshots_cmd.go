@@ -1254,7 +1254,7 @@ func doCompress(cliCtx *cli.Context) error {
 		default:
 		}
 	}
-	if err != nil && !errors.Is(err, io.EOF) {
+	if !errors.Is(err, io.EOF) {
 		return err
 	}
 	if err := c.Compress(); err != nil {

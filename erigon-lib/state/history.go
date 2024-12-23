@@ -93,7 +93,6 @@ type histCfg struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool
 	snapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
-	withLocalityIndex  bool
 	historyDisabled    bool // skip all write operations to this History (even in DB)
 
 	indexList     idxList

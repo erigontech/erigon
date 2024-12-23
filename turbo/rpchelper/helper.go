@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	state2 "github.com/erigontech/erigon-lib/state"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -161,8 +162,29 @@ func CreateHistoryStateReader(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReade
 	if err != nil {
 		return nil, err
 	}
-	r.SetTxNum(uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1))
+	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
+	earliestTxNum := r.StateHistoryStartFrom()
+	if txNum < earliestTxNum {
+		// data available only starting from earliestTxNum, throw error to avoid unintended
+		// consequences of using this StateReader
+		return r, state.PrunedError
+	}
+	r.SetTxNum(txNum)
 	return r, nil
+}
+
+func NewLatestDomainStateReader(sd *state2.SharedDomains) state.StateReader {
+	return state.NewReaderV3(sd)
+}
+
+func NewLatestDomainStateWriter(domains *state2.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
+	minTxNum, err := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(context.Background(), blockReader)).Min(domains.Tx(), blockNum)
+	if err != nil {
+		panic(err)
+	}
+	domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1))
+	return state.NewWriterV4(domains)
+
 }
 
 func NewLatestStateReader(tx kv.Tx) state.StateReader {

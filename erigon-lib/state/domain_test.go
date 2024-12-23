@@ -43,6 +43,7 @@ import (
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/order"
@@ -97,8 +98,8 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	cfg := domainCfg{
 		name: kv.AccountsDomain, valuesTable: valsTable,
 		hist: histCfg{
-			valuesTable:       historyValsTable,
-			withLocalityIndex: false, compression: seg.CompressNone, historyLargeValues: true,
+			valuesTable: historyValsTable,
+			compression: seg.CompressNone, historyLargeValues: true,
 
 			iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
 				aggregationStep: aggStep, keysTable: historyKeysTable, valuesTable: indexTable},
@@ -518,7 +519,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		require.NoError(t, err)
 	}
 	var r DomainRanges
-	maxSpan := d.aggregationStep * StepsInColdFile
+	maxSpan := d.aggregationStep * config3.StepsInFrozenFile
 
 	for {
 		if stop := func() bool {
@@ -570,7 +571,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune
 		dc.Close()
 	}
 
-	maxSpan := d.aggregationStep * StepsInColdFile
+	maxSpan := d.aggregationStep * config3.StepsInFrozenFile
 	for {
 		dc := d.BeginFilesRo()
 		r := dc.findMergeRange(dc.files.EndTxNum(), maxSpan)
@@ -616,6 +617,61 @@ func TestDomain_ScanFiles(t *testing.T) {
 
 	// Check the history
 	checkHistory(t, db, d, txs)
+}
+
+func TestDomainRoTx_CursorParentCheck(t *testing.T) {
+	asserts = true
+	defer func() { asserts = false }()
+
+	logger := log.New()
+	db, d := testDbAndDomain(t, logger)
+	ctx, require := context.Background(), require.New(t)
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	val := []byte("value1")
+	writer.SetTxNum(1)
+	writer.addValue([]byte("key1"), nil, val)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(err)
+	err = tx.Commit()
+	require.NoError(err)
+
+	tx, err = db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	_, _, _, err = dc.GetLatest([]byte("key1"), tx)
+	require.NoError(err)
+
+	cursor, err := dc.valsCursor(tx)
+	require.NoError(err)
+	require.NotNil(cursor)
+	tx.Rollback()
+
+	otherTx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer otherTx.Rollback()
+	//dc.valsC.Close()
+	//dc.valsC = nil
+
+	defer func() {
+		r := recover()
+		require.NotNil(r)
+		//re := r.(error)
+		//fmt.Println(re)
+		//require.ErrorIs(re, sdTxImmutabilityInvariant)
+	}()
+
+	_, _, _, err = dc.GetLatest([]byte("key1"), otherTx)
+	require.NoError(err)
 }
 
 func TestDomain_Delete(t *testing.T) {
@@ -715,7 +771,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
-	maxFrozenFiles := (txCount / dom.aggregationStep) / StepsInColdFile
+	maxFrozenFiles := (txCount / dom.aggregationStep) / config3.StepsInFrozenFile
 
 	ctx := context.Background()
 	roTx, err := db.BeginRo(ctx)
@@ -1232,7 +1288,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 
 	var k [8]byte
 	var v [8]byte
-	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInColdFile
+	maxFrozenFiles := (txCount / d.aggregationStep) / config3.StepsInFrozenFile
 	prev := map[string]string{}
 
 	// key 0: only in frozen file 0

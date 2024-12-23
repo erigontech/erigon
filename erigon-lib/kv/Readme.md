@@ -29,7 +29,7 @@ open_cursor/seek/write_data_from_current_position/move_to_end/step_back/step_for
                   v                                      v
 +-----------------------------------+   +-----------------------------------+
 |       ethdb/kv_mdbx.go            |   |       ethdb/kv_remote.go          |
-|  (tg-specific MDBX implementaion) |   |   (tg-specific remote DB access)  |
+|  (tg-specific MDBX implementation) |   |   (tg-specific remote DB access)  |
 +-----------------------------------+   +-----------------------------------+
                   |                                      |
                   |                                      |
@@ -39,7 +39,7 @@ open_cursor/seek/write_data_from_current_position/move_to_end/step_back/step_for
 |         (Common KV interface. DB-friendly, disk-friendly, cpu-cache-friendly.                |
 |           Same app code can work with local or remote database.                              |
 |           Allows experiment with another database implementations.                           |
-|          Supports context.Context for cancelation. Any operation can return error)           |
+|          Supports context.Context for cancellation. Any operation can return error)           |
 +----------------------------------------------------------------------------------------------+
 
 Then:
@@ -62,7 +62,7 @@ kv_temporal.go
 
 - Methods db.Update, db.View - can be used to open and close short transaction.
 - Methods Begin/Commit/Rollback - for long transaction.
-- it's safe to call .Rollback() after .Commit(), multiple rollbacks are also safe. Common transaction patter:
+- it's safe to call .Rollback() after .Commit(), multiple rollbacks are also safe. Common transaction pattern:
 
 ```golang
 
