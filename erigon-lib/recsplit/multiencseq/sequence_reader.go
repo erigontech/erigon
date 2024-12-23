@@ -12,6 +12,10 @@ const (
 	PlainEliasFano   EncodingType = 0b0
 	SimpleEncoding   EncodingType = 0b10000000
 	RebasedEliasFano EncodingType = 0b10010000
+
+	PlainEliasFanoMask     byte = 0b10000000
+	SimpleEncodingMask     byte = 0b11110000
+	SimpleEncodingSizeMask byte = ^SimpleEncodingMask
 )
 
 // SequenceReader is used to read serialized number sequences.
@@ -35,18 +39,18 @@ func ReadMultiEncSeq(baseNum uint64, raw []byte) *SequenceReader {
 // from raw data
 func Count(baseNum uint64, data []byte) uint64 {
 	// plain elias fano (legacy)
-	if data[0]&0b10000000 == 0 {
+	if data[0]&PlainEliasFanoMask == 0 {
 		return eliasfano32.Count(data)
 	}
 
 	// rebased elias fano
-	if data[0] == 0x90 {
+	if EncodingType(data[0]) == RebasedEliasFano {
 		return eliasfano32.Count(data[1:])
 	}
 
 	// simple encoding
-	if data[0]&0b11110000 == 0b10000000 {
-		return uint64(data[0]&0b00001111) + 1
+	if EncodingType(data[0]&SimpleEncodingMask) == SimpleEncoding {
+		return uint64(data[0]&SimpleEncodingSizeMask) + 1
 	}
 
 	panic("unknown encoding")
@@ -100,21 +104,21 @@ func (s *SequenceReader) Count() uint64 {
 
 func (s *SequenceReader) Reset(baseNum uint64, raw []byte) {
 	// plain elias fano (legacy)
-	if raw[0]&0b10000000 == 0 {
+	if raw[0]&PlainEliasFanoMask == 0 {
 		s.currentEnc = PlainEliasFano
 		s.ref.Reset(0, raw)
 		return
 	}
 
 	// rebased elias fano
-	if raw[0] == 0x90 {
+	if EncodingType(raw[0]) == RebasedEliasFano {
 		s.currentEnc = RebasedEliasFano
 		s.ref.Reset(baseNum, raw[1:])
 		return
 	}
 
 	// simple encoding
-	if raw[0]&0b11110000 == 0b10000000 {
+	if EncodingType(raw[0]&SimpleEncodingMask) == SimpleEncoding {
 		s.currentEnc = SimpleEncoding
 		s.sseq.Reset(baseNum, raw[1:])
 		return
