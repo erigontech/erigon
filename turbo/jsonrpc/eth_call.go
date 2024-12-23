@@ -346,88 +346,119 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 // GetProof is partially implemented; no Storage proofs, and proofs must be for
 // blocks within maxGetProofRewindBlockCount blocks of the head.
 func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	return nil, errors.New("not supported by Erigon3")
-	/*
-		tx, err := api.db.BeginTemporalRo(ctx)
+	db := api.db
+	logger := api.logger
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer roTx.Rollback()
+
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := api.blockWithSenders(ctx, roTx, hash, blockNr)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	header := block.Header()
+
+	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	if err != nil {
+		return nil, err
+	}
+
+	if latestBlock < blockNr {
+		// shouldn't happen, but check anyway
+		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
+	}
+
+	engine, ok := api.engine().(consensus.Engine)
+	if !ok {
+		return nil, errors.New("engine is not consensus.Engine")
+	}
+
+	roTx2, err := db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer roTx2.Rollback()
+	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
+	defer txBatch2.Rollback()
+
+	// Prepare witness config
+	chainConfig, err := api.chainConfig(ctx, roTx2)
+	if err != nil {
+		return nil, fmt.Errorf("error loading chain config: %v", err)
+	}
+
+	// Unwind to blockNr
+	cfg := stagedsync.StageWitnessCfg(true, 0, chainConfig, engine, api._blockReader, api.dirs)
+	// only unwind if not latest block
+	if blockNr != latestBlock {
+		// the +1 is because stage state is blockNr+1
+		err = stagedsync.RewindStagesForWitness(txBatch2, blockNr+1, latestBlock, &cfg, false, ctx, logger)
 		if err != nil {
 			return nil, err
 		}
-		defer tx.Rollback()
+	}
 
-		blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
-		if err != nil {
-			return nil, err
-		}
+	txNumsReader := rawdbv3.TxNums
+	stateReader, err := rpchelper.CreateHistoryStateReader(txBatch2, txNumsReader, blockNr, 0, chainConfig.ChainName)
+	if err != nil {
+		return nil, err
+	}
 
-		header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNr)
-		if err != nil {
-			return nil, err
-		}
+	a, err := stateReader.ReadAccountData(address)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil {
+		a = &accounts.Account{}
+	}
+	rl := trie.NewRetainList(0)
+	pr, err := trie.NewProofRetainer(address, a, storageKeys, rl)
+	if err != nil {
+		return nil, err
+	}
 
-		latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
-		if err != nil {
-			return nil, err
-		}
+	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
+	patricieTrie := sdCtx.Trie()
+	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
+	}
 
-		if latestBlock < blockNr {
-			// shouldn't happen, but check anyway
-			return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
-		}
+	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
+	// so this is just to satisfy the current hex patricia trie api.
+	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
+	updates.TouchPlainKey(string(address.Bytes()), nil, updates.TouchAccount)
+	for _, storageKey := range storageKeys {
+		// the full storage key is concat(address, storageKey) which is 32+32 = 64 bytes
+		fullStorageKey := make([]byte, 64)
+		copy(fullStorageKey[:32], address.Bytes())
+		copy(fullStorageKey[32:], storageKey.Bytes())
+		updates.TouchPlainKey(string(fullStorageKey), nil, updates.TouchAccount)
+	}
 
-		rl := trie.NewRetainList(0)
-		var loader *trie.FlatDBTrieLoader
-		if blockNr < latestBlock {
-			if latestBlock-blockNr > uint64(api.MaxGetProofRewindBlockCount) {
-				return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", uint64(api.MaxGetProofRewindBlockCount), latestBlock)
-			}
-			batch := membatchwithdb.NewMemoryBatch(tx, api.dirs.Tmp, api.logger)
-			defer batch.Rollback()
-
-			unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
-			stageState := &stagedsync.StageState{BlockNumber: latestBlock}
-
-			hashStageCfg := stagedsync.StageHashStateCfg(nil, api.dirs, api.historyV3(batch))
-			if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx, api.logger); err != nil {
-				return nil, err
-			}
-
-			interHashStageCfg := stagedsync.StageTrieCfg(nil, false, false, false, api.dirs.Tmp, api._blockReader, nil, api.historyV3(batch), api._agg)
-			loader, err = stagedsync.UnwindIntermediateHashesForTrieLoader("eth_getProof", rl, unwindState, stageState, batch, interHashStageCfg, nil, nil, ctx.Done(), api.logger)
-			if err != nil {
-				return nil, err
-			}
-			tx = batch
-		} else {
-			loader = trie.NewFlatDBTrieLoader("eth_getProof", rl, nil, nil, false)
-		}
-
-		reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, "")
-		if err != nil {
-			return nil, err
-		}
-		a, err := reader.ReadAccountData(address)
-		if err != nil {
-			return nil, err
-		}
-		if a == nil {
-			a = &accounts.Account{}
-		}
-		pr, err := trie.NewProofRetainer(address, a, storageKeys, rl)
-		if err != nil {
-			return nil, err
-		}
-
-		loader.SetProofRetainer(pr)
-		root, err := loader.CalcTrieRoot(tx, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		if root != header.Root {
-			return nil, fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in proof implementation", root, header.Root)
-		}
-		return pr.ProofResult()
-	*/
+	hph.SetTrace(false) // disable tracing to avoid mixing with trace from witness computation
+	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
+	witnessTrie, _, err := hph.GenerateWitness(ctx, updates, nil /* codeReads */, header.Root[:], "computeWitness(eth_getProof)")
+	if err != nil {
+		return nil, err
+	}
+	_ = witnessTrie
+	return pr.ProofResult()
 }
 
 func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
