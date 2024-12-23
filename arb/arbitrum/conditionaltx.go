@@ -1,8 +1,10 @@
 package arbitrum
 
 import (
+	"bytes"
 	"context"
 	"errors"
+
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 
@@ -60,10 +62,10 @@ func SubmitConditionalTransaction(ctx context.Context, b *APIBackend, tx *types.
 	return tx.Hash(), nil
 }
 
-func SendConditionalTransactionRPC(ctx context.Context, rpc *rpc.Client, tx types.ArbTx, options *arbitrum_types.ConditionalOptions) error {
-	data, err := tx.MarshalBinary()
-	if err != nil {
+func SendConditionalTransactionRPC(ctx context.Context, rpc *rpc.Client, tx types.Transaction, options *arbitrum_types.ConditionalOptions) error {
+	buf := new(bytes.Buffer)
+	if err := tx.MarshalBinary(buf); err != nil {
 		return err
 	}
-	return rpc.CallContext(ctx, nil, "eth_sendRawTransactionConditional", hexutility.Encode(data), options)
+	return rpc.CallContext(ctx, nil, "eth_sendRawTransactionConditional", hexutility.Encode(buf.Bytes()), options)
 }
