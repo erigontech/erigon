@@ -171,7 +171,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
+	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New(), false)
 	if err != nil {
 		return err
 	}

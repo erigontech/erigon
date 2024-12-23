@@ -258,6 +258,8 @@ type Config struct {
 	SilkwormRpcLogDumpResponse   bool
 	SilkwormRpcNumWorkers        uint32
 	SilkwormRpcJsonCompatibility bool
+
+	ExperimentalEFOptimization bool
 }
 
 type Sync struct {
