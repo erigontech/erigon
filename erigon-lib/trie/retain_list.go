@@ -21,7 +21,6 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -124,17 +123,16 @@ func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys [
 	accHexKey := rl.AddKey(addrHash[:])
 
 	storageHexKeys := make([][]byte, len(storageKeys))
-	for i, sk := range storageKeys {
-		storageHash, err := libcommon.HashData(sk[:])
+	for i, storageKey := range storageKeys {
+		storageHash, err := libcommon.HashData(storageKey[:])
 		if err != nil {
 			return nil, err
 		}
 
-		var compactEncoded [72]byte
-		copy(compactEncoded[:32], addrHash[:])
-		binary.BigEndian.PutUint64(compactEncoded[32:40], a.Incarnation)
-		copy(compactEncoded[40:], storageHash[:])
-		storageHexKeys[i] = rl.AddKey(compactEncoded[:])
+		var compactEncodedStorageKey [64]byte
+		copy(compactEncodedStorageKey[:32], addrHash[:])
+		copy(compactEncodedStorageKey[32:], storageHash[:])
+		storageHexKeys[i] = rl.AddKey(compactEncodedStorageKey[:])
 	}
 
 	return &DefaultProofRetainer{
