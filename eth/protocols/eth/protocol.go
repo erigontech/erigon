@@ -157,7 +157,7 @@ type GetBlockHeadersPacket struct {
 	Reverse bool         // Query direction (false = rising towards latest, true = falling towards genesis)
 }
 
-// GetBlockHeadersPacket represents a block header query over eth/66
+// GetBlockHeadersPacket66 represents a block header query over eth/66
 type GetBlockHeadersPacket66 struct {
 	RequestId uint64
 	*GetBlockHeadersPacket
@@ -202,7 +202,7 @@ func (hn *HashOrNumber) DecodeRLP(s *rlp.Stream) error {
 // BlockHeadersPacket represents a block header response.
 type BlockHeadersPacket []*types.Header
 
-// BlockHeadersPacket represents a block header response over eth/66.
+// BlockHeadersPacket66 represents a block header response over eth/66.
 type BlockHeadersPacket66 struct {
 	RequestId uint64
 	BlockHeadersPacket
@@ -300,13 +300,13 @@ type BlockBodiesPacket []*types.Body
 // BlockRawBodiesPacket is the network packet for block content distribution.
 type BlockRawBodiesPacket []*types.RawBody
 
-// BlockBodiesPacket is the network packet for block content distribution over eth/66.
+// BlockBodiesPacket66 is the network packet for block content distribution over eth/66.
 type BlockBodiesPacket66 struct {
 	RequestId uint64
 	BlockBodiesPacket
 }
 
-// BlockBodiesPacket is the network packet for block content distribution over eth/66.
+// BlockRawBodiesPacket66 is the network packet for block content distribution over eth/66.
 type BlockRawBodiesPacket66 struct {
 	RequestId uint64
 	BlockRawBodiesPacket
@@ -340,7 +340,7 @@ func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.
 // GetReceiptsPacket represents a block receipts query.
 type GetReceiptsPacket []libcommon.Hash
 
-// GetReceiptsPacket represents a block receipts query over eth/66.
+// GetReceiptsPacket66 represents a block receipts query over eth/66.
 type GetReceiptsPacket66 struct {
 	RequestId uint64
 	GetReceiptsPacket
@@ -349,7 +349,7 @@ type GetReceiptsPacket66 struct {
 // ReceiptsPacket is the network packet for block receipts distribution.
 type ReceiptsPacket [][]*types.Receipt
 
-// ReceiptsPacket is the network packet for block receipts distribution over eth/66.
+// ReceiptsPacket66 is the network packet for block receipts distribution over eth/66.
 type ReceiptsPacket66 struct {
 	RequestId uint64
 	ReceiptsPacket
@@ -358,7 +358,7 @@ type ReceiptsPacket66 struct {
 // ReceiptsRLPPacket is used for receipts, when we already have it encoded
 type ReceiptsRLPPacket []rlp.RawValue
 
-// ReceiptsPacket66 is the eth-66 version of ReceiptsRLPPacket
+// ReceiptsRLPPacket66 is the eth-66 version of ReceiptsRLPPacket
 type ReceiptsRLPPacket66 struct {
 	RequestId uint64
 	ReceiptsRLPPacket
