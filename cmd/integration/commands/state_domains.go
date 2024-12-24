@@ -342,9 +342,6 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 	compressCfg.Workers = runtime.NumCPU()
 	// now start the file indexing
 	for currentLayer, fileName := range filesNamesToPurify {
-		if currentLayer == 0 {
-			continue // we can skip first layer as all the keys are already mapped to 0.
-		}
 		count := 0
 		skipped := 0
 
