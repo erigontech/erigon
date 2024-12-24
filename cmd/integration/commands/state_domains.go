@@ -276,7 +276,8 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	if err := collector.Load(tx, tbl, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 		return fmt.Errorf("failed to load: %w", err)
 	}
-	return nil
+	
+	return tx.Commit()
 }
 
 func copyFile(src, dst string) error {
