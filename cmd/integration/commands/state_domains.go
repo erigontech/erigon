@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -51,6 +52,8 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 )
 
+var purifyDir string
+
 func init() {
 	withDataDir(readDomains)
 	withChain(readDomains)
@@ -61,6 +64,7 @@ func init() {
 	rootCmd.AddCommand(readDomains)
 
 	withDataDir(purifyDomains)
+	purifyDomains.Flags().StringVar(&purifyDir, "purifiedDomain", "purified-output", "")
 	rootCmd.AddCommand(purifyDomains)
 }
 
@@ -158,34 +162,15 @@ var purifyDomains = &cobra.Command{
 				return
 			}
 		}
-		// 2. Walk through the domainDir and process each file
-		err = filepath.Walk(domainDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
+		for _, domain := range purificationDomains {
+			if err := makePurifiedDomainsIndexDB(purifyDB, dirs, log.New(), domain); err != nil {
+				fmt.Println("Error making purifiable index DB: ", err)
+				return
 			}
-			// Skip directories
-			if info.IsDir() {
-				return nil
-			}
-			// Here you can decide if you only want to process certain file extensions
-			// e.g., .kv files
-			if filepath.Ext(path) != ".kv" {
-				// Skip non-kv files if that's your domain’s format
-				return nil
-			}
-
-			fmt.Printf("Processing file: %s\n", path)
-
-			// // Purify the file (remove duplicate keys)
-			// if err := purifyKVFile(path); err != nil {
-			// 	return fmt.Errorf("failed to purify file %s: %w", path, err)
-			// }
-			return nil
-		})
+		}
 		if err != nil {
 			fmt.Printf("error walking the path %q: %v\n", domainDir, err)
 		}
-
 	},
 }
 
@@ -251,7 +236,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	// now start the file indexing
 	for i, fileName := range filesNamesToIndex {
 		if i == 0 {
-			continue
+			continue // we can skip first layer as all the keys are already mapped to 0.
 		}
 		isKey := true
 		dat := make([]byte, 4)
@@ -288,6 +273,141 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	return nil
+}
+
+func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
+	var tbl string
+	switch domain {
+	case "account":
+		tbl = kv.TblAccountVals
+	case "storage":
+		tbl = kv.TblStorageVals
+	case "code":
+		tbl = kv.TblCodeVals
+	case "commitment":
+		tbl = kv.TblCommitmentVals
+	default:
+		return fmt.Errorf("invalid domain %s", domain)
+	}
+	// Iterate over all the files in  dirs.SnapDomain and print them
+	filesNamesToPurify := []string{}
+	if err := filepath.Walk(dirs.SnapDomain, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.Contains(info.Name(), domain) {
+			return nil
+		}
+		// Here you can decide if you only want to process certain file extensions
+		// e.g., .kv files
+		if filepath.Ext(path) != ".kv" {
+			// Skip non-kv files if that's your domain’s format
+			return nil
+		}
+
+		fmt.Printf("Add file to purification of %s: %s\n", domain, path)
+
+		filesNamesToPurify = append(filesNamesToPurify, info.Name())
+		return nil
+	}); err != nil {
+		return fmt.Errorf("failed to walk through the domainDir %s: %w", domain, err)
+	}
+	// sort the files by name
+	sort.Slice(filesNamesToPurify, func(i, j int) bool {
+		res, ok, _ := downloadertype.ParseFileName(dirs.SnapDomain, filesNamesToPurify[i])
+		if !ok {
+			panic("invalid file name")
+		}
+		res2, ok, _ := downloadertype.ParseFileName(dirs.SnapDomain, filesNamesToPurify[j])
+		if !ok {
+			panic("invalid file name")
+		}
+		return res.From < res2.From
+	})
+
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+	os.Mkdir(purifyDir, 0755)
+	compressCfg := seg.DefaultCfg
+	compressCfg.Workers = runtime.NumCPU()
+	// now start the file indexing
+	for currentLayer, fileName := range filesNamesToPurify {
+		if currentLayer == 0 {
+			continue // we can skip first layer as all the keys are already mapped to 0.
+		}
+		count := 0
+		skipped := 0
+
+		dec, err := seg.NewDecompressor(path.Join(dirs.SnapDomain, fileName))
+		if err != nil {
+			return fmt.Errorf("failed to create decompressor: %w", err)
+		}
+		defer dec.Close()
+		getter := dec.MakeGetter()
+
+		valuesComp, err := seg.NewCompressor(context.Background(), "Purification", path.Join(purifyDir, fileName), dirs.Tmp, compressCfg, log.LvlTrace, log.New())
+		if err != nil {
+			return fmt.Errorf("create %s values compressor: %w", path.Join(purifyDir, fileName), err)
+		}
+
+		// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
+		// Compress files only in `merge` which ok to be slow.
+		comp := seg.NewWriter(valuesComp, seg.CompressKeys|seg.CompressVals)
+		defer comp.Close()
+
+		fmt.Printf("Indexing file %s\n", fileName)
+		var (
+			bufKey []byte
+			bufVal []byte
+		)
+
+		var layer uint32
+		for getter.HasNext() {
+			// get the key and value for the current entry
+			bufKey = bufKey[:0]
+			bufKey, _ = getter.Next(bufKey)
+			bufVal = bufVal[:0]
+			bufVal, _ = getter.Next(bufVal)
+
+			layerBytes, err := tx.GetOne(tbl, bufKey)
+			if err != nil {
+				return fmt.Errorf("failed to get key %x: %w", bufKey, err)
+			}
+			// if the key is not found, then the layer is 0
+			layer = 0
+			if len(layerBytes) == 4 {
+				layer = binary.BigEndian.Uint32(layerBytes)
+			}
+			if layer != uint32(currentLayer) {
+				skipped++
+				continue
+			}
+			if err := comp.AddWord(bufKey); err != nil {
+				return fmt.Errorf("failed to add key %x: %w", bufKey, err)
+			}
+			if err := comp.AddWord(bufVal); err != nil {
+				return fmt.Errorf("failed to add val %x: %w", bufVal, err)
+			}
+			count++
+			if count%100000 == 0 {
+				fmt.Printf("Indexed %d keys, skipped %d, in file %s\n", count, skipped, fileName)
+			}
+		}
+		fmt.Printf("Loaded %d keys in file %s. now compressing...\n", count, fileName)
+		if err := comp.Compress(); err != nil {
+			return fmt.Errorf("failed to compress: %w", err)
+		}
+		fmt.Printf("Compressed %d keys in file %s\n", count, fileName)
+		comp.Close()
 	}
 	return nil
 }
