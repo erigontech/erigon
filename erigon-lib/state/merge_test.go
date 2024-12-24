@@ -18,10 +18,11 @@ package state
 
 import (
 	"context"
-	"github.com/erigontech/erigon-lib/common/datadir"
 	"os"
 	"sort"
 	"testing"
+
+	"github.com/erigontech/erigon-lib/common/datadir"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
