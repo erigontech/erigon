@@ -171,6 +171,9 @@ func (f *forkGraphDisk) AnchorSlot() uint64 {
 }
 
 func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot libcommon.Hash) bool {
+	if f.currentState == nil {
+		return false
+	}
 	blockRootState, _ := f.currentState.BlockRoot()
 	return blockRoot == blockRootState
 }
@@ -200,7 +203,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	} else {
 		newState, err = f.getState(block.ParentRoot, false, true)
 		if err != nil {
-			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
+			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot: %x", err, block.ParentRoot)
 		}
 	}
 
@@ -263,7 +266,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			// Add block to list of invalid blocks
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", blockRoot, "reason", invalidBlockErr)
 			f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
-			//f.currentState = nil
+			f.currentState = nil
 
 			return nil, InvalidBlock, invalidBlockErr
 		}
