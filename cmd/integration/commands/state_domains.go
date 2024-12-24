@@ -239,8 +239,8 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		if i == 0 {
 			continue // we can skip first layer as all the keys are already mapped to 0.
 		}
-		isKey := true
-		dat := make([]byte, 4)
+		layerBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(layerBytes, uint32(i))
 		count := 0
 
 		dec, err := seg.NewDecompressor(path.Join(dirs.SnapDomain, fileName))
@@ -254,21 +254,18 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		for getter.HasNext() {
 			buf = buf[:0]
 			buf, _ = getter.Next(buf)
-			if !isKey {
-				isKey = true
-				continue
-			}
-			binary.BigEndian.PutUint32(dat, uint32(i))
-			if err := tx.Put(tbl, buf, dat); err != nil {
+
+			if err := tx.Put(tbl, buf, layerBytes); err != nil {
 				return fmt.Errorf("failed to put key %x: %w", buf, err)
 			}
 
-			isKey = false
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
 			if count%100000 == 0 {
 				fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
 			}
+			// skip values
+			getter.Skip()
 		}
 		fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
 	}
@@ -357,8 +354,6 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 			return fmt.Errorf("create %s values compressor: %w", path.Join(purifyDir, fileName), err)
 		}
 
-		// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
-		// Compress files only in `merge` which ok to be slow.
 		comp := seg.NewWriter(valuesComp, seg.CompressKeys|seg.CompressVals)
 		defer comp.Close()
 
