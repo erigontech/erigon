@@ -179,7 +179,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	var tbl string
 	switch domain {
 	case "account":
-		tbl = kv.TblAccountVals
+		tbl = kv.MaxTxNum
 	case "storage":
 		tbl = kv.TblStorageVals
 	case "code":
@@ -279,7 +279,7 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 	var tbl string
 	switch domain {
 	case "account":
-		tbl = kv.TblAccountVals
+		tbl = kv.MaxTxNum
 	case "storage":
 		tbl = kv.TblStorageVals
 	case "code":
