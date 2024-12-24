@@ -279,7 +279,6 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 			if count%100000 == 0 {
 				fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
 			}
-			return nil
 		}
 		fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
 	}
