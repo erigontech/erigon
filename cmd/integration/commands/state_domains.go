@@ -250,6 +250,9 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 
 	// now start the file indexing
 	for i, fileName := range filesNamesToIndex {
+		if i == 0 {
+			continue
+		}
 		isKey := true
 		dat := make([]byte, 4)
 		count := 0
