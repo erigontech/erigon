@@ -246,6 +246,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
+	defer tx.Rollback()
 
 	// now start the file indexing
 	for i, fileName := range filesNamesToIndex {
@@ -264,7 +265,6 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		for getter.HasNext() {
 			if !isKey {
 				isKey = true
-				return nil
 			}
 			buf = buf[:0]
 			buf, _ = getter.Next(buf)
