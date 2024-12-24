@@ -155,7 +155,8 @@ var purifyDomains = &cobra.Command{
 		purifyDB := mdbx.MustOpen(tmpDir)
 		defer purifyDB.Close()
 
-		purificationDomains := []string{"account", "storage", "code", "commitment"}
+		// purificationDomains := []string{"account", "storage", "code", "commitment"}
+		purificationDomains := []string{"account"}
 		for _, domain := range purificationDomains {
 			if err := makePurifiableIndexDB(purifyDB, dirs, log.New(), domain); err != nil {
 				fmt.Println("Error making purifiable index DB: ", err)
