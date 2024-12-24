@@ -157,7 +157,7 @@ var purifyDomains = &cobra.Command{
 		purifyDB := mdbx.MustOpen(tmpDir)
 		defer purifyDB.Close()
 
-		purificationDomains := []string{"account", "storage", "code", "commitment"}
+		purificationDomains := []string{"account", "storage", "code", "commitment", "receipt"}
 		//purificationDomains := []string{"commitment"}
 		for _, domain := range purificationDomains {
 			if err := makePurifiableIndexDB(purifyDB, dirs, log.New(), domain); err != nil {
@@ -188,6 +188,8 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		tbl = kv.HeaderCanonical
 	case "commitment":
 		tbl = kv.HeaderTD
+	case "receipt":
+		tbl = kv.BadHeaderNumber
 	default:
 		return fmt.Errorf("invalid domain %s", domain)
 	}
@@ -322,6 +324,8 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 		tbl = kv.HeaderCanonical
 	case "commitment":
 		tbl = kv.HeaderTD
+	case "receipt":
+		tbl = kv.BadHeaderNumber
 	default:
 		return fmt.Errorf("invalid domain %s", domain)
 	}
