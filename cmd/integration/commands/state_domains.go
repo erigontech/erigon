@@ -181,11 +181,11 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	case "account":
 		tbl = kv.MaxTxNum
 	case "storage":
-		tbl = kv.TblStorageVals
+		tbl = kv.HeaderNumber
 	case "code":
-		tbl = kv.TblCodeVals
+		tbl = kv.HeaderCanonical
 	case "commitment":
-		tbl = kv.TblCommitmentVals
+		tbl = kv.HeaderTD
 	default:
 		return fmt.Errorf("invalid domain %s", domain)
 	}
@@ -281,11 +281,11 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 	case "account":
 		tbl = kv.MaxTxNum
 	case "storage":
-		tbl = kv.TblStorageVals
+		tbl = kv.HeaderNumber
 	case "code":
-		tbl = kv.TblCodeVals
+		tbl = kv.HeaderCanonical
 	case "commitment":
-		tbl = kv.TblCommitmentVals
+		tbl = kv.HeaderTD
 	default:
 		return fmt.Errorf("invalid domain %s", domain)
 	}
