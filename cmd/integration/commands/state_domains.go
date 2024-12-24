@@ -54,8 +54,6 @@ import (
 	"github.com/erigontech/erigon/turbo/debug"
 )
 
-var purifyDir string
-
 func init() {
 	withDataDir(readDomains)
 	withChain(readDomains)
@@ -72,8 +70,9 @@ func init() {
 
 // if trie variant is not hex, we could not have another rootHash with to verify it
 var (
-	stepSize uint64
-	lastStep uint64
+	stepSize  uint64
+	lastStep  uint64
+	purifyDir string
 )
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
@@ -374,7 +373,7 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 	defer tx.Rollback()
-	os.Mkdir(purifyDir, 0755)
+	outD := datadir.New(purifyDir)
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = runtime.NumCPU()
 	// now start the file indexing
@@ -389,9 +388,9 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 		defer dec.Close()
 		getter := dec.MakeGetter()
 
-		valuesComp, err := seg.NewCompressor(context.Background(), "Purification", path.Join(purifyDir, fileName), dirs.Tmp, compressCfg, log.LvlTrace, log.New())
+		valuesComp, err := seg.NewCompressor(context.Background(), "Purification", path.Join(outD.SnapDomain, fileName), dirs.Tmp, compressCfg, log.LvlTrace, log.New())
 		if err != nil {
-			return fmt.Errorf("create %s values compressor: %w", path.Join(purifyDir, fileName), err)
+			return fmt.Errorf("create %s values compressor: %w", path.Join(outD.SnapDomain, fileName), err)
 		}
 
 		comp := seg.NewWriter(valuesComp, compressionType)
@@ -438,7 +437,7 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 		if skipped == 0 {
 			comp.Close()
 			// just copy the file
-			if err := copyFile(path.Join(dirs.SnapDomain, fileName), path.Join(purifyDir, fileName)); err != nil {
+			if err := copyFile(path.Join(dirs.SnapDomain, fileName), path.Join(outD.SnapDomain,, fileName)); err != nil {
 				return fmt.Errorf("failed to copy file %s: %w", fileName, err)
 			}
 			continue
