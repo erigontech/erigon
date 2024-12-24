@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/seg"
 	state3 "github.com/erigontech/erigon-lib/state"
 
@@ -217,6 +218,9 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	}); err != nil {
 		return fmt.Errorf("failed to walk through the domainDir %s: %w", domain, err)
 	}
+
+	collector := etl.NewCollector("Purification", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
+	defer collector.Close()
 	// sort the files by name
 	sort.Slice(filesNamesToIndex, func(i, j int) bool {
 		res, ok, _ := downloadertype.ParseFileName(dirs.SnapDomain, filesNamesToIndex[i])
@@ -256,10 +260,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 			buf = buf[:0]
 			buf, _ = getter.Next(buf)
 
-			if err := tx.Put(tbl, buf, layerBytes); err != nil {
-				return fmt.Errorf("failed to put key %x: %w", buf, err)
-			}
-
+			collector.Collect(buf, layerBytes)
 			count++
 			//fmt.Println("count: ", count, "keyLength: ", len(buf))
 			if count%100000 == 0 {
@@ -270,8 +271,9 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		}
 		fmt.Printf("Indexed %d keys in file %s\n", count, fileName)
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	fmt.Println("Loading the keys to DB")
+	if err := collector.Load(tx, tbl, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		return fmt.Errorf("failed to load: %w", err)
 	}
 	return nil
 }
