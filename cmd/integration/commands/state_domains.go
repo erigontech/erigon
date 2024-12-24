@@ -277,12 +277,15 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 
 func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
 	var tbl string
+	compressionType := seg.CompressNone
 	switch domain {
 	case "account":
 		tbl = kv.MaxTxNum
 	case "storage":
+		compressionType = seg.CompressKeys
 		tbl = kv.HeaderNumber
 	case "code":
+		compressionType = seg.CompressVals
 		tbl = kv.HeaderCanonical
 	case "commitment":
 		tbl = kv.HeaderTD
@@ -354,7 +357,7 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 			return fmt.Errorf("create %s values compressor: %w", path.Join(purifyDir, fileName), err)
 		}
 
-		comp := seg.NewWriter(valuesComp, seg.CompressKeys|seg.CompressVals)
+		comp := seg.NewWriter(valuesComp, compressionType)
 		defer comp.Close()
 
 		fmt.Printf("Indexing file %s\n", fileName)
