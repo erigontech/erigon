@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"sync/atomic"
 
 	"google.golang.org/grpc"
@@ -395,10 +396,7 @@ func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.No
 			return nil, fmt.Errorf("cannot decode protocols metadata: %w", err)
 		}
 
-		protocols := make(map[string]interface{}, len(rawProtocols))
-		for k, v := range rawProtocols {
-			protocols[k] = v
-		}
+		protocols := maps.Clone(rawProtocols)
 
 		ret = append(ret, p2p.NodeInfo{
 			Enode:      node.Enode,
