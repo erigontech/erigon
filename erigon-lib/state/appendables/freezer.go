@@ -15,23 +15,17 @@ type SimpleFreezer struct {
 }
 
 // what does this do?
-func (sf *SimpleFreezer) Freeze(ctx context.Context, stepKeyFrom, stepKeyTo uint64, roDB kv.RoDB) (collation AppendableCollation, lastKeyValue uint64, err error) {
-	tx, err := roDB.BeginRo(ctx)
-	if err != nil {
-		return AppendableCollation{}, 0, err
-	}
-
-	defer tx.Rollback()
+func (sf *SimpleFreezer) Freeze(ctx context.Context, stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (lastKeyValue uint64, err error) {
 	can_stream := sf.gen.FromStepKey(stepKeyFrom, stepKeyTo, tx)
 	for can_stream.HasNext() {
 		key, err := can_stream.Next()
 		if err != nil {
-			return AppendableCollation{}, 0, err
+			return 0, err
 		}
 
 		value, shouldSkip, _, err := sf.fet.GetValues(key, tx)
 		if err != nil {
-			return AppendableCollation{}, 0, err
+			return 0, err
 		}
 		if shouldSkip {
 			continue
@@ -40,17 +34,17 @@ func (sf *SimpleFreezer) Freeze(ctx context.Context, stepKeyFrom, stepKeyTo uint
 		data, shouldSkip, err := sf.proc.Process(key, value)
 
 		if err != nil {
-			return AppendableCollation{}, 0, err
+			return 0, err
 		}
 		if shouldSkip {
 			continue
 		}
 		if err := sf.coll(data); err != nil {
-			return AppendableCollation{}, 0, err
+			return 0, err
 		}
 	}
 
-	return AppendableCollation{}, 0, nil
+	return 0, nil
 }
 
 // GetCompressorWorkers() uint64

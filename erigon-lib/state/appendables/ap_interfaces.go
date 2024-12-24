@@ -3,9 +3,11 @@ package appendables
 import (
 	"context"
 
+	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/seg"
+	"golang.org/x/sync/errgroup"
 )
 
 type SourceKeyGenerator[SKey any] interface {
@@ -37,12 +39,16 @@ type Appendable[SKey any, SVal any] interface {
 	SetValuePutter(put ValuePutter[SVal])
 
 	SetFreezer(freezer Freezer[*AppendableCollation])
-	SetIndexBuilders(ib []IndexBuilder)
+	SetIndexBuilders(ib []AccessorIndexBuilder)
 	SetCanFreeze(canFreeze CanFreeze)
 	SetRoSnapshots(rosnapshots *RoSnapshots[*AppendableCollation])
 
 	// freeze
-	Collate(ctx context.Context, stepKeyTo uint64, tx kv.Tx) (AppendableCollation, created bool, err error)
+	BuildFiles(ctx context.Context, stepKeyFrom, stepKeyTo uint64, db kv.RoDB, ps *background.ProgressSet) error
+
+	// Collate(ctx context.Context, stepKeyTo uint64, tx kv.Tx) (ap *AppendableCollation, created bool, err error)
+	// BuildFiles(ctx context.Context, step uint64, coll AppendableCollation, ps *background.ProgressSet) (AppendableFiles, error)
+	BuildMissedIndexes(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet)
 
 	Prune(ctx context.Context, limit uint64, rwTx kv.RwTx) error
 
@@ -56,18 +62,19 @@ type Appendable[SKey any, SVal any] interface {
 type Collector func(values []byte) error
 
 // NOTE: Freezer should be agnostic of any appendable stuff
+// pattern is SetCollector, (maybe) CompressorWorkers; and then call Freeze
 type Freezer[CollationType MinimalCollation] interface {
 	// stepKeyFrom/To represent tsNum which the snapshot should range
 	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller
 	// to ensure this.
-	Freeze(ctx context.Context, stepKeyFrom uint64, stepKeyTo uint64, roDB kv.RoDB) (collation CollationType, lastKeyValue uint64, err error)
+	Freeze(ctx context.Context, stepKeyFrom uint64, stepKeyTo uint64, tx kv.Tx) (lastKeyValue uint64, err error)
 	SetCollector(coll Collector)
 	GetCompressorWorkers() uint64
 	SetCompressorWorkers(uint64)
 }
 
 type SnapshotConfig struct {
-	StepSize     uint64 // range width (#stepKeys) of snapshot file
+	StepSize         uint64 // range width (#stepKeys) of snapshot file
 	LeaveStepKeyInDb uint64 // number of element to leave in db
 	// note that both of these are in terms of the "step key" rather than tsNum.
 	// e.g. for txs, we decide to leave x number of blocks in db, and as a result,
