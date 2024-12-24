@@ -263,7 +263,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 		var buf []byte
 		for getter.HasNext() {
 			if !isKey {
-				isKey = !isKey
+				isKey = true
 				return nil
 			}
 			buf = buf[:0]
@@ -273,7 +273,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 				return fmt.Errorf("failed to put key %x: %w", buf, err)
 			}
 
-			isKey = !isKey
+			isKey = false
 			count++
 			fmt.Println("count: ", count, "keyLength: ", len(buf))
 			if count%100000 == 0 {
