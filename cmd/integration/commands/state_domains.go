@@ -270,7 +270,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 			buf, _ = getter.Next(buf)
 			binary.BigEndian.PutUint32(dat, uint32(i))
 			if err := tx.Put(tbl, buf, dat); err != nil {
-				return fmt.Errorf("failed to put key %x: %w", v, err)
+				return fmt.Errorf("failed to put key %x: %w", buf, err)
 			}
 
 			isKey = !isKey
