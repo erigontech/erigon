@@ -276,7 +276,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	if err := collector.Load(tx, tbl, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 		return fmt.Errorf("failed to load: %w", err)
 	}
-	
+
 	return tx.Commit()
 }
 
@@ -438,7 +438,7 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 		if skipped == 0 {
 			comp.Close()
 			// just copy the file
-			if err := copyFile(path.Join(dirs.SnapDomain, fileName), path.Join(outD.SnapDomain,, fileName)); err != nil {
+			if err := copyFile(path.Join(dirs.SnapDomain, fileName), path.Join(outD.SnapDomain, fileName)); err != nil {
 				return fmt.Errorf("failed to copy file %s: %w", fileName, err)
 			}
 			continue
