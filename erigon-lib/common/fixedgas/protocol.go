@@ -24,6 +24,7 @@ const (
 	TxDataNonZeroGasEIP2028   uint64 = 16    // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
 	TxAccessListAddressGas    uint64 = 2400  // Per address specified in EIP 2930 access list
 	TxAccessListStorageKeyGas uint64 = 1900  // Per storage key specified in EIP 2930 access list
+	TxTotalCostFloorPerToken  uint64 = 10    // Per token of calldata in a transaction, as a minimum the txn must pay (EIP-7623)
 
 	MaxCodeSize = 24576 // Maximum bytecode to permit for a contract
 

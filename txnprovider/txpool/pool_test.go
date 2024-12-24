@@ -632,7 +632,7 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			gas, reason := txpoolcfg.CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, c.authorizationsLen, nil, c.creation, true, true, c.isShanghai)
+			gas, reason := txpoolcfg.CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, c.authorizationsLen, nil, c.creation, true, true, c.isShanghai, false)
 			if reason != txpoolcfg.Success {
 				t.Errorf("expected success but got reason %v", reason)
 			}
