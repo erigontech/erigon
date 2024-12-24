@@ -146,7 +146,7 @@ var purifyDomains = &cobra.Command{
 		domainDir := dirs.SnapDomain
 
 		// make a temporary dir
-		tmpDir, err := os.MkdirTemp("purifyTemp", "") // make a temporary dir to store the keys
+		tmpDir, err := os.MkdirTemp(dirs.Tmp, "purifyTemp") // make a temporary dir to store the keys
 		if err != nil {
 			fmt.Println("Error creating temporary directory: ", err)
 			return
