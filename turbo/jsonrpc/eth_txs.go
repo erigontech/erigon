@@ -20,9 +20,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
+
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-	"math/big"
 
 	"github.com/erigontech/erigon-lib/common/hexutil"
 
@@ -91,6 +92,9 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
+		}
+		if header == nil {
+			return nil, nil
 		}
 
 		blockHash := header.Hash()
