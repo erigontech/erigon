@@ -6,10 +6,6 @@ import (
 
 type ApEnum string
 
-const (
-	BorSpans ApEnum = "appendable.borspans"
-)
-
 // convert to interface
 func (e ApEnum) GetSnapshotName(stepKeyFrom, stepKeyTo uint64) string {
 	// assuming v1
@@ -42,21 +38,19 @@ type Range struct {
 func (r Range) From() uint64 { return r.from }
 func (r Range) To() uint64   { return r.to }
 
-type RoSnapshots[CollationType MinimalCollation] struct {
+type RoSnapshots struct {
 	enums          []ApEnum
 	dirty          map[ApEnum]*btree.BTreeG[*DirtySegment]
 	visible        map[ApEnum]VisibleSegments
-	freezers       map[ApEnum]Freezer[CollationType]
 	snapshotConfig map[ApEnum]SnapshotConfig
 	baseEnum       ApEnum
 }
 
-func NewRoSnapshots[CollationType MinimalCollation](enums []ApEnum, alignMin bool) *RoSnapshots[CollationType] {
-	ro := &RoSnapshots[CollationType]{
+func NewRoSnapshots(enums []ApEnum, alignMin bool) *RoSnapshots {
+	ro := &RoSnapshots{
 		enums:          enums,
 		dirty:          make(map[ApEnum]*btree.BTreeG[*DirtySegment]),
 		visible:        make(map[ApEnum]VisibleSegments),
-		freezers:       make(map[ApEnum]Freezer[CollationType]),
 		snapshotConfig: make(map[ApEnum]SnapshotConfig),
 	}
 
@@ -72,46 +66,46 @@ func NewRoSnapshots[CollationType MinimalCollation](enums []ApEnum, alignMin boo
 	return ro
 }
 
-func (s *RoSnapshots[CollationType]) SetBaseEnum(enum ApEnum) {
+func (s *RoSnapshots) SetBaseEnum(enum ApEnum) {
 	s.baseEnum = enum
 }
 
-func (s *RoSnapshots[CollationType]) RegisterSegment(enum ApEnum, seg *DirtySegment) {
+func (s *RoSnapshots) RegisterSegment(enum ApEnum, seg *DirtySegment) {
 	s.dirty[enum].Set(seg)
 	s.recalcVisibleFiles()
 }
 
-func (s *RoSnapshots[CollationType]) VisibleSegMinimaxStepKey() uint64 { return 0 }
+func (s *RoSnapshots) VisibleSegMinimaxStepKey() uint64 { return 0 }
 
-func (s *RoSnapshots[CollationType]) DirtySegMinimaxStepKey() uint64 { return 0 }
+func (s *RoSnapshots) DirtySegMinimaxStepKey() uint64 { return 0 }
 
-func (s *RoSnapshots[CollationType]) recalcVisibleFiles() {
+func (s *RoSnapshots) recalcVisibleFiles() {
 	// based on alignMin, if true all enums are aligned to min step key
 	// otherwise all enums are aligned to their own step key
 }
 
-func (s *RoSnapshots[CollationType]) LastStepInSnapshot(enum ApEnum) (uint64, error) {
+func (s *RoSnapshots) LastStepInSnapshot(enum ApEnum) (uint64, error) {
 	// use dirty files
 	return 0, nil
 }
 
-func (s *RoSnapshots[CollationType]) SetSnapConfig(enum ApEnum, cfg SnapshotConfig) {
+func (s *RoSnapshots) SetSnapConfig(enum ApEnum, cfg SnapshotConfig) {
 	s.snapshotConfig[enum] = cfg
 }
 
-func (s *RoSnapshots[CollationType]) GetSnapshotConfig(enum ApEnum) SnapshotConfig {
+func (s *RoSnapshots) GetSnapshotConfig(enum ApEnum) SnapshotConfig {
 	return s.snapshotConfig[enum]
 }
 
-func (s *RoSnapshots[CollationType]) LogStat(label string) {}
+func (s *RoSnapshots) LogStat(label string) {}
 
-func (s *RoSnapshots[CollationType]) GetDirtySegment(enum ApEnum, stepKeyFrom, stepKeyTo uint64) (*DirtySegment, bool) {
+func (s *RoSnapshots) GetDirtySegment(enum ApEnum, stepKeyFrom, stepKeyTo uint64) (*DirtySegment, bool) {
 	// walk over dirty segments and return the first that matches
 	return nil, false
 }
 
 // ranges()
-func (s *RoSnapshots[CollationType]) Ranges() []Range {
+func (s *RoSnapshots) Ranges() []Range {
 	// use baseSegType
 	return nil
 }
@@ -135,8 +129,8 @@ func (s *RoSnapshots[CollationType]) Ranges() []Range {
 // }
 
 // view stuff
-type View[CollationType MinimalCollation] struct {
-	s           *RoSnapshots[CollationType]
+type View struct {
+	s           *RoSnapshots
 	segments    []*RoTx
 	baseSegType ApEnum
 }

@@ -6,16 +6,19 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-type SimpleFreezer struct {
-	gen    SourceKeyGenerator[[]byte]
-	fet    ValueFetcher[[]byte, []byte]
-	proc   ValueProcessor[[]byte, []byte]
-	config *SnapshotConfig
-	coll   Collector
+type ValueProcessor[Skey any, Sval any] interface {
+	Process(sourceKey Skey, value Sval) (data Sval, shouldSkip bool, err error)
+}
+
+type BaseFreezer struct {
+	gen  SourceKeyGenerator[[]byte]
+	fet  ValueFetcher[[]byte, []byte]
+	proc ValueProcessor[[]byte, []byte]
+	coll Collector
 }
 
 // what does this do?
-func (sf *SimpleFreezer) Freeze(ctx context.Context, stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (lastKeyValue uint64, err error) {
+func (sf *BaseFreezer) Freeze(ctx context.Context, stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (lastKeyValue uint64, err error) {
 	can_stream := sf.gen.FromStepKey(stepKeyFrom, stepKeyTo, tx)
 	for can_stream.HasNext() {
 		key, err := can_stream.Next()
@@ -48,13 +51,25 @@ func (sf *SimpleFreezer) Freeze(ctx context.Context, stepKeyFrom, stepKeyTo uint
 }
 
 // GetCompressorWorkers() uint64
-func (sf *SimpleFreezer) GetCompressorWorkers() uint64 {
+func (sf *BaseFreezer) GetCompressorWorkers() uint64 {
 	return 0
 }
 
 // SetCompressorWorkers(uint64)
-func (sf *SimpleFreezer) SetCompressorWorkers(uint64) {}
+func (sf *BaseFreezer) SetCompressorWorkers(uint64) {}
 
-func (sf *SimpleFreezer) SetCollector(coll Collector) {
+func (sf *BaseFreezer) SetCollector(coll Collector) {
 	sf.coll = coll
+}
+
+func (sf *BaseFreezer) SetSourceKeyGenerator(gen SourceKeyGenerator[[]byte]) {
+	sf.gen = gen
+}
+
+func (sf *BaseFreezer) SetValueFetcher(fet ValueFetcher[[]byte, []byte]) {
+	sf.fet = fet
+}
+
+func (sf *BaseFreezer) SetValueProcessor(proc ValueProcessor[[]byte, []byte]) {
+	sf.proc = proc
 }

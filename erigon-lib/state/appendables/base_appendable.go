@@ -5,23 +5,38 @@ import (
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/seg"
+	"golang.org/x/sync/errgroup"
 )
 
-type BaseAppendable[SKey any, SVal any] struct {
-	gen  SourceKeyGenerator[SKey]
-	fet  ValueFetcher[SKey, SVal]
-	proc ValueProcessor[SKey, SVal]
-	put  ValuePutter[SVal]
+type SourceKeyGenerator[SKey any] interface {
+	FromStepKey(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) stream.Uno[SKey]
+	FromTsNum(tsNum uint64, tx kv.Tx) SKey
+	FromTsId(tsId uint64, forkId []byte, tx kv.Tx) SKey
+}
 
-	freezer       Freezer[*AppendableCollation]
+type ValueFetcher[SKey any, SVal any] interface {
+	GetValues(sourceKey SKey, tx kv.Tx) (value SVal, shouldSkip bool, found bool, err error)
+}
+
+type ValuePutter[SVal any] interface {
+	Put(tsId uint64, forkId []byte, value SVal, tx kv.RwTx) error
+}
+
+type BaseAppendable[SKey any, SVal any] struct {
+	gen SourceKeyGenerator[SKey]
+	fet ValueFetcher[SKey, SVal]
+	put ValuePutter[SVal]
+
+	freezer       Freezer
 	indexBuilders []AccessorIndexBuilder
 
 	canFreeze CanFreeze
 
-	rosnapshot *RoSnapshots[*AppendableCollation]
+	rosnapshot *RoSnapshots
 	enum       ApEnum
 }
 
@@ -30,6 +45,9 @@ type BaseAppendable[SKey any, SVal any] struct {
 func (ap *BaseAppendable[SKey, SVal]) Get(tsNum uint64, tx kv.Tx) (SVal, bool, error) {
 	vkey := ap.gen.FromTsNum(tsNum, tx)
 	val, _, found, err := ap.fet.GetValues(vkey, tx)
+	// var ba Appendable[uint64, []byte]
+	// ba = &BaseAppendable[uint64, []byte]{}
+	//_, _ = ba.UnbuiltStepsTill(tsNum)
 	return val, found, err
 }
 
@@ -136,6 +154,14 @@ func (ap *BaseAppendable[SKey, SVal]) BuildFiles(ctx context.Context, stepKeyFro
 	return nil
 }
 
+func (ap *BaseAppendable[SKey, SVal]) BuildMissedIndexes(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+
+}
+
+func (ap *BaseAppendable[SKey, SVal]) Prune(ctx context.Context, limit uint64, rwTx kv.RwTx) error {
+	return nil
+}
+
 // collate
 // TODO: doubt, passing tx to freeze rather than db...
 // was passing db earlier as wanted to do bigchunks, but alex said it doesn't
@@ -214,8 +240,24 @@ func (ap *BaseAppendable[SKey, SVal]) SetCanFreeze(canFreeze CanFreeze) {
 	ap.canFreeze = canFreeze
 }
 
-func (ap *BaseAppendable[SKey, SVal]) SetRoSnapshots(rs *RoSnapshots[*AppendableCollation]) {
+func (ap *BaseAppendable[SKey, SVal]) SetFreezer(freezer Freezer) {
+	ap.freezer = freezer
+}
+
+func (ap *BaseAppendable[SKey, SVal]) SetRoSnapshots(rs *RoSnapshots) {
 	ap.rosnapshot = rs
+}
+
+func (ap *BaseAppendable[SKey, SVal]) SetSourceKeyGenerator(gen SourceKeyGenerator[SKey]) {
+	ap.gen = gen
+}
+
+func (ap *BaseAppendable[SKey, SVal]) SetValueFetcher(fet ValueFetcher[SKey, SVal]) {
+	ap.fet = fet
+}
+
+func (ap *BaseAppendable[SKey, SVal]) SetValuePutter(put ValuePutter[SVal]) {
+	ap.put = put
 }
 
 type AppendableFiles struct {
