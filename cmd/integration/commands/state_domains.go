@@ -65,14 +65,16 @@ func init() {
 
 	withDataDir(purifyDomains)
 	purifyDomains.Flags().StringVar(&purifyDir, "purifiedDomain", "purified-output", "")
+	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "commitment", false, "purify only commitment domain")
 	rootCmd.AddCommand(purifyDomains)
 }
 
 // if trie variant is not hex, we could not have another rootHash with to verify it
 var (
-	stepSize  uint64
-	lastStep  uint64
-	purifyDir string
+	stepSize             uint64
+	lastStep             uint64
+	purifyDir            string
+	purifyOnlyCommitment bool
 )
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
@@ -155,8 +157,12 @@ var purifyDomains = &cobra.Command{
 
 		purifyDB := mdbx.MustOpen(tmpDir)
 		defer purifyDB.Close()
-
-		purificationDomains := []string{"account", "storage" /*"code",*/, "commitment", "receipt"}
+		var purificationDomains []string
+		if purifyOnlyCommitment {
+			purificationDomains = []string{"commitment"}
+		} else {
+			purificationDomains = []string{"account", "storage" /*"code",*/, "commitment", "receipt"}
+		}
 		//purificationDomains := []string{"commitment"}
 		for _, domain := range purificationDomains {
 			if err := makePurifiableIndexDB(purifyDB, dirs, log.New(), domain); err != nil {
