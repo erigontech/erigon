@@ -22,7 +22,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -286,36 +285,6 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	return tx.Commit()
 }
 
-func copyFile(src, dst string) error {
-	// Open the source file
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	// Create the destination file
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	// Copy the file contents from the source to the destination
-	_, err = io.Copy(out, in)
-	if err != nil {
-		return err
-	}
-
-	// Ensure all data is written to disk
-	err = out.Sync()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
 	var tbl string
 	compressionType := seg.CompressNone
@@ -441,14 +410,7 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 				fmt.Printf("Indexed %d keys, skipped %d, in file %s\n", count, skipped, fileName)
 			}
 		}
-		if skipped == 0 {
-			comp.Close()
-			// just copy the file
-			if err := copyFile(path.Join(dirs.SnapDomain, fileName), path.Join(outD.SnapDomain, fileName)); err != nil {
-				return fmt.Errorf("failed to copy file %s: %w", fileName, err)
-			}
-			continue
-		}
+
 		fmt.Printf("Loaded %d keys in file %s. now compressing...\n", count, fileName)
 		if err := comp.Compress(); err != nil {
 			return fmt.Errorf("failed to compress: %w", err)
