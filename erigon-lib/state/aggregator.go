@@ -1798,7 +1798,7 @@ func (ac *AggregatorRoTx) nastyFileRead(name kv.Domain, from, to uint64) (*seg.R
 	if fi < 0 {
 		return nil, fmt.Errorf("file not found")
 	}
-	return ac.d[name].statelessGetter(fi), nil
+	return ac.d[name].reader(fi), nil
 }
 
 // AggregatorRoTx guarantee consistent View of files ("snapshots isolation" level https://en.wikipedia.org/wiki/Snapshot_isolation):

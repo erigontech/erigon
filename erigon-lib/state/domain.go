@@ -652,7 +652,6 @@ type DomainRoTx struct {
 	d *Domain
 
 	readerMutex sync.RWMutex
-	getters     []*seg.Reader
 	readers     []*BtIndex
 	idxReaders  []*recsplit.IndexReader
 
@@ -675,7 +674,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
-	g := dt.statelessGetter(i)
+	g := dt.reader(i)
 	if dt.d.indexList&withBTree != 0 {
 		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
 		if err != nil || !ok {
@@ -1700,18 +1699,9 @@ func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int {
 	return -1
 }
 
-func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
-	dt.readerMutex.Lock()
-	defer dt.readerMutex.Unlock()
-	if dt.getters == nil {
-		dt.getters = make([]*seg.Reader, len(dt.files))
-	}
-	r := dt.getters[i]
-	if r == nil {
-		r = seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
-		dt.getters[i] = r
-	}
-	return r
+func (dt *DomainRoTx) reader(i int) *seg.Reader {
+	// readers are not statless - getters contain the current data pointer
+	return seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {

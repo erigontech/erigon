@@ -792,7 +792,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 		sctx := sd.aggTx.d[kv.StorageDomain]
 		for i, item := range sctx.files {
-			cursor, err := item.src.bindex.Seek(sctx.statelessGetter(i), prefix)
+			cursor, err := item.src.bindex.Seek(sctx.reader(i), prefix)
 			if err != nil {
 				return err
 			}

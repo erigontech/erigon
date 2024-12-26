@@ -173,7 +173,7 @@ func (hi *DomainLatestIterFile) init(dc *DomainRoTx) error {
 
 	for i, item := range dc.files {
 		// todo release btcursor when iter over/make it truly stateless
-		btCursor, err := dc.statelessBtree(i).Seek(dc.statelessGetter(i), hi.from)
+		btCursor, err := dc.statelessBtree(i).Seek(dc.reader(i), hi.from)
 		if err != nil {
 			return err
 		}
