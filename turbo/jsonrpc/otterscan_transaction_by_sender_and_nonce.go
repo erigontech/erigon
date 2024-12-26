@@ -109,6 +109,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 			return false
 		}
 		if len(v) == 0 {
+			fmt.Printf("[dbg] loop2 3: creationTxnID=%d\n", creationTxnID)
 			creationTxnID = max(creationTxnID, txnID)
 			return false
 		}
@@ -137,9 +138,11 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		return nil, searchErr
 	}
 	if creationTxnID == 0 {
+		fmt.Printf("[dbg] loop3 1\n")
 		return nil, nil
 	}
 	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
+	fmt.Printf("[dbg] loop3 2: %d, %d, %b\n", creationTxnID, ok, bn)
 	if err != nil {
 		return nil, err
 	}
