@@ -52,9 +52,15 @@ func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Parallel()
 
-	t.Run("ii: > 2 unmerged files", func(t *testing.T) {
+	newTestDomain := func() (*InvertedIndex, *History) {
 		d := emptyTestDomain(1)
-		ii := d.History.InvertedIndex
+		d.History.InvertedIndex.integrity = nil
+		d.History.InvertedIndex.indexList = 0
+		d.History.indexList = 0
+		return d.History.InvertedIndex, d.History
+	}
+	t.Run("ii: > 2 unmerged files", func(t *testing.T) {
+		ii, _ := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-2.ef",
 			"v1-accounts.2-3.ef",
@@ -79,8 +85,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 3, len(idxF))
 	})
 	t.Run("hist: > 2 unmerged files", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii, h := d.History.InvertedIndex, d.History
+		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-1.ef",
 			"v1-accounts.1-2.ef",
@@ -115,8 +120,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.index.to))
 	})
 	t.Run("not equal amount of files", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii, h := d.History.InvertedIndex, d.History
+		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-1.ef",
 			"v1-accounts.1-2.ef",
@@ -152,8 +156,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.index.to))
 	})
 	t.Run("idx merged, history not yet", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii, h := d.History.InvertedIndex, d.History
+		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-2.ef",
 			"v1-accounts.2-3.ef",
@@ -187,8 +190,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.Equal(t, 2, int(r.history.to))
 	})
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii, h := d.History.InvertedIndex, d.History
+		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-1.ef",
 			"v1-accounts.1-2.ef",
@@ -229,8 +231,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Equal(t, 2, len(histFiles))
 	})
 	t.Run("idx merged and small files lost", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii, h := d.History.InvertedIndex, d.History
+		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-4.ef",
 		})
@@ -266,8 +267,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	})
 
 	t.Run("history merged, but index not and history garbage left", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii, h := d.History.InvertedIndex, d.History
+		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-1.ef",
 			"v1-accounts.1-2.ef",
@@ -305,8 +305,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Equal(t, 0, len(histFiles))
 	})
 	t.Run("history merge progress ahead of idx", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii, h := d.History.InvertedIndex, d.History
+		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-1.ef",
 			"v1-accounts.1-2.ef",
@@ -348,8 +347,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Equal(t, 3, len(histFiles))
 	})
 	t.Run("idx merge progress ahead of history", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii, h := d.History.InvertedIndex, d.History
+		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-1.ef",
 			"v1-accounts.1-2.ef",
@@ -388,8 +386,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Equal(t, 2, len(histFiles))
 	})
 	t.Run("idx merged, but garbage left", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii, h := d.History.InvertedIndex, d.History
+		ii, h := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-1.ef",
 			"v1-accounts.1-2.ef",
@@ -422,8 +419,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		assert.False(t, r.history.needMerge)
 	})
 	t.Run("idx merged, but garbage left2", func(t *testing.T) {
-		d := emptyTestDomain(1)
-		ii := d.History.InvertedIndex
+		ii, _ := newTestDomain()
 		ii.scanDirtyFiles([]string{
 			"v1-accounts.0-1.ef",
 			"v1-accounts.1-2.ef",
