@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-// PostExec stage is run after execution stage to peform extra verifications that are only possible when state is available.
+// PostExec stage is run after execution stage to perform extra verifications that are only possible when state is available.
 // It is used for consensus engines which keep validators inside smart contracts (Bor, AuRa)
 
 type PostExecCfg struct {
