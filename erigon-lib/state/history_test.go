@@ -50,40 +50,22 @@ import (
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
-	keysTable := "AccountKeys"
-	indexTable := "AccountIndex"
-	valsTable := "AccountVals"
-	settingsTable := "Settings"
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.SnapDomain).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		if largeValues {
-			return kv.TableCfg{
-				keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
-				indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
-				valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
-				settingsTable:         kv.TableCfgItem{},
-				kv.TblPruningProgress: kv.TableCfgItem{},
-			}
-		}
-		return kv.TableCfg{
-			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
-			valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			settingsTable:         kv.TableCfgItem{},
-			kv.TblPruningProgress: kv.TableCfgItem{},
-		}
-	}).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
-	cfg := histCfg{
-		filenameBase: "hist",
-		valuesTable:  valsTable,
+	cfg := Schema[kv.AccountsDomain]
 
-		iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
-			aggregationStep: 16, filenameBase: "hist", keysTable: keysTable, valuesTable: indexTable,
-		},
-		compression: seg.CompressNone, historyLargeValues: largeValues,
-	}
-	h, err := NewHistory(cfg, logger)
+	cfg.hist.iiCfg.aggregationStep = 16
+	cfg.hist.iiCfg.dirs = dirs
+	cfg.hist.iiCfg.salt = &salt
+
+	cfg.hist.historyLargeValues = largeValues
+
+	//perf of tests
+	cfg.hist.iiCfg.withExistence = false
+	cfg.hist.iiCfg.compression = seg.CompressNone
+	cfg.hist.compression = seg.CompressNone
+	h, err := NewHistory(cfg.hist, logger)
 	require.NoError(tb, err)
 	h.DisableFsync()
 	tb.Cleanup(db.Close)
@@ -235,7 +217,8 @@ func TestHistoryCollationBuild(t *testing.T) {
 
 		c, err := h.collate(ctx, 0, 0, 8, tx)
 		require.NoError(err)
-		require.True(strings.HasSuffix(c.historyPath, "v1-hist.0-1.v"))
+
+		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
 		require.Equal(6, c.historyCount)
 		require.Equal(3, c.efHistoryComp.Count()/2)
 
@@ -1395,12 +1378,12 @@ func TestScanStaticFilesH(t *testing.T) {
 		dirtyFiles:    btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	files := []string{
-		"v1-test.0-1.v",
-		"v1-test.1-2.v",
-		"v1-test.0-4.v",
-		"v1-test.2-3.v",
-		"v1-test.3-4.v",
-		"v1-test.4-5.v",
+		"v1-accounts.0-1.v",
+		"v1-accounts.1-2.v",
+		"v1-accounts.0-4.v",
+		"v1-accounts.2-3.v",
+		"v1-accounts.3-4.v",
+		"v1-accounts.4-5.v",
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
