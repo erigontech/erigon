@@ -158,8 +158,10 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 
+		indexList:   withBTree | withExistence,
 		integrity:   integrityCheck,
 		compression: seg.CompressNone,
+		compressCfg: DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblAccountHistoryVals,
@@ -178,8 +180,10 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 
+		indexList:   withBTree | withExistence,
 		integrity:   integrityCheck,
 		compression: seg.CompressKeys,
+		compressCfg: DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblStorageHistoryVals,
@@ -198,8 +202,10 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 
+		indexList:   withBTree | withExistence,
 		integrity:   integrityCheck,
 		compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		compressCfg: DomainCompressCfg,
 		largeValues: true,
 
 		hist: histCfg{
@@ -219,9 +225,11 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 
+		indexList:           withBTree | withExistence,
 		replaceKeysInValues: a.commitmentValuesTransform,
 		integrity:           integrityCheck,
 		compression:         seg.CompressKeys,
+		compressCfg:         DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblCommitmentHistoryVals,
@@ -239,8 +247,11 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 	}
 	cfg = domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
-		compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+
+		indexList:   withBTree | withExistence,
 		integrity:   integrityCheck,
+		compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		compressCfg: DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblReceiptHistoryVals,

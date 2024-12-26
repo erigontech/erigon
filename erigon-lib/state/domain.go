@@ -131,11 +131,6 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-	if cfg.indexList == 0 {
-		cfg.indexList = withBTree | withExistence
-	}
-	cfg.compressCfg = DomainCompressCfg
-
 	d := &Domain{
 		domainCfg:  cfg,
 		dirtyFiles: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
