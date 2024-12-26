@@ -93,6 +93,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	var creationTxnID uint64
 	var searchErr error
 
+	fmt.Printf("[dbg] loop1 3: nextTxnID=%d, prevTxnID=%d\n", nextTxnID, prevTxnID)
 	if nextTxnID == 0 {
 		nextTxnID = prevTxnID + 1
 	}
