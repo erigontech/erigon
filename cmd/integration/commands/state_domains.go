@@ -66,6 +66,7 @@ func init() {
 	withDataDir(purifyDomains)
 	purifyDomains.Flags().StringVar(&purifyDir, "purifiedDomain", "purified-output", "")
 	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "only-commitment", true, "purify only commitment domain")
+	purifyDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the purified domains directly in datadir (will remove .kvei and .bt too)")
 	rootCmd.AddCommand(purifyDomains)
 }
 
@@ -75,6 +76,7 @@ var (
 	lastStep             uint64
 	purifyDir            string
 	purifyOnlyCommitment bool
+	replaceInDatadir     bool
 )
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
@@ -171,7 +173,7 @@ var purifyDomains = &cobra.Command{
 			}
 		}
 		for _, domain := range purificationDomains {
-			if err := makePurifiedDomainsIndexDB(purifyDB, dirs, log.New(), domain); err != nil {
+			if err := makePurifiedDomains(purifyDB, dirs, log.New(), domain); err != nil {
 				fmt.Println("Error making purifiable index DB: ", err)
 				return
 			}
@@ -286,7 +288,7 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	return tx.Commit()
 }
 
-func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
+func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
 	var tbl string
 	compressionType := seg.CompressNone
 	switch domain {
@@ -418,6 +420,20 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 		}
 		fmt.Printf("Compressed %d keys in file %s\n", count, fileName)
 		comp.Close()
+		if replaceInDatadir {
+			if err := os.Rename(path.Join(outD.SnapDomain, fileName), path.Join(dirs.SnapDomain, fileName)); err != nil {
+				return fmt.Errorf("failed to replace the file %s: %w", fileName, err)
+			}
+			kveiFile := strings.ReplaceAll(fileName, ".kv", ".kvei")
+			btFile := strings.ReplaceAll(fileName, ".kv", ".bt")
+			// also remove the .kvei and .bt files
+			if err := os.Remove(path.Join(dirs.SnapDomain, kveiFile)); err != nil {
+				return fmt.Errorf("failed to remove the file: %w", kveiFile, err)
+			}
+			if err := os.Remove(path.Join(dirs.SnapDomain, btFile)); err != nil {
+				return fmt.Errorf("failed to remove the file: %w", btFile, err)
+			}
+		}
 	}
 	return nil
 }
