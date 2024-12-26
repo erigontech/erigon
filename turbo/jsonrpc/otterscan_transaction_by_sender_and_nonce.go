@@ -70,6 +70,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 
 		if len(v) == 0 { // creation, but maybe not our Incarnation
 			prevTxnID = txnID
+			fmt.Printf("[dbg] loop1 3: %d\n", acc.Nonce)
 			continue
 		}
 
@@ -78,8 +79,10 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		}
 		// Desired nonce was found in this chunk
 		if acc.Nonce > nonce {
+			fmt.Printf("[dbg] loop1 1: %d\n", acc.Nonce)
 			break
 		}
+		fmt.Printf("[dbg] loop1 2: %d\n", acc.Nonce)
 		prevTxnID = txnID
 	}
 
@@ -120,9 +123,12 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		// previous history block contains the actual change; it may contain multiple
 		// nonce changes.
 		if acc.Nonce <= nonce {
+			fmt.Printf("[dbg] loop2 1: %d\n", acc.Nonce)
 			creationTxnID = max(creationTxnID, txnID)
 			return false
 		}
+		fmt.Printf("[dbg] loop2 2: %d\n", acc.Nonce)
+
 		return true
 	})
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
