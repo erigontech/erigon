@@ -878,21 +878,21 @@ type flusher interface {
 }
 
 func (ac *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
-	frozenTxNum := ac.TxNumsInFiles(entitySet...)
-	if frozenTxNum > 0 {
-		frozenTxNum--
+	txNumInFiles := ac.TxNumsInFiles(entitySet...)
+	if txNumInFiles > 0 {
+		txNumInFiles--
 	}
-	return frozenTxNum / ac.a.StepSize()
+	return txNumInFiles / ac.a.StepSize()
 }
 
-func (ac *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (res uint64) {
+func (ac *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
 	for i, domain := range entitySet {
 		domainEnd := ac.d[domain].files.EndTxNum()
-		if i == 0 || domainEnd < res {
-			res = domainEnd
+		if i == 0 || domainEnd < minTxNum {
+			minTxNum = domainEnd
 		}
 	}
-	return res
+	return minTxNum
 }
 
 func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
