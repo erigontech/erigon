@@ -28,9 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
@@ -45,6 +42,7 @@ import (
 	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/seg"
+	"github.com/stretchr/testify/require"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -1370,13 +1368,16 @@ func TestIterateChanged2(t *testing.T) {
 func TestScanStaticFilesH(t *testing.T) {
 	t.Parallel()
 
-	h := &History{
-		histCfg: histCfg{
-			filenameBase: "test",
-		},
-		InvertedIndex: emptyTestInvertedIndex(1),
-		dirtyFiles:    btree2.NewBTreeG[*filesItem](filesItemLess),
+	newTestDomain := func() (*InvertedIndex, *History) {
+		d := emptyTestDomain(1)
+		d.History.InvertedIndex.integrity = nil
+		d.History.InvertedIndex.indexList = 0
+		d.History.indexList = 0
+		return d.History.InvertedIndex, d.History
 	}
+
+	_, h := newTestDomain()
+
 	files := []string{
 		"v1-accounts.0-1.v",
 		"v1-accounts.1-2.v",
