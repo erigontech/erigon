@@ -65,7 +65,7 @@ func init() {
 
 	withDataDir(purifyDomains)
 	purifyDomains.Flags().StringVar(&purifyDir, "purifiedDomain", "purified-output", "")
-	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "commitment", false, "purify only commitment domain")
+	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "only-commitment", true, "purify only commitment domain")
 	rootCmd.AddCommand(purifyDomains)
 }
 
