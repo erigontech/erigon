@@ -431,16 +431,16 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 			btFileTorrent := btFile + ".torrent"
 			// also remove the .kvei and .bt files
 			if err := os.Remove(path.Join(dirs.SnapDomain, kveiFile)); err != nil {
-				return fmt.Errorf("failed to remove the file: %s", kveiFile, err)
+				return fmt.Errorf("failed to remove the file: %s, %w", kveiFile, err)
 			}
 			if err := os.Remove(path.Join(dirs.SnapDomain, btFile)); err != nil {
-				return fmt.Errorf("failed to remove the file: %s", btFile, err)
+				return fmt.Errorf("failed to remove the file: %s, %w", btFile, err)
 			}
 			if err := os.Remove(path.Join(dirs.SnapDomain, kveiFileTorrent)); err != nil {
-				return fmt.Errorf("failed to remove the file: %s", kveiFileTorrent, err)
+				return fmt.Errorf("failed to remove the file: %s, %w", kveiFileTorrent, err)
 			}
 			if err := os.Remove(path.Join(dirs.SnapDomain, btFileTorrent)); err != nil {
-				return fmt.Errorf("failed to remove the file: %s", btFileTorrent, err)
+				return fmt.Errorf("failed to remove the file: %s, %w", btFileTorrent, err)
 			}
 			fmt.Printf("Removed the files %s and %s\n", kveiFile, btFile)
 		}
