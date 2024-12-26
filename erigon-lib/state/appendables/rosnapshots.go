@@ -6,20 +6,20 @@ import (
 
 type ApEnum string
 
-// convert to interface
-func (e ApEnum) GetSnapshotName(stepKeyFrom, stepKeyTo uint64) string {
-	// assuming v1
-	return ""
-}
+// // convert to interface
+// func (e ApEnum) GetSnapshotName(stepKeyFrom, stepKeyTo uint64) string {
+// 	// assuming v1
+// 	return ""
+// }
 
-func (e ApEnum) StepSize() uint64 {
-	// this is complicated. Old snapshots can have different step sizes, so need to check
-	// preverified...
-	// in general snapshot size can change with time + older snapshots can have different step sizes
-	return 100_000
-}
+// func (e ApEnum) StepSize() uint64 {
+// 	// this is complicated. Old snapshots can have different step sizes, so need to check
+// 	// preverified...
+// 	// in general snapshot size can change with time + older snapshots can have different step sizes
+// 	return 100_000
+// }
 
-func (e ApEnum) ParseFileName(fileName string) (stepKeyFrom, stepKeyTo uint64) { return 0, 0 }
+// func (e ApEnum) ParseFileName(fileName string) (stepKeyFrom, stepKeyTo uint64) { return 0, 0 }
 
 func DirtySegmentLess(i, j *DirtySegment) bool {
 	if i.from != j.from {
@@ -39,6 +39,8 @@ func (r Range) From() uint64 { return r.from }
 func (r Range) To() uint64   { return r.to }
 
 type RoSnapshots struct {
+	// is cohort useful here?
+	// helps with visibleFiles alignment, that's all...
 	enums          []ApEnum
 	dirty          map[ApEnum]*btree.BTreeG[*DirtySegment]
 	visible        map[ApEnum]VisibleSegments

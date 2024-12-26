@@ -6,14 +6,14 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-type ValueProcessor[Skey any, Sval any] interface {
-	Process(sourceKey Skey, value Sval) (data Sval, shouldSkip bool, err error)
+type ValueProcessor interface {
+	Process(sourceKey VKType, value VVType) (data VVType, shouldSkip bool, err error)
 }
 
 type BaseFreezer struct {
-	gen  SourceKeyGenerator[[]byte]
-	fet  ValueFetcher[[]byte, []byte]
-	proc ValueProcessor[[]byte, []byte]
+	gen  SourceKeyGenerator
+	fet  ValueFetcher
+	proc ValueProcessor
 	coll Collector
 }
 
@@ -62,14 +62,14 @@ func (sf *BaseFreezer) SetCollector(coll Collector) {
 	sf.coll = coll
 }
 
-func (sf *BaseFreezer) SetSourceKeyGenerator(gen SourceKeyGenerator[[]byte]) {
+func (sf *BaseFreezer) SetSourceKeyGenerator(gen SourceKeyGenerator) {
 	sf.gen = gen
 }
 
-func (sf *BaseFreezer) SetValueFetcher(fet ValueFetcher[[]byte, []byte]) {
+func (sf *BaseFreezer) SetValueFetcher(fet ValueFetcher) {
 	sf.fet = fet
 }
 
-func (sf *BaseFreezer) SetValueProcessor(proc ValueProcessor[[]byte, []byte]) {
+func (sf *BaseFreezer) SetValueProcessor(proc ValueProcessor) {
 	sf.proc = proc
 }

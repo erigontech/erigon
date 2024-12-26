@@ -25,7 +25,7 @@ type IndexKeyFactory interface {
 }
 
 type IndexBuilder[IndexType any] interface {
-	Build(ctx context.Context, stepFromKey, stepToKey uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (IndexType, error)
+	Build(ctx context.Context, stepFrom, stepTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (IndexType, error)
 	// GetIdentifier() string // unique identifier for this index
 	// GetInputDataQuery(stepKeyFrom, stepKeyTo uint64) IndexInputDataQuery
 	// GetIndexKeyFactory() IndexKeyFactory
@@ -56,42 +56,40 @@ func NewAccessorArgs(enums, lessFalsePositives, nofsync bool, salt uint32) *Acce
 // simple accessor index
 
 type SimpleAccessorBuilder struct {
-	args       *AccessorArgs
-	idxName    string
-	rosnapshot *RoSnapshots[*AppendableCollation]
-	enum       ApEnum
-	kf         IndexKeyFactory
+	args        *AccessorArgs
+	idxBaseName string
+	enum        ApEnum
+	kf          IndexKeyFactory
 }
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, enum ApEnum, indexName string, rosnapshot *RoSnapshots[*AppendableCollation]) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, enum ApEnum, idxBaseName string) *SimpleAccessorBuilder {
 	return &SimpleAccessorBuilder{
-		args:       args,
-		idxName:    indexName,
-		rosnapshot: rosnapshot,
-		enum:       enum,
+		args:        args,
+		idxBaseName: idxBaseName,
+		enum:        enum,
+		//version:
 	}
 }
 
-// func (s *SimpleAccessorBuilder) GetIdentifier() string {
-// 	return s.idxName
-// }
+func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
+	s.args = args
+}
 
-func (s *SimpleAccessorBuilder) GetInputDataQuery(stepKeyFrom, stepKeyTo uint64) IndexInputDataQuery {
-	// Get should increment refcount?
-	seg, found := s.rosnapshot.GetDirtySegment(s.enum, stepKeyFrom, stepKeyTo)
-	if !found {
-		return nil
-	}
-	return &DecompressorIndexInputDataQuery{seg: seg, from: stepKeyFrom}
+func (s *SimpleAccessorBuilder) GetInputDataQuery(stepKeyFrom, stepKeyTo uint64) *DecompressorIndexInputDataQuery {
+	// just segname?
+
+	sgname := AppeSegName(s.enum, 1, stepKeyFrom, stepKeyTo)
+	decomp, _ := seg.NewDecompressor(sgname)
+	return &DecompressorIndexInputDataQuery{decomp: decomp, from: stepKeyFrom}
 }
 
 func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
 	s.kf = factory
 }
 
-func (s *SimpleAccessorBuilder) Build(ctx context.Context, stepKeyFrom, stepKeyTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
-	iidq := s.GetInputDataQuery(stepKeyFrom, stepKeyTo).(*DecompressorIndexInputDataQuery)
-	idxFile := s.GetIndexPath(stepKeyFrom, stepKeyTo)
+func (s *SimpleAccessorBuilder) Build(ctx context.Context, stepFrom, stepTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
+	iidq := s.GetInputDataQuery(stepFrom, stepTo)
+	idxFile := AppeIdxName(1, stepFrom, stepTo, s.idxBaseName)
 
 	// enums              bool
 	// lessFalsePositives bool
@@ -112,7 +110,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, stepKeyFrom, stepKeyT
 		return nil, err
 	}
 
-	defer iidq.seg.Decompressor.EnableReadAhead().DisableReadAhead()
+	defer iidq.decomp.EnableReadAhead().DisableReadAhead()
 
 	for {
 		stream := iidq.GetStream(ctx)
@@ -146,18 +144,14 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, stepKeyFrom, stepKeyT
 
 }
 
-func (s *SimpleAccessorBuilder) GetIndexPath(stepKeyFrom, stepKeyTo uint64) string {
-	return ""
-}
-
 type DecompressorIndexInputDataQuery struct {
-	seg  *DirtySegment
-	from uint64
+	decomp *seg.Decompressor
+	from   uint64
 }
 
 func (d *DecompressorIndexInputDataQuery) GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] {
 	// open seg if not yet
-	return &seg_stream{ctx: ctx, g: d.seg.Decompressor.MakeGetter(), word: make([]byte, 0, 4096)}
+	return &seg_stream{ctx: ctx, g: d.decomp.MakeGetter(), word: make([]byte, 0, 4096)}
 }
 
 func (d *DecompressorIndexInputDataQuery) GetBaseDataId() uint64 {
@@ -165,7 +159,7 @@ func (d *DecompressorIndexInputDataQuery) GetBaseDataId() uint64 {
 }
 
 func (d *DecompressorIndexInputDataQuery) GetCount() uint64 {
-	return uint64(d.seg.Decompressor.Count())
+	return uint64(d.decomp.Count())
 }
 
 type seg_stream struct {

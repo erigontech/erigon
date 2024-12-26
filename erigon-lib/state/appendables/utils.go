@@ -17,7 +17,7 @@ type SequentialStream struct {
 	closed  bool
 }
 
-func (s *SequentialStream) Next() ([]byte, error) {
+func (s *SequentialStream) Next() (VKType, error) {
 	if s.closed {
 		return zeroByte, io.EOF
 	}
@@ -49,13 +49,13 @@ func NewPlainPutter(valsTable string) *PlainPutter {
 	return &PlainPutter{valsTable}
 }
 
-func (p *PlainPutter) Put(tsId uint64, forkId []byte, value []byte, tx kv.RwTx) error {
+func (p *PlainPutter) Put(tsId uint64, forkId []byte, value VVType, tx kv.RwTx) error {
 	return tx.Put(p.valsTable, hexutility.EncodeTs(tsId), value)
 }
 
 type PlainProcessor struct{}
 
-func (p *PlainProcessor) Process(sourceKey []byte, value []byte) (data []byte, shouldSkip bool, err error) {
+func (p *PlainProcessor) Process(sourceKey VKType, value VVType) (data VVType, shouldSkip bool, err error) {
 	return value, false, nil
 }
 
@@ -67,7 +67,7 @@ func NewPlainFetcher(valsTable string) *PlainFetcher {
 	return &PlainFetcher{valsTable}
 }
 
-func (f *PlainFetcher) GetValues(sourceKey []byte, tx kv.Tx) (value []byte, shouldSkip bool, found bool, err error) {
+func (f *PlainFetcher) GetValues(sourceKey VKType, tx kv.Tx) (value VVType, shouldSkip bool, found bool, err error) {
 	found = true
 	shouldSkip = false
 	value, err = tx.GetOne(f.valsTable, sourceKey)
@@ -77,7 +77,7 @@ func (f *PlainFetcher) GetValues(sourceKey []byte, tx kv.Tx) (value []byte, shou
 	return value, shouldSkip, found, nil
 }
 
-func NewSequentialStream(from uint64, to uint64) stream.Uno[[]byte] {
+func NewSequentialStream(from uint64, to uint64) stream.Uno[VKType] {
 	return &SequentialStream{
 		from:    from,
 		to:      to,
@@ -90,7 +90,7 @@ type PlainFreezer struct {
 	valsTable string
 }
 
-func NewPlainFreezer(valsTable string, gen SourceKeyGenerator[[]byte]) *PlainFreezer {
+func NewPlainFreezer(valsTable string, gen SourceKeyGenerator) *PlainFreezer {
 	f := PlainFreezer{
 		valsTable: valsTable,
 	}
@@ -100,4 +100,5 @@ func NewPlainFreezer(valsTable string, gen SourceKeyGenerator[[]byte]) *PlainFre
 		fet:  &PlainFetcher{valsTable},
 		proc: &PlainProcessor{},
 	}
+
 }

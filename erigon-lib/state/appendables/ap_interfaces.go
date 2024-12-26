@@ -12,7 +12,10 @@ type CanFreeze interface {
 	Evaluate(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (bool, error)
 }
 
-type Appendable[SKey any, SVal any] interface {
+type VKType []byte // value table key type
+type VVType []byte // value table value type
+
+type Appendable interface {
 	// SetSourceKeyGenerator(gen SourceKeyGenerator[SKey])
 	// SetValueFetcher(fet ValueFetcher[SKey, SVal])
 	// SetValuePutter(put ValuePutter[SVal])
@@ -21,6 +24,7 @@ type Appendable[SKey any, SVal any] interface {
 	SetIndexBuilders(ib []AccessorIndexBuilder)
 	SetCanFreeze(canFreeze CanFreeze)
 	SetRoSnapshots(rosnapshots *RoSnapshots)
+	GetRoSnapshots() *RoSnapshots
 
 	// freeze
 	BuildFiles(ctx context.Context, stepKeyFrom, stepKeyTo uint64, db kv.RoDB, ps *background.ProgressSet) error
@@ -32,16 +36,17 @@ type Appendable[SKey any, SVal any] interface {
 	Prune(ctx context.Context, limit uint64, rwTx kv.RwTx) error
 
 	// queries and put
-	Get(tsNum uint64, roTx kv.Tx) (SVal, bool, error)
-	NCGet(tsId uint64, forkId []byte, roTx kv.Tx) (SVal, bool, error)
+	Get(tsNum uint64, roTx kv.Tx) (VVType, bool, error)
+	NCGet(tsId uint64, forkId []byte, roTx kv.Tx) (VVType, bool, error)
 
-	Put(tsId uint64, forkId []byte, value SVal, rwTx kv.RwTx) error
+	Put(tsId uint64, forkId []byte, value VVType, rwTx kv.RwTx) error
 }
 
 type Collector func(values []byte) error
 
 // NOTE: Freezer should be agnostic of any appendable stuff
 // pattern is SetCollector, (maybe) CompressorWorkers; and then call Freeze
+// TODO: can Freeze accept step? Depends on if it's only used to create the minimal snapshot...
 type Freezer interface {
 	// stepKeyFrom/To represent tsNum which the snapshot should range
 	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller
@@ -53,7 +58,7 @@ type Freezer interface {
 }
 
 type SnapshotConfig struct {
-	StepSize         uint64 // range width (#stepKeys) of snapshot file
+	StepSize         uint64 // range width (#stepKeys) of snapshot file i.e. #stepKeys per step
 	LeaveStepKeyInDb uint64 // number of element to leave in db
 	// note that both of these are in terms of the "step key" rather than tsNum.
 	// e.g. for txs, we decide to leave x number of blocks in db, and as a result,

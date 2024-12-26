@@ -12,7 +12,7 @@ import (
 // appendables which don't store non-canonical data
 // 1. or which tsId = tsNum always
 // 2. bor spans/milestones/checkpoints
-// 3. two level lookup: stepKey -> tsId/tsNum -> value
+// 3. two level lookup: stepKey -> tsId/tsNum -> value (non-range lookup)
 /// forget about blobs right now
 
 // 1. a valsTable stores the value simply
@@ -21,15 +21,20 @@ const (
 	BorSpans ca.ApEnum = "borspans.appe"
 )
 
+func init() {
+	ca.RegisterAppendable(BorSpans, NewSpanAppendable(kv.BorSpans))
+	// even agg is initialized, it'll pick appendables from registry
+	// and set it in itself.
+}
 
 type SpanAppendable struct {
-	ca.BaseAppendable[[]byte, []byte]
+	ca.BaseAppendable
 	valsTable string
 }
 
 func NewSpanAppendable(valsTable string) *SpanAppendable {
 	ap := &SpanAppendable{
-		BaseAppendable: ca.BaseAppendable[[]byte, []byte]{},
+		BaseAppendable: ca.BaseAppendable{},
 		valsTable:      valsTable,
 	}
 
@@ -41,7 +46,7 @@ func NewSpanAppendable(valsTable string) *SpanAppendable {
 
 	salt := uint32(4343) // load from salt-blocks.txt etc.
 
-	indexb := ca.NewSimpleAccessorBuilder(ca.NewAccessorArgs(true, false, false, salt), ca.BorSpans)
+	indexb := ca.NewSimpleAccessorBuilder(ca.NewAccessorArgs(true, false, false, salt), BorSpans)
 
 	ap.rosnapshot = &ca.RoSnapshots{
 		enums: []ApEnum{BorSpans},
@@ -56,17 +61,17 @@ func NewSpanAppendable(valsTable string) *SpanAppendable {
 
 type SpanSourceKeyGenerator struct{}
 
-func (s *SpanSourceKeyGenerator) FromStepKey(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) stream.Uno[[]byte] {
+func (s *SpanSourceKeyGenerator) FromStepKey(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) stream.Uno[ca.VKType] {
 	spanFrom := heimdall.SpanIdAt(stepKeyFrom)
 	spanTo := heimdall.SpanIdAt(stepKeyTo)
 	return ca.NewSequentialStream(uint64(spanFrom), uint64(spanTo))
 }
 
-func (s *SpanSourceKeyGenerator) FromTsNum(tsNum uint64, tx kv.Tx) []byte {
+func (s *SpanSourceKeyGenerator) FromTsNum(tsNum uint64, tx kv.Tx) ca.VKType {
 	return hexutility.EncodeTs(tsNum)
 }
 
-func (s *SpanSourceKeyGenerator) FromTsId(tsId uint64, forkId []byte, tx kv.Tx) []byte {
+func (s *SpanSourceKeyGenerator) FromTsId(tsId uint64, forkId []byte, tx kv.Tx) ca.VKType {
 	return hexutility.EncodeTs(tsId)
 }
 
