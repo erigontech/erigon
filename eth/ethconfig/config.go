@@ -137,13 +137,14 @@ func init() {
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
 type BlocksFreezing struct {
-	KeepBlocks     bool // produce new snapshots of blocks but don't remove blocks from DB
-	ProduceE2      bool // produce new block files
-	ProduceE3      bool // produce new state files
-	NoDownloader   bool // possible to use snapshots without calling Downloader
-	Verify         bool // verify snapshots on startup
-	DownloaderAddr string
-	ChainName      string
+	KeepBlocks        bool // produce new snapshots of blocks but don't remove blocks from DB
+	ProduceE2         bool // produce new block files
+	ProduceE3         bool // produce new state files
+	NoDownloader      bool // possible to use snapshots without calling Downloader
+	Verify            bool // verify snapshots on startup
+	DisableDownloadE3 bool // disable download state snapshots
+	DownloaderAddr    string
+	ChainName         string
 }
 
 func (s BlocksFreezing) String() string {
@@ -260,8 +261,6 @@ type Config struct {
 	SilkwormRpcLogDumpResponse   bool
 	SilkwormRpcNumWorkers        uint32
 	SilkwormRpcJsonCompatibility bool
-
-	DisableTxPoolGossip bool
 }
 
 type Sync struct {

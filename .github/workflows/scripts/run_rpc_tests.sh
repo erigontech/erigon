@@ -6,8 +6,6 @@ set +e # Disable exit on error
 disabled_tests=(
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
-    # Erigon bug https://github.com/erigontech/erigon/issues/12603
-    erigon_getLatestLogs
     # to investigate
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
