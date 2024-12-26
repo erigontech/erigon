@@ -157,7 +157,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	fmt.Printf("[dbg] loop3 3: creationTxnID=%d, minTxNum=%d, txIndex=%d\n", creationTxnID, minTxNum, txIndex)
 	if txIndex == -1 {
 		txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
-		fmt.Printf("[dbg] loop3 3!!!: creationTxnID=%d, minTxNum=%d, txIndex=%d\n", creationTxnID, minTxNum, txIndex)
+		fmt.Printf("[dbg] loop3 3!!!: prevTxnID=%d, minTxNum=%d, idx=%d, txIndex=%d\n", prevTxnID, minTxNum, idx, txIndex)
 	}
 	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, bn, txIndex)
 	if err != nil {
