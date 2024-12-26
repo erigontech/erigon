@@ -141,14 +141,12 @@ var PrecompiledContractsPrague = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{0x09}): &blake2F{},
 	libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
 	libcommon.BytesToAddress([]byte{0x0b}): &bls12381G1Add{},
-	libcommon.BytesToAddress([]byte{0x0c}): &bls12381G1Mul{},
-	libcommon.BytesToAddress([]byte{0x0d}): &bls12381G1MultiExp{},
-	libcommon.BytesToAddress([]byte{0x0e}): &bls12381G2Add{},
-	libcommon.BytesToAddress([]byte{0x0f}): &bls12381G2Mul{},
-	libcommon.BytesToAddress([]byte{0x10}): &bls12381G2MultiExp{},
-	libcommon.BytesToAddress([]byte{0x11}): &bls12381Pairing{},
-	libcommon.BytesToAddress([]byte{0x12}): &bls12381MapFpToG1{},
-	libcommon.BytesToAddress([]byte{0x13}): &bls12381MapFp2ToG2{},
+	libcommon.BytesToAddress([]byte{0x0c}): &bls12381G1MultiExp{},
+	libcommon.BytesToAddress([]byte{0x0d}): &bls12381G2Add{},
+	libcommon.BytesToAddress([]byte{0x0e}): &bls12381G2MultiExp{},
+	libcommon.BytesToAddress([]byte{0x0f}): &bls12381Pairing{},
+	libcommon.BytesToAddress([]byte{0x10}): &bls12381MapFpToG1{},
+	libcommon.BytesToAddress([]byte{0x11}): &bls12381MapFp2ToG2{},
 }
 
 var (
@@ -787,10 +785,10 @@ func (c *bls12381G1MultiExp) RequiredGas(input []byte) uint64 {
 	}
 	// Lookup discount value for G1 point, scalar value pair length
 	var discount uint64
-	if dLen := len(params.Bls12381MultiExpDiscountTable); k < dLen {
-		discount = params.Bls12381MultiExpDiscountTable[k-1]
+	if dLen := len(params.Bls12381MSMDiscountTableG1); k < dLen {
+		discount = params.Bls12381MSMDiscountTableG1[k-1]
 	} else {
-		discount = params.Bls12381MultiExpDiscountTable[dLen-1]
+		discount = params.Bls12381MSMDiscountTableG1[dLen-1]
 	}
 	// Calculate gas and return the result
 	return (uint64(k) * params.Bls12381G1MulGas * discount) / 1000
@@ -920,10 +918,10 @@ func (c *bls12381G2MultiExp) RequiredGas(input []byte) uint64 {
 	}
 	// Lookup discount value for G2 point, scalar value pair length
 	var discount uint64
-	if dLen := len(params.Bls12381MultiExpDiscountTable); k < dLen {
-		discount = params.Bls12381MultiExpDiscountTable[k-1]
+	if dLen := len(params.Bls12381MSMDiscountTableG2); k < dLen {
+		discount = params.Bls12381MSMDiscountTableG2[k-1]
 	} else {
-		discount = params.Bls12381MultiExpDiscountTable[dLen-1]
+		discount = params.Bls12381MSMDiscountTableG2[dLen-1]
 	}
 	// Calculate gas and return the result
 	return (uint64(k) * params.Bls12381G2MulGas * discount) / 1000
