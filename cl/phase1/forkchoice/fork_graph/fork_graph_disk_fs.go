@@ -112,6 +112,12 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		return
 	}
 	f.stateDumpLock.Lock()
+	unlockOnDefer := true
+	defer func() {
+		if unlockOnDefer {
+			f.stateDumpLock.Unlock()
+		}
+	}()
 	// Truncate and then grow the buffer to the size of the state.
 	f.sszBuffer, err = bs.EncodeSSZ(f.sszBuffer[:0])
 	if err != nil {
@@ -164,7 +170,7 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot libcommon.Hash, bs *stat
 		log.Error("failed to sync dumped file", "err", err)
 		return
 	}
-
+	unlockOnDefer = false
 	go func() {
 		cacheFile, err := f.fs.OpenFile(getBeaconStateCacheFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
 		if err != nil {
