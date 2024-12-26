@@ -110,7 +110,7 @@ func (t TxNumsReader) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error
 }
 
 // Min = `max(blockNum-1)+1` returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
-func (t TxNumsReader) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
+func (t TxNumsReader) Min(tx kv.Tx, blockNum uint64) (uint64, error) {
 	if blockNum == 0 {
 		return 0, nil
 	}

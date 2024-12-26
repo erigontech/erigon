@@ -124,7 +124,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		// previous history block contains the actual change; it may contain multiple
 		// nonce changes.
 		if acc.Nonce <= nonce {
-			fmt.Printf("[dbg] loop2 1: %d\n", acc.Nonce)
+			fmt.Printf("[dbg] loop2 1: %d\n", creationTxnID)
 			creationTxnID = max(creationTxnID, txnID)
 			return false
 		}
