@@ -409,7 +409,9 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 
 // get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep uint64, ok bool) {
-	//sd.muMaps.RLock()
+	sd.muMaps.RLock()
+	defer sd.muMaps.RUnlock()
+
 	keyS := toStringZeroCopy(key)
 	var dataWithPrevStep dataWithPrevStep
 	if table == kv.StorageDomain {
@@ -417,6 +419,7 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep ui
 		return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
 
 	}
+
 	dataWithPrevStep, ok = sd.domains[table][keyS]
 	return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
 }

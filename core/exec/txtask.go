@@ -55,8 +55,8 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
-	VersionedReads(ibs *state.IntraBlockState) []state.VersionedRead
-	VersionedWrites(ibs *state.IntraBlockState) []state.VersionedWrite
+	VersionedReads(ibs *state.IntraBlockState) state.VersionedReads
+	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
 	Reset(ibs *state.IntraBlockState)
 
 	TxType() uint8
@@ -178,7 +178,6 @@ type TxTask struct {
 	Sender             *libcommon.Address
 	SkipAnalysis       bool
 	PruneNonEssentials bool
-	GetHashFn          func(n uint64) libcommon.Hash
 	TxAsMessage        types.Message
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
@@ -228,11 +227,11 @@ func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
 }
 
-func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) []state.VersionedRead {
+func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.VersionedReads {
 	return ibs.VersionedReads()
 }
 
-func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) []state.VersionedWrite {
+func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites {
 	return ibs.VersionedWrites()
 }
 
@@ -266,8 +265,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 	stateReader.SetTxNum(txTask.TxNum)
 	rs.Domains().SetTxNum(txTask.TxNum)
-	stateReader.ResetReadSet()
-	
+
 	//ibs.SetTrace(true)
 
 	rules := txTask.Rules
@@ -357,15 +355,15 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 					return nil, ErrExecAbortError{Dependency: ibs.DepTxIndex(), OriginError: err}
 				}
 
-				reads := ibs.VersionedReadMap()
+				reads := ibs.VersionedReads()
 
 				if _, ok := reads[state.SubpathKey(evm.Context.Coinbase, state.BalancePath)]; ok {
-					log.Debug("Coinbase is in MVReadMap", "address", evm.Context.Coinbase)
+					log.Debug("Coinbase is in versiopnedMap", "address", evm.Context.Coinbase)
 					result.ShouldRerunWithoutFeeDelay = true
 				}
 
 				if _, ok := reads[state.SubpathKey(applyRes.BurntContractAddress, state.BalancePath)]; ok {
-					log.Debug("BurntContractAddress is in MVReadMap", "address", applyRes.BurntContractAddress)
+					log.Debug("BurntContractAddress is in versiopnedMap", "address", applyRes.BurntContractAddress)
 					result.ShouldRerunWithoutFeeDelay = true
 				}
 
@@ -475,6 +473,9 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 // No limit on amount of txs added by this method.
 func (q *QueueWithRetry) ReTry(t Task) {
 	fmt.Println("RETRY", t.Version())
+	if t.Version().Incarnation > 300 {
+		fmt.Println("Too many")
+	}
 	q.retiresLock.Lock()
 	heap.Push(&q.retires, t)
 	q.retiresLock.Unlock()
@@ -587,6 +588,9 @@ func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
 
 // Add result of execution. May block when internal channel is full
 func (q *ResultsQueue) Add(ctx context.Context, task *Result) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

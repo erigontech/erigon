@@ -5,11 +5,11 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand"
 	"os"
 	"runtime"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
 	"github.com/stretchr/testify/assert"
 
@@ -167,8 +166,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	return &exec.Result{}
 }
 
-func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) []state.VersionedWrite {
-	writes := make([]state.VersionedWrite, 0, len(t.writeMap))
+func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) state.VersionedWrites {
+	writes := make(state.VersionedWrites, 0, len(t.writeMap))
 
 	for _, v := range t.writeMap {
 		writes = append(writes, v)
@@ -177,14 +176,8 @@ func (t *testExecTask) VersionedWrites(_ *state.IntraBlockState) []state.Version
 	return writes
 }
 
-func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) []state.VersionedRead {
-	reads := make([]state.VersionedRead, 0, len(t.readMap))
-
-	for _, v := range t.readMap {
-		reads = append(reads, v)
-	}
-
-	return reads
+func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.VersionedReads {
+	return t.readMap
 }
 
 func (t *testExecTask) Sender() common.Address {
@@ -485,21 +478,18 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 				chainConfig: params.MainnetChainConfig,
 				db:          db,
 			},
-			doms:           domains,
-			rs:             state.NewStateV3Buffered(state.NewStateV3(domains, logger)),
-			outputTxNum:    &atomic.Uint64{},
-			outputBlockNum: stages.SyncMetrics[stages.Execution],
-			logger:         logger,
+			doms:   domains,
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, logger)),
+			logger: logger,
 		},
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	blockResults := make(chan *blockResult, 100)
-	executorCancel := pe.run(context.Background(), blockResults)
+	executorCancel := pe.run(context.Background())
 	defer executorCancel()
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(t, pe, tasks, blockResults, false, validation, metadata)
+	_, err = executeParallelWithCheck(t, pe, tasks, false, validation, metadata)
 
 	assert.NoError(t, err, "error occur during parallel execution")
 
@@ -527,7 +517,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 type propertyCheck func(*parallelExecutor) error
 
-func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.Task, results chan *blockResult, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
+func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
 	}
@@ -540,7 +530,7 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 
 	defer pe.wait(context.Background())
 
-	blockResult := <-results
+	blockResult := pe.processEvents(context.Background(), math.MaxUint64)
 
 	if check != nil {
 		err = check(pe)
@@ -582,20 +572,17 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 				chainConfig: params.MainnetChainConfig,
 				db:          db,
 			},
-			doms:           domains,
-			rs:             state.NewStateV3Buffered(state.NewStateV3(domains, logger)),
-			outputTxNum:    &atomic.Uint64{},
-			outputBlockNum: stages.SyncMetrics[stages.Execution],
-			logger:         logger,
+			doms:   domains,
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, logger)),
+			logger: logger,
 		},
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	blockResults := make(chan *blockResult, 100)
-	executorCancel := pe.run(context.Background(), blockResults)
+	executorCancel := pe.run(context.Background())
 	defer executorCancel()
 
-	res, err := executeParallelWithCheck(t, pe, tasks, blockResults, true, validation, false)
+	res, err := executeParallelWithCheck(t, pe, tasks, true, validation, false)
 
 	assert.NoError(t, err, "error occur during parallel execution")
 

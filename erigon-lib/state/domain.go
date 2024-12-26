@@ -651,11 +651,11 @@ type DomainRoTx struct {
 
 	d *Domain
 
-	getters    []*seg.Reader
-	readers    []*BtIndex
-	idxReaders []*recsplit.IndexReader
+	readerMutex sync.RWMutex
+	getters     []*seg.Reader
+	readers     []*BtIndex
+	idxReaders  []*recsplit.IndexReader
 
-	keyBuf [60]byte // 52b key and 8b for inverted step
 	comBuf []byte
 
 	valsC kv.Cursor
@@ -1536,11 +1536,21 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(filekey)
-	if useCache && dt.getFromFileCache == nil {
-		dt.getFromFileCache = dt.visible.newGetFromFileCache()
+
+	dt.readerMutex.RLock()
+	getFromFileCache := dt.getFromFileCache
+	dt.readerMutex.RUnlock()
+
+	if useCache && getFromFileCache == nil {
+		dt.readerMutex.Lock()
+		if dt.getFromFileCache == nil {
+			dt.getFromFileCache = dt.visible.newGetFromFileCache()
+		}
+		getFromFileCache = dt.getFromFileCache
+		dt.readerMutex.Unlock()
 	}
-	if dt.getFromFileCache != nil && maxTxNum == math.MaxUint64 {
-		cv, ok := dt.getFromFileCache.Get(hi)
+	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
+		cv, ok := getFromFileCache.Get(hi)
 		if ok {
 			if !cv.exists {
 				return nil, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
@@ -1592,8 +1602,8 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), filekey, dt.files[i].src.decompressor.FileName())
 		}
 
-		if dt.getFromFileCache != nil {
-			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), offset: offset, exists: true, v: v})
+		if getFromFileCache != nil {
+			getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), offset: offset, exists: true, v: v})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
 	}
@@ -1601,8 +1611,8 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), filekey, len(dt.files))
 	}
 
-	if dt.getFromFileCache != nil {
-		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false, v: nil})
+	if getFromFileCache != nil {
+		getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, offset: 0, exists: false, v: nil})
 	}
 	return nil, false, 0, 0, nil
 }
@@ -1675,6 +1685,8 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.ht.Close()
 
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
 	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
@@ -1689,6 +1701,8 @@ func (dt *DomainRoTx) statelessFileIndex(txFrom uint64, txTo uint64) int {
 }
 
 func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
 	if dt.getters == nil {
 		dt.getters = make([]*seg.Reader, len(dt.files))
 	}
@@ -1701,6 +1715,8 @@ func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
 	if dt.idxReaders == nil {
 		dt.idxReaders = make([]*recsplit.IndexReader, len(dt.files))
 	}
@@ -1713,6 +1729,8 @@ func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
 	if dt.readers == nil {
 		dt.readers = make([]*BtIndex, len(dt.files))
 	}
@@ -1725,6 +1743,8 @@ func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
 }
 
 func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+	dt.readerMutex.Lock()
+	defer dt.readerMutex.Unlock()
 	if dt.valsC != nil {
 		return dt.valsC, nil
 	}
@@ -1790,9 +1810,11 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, b
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+	var keyBuf [60]byte // 52b key and 8b for inverted step ()
+
 	key := key1
 	if len(key2) > 0 {
-		key = append(append(dt.keyBuf[:0], key1...), key2...)
+		key = append(append(keyBuf[:0], key1...), key2...)
 	}
 
 	var v []byte

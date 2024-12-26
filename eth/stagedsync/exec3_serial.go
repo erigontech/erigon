@@ -26,17 +26,20 @@ type serialExecutor struct {
 	applyWorker        *exec3.Worker
 	skipPostEvaluation bool
 	// outputs
-	txCount     uint64
-	usedGas     uint64
-	blobGasUsed uint64
+	txCount         uint64
+	usedGas         uint64
+	blobGasUsed     uint64
+	lastBlockResult *blockResult
 }
 
 func (se *serialExecutor) wait(ctx context.Context) error {
 	return nil
 }
 
-func (se *serialExecutor) processEvents(ctx context.Context, commitThreshold uint64) error {
-	return nil
+func (se *serialExecutor) processEvents(ctx context.Context, commitThreshold uint64) *blockResult {
+	result := se.lastBlockResult
+	se.lastBlockResult = nil
+	return result
 }
 
 func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profile bool) (cont bool, err error) {
@@ -97,8 +100,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
-
-				se.outputBlockNum.SetUint64(txTask.BlockNum)
 			} else if txTask.TxIndex >= 0 {
 				var prev *types.Receipt
 				if txTask.TxIndex > 0 {
@@ -167,7 +168,10 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 
 		se.doms.SetTxNum(txTask.TxNum)
 		se.doms.SetBlockNum(txTask.BlockNum)
-		se.outputTxNum.Add(1)
+		se.lastBlockResult = &blockResult{
+			BlockNum:  txTask.BlockNum,
+			lastTxNum: txTask.TxNum,
+		}
 	}
 
 	return true, nil
@@ -175,7 +179,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 
 func (se *serialExecutor) commit(ctx context.Context, txNum uint64, useExternalTx bool) (t2 time.Duration, err error) {
 	se.doms.Close()
-	if err = se.execStage.Update(se.applyTx, se.outputBlockNum.GetValueUint64()); err != nil {
+	if err = se.execStage.Update(se.applyTx, se.lastBlockResult.lastTxNum); err != nil {
 		return 0, err
 	}
 
@@ -188,7 +192,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, useExternalT
 		}
 
 		t2 = time.Since(tt)
-		se.agg.BuildFilesInBackground(se.outputTxNum.Load())
+		se.agg.BuildFilesInBackground(se.lastBlockResult.lastTxNum)
 
 		se.applyTx, err = se.cfg.db.BeginRw(context.Background()) //nolint
 		if err != nil {

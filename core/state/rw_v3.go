@@ -593,9 +593,7 @@ func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 func (r *ReaderV3) DiscardReadList()                  {}
 func (r *ReaderV3) SetTxNum(txNum uint64)             { r.txNum = txNum }
 func (r *ReaderV3) SetTx(tx kv.Tx)                    {}
-func (r *ReaderV3) ReadSet() map[string]*state.KvList { return nil }
 func (r *ReaderV3) SetTrace(trace bool)               { r.trace = trace }
-func (r *ReaderV3) ResetReadSet()                     {}
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.tx.GetLatest(kv.AccountsDomain, address[:], nil)
@@ -688,9 +686,7 @@ func NewReaderParallelV3(sd *state.SharedDomains) *ReaderParallelV3 {
 func (r *ReaderParallelV3) DiscardReadList()                  { r.discardReadList = true }
 func (r *ReaderParallelV3) SetTxNum(txNum uint64)             { r.txNum = txNum }
 func (r *ReaderParallelV3) SetTx(tx kv.Tx)                    {}
-func (r *ReaderParallelV3) ReadSet() map[string]*state.KvList { return r.readLists }
 func (r *ReaderParallelV3) SetTrace(trace bool)               { r.trace = trace }
-func (r *ReaderParallelV3) ResetReadSet()                     { r.readLists = newReadList() }
 
 func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, address[:], nil)
@@ -890,14 +886,6 @@ func (r *bufferedReader) SetTxNum(txn uint64) {
 
 func (r *bufferedReader) DiscardReadList() {
 	r.reader.DiscardReadList()
-}
-
-func (r *bufferedReader) ReadSet() map[string]*state.KvList {
-	return r.reader.ReadSet()
-}
-
-func (r *bufferedReader) ResetReadSet() {
-	r.reader.ResetReadSet()
 }
 
 type WriteLists map[string]*state.KvList

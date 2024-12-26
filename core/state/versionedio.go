@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain"
+	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
@@ -21,6 +23,7 @@ type VersionedRead struct {
 	Path VersionKey
 	Kind int
 	V    Version
+	Val  interface{}
 }
 
 type VersionedWrite struct {
@@ -30,7 +33,94 @@ type VersionedWrite struct {
 	Reason tracing.BalanceChangeReason
 }
 
-type VersionedReads []VersionedRead
+type VersionedReads map[VersionKey]VersionedRead
+
+type versionedStateReader struct {
+	reads       VersionedReads
+	stateReader StateReader
+}
+
+func NewVersionedStateReader(reads VersionedReads) *versionedStateReader {
+	return &versionedStateReader{reads, nil}
+}
+
+func (vr *versionedStateReader) SetStateReader(stateReader StateReader) {
+	vr.stateReader = stateReader
+}
+
+func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	if r, ok := vr.reads[AddressKey(address)]; ok && r.Val != nil {
+		return &r.Val.(*stateObject).data, nil
+	}
+
+	if vr.stateReader != nil {
+		return vr.stateReader.ReadAccountData(address)
+	}
+
+	return nil, nil
+}
+
+func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	if r, ok := vr.reads[AddressKey(address)]; ok && r.Val != nil {
+		return &r.Val.(*stateObject).data, nil
+	}
+
+	if vr.stateReader != nil {
+		return vr.stateReader.ReadAccountDataForDebug(address)
+	}
+
+	return nil, nil
+}
+
+func (vr versionedStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	if r, ok := vr.reads[StateKey(address, *key)]; ok && r.Val != nil {
+		return r.Val.(*uint256.Int).Bytes(), nil
+	}
+
+	if vr.stateReader != nil {
+		return vr.stateReader.ReadAccountStorage(address, incarnation, key)
+	}
+
+	return nil, nil
+}
+
+func (vr versionedStateReader) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
+	if r, ok := vr.reads[SubpathKey(address, CodePath)]; ok && r.Val != nil {
+		return r.Val.(*stateObject).Code()
+	}
+
+	if vr.stateReader != nil {
+		return vr.stateReader.ReadAccountCode(address, incarnation)
+	}
+
+	return nil, nil
+}
+
+func (vr versionedStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+	if r, ok := vr.reads[SubpathKey(address, CodePath)]; ok && r.Val != nil {
+		code, err := r.Val.(*stateObject).Code()
+		return len(code), err
+	}
+
+	if vr.stateReader != nil {
+		return vr.stateReader.ReadAccountCodeSize(address, incarnation)
+	}
+
+	return 0, nil
+}
+
+func (vr versionedStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	if r, ok := vr.reads[AddressKey(address)]; ok && r.Val != nil {
+		return r.Val.(*stateObject).data.Incarnation, nil
+	}
+
+	if vr.stateReader != nil {
+		return vr.stateReader.ReadAccountIncarnation(address)
+	}
+
+	return 0, nil
+}
+
 type VersionedWrites []VersionedWrite
 
 // hasNewWrite: returns true if the current set has a new write compared to the input
@@ -146,7 +236,7 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 	return stateObjects, nil
 }
 
-func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStorage func(sdb *stateObject) (T, error)) (T, error) {
+func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, copyV func(T) any, readStorage func(sdb *stateObject) (T, error)) (T, error) {
 	if s.versionMap == nil {
 		so := s.stateObjects[k.GetAddress()]
 		if !k.IsAddress() {
@@ -179,6 +269,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStor
 		{
 			v, err = readStorage(res.Value().(*stateObject))
 			vr.Kind = ReadKindMap
+			vr.Val = copyV(v)
 		}
 	case MVReadResultDependency:
 		{
@@ -195,6 +286,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, readStor
 				v, err = readStorage(so)
 			}
 			vr.Kind = ReadKindStorage
+			vr.Val = copyV(v)
 		}
 	default:
 		return defaultV, nil
@@ -247,7 +339,7 @@ func (io *VersionedIO) Inputs() []VersionedReads {
 	return io.inputs
 }
 
-func (io *VersionedIO) ReadSet(txnIdx int) []VersionedRead {
+func (io *VersionedIO) ReadSet(txnIdx int) VersionedReads {
 	if len(io.inputs) <= txnIdx+1 {
 		return nil
 	}
@@ -285,7 +377,7 @@ func NewVersionedIO(numTx int) *VersionedIO {
 	}
 }
 
-func (io *VersionedIO) RecordReads(txId int, input []VersionedRead) {
+func (io *VersionedIO) RecordReads(txId int, input VersionedReads) {
 	if len(io.inputs) <= txId+1 {
 		io.inputs = append(io.inputs, make([]VersionedReads, txId+2-len(io.inputs))...)
 	}
@@ -321,19 +413,13 @@ type DAG struct {
 
 type TxDep struct {
 	Index         int
-	ReadList      []VersionedRead
+	Reads         VersionedReads
 	FullWriteList [][]VersionedWrite
 }
 
 func HasReadDep(txFrom VersionedWrites, txTo VersionedReads) bool {
-	reads := make(map[VersionKey]bool)
-
-	for _, v := range txTo {
-		reads[v.Path] = true
-	}
-
 	for _, rd := range txFrom {
-		if _, ok := reads[rd.Path]; ok {
+		if _, ok := txTo[rd.Path]; ok {
 			return true
 		}
 	}
@@ -397,7 +483,7 @@ func depsHelper(dependencies map[int]map[int]bool, txFrom VersionedWrites, txTo 
 }
 
 func UpdateDeps(deps map[int]map[int]bool, t TxDep) map[int]map[int]bool {
-	txTo := t.ReadList
+	txTo := t.Reads
 
 	deps[t.Index] = map[int]bool{}
 

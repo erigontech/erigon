@@ -363,18 +363,16 @@ func ExecV3(ctx context.Context,
 
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
-				cfg:            cfg,
-				execStage:      execStage,
-				rs:             rs,
-				doms:           doms,
-				agg:            agg,
-				accumulator:    accumulator,
-				isMining:       isMining,
-				inMemExec:      inMemExec,
-				applyTx:        applyTx,
-				outputTxNum:    &outputTxNum,
-				outputBlockNum: stages.SyncMetrics[stages.Execution],
-				logger:         logger,
+				cfg:         cfg,
+				execStage:   execStage,
+				rs:          rs,
+				doms:        doms,
+				agg:         agg,
+				accumulator: accumulator,
+				isMining:    isMining,
+				inMemExec:   inMemExec,
+				applyTx:     applyTx,
+				logger:      logger,
 			},
 			shouldGenerateChangesets: shouldGenerateChangesets,
 			workerCount:              workerCount,
@@ -383,12 +381,11 @@ func ExecV3(ctx context.Context,
 			progress:                 progress,
 		}
 
-		executorResults := make(chan *blockResult, 100)
-		executorCancel := pe.run(ctx, executorResults)
+		executorCancel := pe.run(ctx)
 		defer executorCancel()
 
 		defer func() {
-			processed.Log("Done", executor.readState().StateV3, nil, pe.rws, 0 /*txCount - TODO*/, logGas, pe.outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			processed.Log("Done", executor.readState().StateV3, nil, pe.rws, 0 /*txCount - TODO*/, logGas, stages.SyncMetrics[stages.Execution].GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = pe
@@ -398,24 +395,22 @@ func ExecV3(ctx context.Context,
 
 		se := &serialExecutor{
 			txExecutor: txExecutor{
-				cfg:            cfg,
-				execStage:      execStage,
-				rs:             rs,
-				doms:           doms,
-				agg:            agg,
-				u:              u,
-				isMining:       isMining,
-				inMemExec:      inMemExec,
-				applyTx:        applyTx,
-				outputTxNum:    &outputTxNum,
-				outputBlockNum: stages.SyncMetrics[stages.Execution],
-				logger:         logger,
+				cfg:       cfg,
+				execStage: execStage,
+				rs:        rs,
+				doms:      doms,
+				agg:       agg,
+				u:         u,
+				isMining:  isMining,
+				inMemExec: inMemExec,
+				applyTx:   applyTx,
+				logger:    logger,
 			},
 			applyWorker: applyWorker,
 		}
 
 		defer func() {
-			processed.Log("Done", executor.readState().StateV3, nil, nil, se.txCount, logGas, se.outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+			processed.Log("Done", executor.readState().StateV3, nil, nil, se.txCount, logGas, stages.SyncMetrics[stages.Execution].GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 		}()
 
 		executor = se
@@ -454,7 +449,7 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 
 	// Only needed by bor chains
-	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+	shouldGenerateChangesetsForLastBlocks := false //cfg.chainConfig.Bor != nil
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -497,15 +492,13 @@ Loop:
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, blockNum, header.Time)
-
-		getHashFnMute := &sync.Mutex{}
-		getHashFn := core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header) {
-			getHashFnMute.Lock()
-			defer getHashFnMute.Unlock()
-			return executor.getHeader(ctx, hash, number)
-		})
 		totalGasUsed += b.GasUsed()
-		blockContext := core.NewEVMBlockContext(header, getHashFn, cfg.engine, cfg.author /* author */, chainConfig)
+		getHashFnMutex := sync.Mutex{}
+		blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header) {
+			getHashFnMutex.Lock()
+			defer getHashFnMutex.Unlock()
+			return executor.getHeader(ctx, hash, number)
+		}), cfg.engine, cfg.author, chainConfig)
 
 		if !parallel && accumulator != nil {
 			txs, err := blockReader.RawTransactions(context.Background(), executor.tx(), b.NumberU64(), b.NumberU64())
@@ -534,7 +527,6 @@ Loop:
 				Rules:              rules,
 				Txs:                txs,
 				SkipAnalysis:       skipAnalysis,
-				GetHashFn:          getHashFn,
 				EvmBlockContext:    blockContext,
 				Withdrawals:        b.Withdrawals(),
 				PruneNonEssentials: pruneNonEssentials,
@@ -643,8 +635,17 @@ Loop:
 
 		// MA commitTx
 		if parallel {
-			if err := executor.processEvents(ctx, commitThreshold); err != nil {
-				return err
+			blockResult := executor.processEvents(ctx, commitThreshold)
+
+			if blockResult != nil {
+				if blockResult.Err != nil {
+					return blockResult.Err
+				}
+
+				if blockResult.complete {
+					outputTxNum.Store(blockResult.lastTxNum)
+					stages.SyncMetrics[stages.Execution].SetUint64(blockResult.BlockNum)
+				}
 			}
 		} else {
 			if !inMemExec && !isMining {
@@ -658,7 +659,7 @@ Loop:
 				}
 
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState().StateV3, nil, nil, count, logGas, executor.(*serialExecutor).outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+				progress.Log("", executor.readState().StateV3, nil, nil, count, logGas, stages.SyncMetrics[stages.Execution].GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {
@@ -720,6 +721,24 @@ Loop:
 			return ctx.Err()
 		default:
 		}
+	}
+
+	for {
+		blockResult := executor.processEvents(ctx, commitThreshold)
+
+		if blockResult == nil {
+			break
+		}
+
+		if blockResult.Err != nil {
+			return blockResult.Err
+		}
+
+		if blockResult.complete {
+			outputTxNum.Store(blockResult.lastTxNum)
+			stages.SyncMetrics[stages.Execution].SetUint64(blockResult.BlockNum)
+		}
+
 	}
 
 	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", mxExecRepeats.GetValueUint64())

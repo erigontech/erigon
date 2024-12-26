@@ -141,7 +141,6 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *exec.TxTask) *exec.Result {
 	}
 
 	rw.stateReader.SetTxNum(txTask.TxNum)
-	rw.stateReader.ResetReadSet()
 	rw.stateWriter = state.NewNoopWriter()
 
 	rw.ibs.Reset()
@@ -462,7 +461,6 @@ func CustomTraceMapReduce(fromBlock, toBlock uint64, consumer TraceConsumer, ctx
 				Rules:           rules,
 				Txs:             txs,
 				SkipAnalysis:    skipAnalysis,
-				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
 				Withdrawals:     b.Withdrawals(),
 

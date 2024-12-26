@@ -21,7 +21,6 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
@@ -50,9 +49,7 @@ func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) GetTxNum() uint64      { return hr.txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
-func (hr *HistoryReaderV3) ReadSet() map[string]*state.KvList { return nil }
-func (hr *HistoryReaderV3) ResetReadSet()                     {}
-func (hr *HistoryReaderV3) DiscardReadList()                  {}
+func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, ok, err := hr.ttx.GetAsOf(kv.AccountsDomain, address[:], nil, hr.txNum)
@@ -131,8 +128,6 @@ type ResettableStateReader interface {
 	SetTx(tx kv.Tx)
 	SetTxNum(txn uint64)
 	DiscardReadList()
-	ReadSet() map[string]*state.KvList
-	ResetReadSet()
 }
 
 /*
