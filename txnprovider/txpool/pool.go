@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/u256"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
+	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
@@ -427,6 +428,13 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		default:
 		}
 	}
+
+
+	diagUpdate := diagnostics.DiagBlockTxnUpdate{}
+	for _, txn := range minedTxns.Txns {
+		diagUpdate.Txns = append(diagUpdate.Txns, diagnostics.DiagTxn{Hash: txn.IDHash[:]})
+	}
+	diagnostics.Send(diagUpdate)
 
 	return nil
 }
@@ -1219,6 +1227,8 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		}
 	}
 
+	//fmt.Println("Call!!!")
+
 	// This can be thought of a reverse operation from the one described before.
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
@@ -1231,7 +1241,10 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]txpoolcfg.DiscardReason, len(newTxns.Txns))
 	announcements := Announcements{}
+	diagUpdate := diagnostics.DiagTxnUpdate{}
+
 	for i, txn := range newTxns.Txns {
+		diagUpdate.Txns = append(diagUpdate.Txns, diagnostics.DiagTxn{Hash: txn.IDHash[:]})
 		if found, ok := p.byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = txpoolcfg.DuplicateHash
 			// In case if the transition is stuck, "poke" it to rebroadcast
@@ -1251,6 +1264,8 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
 	}
+
+	diagnostics.Send(diagUpdate)
 
 	for senderID := range sendersWithChangedState {
 		nonce, balance, err := senders.info(cacheView, senderID)
