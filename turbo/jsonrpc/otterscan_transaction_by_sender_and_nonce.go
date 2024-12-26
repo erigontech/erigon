@@ -142,7 +142,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		return nil, nil
 	}
 	ok, bn, err := txNumsReader.FindBlockNum(tx, creationTxnID)
-	fmt.Printf("[dbg] loop3 2: %d, %d, %b\n", creationTxnID, ok, bn)
+	fmt.Printf("[dbg] loop3 2: %d, %d, %b\n", creationTxnID, bn, ok)
 	if err != nil {
 		return nil, err
 	}
