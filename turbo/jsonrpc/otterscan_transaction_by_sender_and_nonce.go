@@ -170,8 +170,10 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	fmt.Printf("[dbg] loop3 4: %d, %d, %x\n", txn.GetNonce(), nonce, s)
 	{
 		txn, _ = api._txnReader.TxnByIdxInBlock(ctx, tx, bn, txIndex-1)
+		s, _ = txn.GetSender()
 		fmt.Printf("[dbg] loop3 4-1: %d, %d, %x\n", txn.GetNonce(), nonce, s)
 		txn, _ = api._txnReader.TxnByIdxInBlock(ctx, tx, bn, txIndex+1)
+		s, _ = txn.GetSender()
 		fmt.Printf("[dbg] loop3 4+1: %d, %d, %x\n", txn.GetNonce(), nonce, s)
 
 	}
