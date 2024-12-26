@@ -77,7 +77,6 @@ type InvertedIndex struct {
 type iiCfg struct {
 	salt *uint32
 	dirs datadir.Dirs
-	db   kv.RoDB // global db pointer. mostly for background warmup.
 
 	filenameBase    string // filename base for all files of this inverted index
 	aggregationStep uint64 // amount of transactions inside single aggregation step
@@ -101,7 +100,13 @@ type iiVisible struct {
 
 func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
-		panic("empty `dirs` varialbe")
+		panic("assert: empty `dirs`")
+	}
+	if cfg.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if cfg.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
@@ -177,6 +182,12 @@ func (ii *InvertedIndex) openFolder() error {
 }
 
 func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
+	if ii.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if ii.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
+	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, ii.aggregationStep, ii.filenameBase, "ef", ii.logger) {
 		startStep, endStep := dirtyFile.startTxNum/ii.aggregationStep, dirtyFile.endTxNum/ii.aggregationStep
 		if ii.integrity != nil && !ii.integrity(startStep, endStep) {

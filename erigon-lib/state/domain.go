@@ -101,7 +101,7 @@ type domainCfg struct {
 	valuesTable string  // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	largeValues bool
 
-	integrity rangeDomainIntegrityChecker
+	crossDomainIntegrity rangeDomainIntegrityChecker
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
@@ -129,12 +129,11 @@ var DomainCompressCfg = seg.Cfg{
 
 func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
-		panic("empty `dirs` variable")
+		panic("assert: empty `dirs`")
 	}
-	if cfg.indexList == 0 {
-		cfg.indexList = withBTree | withExistence
+	if cfg.hist.filenameBase == "" {
+		panic("assert: emtpy `filenameBase`" + cfg.name.String())
 	}
-	cfg.compressCfg = DomainCompressCfg
 
 	d := &Domain{
 		domainCfg:  cfg,
@@ -143,10 +142,6 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	}
 
 	var err error
-	if cfg.hist.filenameBase == "" {
-		cfg.hist.filenameBase = cfg.name.String()
-		cfg.hist.iiCfg.filenameBase = cfg.hist.filenameBase
-	}
 	if d.History, err = NewHistory(cfg.hist, logger); err != nil {
 		return nil, err
 	}
@@ -298,10 +293,18 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 }
 
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
-	for _, dirtyFile := range scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger) {
+	if d.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if d.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
+	}
+
+	l := scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger)
+	for _, dirtyFile := range l {
 		startStep, endStep := dirtyFile.startTxNum/d.aggregationStep, dirtyFile.endTxNum/d.aggregationStep
 		domainName, _ := kv.String2Domain(d.filenameBase)
-		if d.integrity != nil && !d.integrity(domainName, startStep, endStep) {
+		if d.crossDomainIntegrity != nil && !d.crossDomainIntegrity(domainName, d.dirs, startStep, endStep) {
 			d.logger.Debug("[agg] skip garbage file", "name", d.filenameBase, "startStep", startStep, "endStep", endStep)
 			continue
 		}

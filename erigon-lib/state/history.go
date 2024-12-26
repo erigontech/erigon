@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/datadir"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -69,7 +70,7 @@ type History struct {
 	_visibleFiles []visibleFile
 }
 
-type rangeDomainIntegrityChecker func(d kv.Domain, fromStep, toStep uint64) bool
+type rangeDomainIntegrityChecker func(d kv.Domain, dirs datadir.Dirs, fromStep, toStep uint64) bool
 type rangeIntegrityChecker func(fromStep, toStep uint64) bool
 
 type histCfg struct {
@@ -136,8 +137,11 @@ func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	return &h, nil
 }
 
+func (h *History) vFileName(fromStep, toStep uint64) string {
+	return fmt.Sprintf("v1-%s.%d-%d.v", h.filenameBase, fromStep, toStep)
+}
 func (h *History) vFilePath(fromStep, toStep uint64) string {
-	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("v1-%s.%d-%d.v", h.filenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
 func (h *History) vAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("v1-%s.%d-%d.vi", h.filenameBase, fromStep, toStep))
@@ -169,6 +173,12 @@ func (h *History) openFolder() error {
 }
 
 func (h *History) scanDirtyFiles(fileNames []string) {
+	if h.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if h.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
+	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, h.aggregationStep, h.filenameBase, "v", h.logger) {
 		startStep, endStep := dirtyFile.startTxNum/h.aggregationStep, dirtyFile.endTxNum/h.aggregationStep
 		if h.integrity != nil && !h.integrity(startStep, endStep) {
