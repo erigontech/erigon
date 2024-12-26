@@ -102,6 +102,12 @@ func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
+	if cfg.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if cfg.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
+	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
