@@ -421,6 +421,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		fmt.Printf("Compressed %d keys in file %s\n", count, fileName)
 		comp.Close()
 		if replaceInDatadir {
+			fmt.Printf("Replacing the file %s in datadir\n", fileName)
 			if err := os.Rename(path.Join(outD.SnapDomain, fileName), path.Join(dirs.SnapDomain, fileName)); err != nil {
 				return fmt.Errorf("failed to replace the file %s: %w", fileName, err)
 			}
@@ -433,6 +434,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 			if err := os.Remove(path.Join(dirs.SnapDomain, btFile)); err != nil {
 				return fmt.Errorf("failed to remove the file: %w", btFile, err)
 			}
+			fmt.Printf("Removed the files %s and %s\n", kveiFile, btFile)
 		}
 	}
 	return nil
