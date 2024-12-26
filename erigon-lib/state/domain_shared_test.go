@@ -320,6 +320,8 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 		ac = agg.BeginFilesRo()
 		defer ac.Close()
+		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains...)))
+
 		rwTx, err = db.BeginRw(ctx)
 		require.NoError(err)
 		defer rwTx.Rollback()

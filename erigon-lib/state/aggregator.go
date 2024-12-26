@@ -441,6 +441,10 @@ func (a *Aggregator) EnableHistory(name kv.Domain) *Aggregator {
 	return a
 }
 
+func (a *Aggregator) HasBackgroundFilesBuild2() bool {
+	return a.buildingFiles.Load() || a.mergingFiles.Load()
+}
+
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *Aggregator) BackgroundProgress() string    { return a.ps.String() }
 
@@ -886,6 +890,9 @@ func (ac *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
 }
 
 func (ac *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
+	if len(entitySet) == 0 {
+		panic("assert: missed arguments")
+	}
 	for i, domain := range entitySet {
 		domainEnd := ac.d[domain].files.EndTxNum()
 		if i == 0 || domainEnd < minTxNum {
@@ -1418,7 +1425,7 @@ func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
 func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
-	a.visibleFilesMinimaxTxNum.Store(aggTx.TxNumsInFiles())
+	a.visibleFilesMinimaxTxNum.Store(aggTx.TxNumsInFiles(kv.StateDomains...))
 }
 
 type RangesV3 struct {
