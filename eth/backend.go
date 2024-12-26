@@ -1644,6 +1644,9 @@ func (s *Ethereum) Stop() error {
 	if s.txPoolDB != nil {
 		s.txPoolDB.Close()
 	}
+	if s.agg != nil {
+		s.agg.Close()
+	}
 	s.chainDB.Close()
 
 	if s.silkwormRPCDaemonService != nil {
