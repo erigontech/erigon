@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
+	statelib "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
@@ -350,7 +351,7 @@ func makePurifiedDomainsIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger
 	}
 	defer tx.Rollback()
 	outD := datadir.New(purifyDir)
-	compressCfg := seg.DefaultCfg
+	compressCfg := statelib.DomainCompressCfg
 	compressCfg.Workers = runtime.NumCPU()
 	// now start the file indexing
 	for currentLayer, fileName := range filesNamesToPurify {
