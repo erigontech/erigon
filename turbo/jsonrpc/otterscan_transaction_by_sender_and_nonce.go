@@ -154,6 +154,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		return nil, err
 	}
 	txIndex := int(creationTxnID) - int(minTxNum) - 1 /* system-tx */
+	fmt.Printf("[dbg] loop3 3: creationTxnID=%d, minTxNum=%d, txIndex=%d\n", creationTxnID, minTxNum, txIndex)
 	if txIndex == -1 {
 		txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
 	}
@@ -165,6 +166,8 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		log.Warn("[rpc] txn is nil", "blockNum", bn, "txIndex", txIndex)
 		return nil, nil
 	}
+	s, _ := txn.GetSender()
+	fmt.Printf("[dbg] loop3 4: %d, %d, %x\n", txn.GetNonce(), nonce, s)
 	found := txn.GetNonce() == nonce
 	if !found {
 		return nil, nil
