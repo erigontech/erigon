@@ -38,9 +38,9 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Restore Erigon Testbed Data Directory
-      run: |
-        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+    #- name: Restore Erigon Testbed Data Directory
+    #  run: |
+    #    rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
 
     - name: Run Erigon, send ctrl-c and check for clean exiting
       id: test_step
@@ -48,7 +48,7 @@ jobs:
         set +e # Disable exit on error
         
         # Run Erigon, send ctrl-c and check logs
-        python3 $ERIGON_QA_PATH/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $WORKING_TIME_SECONDS Erigon2
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py ${{ github.workspace }}/build/bin $ERIGON_REFERENCE_DATA_DIR $WORKING_TIME_SECONDS Erigon2
   
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -72,10 +72,10 @@ jobs:
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Delete Erigon Testbed Data Directory
-      if: always()
-      run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR
+    #- name: Delete Erigon Testbed Data Directory
+    #  if: always()
+    #  run: |
+    #    rm -rf $ERIGON_TESTBED_DATA_DIR
 
     - name: Resume the Erigon instance dedicated to db maintenance
       run: |
