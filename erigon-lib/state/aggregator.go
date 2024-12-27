@@ -82,7 +82,7 @@ type Aggregator struct {
 
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
-	onFreeze OnFreezeFunc
+	onFreeze kv.OnFreezeFunc
 
 	ps *background.ProgressSet
 
@@ -94,8 +94,6 @@ type Aggregator struct {
 
 	produce bool
 }
-
-type OnFreezeFunc func(frozenFileNames []string)
 
 const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
@@ -334,8 +332,8 @@ func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadi
 	return nil
 }
 
-func (a *Aggregator) StepSize() uint64        { return a.aggregationStep }
-func (a *Aggregator) OnFreeze(f OnFreezeFunc) { a.onFreeze = f }
+func (a *Aggregator) StepSize() uint64           { return a.aggregationStep }
+func (a *Aggregator) OnFreeze(f kv.OnFreezeFunc) { a.onFreeze = f }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()

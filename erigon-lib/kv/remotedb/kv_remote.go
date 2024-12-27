@@ -228,6 +228,7 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) 
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
+func (db *DB) OnFreeze(f kv.OnFreezeFunc) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
 func (tx *tx) CollectMetrics() {}
