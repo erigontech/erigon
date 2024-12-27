@@ -23,7 +23,6 @@ type Appendable interface {
 	SetFreezer(freezer Freezer)
 	SetIndexBuilders(ib []AccessorIndexBuilder)
 	SetCanFreeze(canFreeze CanFreeze)
-	SetRoSnapshots(rosnapshots *RoSnapshots)
 	GetRoSnapshots() *RoSnapshots
 
 	// freeze
@@ -34,6 +33,7 @@ type Appendable interface {
 	BuildMissedIndexes(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet)
 
 	Prune(ctx context.Context, limit uint64, rwTx kv.RwTx) error
+	Unwind(ctx context.Context, stepKeyFrom uint64, rwTx kv.RwTx) // stepKey or tsId/tsNum
 
 	// queries and put
 	Get(tsNum uint64, roTx kv.Tx) (VVType, bool, error)

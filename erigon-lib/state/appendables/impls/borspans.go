@@ -1,12 +1,13 @@
 package impls
 
 import (
+	"context"
+
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	ca "github.com/erigontech/erigon-lib/state/appendables"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/tidwall/btree"
 )
 
 // appendables which don't store non-canonical data
@@ -21,20 +22,20 @@ const (
 	BorSpans ca.ApEnum = "borspans.appe"
 )
 
-func init() {
-	ca.RegisterAppendable(BorSpans, NewSpanAppendable(kv.BorSpans))
-	// even agg is initialized, it'll pick appendables from registry
-	// and set it in itself.
-}
+// func init() {
+// 	ca.RegisterAppendable(BorSpans, NewSpanAppendable(kv.BorSpans))
+// 	// even agg is initialized, it'll pick appendables from registry
+// 	// and set it in itself.
+// }
 
 type SpanAppendable struct {
-	ca.BaseAppendable
+	*ca.BaseAppendable
 	valsTable string
 }
 
 func NewSpanAppendable(valsTable string) *SpanAppendable {
 	ap := &SpanAppendable{
-		BaseAppendable: ca.BaseAppendable{},
+		BaseAppendable: ca.NewBaseAppendable(BorSpans),
 		valsTable:      valsTable,
 	}
 
@@ -46,17 +47,25 @@ func NewSpanAppendable(valsTable string) *SpanAppendable {
 
 	salt := uint32(4343) // load from salt-blocks.txt etc.
 
-	indexb := ca.NewSimpleAccessorBuilder(ca.NewAccessorArgs(true, false, false, salt), BorSpans)
-
-	ap.rosnapshot = &ca.RoSnapshots{
-		enums: []ApEnum{BorSpans},
-		dirty: map[ApEnum]*btree.BTreeG[*DirtySegment]{},
-		visible: map[ApEnum]VisibleSegments{
-			BorSpans: {},
-		},
-	}
-	ap.enum = BorSpans
+	indexb := ca.NewSimpleAccessorBuilder(ca.NewAccessorArgs(true, false, false, salt), BorSpans, string(BorSpans))
+	ap.SetIndexBuilders([]ca.AccessorIndexBuilder{indexb})
 	return ap
+}
+
+// prune function
+func (ap *SpanAppendable) Prune(ctx context.Context, limit uint64, rwTx kv.RwTx) error {
+	// TODO
+	return nil
+}
+
+func (ap *SpanAppendable) Unwind(ctx context.Context, stepKeyFrom uint64, rwTx kv.RwTx) {
+	cursor, err := rwTx.Cursor(ap.valsTable)
+	if err != nil {
+		return
+	}
+
+	defer cursor.Close()
+
 }
 
 type SpanSourceKeyGenerator struct{}

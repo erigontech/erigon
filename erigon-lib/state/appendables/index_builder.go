@@ -25,7 +25,7 @@ type IndexKeyFactory interface {
 }
 
 type IndexBuilder[IndexType any] interface {
-	Build(ctx context.Context, stepFrom, stepTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (IndexType, error)
+	Build(ctx context.Context, stepKeyFrom, stepKeyTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (IndexType, error)
 	// GetIdentifier() string // unique identifier for this index
 	// GetInputDataQuery(stepKeyFrom, stepKeyTo uint64) IndexInputDataQuery
 	// GetIndexKeyFactory() IndexKeyFactory

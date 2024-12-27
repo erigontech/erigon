@@ -36,8 +36,15 @@ type BaseAppendable struct {
 
 	canFreeze CanFreeze
 
-	rosnapshot *RoSnapshots
-	enum       ApEnum
+	//rosnapshot *RoSnapshots
+	enum ApEnum
+}
+
+func NewBaseAppendable(enum ApEnum) *BaseAppendable {
+	ap := &BaseAppendable{
+		enum: enum,
+	}
+	return ap
 }
 
 // setters
@@ -172,14 +179,6 @@ func (ap *BaseAppendable) SetCanFreeze(canFreeze CanFreeze) {
 
 func (ap *BaseAppendable) SetFreezer(freezer Freezer) {
 	ap.freezer = freezer
-}
-
-func (ap *BaseAppendable) SetRoSnapshots(rs *RoSnapshots) {
-	ap.rosnapshot = rs
-}
-
-func (ap *BaseAppendable) GetRoSnapshots() *RoSnapshots {
-	return ap.rosnapshot
 }
 
 func (ap *BaseAppendable) SetSourceKeyGenerator(gen SourceKeyGenerator) {
