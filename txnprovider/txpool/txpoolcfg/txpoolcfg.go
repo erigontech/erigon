@@ -191,9 +191,9 @@ func (r DiscardReason) String() string {
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 // TODO: move input data to a struct
-func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai, isPrague bool) (uint64, DiscardReason) {
+func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai, isPrague bool) (uint64, uint64, DiscardReason) {
 	// Set the starting gas for the raw transaction
-	var gas uint64
+	var gas, floorGas7623 uint64
 	if isContractCreation && isHomestead {
 		gas = fixedgas.TxGasContractCreation
 	} else {
@@ -211,84 +211,81 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessL
 
 		product, overflow := emath.SafeMul(nz, nonZeroGas)
 		if overflow {
-			return 0, GasUintOverflow
+			return 0, 0, GasUintOverflow
 		}
 		gas, overflow = emath.SafeAdd(gas, product)
 		if overflow {
-			return 0, GasUintOverflow
+			return 0, 0, GasUintOverflow
 		}
 
 		z := dataLen - nz
 
 		product, overflow = emath.SafeMul(z, fixedgas.TxDataZeroGas)
 		if overflow {
-			return 0, GasUintOverflow
+			return 0, 0, GasUintOverflow
 		}
 		gas, overflow = emath.SafeAdd(gas, product)
 		if overflow {
-			return 0, GasUintOverflow
+			return 0, 0, GasUintOverflow
 		}
 
 		if isContractCreation && isShanghai {
 			numWords := toWordSize(dataLen)
 			product, overflow = emath.SafeMul(numWords, fixedgas.InitCodeWordGas)
 			if overflow {
-				return 0, GasUintOverflow
+				return 0, 0, GasUintOverflow
 			}
 			gas, overflow = emath.SafeAdd(gas, product)
 			if overflow {
-				return 0, GasUintOverflow
+				return 0, 0, GasUintOverflow
 			}
 		}
 
 		// EIP-7623
 		if isPrague {
 			tokenLen := dataLen + 3*nz
-			floorCost, overflow := emath.SafeMul(tokenLen, fixedgas.TxTotalCostFloorPerToken)
+			floorGas7623, overflow = emath.SafeMul(tokenLen, fixedgas.TxTotalCostFloorPerToken)
 			if overflow {
-				return 0, GasUintOverflow
+				return 0, 0, GasUintOverflow
 			}
-			floorCost, overflow = emath.SafeAdd(floorCost, fixedgas.TxGas)
+			floorGas7623, overflow = emath.SafeAdd(floorGas7623, fixedgas.TxGas)
 			if overflow {
-				return 0, GasUintOverflow
-			}
-			if floorCost > gas {
-				gas = floorCost
+				return 0, 0, GasUintOverflow
 			}
 		}
 	}
 	if accessList != nil {
 		product, overflow := emath.SafeMul(uint64(len(accessList)), fixedgas.TxAccessListAddressGas)
 		if overflow {
-			return 0, GasUintOverflow
+			return 0, 0, GasUintOverflow
 		}
 		gas, overflow = emath.SafeAdd(gas, product)
 		if overflow {
-			return 0, GasUintOverflow
+			return 0, 0, GasUintOverflow
 		}
 
 		product, overflow = emath.SafeMul(uint64(accessList.StorageKeys()), fixedgas.TxAccessListStorageKeyGas)
 		if overflow {
-			return 0, GasUintOverflow
+			return 0, 0, GasUintOverflow
 		}
 		gas, overflow = emath.SafeAdd(gas, product)
 		if overflow {
-			return 0, GasUintOverflow
+			return 0, 0, GasUintOverflow
 		}
 	}
 
 	// Add the cost of authorizations
 	product, overflow := emath.SafeMul(authorizationsLen, fixedgas.PerEmptyAccountCost)
 	if overflow {
-		return 0, GasUintOverflow
+		return 0, 0, GasUintOverflow
 	}
 
 	gas, overflow = emath.SafeAdd(gas, product)
 	if overflow {
-		return 0, GasUintOverflow
+		return 0, 0, GasUintOverflow
 	}
 
-	return gas, Success
+	return gas, floorGas7623, Success
 }
 
 // toWordSize returns the ceiled word size required for memory expansion.
