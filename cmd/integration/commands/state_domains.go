@@ -67,6 +67,7 @@ func init() {
 	purifyDomains.Flags().StringVar(&purifyDir, "purifiedDomain", "purified-output", "")
 	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "only-commitment", true, "purify only commitment domain")
 	purifyDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the purified domains directly in datadir (will remove .kvei and .bt too)")
+	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "minimum ratio of keys to skip in L0")
 	rootCmd.AddCommand(purifyDomains)
 }
 
@@ -74,6 +75,7 @@ func init() {
 var (
 	stepSize             uint64
 	lastStep             uint64
+	minSkipRatioL0       float64
 	purifyDir            string
 	purifyOnlyCommitment bool
 	replaceInDatadir     bool
@@ -410,10 +412,16 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 			}
 			count++
 			if count%100000 == 0 {
-				fmt.Printf("Indexed %d keys, skipped %d, in file %s\n", count, skipped, fileName)
+				skipRatio := float64(skipped) / float64(count)
+				fmt.Printf("Indexed %d keys, skipped %d, in file %s. skip ratio: %.2f\n", count, skipped, fileName, skipRatio)
 			}
 		}
 
+		skipRatio := float64(skipped) / float64(count)
+		if skipRatio < minSkipRatioL0 && currentLayer == 0 {
+			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping the domain and file %s\n", skipRatio, minSkipRatioL0, fileName)
+			return nil
+		}
 		fmt.Printf("Loaded %d keys in file %s. now compressing...\n", count, fileName)
 		if err := comp.Compress(); err != nil {
 			return fmt.Errorf("failed to compress: %w", err)
