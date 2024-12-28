@@ -45,7 +45,7 @@ type StageHistoryReconstructionCfg struct {
 	sn                       *freezeblocks.CaplinSnapshots
 	startingRoot             libcommon.Hash
 	backfilling              bool
-	blobsBackfilling         bool
+	archiveBlobsBackfilling  bool
 	waitForAllRoutines       bool
 	startingSlot             uint64
 	tmpdir                   string
@@ -61,7 +61,7 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, backfilling, blobsBackfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, backfilling, archiveBlobsBackfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		beaconCfg:                beaconCfg,
 		downloader:               downloader,
@@ -78,7 +78,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 		backfillingThrottling:    backfillingThrottling,
 		executionBlocksCollector: executionBlocksCollector,
 		blockReader:              blockReader,
-		blobsBackfilling:         blobsBackfilling,
+		archiveBlobsBackfilling:  archiveBlobsBackfilling,
 		blobStorage:              blobStorage,
 	}
 }
@@ -235,26 +235,24 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		close(finishCh)
-		if cfg.blobsBackfilling {
-			go func() {
-				if err := downloadBlobHistoryWorker(cfg, ctx, true, logger); err != nil {
-					logger.Error("Error downloading blobs", "err", err)
-				}
-				// set a timer every 15 minutes as a failsafe
-				ticker := time.NewTicker(15 * time.Minute)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-ticker.C:
-						if err := downloadBlobHistoryWorker(cfg, ctx, false, logger); err != nil {
-							logger.Error("Error downloading blobs", "err", err)
-						}
-					}
-				}
-			}()
-		}
+		go func() {
+			if err := downloadBlobHistoryWorker(cfg, ctx, true, logger); err != nil {
+				logger.Error("Error downloading blobs", "err", err)
+			}
+			// commented out because this code does not work well yet.
+			// ticker := time.NewTicker(15 * time.Minute)
+			// defer ticker.Stop()
+			// for {
+			// 	select {
+			// 	case <-ctx.Done():
+			// 		return
+			// 	case <-ticker.C:
+			// 		if err := downloadBlobHistoryWorker(cfg, ctx, false, logger); err != nil {
+			// 			logger.Error("Error downloading blobs", "err", err)
+			// 		}
+			// 	}
+			// }
+		}()
 	}()
 	// We block until we are done with the EL side of the backfilling with 2000 blocks of safety margin.
 	for !cfg.downloader.Finished() && (cfg.engine == nil || cfg.downloader.Progress() > destinationSlotForEL) {
@@ -289,6 +287,10 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	prevTime := time.Now()
 	targetSlot := cfg.beaconCfg.DenebForkEpoch * cfg.beaconCfg.SlotsPerEpoch
 
+	if !cfg.archiveBlobsBackfilling {
+		targetSlot = currentSlot - min(cfg.beaconCfg.MinSlotsForBlobsSidecarsRequest(), currentSlot)
+	}
+	log.Info("[Caplin] Backfilling blobs", "from", currentSlot, "to", targetSlot)
 	for currentSlot >= targetSlot {
 		if currentSlot <= cfg.sn.FrozenBlobs() {
 			break
