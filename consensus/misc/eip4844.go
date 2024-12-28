@@ -41,10 +41,10 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header) uint64 {
 		blobGasUsed = *parent.BlobGasUsed
 	}
 
-	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock() {
+	if excessBlobGas+blobGasUsed < config.GetTargetBlobGasPerBlock(parent.Time) {
 		return 0
 	}
-	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock()
+	return excessBlobGas + blobGasUsed - config.GetTargetBlobGasPerBlock(parent.Time)
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
@@ -103,8 +103,8 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 	return nil
 }
 
-func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64) (*uint256.Int, error) {
-	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction()), excessBlobGas)
+func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (*uint256.Int, error) {
+	return FakeExponential(uint256.NewInt(config.GetMinBlobGasPrice()), uint256.NewInt(config.GetBlobGasPriceUpdateFraction(headerTime)), excessBlobGas)
 }
 
 func GetBlobGasUsed(numBlobs int) uint64 {

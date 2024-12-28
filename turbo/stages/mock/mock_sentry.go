@@ -344,6 +344,19 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
+		newTxs := make(chan txpool.Announcements, 1024)
+		if tb != nil {
+			tb.Cleanup(func() {
+				close(newTxs)
+			})
+		}
+		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
+		shanghaiTime := mock.ChainConfig.ShanghaiTime
+		cancunTime := mock.ChainConfig.CancunTime
+		pragueTime := mock.ChainConfig.PragueTime
+		maxBlobsPerBlock := mock.ChainConfig.GetMaxBlobsPerBlock(0)
+		mock.txPoolDB = memdb.NewWithLabel(tmpdir, kv.TxPoolDB)
+		mock.TxPool, err = txpool.New(newTxs, mock.txPoolDB, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime, nil /* agraBlock */, cancunTime, pragueTime, maxBlobsPerBlock, nil, logger)
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 		mock.TxPool, mock.TxPoolGrpcServer, err = txpool.Assemble(
 			ctx,

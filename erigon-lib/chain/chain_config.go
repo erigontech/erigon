@@ -75,6 +75,11 @@ type Config struct {
 	TargetBlobGasPerBlock      *uint64 `json:"targetBlobGasPerBlock,omitempty"`
 	BlobGasPriceUpdateFraction *uint64 `json:"blobGasPriceUpdateFraction,omitempty"`
 
+	// EIP-7691
+	MaxBlobGasPerBlockPrague         *uint64 `json:"maxBlobGasPerBlockPrague,omitempty"`
+	TargetBlobGasPerBlockPrague      *uint64 `json:"targetBlobGasPerBlockPrague,omitempty"`
+	BlobGasPriceUpdateFractionPrague *uint64 `json:"blobGasPriceUpdateFractionPrague,omitempty"`
+
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
 	// Starting from Prague, EIP-4844 fees might be collected as well:
@@ -264,29 +269,51 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobGasPerBlock() uint64 {
-	if c != nil && c.MaxBlobGasPerBlock != nil {
-		return *c.MaxBlobGasPerBlock
+func (c *Config) GetMaxBlobGasPerBlock(t uint64) uint64 {
+	if c != nil {
+		if c.IsPrague(t) {
+			if c.MaxBlobGasPerBlockPrague != nil {
+				return *c.MaxBlobGasPerBlockPrague
+			}
+			return 1179648 // EIP-7691
+		} else if c.MaxBlobGasPerBlock != nil {
+			return *c.MaxBlobGasPerBlock
+		}
 	}
 	return 786432 // MAX_BLOB_GAS_PER_BLOCK (EIP-4844)
 }
 
-func (c *Config) GetTargetBlobGasPerBlock() uint64 {
-	if c != nil && c.TargetBlobGasPerBlock != nil {
-		return *c.TargetBlobGasPerBlock
+func (c *Config) GetTargetBlobGasPerBlock(t uint64) uint64 {
+	if c != nil {
+		if c.IsPrague(t) {
+			if c.TargetBlobGasPerBlockPrague != nil {
+				return *c.TargetBlobGasPerBlockPrague
+			}
+			return 786432
+		} else if c.TargetBlobGasPerBlock != nil {
+			return *c.TargetBlobGasPerBlock
+		}
 	}
 	return 393216 // TARGET_BLOB_GAS_PER_BLOCK (EIP-4844)
 }
 
-func (c *Config) GetBlobGasPriceUpdateFraction() uint64 {
-	if c != nil && c.BlobGasPriceUpdateFraction != nil {
-		return *c.BlobGasPriceUpdateFraction
+func (c *Config) GetBlobGasPriceUpdateFraction(t uint64) uint64 {
+	if c != nil {
+		if c.IsPrague(t) {
+			if c.BlobGasPriceUpdateFractionPrague != nil {
+				return *c.BlobGasPriceUpdateFractionPrague
+			}
+			return 5007716
+
+		} else if c.BlobGasPriceUpdateFraction != nil {
+			return *c.BlobGasPriceUpdateFraction
+		}
 	}
 	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
 }
 
-func (c *Config) GetMaxBlobsPerBlock() uint64 {
-	return c.GetMaxBlobGasPerBlock() / fixedgas.BlobGasPerBlob
+func (c *Config) GetMaxBlobsPerBlock(t uint64) uint64 {
+	return c.GetMaxBlobGasPerBlock(t) / fixedgas.BlobGasPerBlob
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported

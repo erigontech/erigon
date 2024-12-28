@@ -39,7 +39,7 @@ func (e *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libc
 	for _, txn := range transactions {
 		actualBlobHashes = append(actualBlobHashes, txn.GetBlobHashes()...)
 	}
-	if len(actualBlobHashes) > int(e.config.GetMaxBlobsPerBlock()) || blobGasUsed > e.config.GetMaxBlobGasPerBlock() {
+	if len(actualBlobHashes) > int(e.config.GetMaxBlobsPerBlock(0)) || blobGasUsed > e.config.GetMaxBlobGasPerBlock(0) {
 		return nil
 	}
 	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
