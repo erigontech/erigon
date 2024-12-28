@@ -215,12 +215,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
-		requests = make(types.FlatRequests, len(types.KnownRequestTypes))
-		for i, r := range types.KnownRequestTypes {
-			if len(executionRequests) == i {
-				executionRequests = append(executionRequests, []byte{})
-			}
-			requests[i] = types.FlatRequest{Type: r, RequestData: executionRequests[i]}
+		requests = make(types.FlatRequests, 0)
+		for _, r := range executionRequests {
+			requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r})
 		}
 		rh := requests.Hash()
 		header.RequestsHash = rh
@@ -499,16 +496,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	data := resp.Data
 	var executionRequests []hexutility.Bytes
 	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutility.Bytes, len(types.KnownRequestTypes))
-		if len(data.Requests.Requests) != 3 {
-			s.logger.Warn("Error in getPayload - data.Requests.Requests len not 3")
-		}
-		for i := 0; i < len(types.KnownRequestTypes); i++ {
-			if len(data.Requests.Requests) < i+1 || data.Requests.Requests[i] == nil {
-				executionRequests[i] = make(hexutility.Bytes, 0)
-			} else {
-				executionRequests[i] = data.Requests.Requests[i]
-			}
+		executionRequests = make([]hexutility.Bytes, 0)
+		for _, r := range data.Requests.Requests {
+			executionRequests = append(executionRequests, r)
 		}
 	}
 
