@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/holiman/uint256"
 	"github.com/pkg/errors"
 )
 
@@ -97,8 +98,12 @@ func (o *ConditionalOptions) Check(l1BlockNumber uint64, l2Timestamp uint64, sta
 			}
 		} else if len(rootHashOrSlots.SlotValue) > 0 {
 			for slot, value := range rootHashOrSlots.SlotValue {
-				stored := statedb.GetState(address, slot)
-				if !bytes.Equal(stored.Bytes(), value.Bytes()) {
+				toValue := new(uint256.Int)
+				err := statedb.GetState(address, &slot, toValue)
+				if err != nil {
+					return NewRejectedError("Storage slot value not found")
+				}
+				if !bytes.Equal(toValue.Bytes(), value.Bytes()) {
 					return NewRejectedError("Storage slot value condition not met")
 				}
 			}

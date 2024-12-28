@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/turbo/app"
 	"github.com/holiman/uint256"
 )
 
@@ -64,6 +65,12 @@ func newTestBackend(t *testing.T) (*node.Node, []*types.Block) {
 	if err != nil {
 		t.Fatalf("can't create new ethereum service: %v", err)
 	}
+
+	// pack := core.ChainPack {
+	// 	Blocks: blocks[1:],
+	// }
+	// app.InsertChain(ethservice, chain *core.ChainPack, logger log.Logger)
+	//
 	// filterSystem := filters.NewFilterSystem(ethservice.APIBackend, filters.Config{})
 	// n.RegisterAPIs([]rpc.API{{
 	// 	Namespace: "eth",
