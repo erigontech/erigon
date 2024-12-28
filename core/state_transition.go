@@ -545,7 +545,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	}
 
 	result := &evmtypes.ExecutionResult{
-		UsedGas:             gasUsed,
+		UsedGas:             st.gasUsed(),
 		Err:                 vmerr,
 		Reverted:            vmerr == vm.ErrExecutionReverted,
 		ReturnData:          ret,
