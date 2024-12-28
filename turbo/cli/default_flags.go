@@ -213,11 +213,12 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiProtocolFlag,
 	&utils.BeaconApiIdleTimeoutFlag,
 
-	&utils.CaplinBackfillingFlag,
-	&utils.CaplinBlobBackfillingFlag,
+	&utils.CaplinArchiveBlocksFlag,
+	&utils.CaplinArchiveBlobsFlag,
+	&utils.CaplinArchiveStatesFlag,
+
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinDisableCheckpointSyncFlag,
-	&utils.CaplinArchiveFlag,
 	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
 	&utils.CaplinValidatorMonitorFlag,

@@ -44,8 +44,8 @@ type StageHistoryReconstructionCfg struct {
 	downloader               *network.BackwardBeaconDownloader
 	sn                       *freezeblocks.CaplinSnapshots
 	startingRoot             libcommon.Hash
-	backfilling              bool
-	blobsBackfilling         bool
+	archiveBlocks            bool
+	archiveBlobs             bool
 	waitForAllRoutines       bool
 	startingSlot             uint64
 	tmpdir                   string
@@ -61,7 +61,7 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, backfilling, blobsBackfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, archiveBlocks, archiveBlobs, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		beaconCfg:                beaconCfg,
 		downloader:               downloader,
@@ -70,7 +70,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 		startingSlot:             startinSlot,
 		waitForAllRoutines:       waitForAllRoutines,
 		logger:                   logger,
-		backfilling:              backfilling,
+		archiveBlocks:            archiveBlocks,
 		indiciesDB:               indiciesDB,
 		antiquary:                antiquary,
 		engine:                   engine,
@@ -78,7 +78,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 		backfillingThrottling:    backfillingThrottling,
 		executionBlocksCollector: executionBlocksCollector,
 		blockReader:              blockReader,
-		blobsBackfilling:         blobsBackfilling,
+		archiveBlobs:             archiveBlobs,
 		blobStorage:              blobStorage,
 	}
 }
@@ -90,7 +90,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	currentSlot := cfg.startingSlot
 
 	if !clparams.SupportBackfilling(cfg.beaconCfg.DepositNetworkID) {
-		cfg.backfilling = false // disable backfilling if not on a supported network
+		cfg.archiveBlocks = false // disable backfilling if not on a supported network
 	}
 
 	// Start the procedure
@@ -143,7 +143,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					return false, tx.Commit()
 				}
 			}
-			if hasELBlock && !cfg.backfilling {
+			if hasELBlock && !cfg.archiveBlocks {
 				return true, tx.Commit()
 			}
 		}
@@ -159,7 +159,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if slot == 0 || (isInCLSnapshots && isInElSnapshots) {
 			return true, tx.Commit()
 		}
-		return (!cfg.backfilling || slot <= cfg.sn.SegmentsMax()) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
+		return (!cfg.archiveBlocks || slot <= cfg.sn.SegmentsMax()) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -228,14 +228,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 		cfg.antiquary.NotifyBackfilled()
-		if cfg.backfilling {
+		if cfg.archiveBlocks {
 			cfg.logger.Info("Full backfilling finished")
 		} else {
 			cfg.logger.Info("Missing blocks download finished (note: this does not mean that the history is complete, only that the missing blocks need for sync have been downloaded)")
 		}
 
 		close(finishCh)
-		if cfg.blobsBackfilling {
+		if cfg.archiveBlobs {
 			go func() {
 				if err := downloadBlobHistoryWorker(cfg, ctx, true, logger); err != nil {
 					logger.Error("Error downloading blobs", "err", err)

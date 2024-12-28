@@ -65,7 +65,7 @@ type Cfg struct {
 	attestationDataProducer attestation_producer.AttestationDataProducer
 	validatorMonitor        monitor.ValidatorMonitor
 
-	hasDownloaded, backfilling, blobBackfilling bool
+	hasDownloaded, archiveBlocks, archiveBlobs bool
 }
 
 type Args struct {
@@ -91,8 +91,8 @@ func ClStagesCfg(
 	blockReader freezeblocks.BeaconSnapshotReader,
 	dirs datadir.Dirs,
 	syncBackLoopLimit uint64,
-	backfilling bool,
-	blobBackfilling bool,
+	archiveBlocks bool,
+	archiveBlobs bool,
 	syncedData *synced_data.SyncedDataManager,
 	emitters *beaconevents.EventEmitter,
 	blobStore blob_storage.BlobStorage,
@@ -112,12 +112,12 @@ func ClStagesCfg(
 		indiciesDB:              indiciesDB,
 		sn:                      sn,
 		blockReader:             blockReader,
-		backfilling:             backfilling,
+		archiveBlocks:           archiveBlocks,
+		archiveBlobs:            archiveBlobs,
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
 		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.Tmp),
-		blobBackfilling:         blobBackfilling,
 		attestationDataProducer: attestationDataProducer,
 		validatorMonitor:        validatorMonitor,
 	}
@@ -254,7 +254,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.backfilling, cfg.blobBackfilling, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.archiveBlocks, cfg.archiveBlobs, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
