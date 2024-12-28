@@ -204,7 +204,6 @@ type Ethereum struct {
 	forkValidator           *engine_helpers.ForkValidator
 	downloader              *downloader.Downloader
 
-	agg            *libstate.Aggregator
 	blockSnapshots *freezeblocks.RoSnapshots
 	blockReader    services.FullBlockReader
 	blockWriter    *blockio.BlockWriter
@@ -343,7 +342,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	backend.agg, backend.blockSnapshots, backend.blockReader, backend.blockWriter = agg, allSnapshots, blockReader, blockWriter
+	backend.blockSnapshots, backend.blockReader, backend.blockWriter = allSnapshots, blockReader, blockWriter
 
 	backend.chainDB, err = temporal.New(rawChainDB, agg)
 	if err != nil {
@@ -1420,7 +1419,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 	}
 
-	s.agg.OnFreeze(func(frozenFileNames []string) {
+	s.chainDB.OnFreeze(func(frozenFileNames []string) {
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if s.downloaderClient != nil {
@@ -1642,9 +1641,6 @@ func (s *Ethereum) Stop() error {
 	}
 	if s.txPoolDB != nil {
 		s.txPoolDB.Close()
-	}
-	if s.agg != nil {
-		s.agg.Close()
 	}
 	s.chainDB.Close()
 
