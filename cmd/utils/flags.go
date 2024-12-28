@@ -1021,8 +1021,13 @@ var (
 		Usage: "sets whether backfilling is enabled for caplin",
 		Value: false,
 	}
+	CaplinImmediateBlobBackfillFlag = cli.BoolFlag{
+		Name:  "caplin.blobs-immediate-backfill",
+		Usage: "sets whether caplin should immediatelly backfill blobs (4096 epochs)",
+		Value: false,
+	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{
-		Name:  "caplin.backfilling.blob.no-pruning",
+		Name:  "caplin.blobs-no-pruning",
 		Usage: "disable blob pruning in caplin",
 		Value: false,
 	}
@@ -1758,6 +1763,7 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	// More granularity here.
 	cfg.CaplinConfig.ArchiveBlobs = ctx.Bool(CaplinArchiveBlobsFlag.Name)
+	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	cfg.CaplinConfig.ArchiveStates = ctx.Bool(CaplinArchiveStatesFlag.Name)

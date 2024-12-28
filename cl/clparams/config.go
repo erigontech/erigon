@@ -45,6 +45,7 @@ type CaplinConfig struct {
 	ArchiveBlocks             bool
 	ArchiveBlobs              bool
 	ArchiveStates             bool
+	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
 	SnapshotGenerationEnabled bool
 	// Network related config
