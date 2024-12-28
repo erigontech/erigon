@@ -800,6 +800,10 @@ func (e *EngineServer) HandleNewPayload(
 	return resp, nil
 }
 
+func (e *EngineServer) BlockChain() eth1_chain_reader.ChainReaderWriterEth1 {
+	return e.chainRW
+}
+
 func convertGrpcStatusToEngineStatus(status execution.ExecutionStatus) engine_types.EngineStatus {
 	switch status {
 	case execution.ExecutionStatus_Success:

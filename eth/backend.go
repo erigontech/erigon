@@ -1790,3 +1790,7 @@ func setBorDefaultTxPoolPriceLimit(chainConfig *chain.Config, config txpoolcfg.C
 func polygonSyncSentry(sentries []protosentry.SentryClient) protosentry.SentryClient {
 	return libsentry.NewSentryMultiplexer(sentries)
 }
+
+// func (s *Ethereum) BlockChain() eth1_chain_reader.ChainReaderWriterEth1 {
+// 	return s.ExecutionModule().blo
+// }

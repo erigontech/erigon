@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/filters"
 	"github.com/erigontech/erigon/event"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/rpc"
@@ -27,7 +28,7 @@ type Backend struct {
 	scope  event.SubscriptionScope
 
 	bloomRequests chan chan *bloombits.Retrieval // Channel receiving bloom data retrieval requests
-	bloomIndexer  *core.ChainIndexer             // Bloom indexer operating during block imports
+	// bloomIndexer  *core.ChainIndexer             // Bloom indexer operating during block imports
 
 	//shutdownTracker *shutdowncheck.ShutdownTracker
 
@@ -46,7 +47,7 @@ func NewBackend(stack *node.Node, config *Config, chainDb kv.TemporalRwDB, publi
 		chainDb: chainDb,
 
 		bloomRequests: make(chan chan *bloombits.Retrieval),
-		bloomIndexer:  core.NewBloomIndexer(chainDb, config.BloomBitsBlocks, config.BloomConfirms),
+		// bloomIndexer:  core.NewBloomIndexer(chainDb, config.BloomBitsBlocks, config.BloomConfirms),
 
 		//shutdownTracker: shutdowncheck.NewShutdownTracker(chainDb),
 
@@ -63,24 +64,26 @@ func NewBackend(stack *node.Node, config *Config, chainDb kv.TemporalRwDB, publi
 		//backend.stack.ApplyAPIFilter(rpcFilter)
 	}
 
-	backend.bloomIndexer.Start(backend.arb.BlockChain())
-	filterSystem, err := createRegisterAPIBackend(backend, filterConfig, config.ClassicRedirect, config.ClassicRedirectTimeout)
-	if err != nil {
-		return nil, nil, err
-	}
-	backend.filterSystem = filterSystem
-	return backend, filterSystem, nil
+	// backend.bloomIndexer.Start(backend.arb.BlockChain())
+	// filtersystem, err := createRegisterAPIBackend(backend, filterConfig, config.ClassicRedirect, config.ClassicRedirectTimeout)
+	// if err != nil {
+	// 	return nil, nil, err
+	// }
+	// backend.filterSystem = filterSystem
+	// return backend, filterSystem, nil //
+	return backend, nil, nil
 }
 
 // func (b *Backend) AccountManager() *accounts.Manager { return b.stack.AccountManager() }
-func (b *Backend) APIBackend() *APIBackend          { return b.apiBackend }
-func (b *Backend) APIs() []rpc.API                  { return b.apiBackend.GetAPIs(b.filterSystem) }
-func (b *Backend) ArbInterface() ArbInterface       { return b.arb }
-func (b *Backend) BlockChain() *core.BlockChain     { return b.arb.BlockChain() }
-func (b *Backend) BloomIndexer() *core.ChainIndexer { return b.bloomIndexer }
-func (b *Backend) ChainDb() kv.TemporalRwDB         { return b.chainDb }
-func (b *Backend) Engine() consensus.Engine         { return b.arb.BlockChain().Engine() }
-func (b *Backend) Stack() *node.Node                { return b.stack }
+func (b *Backend) APIBackend() *APIBackend                             { return b.apiBackend }
+func (b *Backend) APIs() []rpc.API                                     { return b.apiBackend.GetAPIs(b.filterSystem) }
+func (b *Backend) ArbInterface() ArbInterface                          { return b.arb }
+func (b *Backend) BlockChain() eth1_chain_reader.ChainReaderWriterEth1 { return b.arb.BlockChain() }
+
+// func (b *Backend) BloomIndexer() *core.ChainIndexer                    { return b.bloomIndexer }
+func (b *Backend) ChainDb() kv.TemporalRwDB { return b.chainDb }
+func (b *Backend) Engine() consensus.Engine { return b.arb.BlockChain().Engine() }
+func (b *Backend) Stack() *node.Node        { return b.stack }
 
 func (b *Backend) ResetWithGenesisBlock(gb *types.Block) {
 	b.arb.BlockChain().ResetWithGenesisBlock(gb)
@@ -105,7 +108,7 @@ func (b *Backend) Start() error {
 
 func (b *Backend) Stop() error {
 	b.scope.Close()
-	b.bloomIndexer.Close()
+	// b.bloomIndexer.Close()		//
 	//b.shutdownTracker.Stop()
 	b.chainDb.Close()
 	close(b.chanClose)

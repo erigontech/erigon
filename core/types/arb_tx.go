@@ -54,7 +54,7 @@ type ArbTx struct {
 }
 
 // NewTx creates a new transaction.
-func NewTx(inner Transaction) *ArbTx {
+func NewArbTx(inner Transaction) *ArbTx {
 	tx := new(ArbTx)
 	tx.setDecoded(inner.Unwrap(), 0)
 	return tx

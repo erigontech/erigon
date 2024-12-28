@@ -69,6 +69,9 @@ type Receipt struct {
 	ContractAddress libcommon.Address `json:"contractAddress"`
 	GasUsed         uint64            `json:"gasUsed" gencodec:"required"`
 
+	GasUsedForL1      uint64   `json:"gasUsedForL1"`      // Arbitrum L1 specific field, different from GasUsed (?)
+	EffectiveGasPrice *big.Int `json:"effectiveGasPrice"` // Arbitrum required, but tag omitted for backwards compatibility
+
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
 	BlockHash        libcommon.Hash `json:"blockHash,omitempty"`

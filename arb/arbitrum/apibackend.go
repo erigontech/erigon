@@ -43,7 +43,7 @@ var (
 )
 
 type APIBackend struct {
-	b           *Backend
+	b           *eth.Ethereum
 	blockReader services.FullBlockReader
 
 	dbForAPICalls kv.TemporalRwDB
@@ -99,24 +99,24 @@ type SyncProgressBackend interface {
 	FinalizedBlockNumber(ctx context.Context) (uint64, error)
 }
 
-func createRegisterAPIBackend(backend *Backend, filterConfig filters.Config, fallbackClientUrl string, fallbackClientTimeout time.Duration) (*filters.FilterSystem, error) {
+func createRegisterAPIBackend(backend *eth.Ethereum, filterConfig filters.Config, fallbackClientUrl string, fallbackClientTimeout time.Duration) (*filters.FilterSystem, error) {
 	fallbackClient, err := CreateFallbackClient(fallbackClientUrl, fallbackClientTimeout)
 	if err != nil {
 		return nil, err
 	}
 	// discard stylus-tag on any call made from api database
-	dbForAPICalls := backend.chainDb
-	wasmStore, tag := backend.chainDb.WasmDataBase()
-	if tag != 0 || len(backend.chainDb.WasmTargets()) > 1 {
-		dbForAPICalls = rawdb.WrapDatabaseWithWasm(backend.chainDb, wasmStore, 0, []ethdb.WasmTarget{rawdb.LocalTarget()})
+	dbForAPICalls := backend.ChainDB()
+	wasmStore, tag := backend.ChainDB().WasmDataBase()
+	if tag != 0 || len(backend.ChainDB().WasmTargets()) > 1 {
+		dbForAPICalls = rawdb.WrapDatabaseWithWasm(backend.ChainDB(), wasmStore, 0, []ethdb.WasmTarget{rawdb.LocalTarget()})
 	}
 	backend.apiBackend = &APIBackend{
 		b:              backend,
 		dbForAPICalls:  dbForAPICalls,
 		fallbackClient: fallbackClient,
 	}
-	filterSystem := filters.NewFilterSystem(backend.apiBackend, filterConfig)
-	backend.stack.RegisterAPIs(backend.apiBackend.GetAPIs(filterSystem))
+	// filterSystem := filters.NewFilterSystem(backend.apiBackend, filterConfig)
+	// backend.stack.RegisterAPIs(backend.apiBackend.GetAPIs(filterSystem))
 	return filterSystem, nil
 }
 
