@@ -64,8 +64,8 @@ type Cfg struct {
 	blobStore               blob_storage.BlobStorage
 	attestationDataProducer attestation_producer.AttestationDataProducer
 	validatorMonitor        monitor.ValidatorMonitor
-
-	hasDownloaded, archiveBlocks, archiveBlobs bool
+	caplinConfig            *clparams.CaplinConfig
+	hasDownloaded           bool
 }
 
 type Args struct {
@@ -91,8 +91,7 @@ func ClStagesCfg(
 	blockReader freezeblocks.BeaconSnapshotReader,
 	dirs datadir.Dirs,
 	syncBackLoopLimit uint64,
-	archiveBlocks bool,
-	archiveBlobs bool,
+	caplinConfig *clparams.CaplinConfig,
 	syncedData *synced_data.SyncedDataManager,
 	emitters *beaconevents.EventEmitter,
 	blobStore blob_storage.BlobStorage,
@@ -100,20 +99,19 @@ func ClStagesCfg(
 	validatorMonitor monitor.ValidatorMonitor,
 ) *Cfg {
 	return &Cfg{
-		rpc:                     rpc,
-		antiquary:               antiquary,
-		ethClock:                ethClock,
-		beaconCfg:               beaconCfg,
-		state:                   state,
-		executionClient:         executionClient,
-		gossipManager:           gossipManager,
-		forkChoice:              forkChoice,
-		dirs:                    dirs,
-		indiciesDB:              indiciesDB,
-		sn:                      sn,
-		blockReader:             blockReader,
-		archiveBlocks:           archiveBlocks,
-		archiveBlobs:            archiveBlobs,
+		rpc:             rpc,
+		antiquary:       antiquary,
+		ethClock:        ethClock,
+		beaconCfg:       beaconCfg,
+		state:           state,
+		executionClient: executionClient,
+		gossipManager:   gossipManager,
+		forkChoice:      forkChoice,
+		dirs:            dirs,
+		indiciesDB:      indiciesDB,
+		sn:              sn,
+		blockReader:     blockReader,
+
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
@@ -253,8 +251,10 @@ func ConsensusClStages(ctx context.Context,
 
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
-
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.archiveBlocks, cfg.archiveBlobs, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
+					if cfg.caplinConfig == nil {
+						panic("caplin config is nil")
+					}
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, *cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
