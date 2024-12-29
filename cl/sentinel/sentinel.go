@@ -93,6 +93,7 @@ type Sentinel struct {
 
 	blockReader freezeblocks.BeaconSnapshotReader
 	blobStorage blob_storage.BlobStorage
+	bwc         *metrics.BandwidthCounter
 
 	indiciesDB kv.RoDB
 
@@ -238,9 +239,9 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	bwc := metrics.NewBandwidthCounter()
+	s.bwc = metrics.NewBandwidthCounter()
 
-	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(bwc))
+	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(s.bwc))
 
 	host, err := libp2p.New(opts...)
 	signal.Reset(syscall.SIGINT)
@@ -248,7 +249,6 @@ func New(
 		return nil, err
 	}
 	s.host = host
-	go s.observeBandwidth(ctx, bwc)
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
@@ -267,7 +267,7 @@ func New(
 	return s, nil
 }
 
-func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthCounter) {
+func (s *Sentinel) observeBandwidth(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
 		countSubnetsSubscribed := func() int {
@@ -296,7 +296,7 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			totals := bwc.GetBandwidthTotals()
+			totals := s.bwc.GetBandwidthTotals()
 			monitor.ObserveTotalInBytes(totals.TotalIn)
 			monitor.ObserveTotalOutBytes(totals.TotalOut)
 			minBound := datasize.KB
@@ -315,7 +315,7 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 			// Check which peers should be banned
 			for _, p := range peers {
 				// get peer bandwidth
-				peerBandwidth := bwc.GetBandwidthForPeer(p)
+				peerBandwidth := s.bwc.GetBandwidthForPeer(p)
 				// check if peer is over limit
 				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
 					peersToBan = append(peersToBan, p)
@@ -369,6 +369,7 @@ func (s *Sentinel) Start() error {
 
 	go s.listenForPeers()
 	go s.forkWatcher()
+	go s.observeBandwidth(s.ctx)
 
 	return nil
 }
