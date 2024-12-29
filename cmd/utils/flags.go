@@ -1007,7 +1007,7 @@ var (
 		Value: 0,
 	}
 	CaplinArchiveBlocksFlag = cli.BoolFlag{
-		Name:  "caplin.block-archive",
+		Name:  "caplin.blocks-archive",
 		Usage: "sets whether backfilling is enabled for caplin",
 		Value: false,
 	}
