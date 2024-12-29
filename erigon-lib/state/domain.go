@@ -1201,8 +1201,8 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kvAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums:              true,
-		LessFalsePositives: true,
+		Enums:              false,
+		LessFalsePositives: false,
 
 		BucketSize: 2000,
 		LeafSize:   recsplit.DefaultLeafSize,
