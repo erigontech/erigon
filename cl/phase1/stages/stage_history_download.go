@@ -110,16 +110,25 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			return false, err
 		}
 		defer tx.Rollback()
+		// handle the case where the block is a CL block including an execution payload
 		if blk.Version() >= clparams.BellatrixVersion {
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
 		slot := blk.Block.Slot
 		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
+		// Skip blocks that are already in the snapshots
 		if !isInCLSnapshots {
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
+		}
+		// we need to backfill an equivalent number of blobs to the blocks
+		hasDownloadEnoughForImmediateBlobsBackfilling := true
+		if cfg.caplinConfig.ImmediateBlobsBackfilling {
+			// download twice the number of blocks needed for good measure
+			blocksToDownload := cfg.beaconCfg.MinSlotsForBlobsSidecarsRequest() * 2
+			hasDownloadEnoughForImmediateBlobsBackfilling = cfg.startingSlot < blocksToDownload || slot > cfg.startingSlot-blocksToDownload
 		}
 		if cfg.engine != nil && cfg.engine.SupportInsertion() && blk.Version() >= clparams.BellatrixVersion {
 			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
@@ -142,7 +151,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 			}
 			if hasELBlock && !cfg.caplinConfig.ArchiveBlocks {
-				return true, tx.Commit()
+				return hasDownloadEnoughForImmediateBlobsBackfilling, tx.Commit()
 			}
 		}
 		isInElSnapshots := true
@@ -157,7 +166,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if slot == 0 || (isInCLSnapshots && isInElSnapshots) {
 			return true, tx.Commit()
 		}
-		return (!cfg.caplinConfig.ArchiveBlocks || slot <= cfg.sn.SegmentsMax()) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
+		return hasDownloadEnoughForImmediateBlobsBackfilling &&
+				(!cfg.caplinConfig.ArchiveBlocks || slot <= cfg.sn.SegmentsMax()) &&
+				(slot <= destinationSlotForEL || isInElSnapshots),
+			tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
