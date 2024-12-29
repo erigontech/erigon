@@ -302,6 +302,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	if !cfg.caplinConfig.ArchiveBlobs && cfg.caplinConfig.ImmediateBlobsBackfilling {
 		targetSlot = currentSlot - min(currentSlot, cfg.beaconCfg.MinSlotsForBlobsSidecarsRequest())
 	}
+	logger.Info("[Blobs-Downloader] Downloading blobs backwards", "slot", currentSlot)
 
 	for currentSlot >= targetSlot {
 		if currentSlot <= cfg.sn.FrozenBlobs() {
@@ -360,7 +361,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			prevLogSlot = currentSlot
 			prevTime = time.Now()
 
-			logger.Info("Downloading blobs backwards", "slot", currentSlot, "blks/sec", blkSecStr)
+			logger.Info("[Blobs-Downloader] Downloading blobs backwards", "slot", currentSlot, "blks/sec", blkSecStr)
 		default:
 		}
 		// Generate the request
@@ -395,7 +396,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 	}
 	if shouldLog {
-		logger.Info("Blob history download finished successfully")
+		logger.Info("[Blobs-Downloader] Blob history download finished successfully")
 	}
 	cfg.antiquary.NotifyBlobBackfilled()
 	return nil
