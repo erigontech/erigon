@@ -121,6 +121,7 @@ type RecSplit struct {
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
+	t       time.Time
 }
 
 type RecSplitArgs struct {
@@ -158,6 +159,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
 	rs.tmpDir = args.TmpDir
+	rs.t = time.Now()
 	rs.indexFile = args.IndexFile
 	rs.tmpFilePath = args.IndexFile + ".tmp"
 	_, fname := filepath.Split(rs.indexFile)
@@ -587,7 +589,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.built {
 		return errors.New("already built")
 	}
-	t := time.Now()
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.indexFileName, rs.keyExpectedCount, rs.keysAdded)
 	}
@@ -736,7 +737,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	log.Warn(fmt.Sprintf("[dbg] build done: %s, leaf=%d, failsCnt=%d, took=%s\n", rs.indexFileName, rs.leafSize, rs.failsCnt, time.Since(t)))
+	log.Warn(fmt.Sprintf("[dbg] build done: %s, leaf=%d, failsCnt=%d, took=%s\n", rs.indexFileName, rs.leafSize, rs.failsCnt, time.Since(rs.t)))
 	return nil
 }
 
