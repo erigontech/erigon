@@ -238,6 +238,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 		cfg.antiquary.NotifyBackfilled()
+		fmt.Println(cfg.caplinConfig.ArchiveBlocks)
 		if cfg.caplinConfig.ArchiveBlocks {
 			cfg.logger.Info("Full backfilling finished")
 		} else {
