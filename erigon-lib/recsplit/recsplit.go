@@ -28,6 +28,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
@@ -66,6 +67,8 @@ func remix(z uint64) uint64 {
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
 	offsetCollector *etl.Collector // Collector that sorts by offsets
+
+	failsCnt int
 
 	indexW          *bufio.Writer
 	indexF          *os.File
@@ -473,6 +476,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			if !fail {
 				break
 			}
+			rs.failsCnt++
 			salt++
 		}
 		for i := uint16(0); i < m; i++ {
@@ -509,6 +513,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			if !fail {
 				break
 			}
+			rs.failsCnt++
 			salt++
 		}
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
@@ -580,6 +585,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.built {
 		return errors.New("already built")
 	}
+	t := time.Now()
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.indexFileName, rs.keyExpectedCount, rs.keysAdded)
 	}
@@ -728,6 +734,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
+	fmt.Printf("build done: %s, failsCnt=%d, took=%s,\n", rs.indexFileName, rs.failsCnt, time.Since(t))
 	return nil
 }
 
