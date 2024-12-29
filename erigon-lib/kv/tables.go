@@ -732,6 +732,8 @@ const (
 	DomainLen        Domain = 5
 )
 
+var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
+
 const (
 	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
