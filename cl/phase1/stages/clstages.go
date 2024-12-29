@@ -64,7 +64,7 @@ type Cfg struct {
 	blobStore               blob_storage.BlobStorage
 	attestationDataProducer attestation_producer.AttestationDataProducer
 	validatorMonitor        monitor.ValidatorMonitor
-	caplinConfig            *clparams.CaplinConfig
+	caplinConfig            clparams.CaplinConfig
 	hasDownloaded           bool
 }
 
@@ -91,7 +91,7 @@ func ClStagesCfg(
 	blockReader freezeblocks.BeaconSnapshotReader,
 	dirs datadir.Dirs,
 	syncBackLoopLimit uint64,
-	caplinConfig *clparams.CaplinConfig,
+	caplinConfig clparams.CaplinConfig,
 	syncedData *synced_data.SyncedDataManager,
 	emitters *beaconevents.EventEmitter,
 	blobStore blob_storage.BlobStorage,
@@ -251,10 +251,8 @@ func ConsensusClStages(ctx context.Context,
 
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
-					if cfg.caplinConfig == nil {
-						panic("caplin config is nil")
-					}
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, *cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
+
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
