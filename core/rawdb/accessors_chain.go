@@ -21,6 +21,7 @@ package rawdb
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -40,9 +41,10 @@ import (
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 
+	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/core/rawdb/utils"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/ethdb/cbor"
-	"github.com/erigontech/erigon/rlp"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -79,6 +81,10 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 			if err := tx.Put(kv.BadHeaderNumber, blockHash, blockNumBytes); err != nil {
 				return err
 			}
+
+			if bheapCache != nil {
+				heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+			}
 		}
 		return tx.Delete(kv.HeaderCanonical, blockNumBytes)
 	}); err != nil {
@@ -86,6 +92,35 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 	}
 	return nil
 }
+
+/* latest bad blocks start */
+var bheapCache utils.ExtendedHeap
+
+func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
+	if bheapCache == nil {
+		ResetBadBlockCache(tx, 100)
+	}
+
+	blockIds := bheapCache.SortedValues()
+	blocks := make([]*types.Block, len(blockIds))
+	for i, blockId := range blockIds {
+		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
+	}
+
+	return blocks, nil
+}
+
+// mainly for testing purposes
+func ResetBadBlockCache(tx kv.Tx, limit int) error {
+	bheapCache = utils.NewBlockMaxHeap(limit)
+	// load the heap
+	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
+		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+		return nil
+	})
+}
+
+/* latest bad blocks end */
 
 func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
 	canonicalHash, err := ReadCanonicalHash(db, number)

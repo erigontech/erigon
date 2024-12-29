@@ -46,20 +46,20 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 
 	// Check the state version is correct.
 	if block.Version() != version {
-		return fmt.Errorf("processBlindedBlock: wrong state version for block at slot %d", block.GetSlot())
+		return fmt.Errorf("processBlock: wrong state version for block at slot %d. state version %v. block version %v", block.GetSlot(), version, block.Version())
 	}
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {
-		return errors.WithMessagef(err, "processBlindedBlock: failed to hash block body")
+		return errors.WithMessagef(err, "processBlock: failed to hash block body")
 	}
 	if err := impl.ProcessBlockHeader(s, block.GetSlot(), block.GetProposerIndex(), block.GetParentRoot(), bodyRoot); err != nil {
-		return fmt.Errorf("processBlindedBlock: failed to process block header: %v", err)
+		return fmt.Errorf("processBlock: failed to process block header: %v", err)
 	}
 	// Process execution payload if enabled.
 	if version >= clparams.BellatrixVersion && executionEnabled(s, payloadHeader.BlockHash) {
 		if s.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
-			expect := state.ExpectedWithdrawals(s, state.Epoch(s))
+			expect, _ := state.ExpectedWithdrawals(s, state.Epoch(s))
 			expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
 			for i := range expect {
 				expectWithdrawals.Append(expect[i])
@@ -68,10 +68,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
 		}
-		parentHash := payloadHeader.ParentHash
-		prevRandao := payloadHeader.PrevRandao
-		time := payloadHeader.Time
-		if err := impl.ProcessExecutionPayload(s, parentHash, prevRandao, time, payloadHeader); err != nil {
+		if err := impl.ProcessExecutionPayload(s, body); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
 		}
 	}
@@ -118,7 +115,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	return nil
 }
 
-// ProcessOperations is called by ProcessBlock and prcesses the block body operations
+// ProcessOperations is called by ProcessBlock and processes the block body operations
 func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (signatures [][]byte, messages [][]byte, publicKeys [][]byte, err error) {
 	if blockBody.GetDeposits().Len() != int(maximumDeposits(s)) {
 		return nil, nil, nil, errors.New("outstanding deposits do not match maximum deposits")
@@ -131,13 +128,9 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
-	if err := solid.RangeErr[*cltypes.AttesterSlashing](blockBody.GetAttesterSlashings(), func(index int, slashing *cltypes.AttesterSlashing, length int) error {
-		if err = impl.ProcessAttesterSlashing(s, slashing); err != nil {
-			return fmt.Errorf("ProcessAttesterSlashing: %s", err)
-		}
-		return nil
-	}); err != nil {
-		return nil, nil, nil, err
+	// attester slashings
+	if err := forEachProcess(s, blockBody.GetAttesterSlashings(), impl.ProcessAttesterSlashing); err != nil {
+		return nil, nil, nil, fmt.Errorf("ProcessProposerSlashing: %s", err)
 	}
 
 	// Process each attestations
@@ -146,13 +139,8 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 
 	// Process each deposit
-	if err := solid.RangeErr[*cltypes.Deposit](blockBody.GetDeposits(), func(index int, deposit *cltypes.Deposit, length int) error {
-		if err = impl.ProcessDeposit(s, deposit); err != nil {
-			return fmt.Errorf("ProcessDeposit: %s", err)
-		}
-		return nil
-	}); err != nil {
-		return nil, nil, nil, err
+	if err := forEachProcess(s, blockBody.GetDeposits(), impl.ProcessDeposit); err != nil {
+		return nil, nil, nil, fmt.Errorf("ProcessDeposit: %s", err)
 	}
 
 	// Process each voluntary exit.
@@ -173,7 +161,28 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
+	if s.Version() >= clparams.ElectraVersion {
+		if err := forEachProcess(s, blockBody.GetExecutionRequests().Deposits, impl.ProcessDepositRequest); err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessDepositRequest: %s", err)
+		}
+		if err := forEachProcess(s, blockBody.GetExecutionRequests().Withdrawals, impl.ProcessWithdrawalRequest); err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessWithdrawalRequest: %s", err)
+		}
+		if err := forEachProcess(s, blockBody.GetExecutionRequests().Consolidations, impl.ProcessConsolidationRequest); err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessConsolidationRequest: %s", err)
+		}
+	}
+
 	return
+}
+
+func forEachProcess[T solid.EncodableHashableSSZ](
+	s abstract.BeaconState,
+	list *solid.ListSSZ[T],
+	f func(s abstract.BeaconState, item T) error) error {
+	return solid.RangeErr(list, func(index int, item T, length int) error {
+		return f(s, item)
+	})
 }
 
 func processRandao(impl BlockProcessor, s abstract.BeaconState, body cltypes.GenericBeaconBody, block cltypes.GenericBeaconBlock) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
@@ -285,9 +294,9 @@ func processBlsToExecutionChanges(impl BlockOperationProcessor, s abstract.Beaco
 			return err
 		}
 
-		// Perform full validation if requested.
-		wc := validator.WithdrawalCredentials()
 		if impl.FullValidate() {
+			// Perform full validation if requested.
+			wc := validator.WithdrawalCredentials()
 			// Check the validator's withdrawal credentials prefix.
 			if wc[0] != byte(beaconConfig.BLSWithdrawalPrefixByte) {
 				return errors.New("invalid withdrawal credentials prefix")

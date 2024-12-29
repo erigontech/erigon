@@ -24,6 +24,7 @@ import (
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/core/types"
@@ -41,7 +42,13 @@ func NewExecutionClientDirect(chainRW eth1_chain_reader.ChainReaderWriterEth1) (
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (PayloadStatus, error) {
+func (cc *ExecutionClientDirect) NewPayload(
+	ctx context.Context,
+	payload *cltypes.Eth1Block,
+	beaconParentRoot *libcommon.Hash,
+	versionedHashes []libcommon.Hash,
+	executionRequestsList []hexutility.Bytes,
+) (PayloadStatus, error) {
 	if payload == nil {
 		return PayloadStatusValidated, nil
 	}

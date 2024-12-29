@@ -77,7 +77,7 @@ func TestFeeHistory(t *testing.T) {
 			defer m.Close()
 
 			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
-			tx, _ := m.DB.BeginRo(m.Ctx)
+			tx, _ := m.DB.BeginTemporalRo(m.Ctx)
 			defer tx.Rollback()
 
 			cache := jsonrpc.NewGasPriceCache()

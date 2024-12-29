@@ -6,4 +6,4 @@ package contracts
 
 // selfDestructor.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build selfDestructor.sol
-//go:generate abigen -abi build/selfdestructor.abi -bin build/selfdestructor.bin -pkg contracts -type selfDestructor -out ./gen_selfDestructor.go
+//go:generate abigen -abi build/selfDestructor.abi -bin build/selfDestructor.bin -pkg contracts -type selfDestructor -out ./gen_selfDestructor.go

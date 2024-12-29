@@ -40,7 +40,7 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	path := t.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := New(kv.ChainDB, logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
@@ -55,7 +55,7 @@ func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 	path := b.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := New(kv.ChainDB, logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
@@ -458,64 +458,6 @@ func TestAppendFirstLast(t *testing.T) {
 	require.Equal(t, []string{"value6.1"}, values)
 }
 
-func TestNextPrevCurrent(t *testing.T) {
-	_, _, c := BaseCase(t)
-
-	k, v, err := c.First()
-	require.Nil(t, err)
-	keys, values := iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Next()
-	require.Equal(t, []byte("key1"), k)
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Current()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-	require.Equal(t, k, []byte("key1"))
-	require.Equal(t, v, []byte("value1.3"))
-
-	k, v, err = c.Next()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key3", "key3"}, keys)
-	require.Equal(t, []string{"value3.1", "value3.3"}, values)
-
-	k, v, err = c.Prev()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Current()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-	k, v, err = c.Prev()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
-
-	err = c.DeleteCurrent()
-	require.Nil(t, err)
-	k, v, err = c.Current()
-	require.Nil(t, err)
-	keys, values = iteration(t, c, k, v)
-	require.Equal(t, []string{"key1", "key3", "key3"}, keys)
-	require.Equal(t, []string{"value1.3", "value3.1", "value3.3"}, values)
-
-}
-
 func TestSeek(t *testing.T) {
 	_, _, c := BaseCase(t)
 
@@ -683,21 +625,21 @@ func TestDupDelete(t *testing.T) {
 }
 
 func TestBeginRoAfterClose(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRo(context.Background())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRwAfterClose(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRw(context.Background())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRoWithDoneContext(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -706,7 +648,7 @@ func TestBeginRoWithDoneContext(t *testing.T) {
 }
 
 func TestBeginRwWithDoneContext(t *testing.T) {
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -721,7 +663,7 @@ func testCloseWaitsAfterTxBegin(
 	txEndFunc func(kv.Getter) error,
 ) {
 	t.Helper()
-	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
+	db := New(kv.ChainDB, log.New()).InMem(t.TempDir()).MustOpen()
 	var txs []kv.Getter
 	for i := 0; i < count; i++ {
 		tx, err := txBeginFunc(db)

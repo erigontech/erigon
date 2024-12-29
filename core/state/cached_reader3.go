@@ -17,13 +17,11 @@
 package state
 
 import (
-	"bytes"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
 
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 // CachedReader3 is a wrapper for an instance of type StateReader
@@ -54,6 +52,23 @@ func (r *CachedReader3) ReadAccountData(address common.Address) (*accounts.Accou
 	return &a, nil
 }
 
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (r *CachedReader3) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+	enc, err := r.cache.Get(address[:])
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	a := accounts.Account{}
+	if err = accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 func (r *CachedReader3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := append(address[:], key.Bytes()...)
 	enc, err := r.cache.Get(compositeKey)
@@ -66,10 +81,7 @@ func (r *CachedReader3) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *CachedReader3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	if bytes.Equal(codeHash.Bytes(), emptyCodeHash) {
-		return nil, nil
-	}
+func (r *CachedReader3) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	code, err := r.cache.GetCode(address[:])
 	if len(code) == 0 {
 		return nil, nil
@@ -77,8 +89,8 @@ func (r *CachedReader3) ReadAccountCode(address common.Address, incarnation uint
 	return code, err
 }
 
-func (r *CachedReader3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	code, err := r.ReadAccountCode(address, incarnation, codeHash)
+func (r *CachedReader3) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
+	code, err := r.ReadAccountCode(address, incarnation)
 	return len(code), err
 }
 

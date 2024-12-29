@@ -20,29 +20,32 @@ import (
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 // ProcessEffectiveBalanceUpdates updates the effective balance of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#effective-balances-updates
-func ProcessEffectiveBalanceUpdates(state abstract.BeaconState) error {
+func ProcessEffectiveBalanceUpdates(s abstract.BeaconState) error {
 	defer monitor.ObserveElaspedTime(monitor.ProcessEffectiveBalanceUpdatesTime).End()
-	beaconConfig := state.BeaconConfig()
+	beaconConfig := s.BeaconConfig()
 	// Define non-changing constants to avoid recomputation.
 	histeresisIncrement := beaconConfig.EffectiveBalanceIncrement / beaconConfig.HysteresisQuotient
 	downwardThreshold := histeresisIncrement * beaconConfig.HysteresisDownwardMultiplier
 	upwardThreshold := histeresisIncrement * beaconConfig.HysteresisUpwardMultiplier
+
 	// Iterate over validator set and compute the diff of each validator.
 	var err error
 	var balance uint64
-	state.ForEachValidator(func(validator solid.Validator, index, total int) bool {
-		balance, err = state.ValidatorBalance(index)
+	s.ForEachValidator(func(validator solid.Validator, index, total int) bool {
+		balance, err = s.ValidatorBalance(index)
 		if err != nil {
 			return false
 		}
 		eb := validator.EffectiveBalance()
 		if balance+downwardThreshold < eb || eb+upwardThreshold < balance {
 			// Set new effective balance
-			effectiveBalance := min(balance-(balance%beaconConfig.EffectiveBalanceIncrement), beaconConfig.MaxEffectiveBalance)
-			state.SetEffectiveBalanceForValidatorAtIndex(index, effectiveBalance)
+			maxEffectiveBalance := state.GetMaxEffectiveBalanceByVersion(validator, s.BeaconConfig(), s.Version())
+			effectiveBalance := min(balance-(balance%beaconConfig.EffectiveBalanceIncrement), maxEffectiveBalance)
+			s.SetEffectiveBalanceForValidatorAtIndex(index, effectiveBalance)
 		}
 		return true
 	})

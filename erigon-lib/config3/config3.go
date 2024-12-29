@@ -16,9 +16,13 @@
 
 package config3
 
-// AggregationStep number of transactions in smallest static file
-const HistoryV3AggregationStep = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
-// const HistoryV3AggregationStep = 1_562_500 / 10
+// Default number of transactions (txNums) in one "step". One static file can have [1, 64] steps.
+const DefaultStepSize = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
+//const DefaultStepSize = 1_562_500 / 10
+
+// StepsInFrozenFile - files of this size are completely frozen/immutable.
+// files of smaller size are also immutable, but can be removed after merge to bigger files.
+const StepsInFrozenFile = 64
 
 const EnableHistoryV4InTest = true
 

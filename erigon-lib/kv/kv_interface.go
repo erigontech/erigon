@@ -19,9 +19,9 @@ package kv
 import (
 	"context"
 	"errors"
-	"fmt"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/metrics"
@@ -143,71 +143,21 @@ var (
 )
 
 type DBVerbosityLvl int8
-type Label uint8
+type Label string
 
 const (
-	Unknown Label = iota
-	ChainDB
-	TxPoolDB
-	SentryDB
-	ConsensusDB
-	DownloaderDB
-	HeimdallDB
-	DiagnosticsDB
-	PolygonBridgeDB
-	CaplinDB
+	Unknown         = "unknown"
+	ChainDB         = "chaindata"
+	TxPoolDB        = "txpool"
+	SentryDB        = "sentry"
+	ConsensusDB     = "consensus"
+	DownloaderDB    = "downloader"
+	HeimdallDB      = "heimdall"
+	DiagnosticsDB   = "diagnostics"
+	PolygonBridgeDB = "polygon-bridge"
+	CaplinDB        = "caplin"
+	TemporaryDB     = "temporary"
 )
-
-func (l Label) String() string {
-	switch l {
-	case ChainDB:
-		return "chaindata"
-	case TxPoolDB:
-		return "txpool"
-	case SentryDB:
-		return "sentry"
-	case ConsensusDB:
-		return "consensus"
-	case DownloaderDB:
-		return "downloader"
-	case HeimdallDB:
-		return "heimdall"
-	case DiagnosticsDB:
-		return "diagnostics"
-	case PolygonBridgeDB:
-		return "polygon-bridge"
-	case CaplinDB:
-		return "caplin"
-	default:
-		return "unknown"
-	}
-}
-func UnmarshalLabel(s string) Label {
-	switch s {
-	case "chaindata":
-		return ChainDB
-	case "txpool":
-		return TxPoolDB
-	case "sentry":
-		return SentryDB
-	case "consensus":
-		return ConsensusDB
-	case "downloader":
-		return DownloaderDB
-	case "heimdall":
-		return HeimdallDB
-	case "diagnostics":
-		return DiagnosticsDB
-	case "polygon-bridge":
-		return PolygonBridgeDB
-	case "caplin":
-		return CaplinDB
-	case "unknown":
-		return Unknown
-	default:
-		panic(fmt.Sprintf("unexpected label: %s", s))
-	}
-}
 
 type GetPut interface {
 	Getter
@@ -300,7 +250,7 @@ type RoDB interface {
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
 	AllTables() TableCfg
-	PageSize() uint64
+	PageSize() datasize.ByteSize
 
 	// Pointer to the underlying C environment handle, if applicable (e.g. *C.MDBX_env)
 	CHandle() unsafe.Pointer
@@ -508,17 +458,20 @@ type (
 )
 
 type TemporalGetter interface {
-	GetLatest(name Domain, k, k2 []byte) (v []byte, step uint64, err error)
+	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
 }
 type TemporalTx interface {
 	Tx
 	TemporalGetter
 
+	// return the earliest known txnum in history of a given domain
+	HistoryStartFrom(domainName Domain) uint64
+
 	// DomainGetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
 	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
-	GetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
+	GetAsOf(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
 	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
@@ -559,6 +512,17 @@ type TemporalPutDel interface {
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
+}
+
+type TemporalRoDB interface {
+	RoDB
+	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
+	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+}
+type TemporalRwDB interface {
+	RwDB
+	TemporalRoDB
+	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 }
 
 // ---- non-importnt utilites

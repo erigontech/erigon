@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -66,6 +65,7 @@ type GossipManager struct {
 	voluntaryExitService         services.VoluntaryExitService
 	blsToExecutionChangeService  services.BLSToExecutionChangeService
 	proposerSlashingService      services.ProposerSlashingService
+	attestationsLimiter          *timeBasedRateLimiter
 }
 
 func NewGossipReceiver(
@@ -103,23 +103,8 @@ func NewGossipReceiver(
 		voluntaryExitService:         voluntaryExitService,
 		blsToExecutionChangeService:  blsToExecutionChangeService,
 		proposerSlashingService:      proposerSlashingService,
+		attestationsLimiter:          newTimeBasedRateLimiter(6*time.Second, 250),
 	}
-}
-
-func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManager, data *sentinel.GossipData, version int, name string, fn func(T, bool) error) error {
-	var t T
-	object := t.Clone().(T)
-	if err := object.DecodeSSZ(common.CopyBytes(data.Data), version); err != nil {
-		g.sentinel.BanPeer(ctx, data.Peer)
-		return err
-	}
-	if err := fn(object /*test=*/, false); err != nil {
-		return err
-	}
-	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Debug("failed to publish gossip", "err", err)
-	}
-	return nil
 }
 
 func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) (err error) {
@@ -146,7 +131,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
 		return nil
 	}
-	if err != nil {
+	if err != nil { //nolint:govet
 		g.sentinel.BanPeer(ctx, data.Peer)
 		return err
 	}
@@ -223,7 +208,19 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.proposerSlashingService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameAttesterSlashing:
-		return operationsContract[*cltypes.AttesterSlashing](ctx, g, data, int(version), "attester slashing", g.forkChoice.OnAttesterSlashing)
+		attesterSlashing := cltypes.NewAttesterSlashing(version)
+		if err := attesterSlashing.DecodeSSZ(data.Data, int(version)); err != nil {
+			return err
+		}
+		g.sentinel.BanPeer(ctx, data.Peer)
+		if err := g.forkChoice.OnAttesterSlashing(attesterSlashing, false); err != nil {
+			return err
+		}
+
+		if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+			log.Debug("failed to publish gossip", "err", err)
+		}
+		return nil
 	case gossip.TopicNameBlsToExecutionChange:
 		obj := &cltypes.SignedBLSToExecutionChangeWithGossipData{
 			GossipData:                 copyOfSentinelData(data),
@@ -265,20 +262,28 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
 		case gossip.IsTopicBeaconAttestation(data.Name):
 			obj := &services.AttestationWithGossipData{
-				GossipData:       copyOfSentinelData(data),
-				Attestation:      &solid.Attestation{},
-				ImmediateProcess: false,
+				GossipData:        copyOfSentinelData(data),
+				Attestation:       &solid.Attestation{},
+				SingleAttestation: &solid.SingleAttestation{},
+				ImmediateProcess:  false,
 			}
-
-			if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-				return err
+			if version < clparams.ElectraVersion {
+				if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+					return err
+				}
+				if g.committeeSub.NeedToAggregate(obj.Attestation) || g.attestationsLimiter.tryAcquire() {
+					return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
+				}
+			} else {
+				// after electra
+				if err := obj.SingleAttestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+					return err
+				}
+				if g.attestationsLimiter.tryAcquire() {
+					return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
+				}
 			}
-
-			if g.committeeSub.NeedToAggregate(obj.Attestation) {
-				return g.attestationService.ProcessMessage(ctx, data.SubnetId, obj)
-			}
-
-			return nil
+			return services.ErrIgnore
 		default:
 			return fmt.Errorf("unknown topic %s", data.Name)
 		}
@@ -306,7 +311,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 					return
 				case data := <-ch:
 					l := log.Ctx{}
-					if err := g.onRecv(ctx, data, l); err != nil && !errors.Is(err, services.ErrIgnore) {
+					if err := g.onRecv(ctx, data, l); err != nil && !errors.Is(err, services.ErrIgnore) && !errors.Is(err, synced_data.ErrNotSynced) {
 						log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 					}
 				}
@@ -330,7 +335,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 		select {
 		case ch <- data:
 		default:
-			//log.Warn("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
+			log.Trace("[Beacon Gossip] Dropping message due to full channel", "topic", data.Name)
 		}
 	}
 

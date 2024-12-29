@@ -6,25 +6,10 @@ set +e # Disable exit on error
 disabled_tests=(
     # Erigon2 and Erigon3 never supported this api methods
     trace_rawTransaction
-    # needs investigations
-    debug_getModifiedAccountsByHash
-    debug_getModifiedAccountsByNumber
-    # Erigon bug https://github.com/erigontech/erigon/issues/12603
-    erigon_getLatestLogs
-    parity_listStorageKeys/test_12.json
-    # created task https://github.com/erigontech/erigon/issues/12668
-    debug_traceCallMany/test_02.tar
-    debug_traceCallMany/test_04.tar
-    debug_traceCallMany/test_05.tar
-    debug_traceCallMany/test_06.tar
-    debug_traceCallMany/test_07.tar
-    debug_traceCallMany/test_09.json
-    debug_traceCallMany/test_10.tar
     # to investigate
     engine_exchangeCapabilities/test_1.json
     engine_exchangeTransitionConfigurationV1/test_01.json
     engine_getClientVersionV1/test_1.json
-    trace_replayBlockTransactions/test_29.tar
     # these tests requires Erigon active
     admin_nodeInfo/test_01.json
     admin_peers/test_01.json
@@ -32,6 +17,8 @@ disabled_tests=(
     eth_coinbase/test_01.json
     eth_createAccessList/test_16.json
     eth_getTransactionByHash/test_02.json
+    # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
+    ots_searchTransactionsBefore/test_04.tar
     eth_getWork/test_01.json
     eth_mining/test_01.json
     eth_protocolVersion/test_1.json

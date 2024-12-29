@@ -330,7 +330,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error)
 		*withdrawalsHash = types.DeriveSha(types.Withdrawals(withdrawals))
 	}
 	if b.version < clparams.DenebVersion {
-		log.Warn("ParentRoot is nil", "parentRoot", parentRoot, "version", b.version)
+		log.Debug("ParentRoot is nil", "parentRoot", parentRoot, "version", b.version)
 		parentRoot = nil
 	}
 

@@ -30,7 +30,7 @@ import (
 )
 
 func TestMapmutation_Flush_Close(t *testing.T) {
-	db := memdb.NewTestDB(t)
+	db := memdb.NewTestDB(t, kv.ChainDB)
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)

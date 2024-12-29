@@ -30,14 +30,13 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/turbo/trie"
+	"github.com/erigontech/erigon-lib/trie"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 type Dumper struct {
 	blockNumber  uint64
-	db           kv.Tx
+	tx           kv.TemporalTx
 	hashedState  bool
 	txNumsReader rawdbv3.TxNumsReader
 }
@@ -127,9 +126,9 @@ func (d iterativeDump) OnRoot(root libcommon.Hash) {
 	}{root})
 }
 
-func NewDumper(db kv.Tx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) *Dumper {
+func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber uint64) *Dumper {
 	return &Dumper{
-		db:           db,
+		tx:           db,
 		blockNumber:  blockNumber,
 		hashedState:  false,
 		txNumsReader: txNumsReader,
@@ -151,7 +150,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 	c.OnRoot(emptyHash) // We do not calculate the root
 
-	ttx := d.db.(kv.TemporalTx)
+	ttx := d.tx
 	txNum, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
@@ -194,7 +193,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			account.CodeHash = hexutility.Bytes(acc.CodeHash.Bytes())
 
 			if !excludeCode {
-				r, _, err := ttx.GetLatest(kv.CodeDomain, k, nil)
+				r, _, err := ttx.GetLatest(kv.CodeDomain, k)
 				if err != nil {
 					return nil, err
 				}
@@ -229,7 +228,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					continue // Skip deleted entries
 				}
 				loc := k[20:]
-				account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+				account.Storage[libcommon.BytesToHash(loc).String()] = libcommon.Bytes2Hex(vs)
 				h, _ := libcommon.HashData(loc)
 				t.Update(h.Bytes(), libcommon.Copy(vs))
 			}

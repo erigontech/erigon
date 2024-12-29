@@ -1,12 +1,11 @@
 # Erigon
 
-Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
+Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
 Blog: **[erigon.substack.com](https://erigon.substack.com/)**
 Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
-frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
-by default.
+frontier.
 
 <br>
 
@@ -52,7 +51,7 @@ by default.
     - [Run local devnet](#run-local-devnet)
     - [Docker permissions error](#docker-permissions-error)
     - [Public RPC](#public-rpc)
-    - [RaspberyPI](#raspberypi)
+    - [RaspberryPI](#raspberrypi)
     - [Run all components by docker-compose](#run-all-components-by-docker-compose)
         - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
         - [Environment Variables](#environment-variables)
@@ -74,8 +73,8 @@ by default.
 
 <!--te-->
 
-**Important defaults**: Erigon is an Archive Node by default: use `--prune.mode` if need make it smaller (not allowed to
-change after first start)
+**Important defaults**: Erigon 3 is a Full Node by default. (Erigon 2 was an [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.)
+Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if you run a validator on a small disk (not allowed to change after first start).
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
@@ -91,7 +90,8 @@ architecture.
 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
 Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
-gp3): [Blocks Execution is slow on cloud-network-drives](#blocks-execution-is-slow-on-cloud-network-drives)
+gp3): Blocks Execution is slow
+on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
 
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
@@ -167,38 +167,31 @@ datadir
 ### Erigon3 datadir size
 
 ```sh
-# eth-mainnet - archive - April 2024
+# eth-mainnet - archive - Nov 2024
 
-du -hsc /erigon/* 
-6G  	/erigon/caplin
-50G 	/erigon/chaindata
-1.8T	/erigon/snapshots
-1.9T	total
+du -hsc /erigon/chaindata
+15G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-100G 	/erigon/snapshots/accessor
-240G	/erigon/snapshots/domain
-260G	/erigon/snapshots/history
-410G	/erigon/snapshots/idx
-1.7T	/erigon/snapshots
+120G 	/erigon/snapshots/accessor
+300G	/erigon/snapshots/domain
+280G	/erigon/snapshots/history
+430G	/erigon/snapshots/idx
+2.3T	/erigon/snapshots
 ```
 
 ```sh
-# bor-mainnet - archive - Jun 2024
+# bor-mainnet - archive - Nov 2024
 
-du -hsc /erigon/* 
-
-160M	/erigon/bor
-50G 	/erigon/chaindata
-3.7T	/erigon/snapshots
-3.8T	total
+du -hsc /erigon/chaindata
+20G 	/erigon/chaindata
 
 du -hsc /erigon/snapshots/* 
-260G	/erigon-data/snapshots/accessor
-850G	/erigon-data/snapshots/domain
-650G	/erigon-data/snapshots/history
-1.4T	/erigon-data/snapshots/idx
-4.1T	/erigon/snapshots
+360G	/erigon-data/snapshots/accessor
+1.1T	/erigon-data/snapshots/domain
+750G	/erigon-data/snapshots/history
+1.5T	/erigon-data/snapshots/idx
+4.9T	/erigon/snapshots
 ```
 
 ### Erigon3 changes from Erigon2
@@ -213,7 +206,7 @@ du -hsc /erigon/snapshots/*
 - **Store most of data in immutable files (segments/snapshots):**
     - can symlink/mount latest state to fast drive and history to cheap drive
     - `chaindata` is less than `15gb`. It's ok to `rm -rf chaindata`. (to prevent grow: recommend `--batchSize <= 1G`)
-- **`--prune` flags changed**: see `--prune.mode` (default: `archive`, full: `full`, EIP-4444: `minimal`)
+- **`--prune` flags changed**: see `--prune.mode` (default: `full`, archive: `archive`, EIP-4444: `minimal`)
 - **Other changes:**
     - ExecutionStage included many E2 stages: stage_hash_state, stage_trie, log_index, history_index, trace_index
     - Restart doesn't loose much partial progress: `--sync.loop.block.limit=5_000` enabled by default
@@ -350,7 +343,7 @@ Caplin is be enabled by default. to disable it and enable the Engine API, use th
 on, an external Consensus Layer will not be need
 anymore.
 
-Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive`
+Caplin also has an archival mode for historical states and blocks. it can be enabled through the `--caplin.archive`
 flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
 e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is
@@ -558,7 +551,7 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 - `--http.corsdomain="*"` is bad-practice: set exact hostname or IP
 - protect from DOS by reducing: `--rpc.batch.concurrency`, `--rpc.batch.limit`
 
-### RaspberyPI
+### RaspberryPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
 
@@ -595,7 +588,7 @@ targets `make user_linux` or `make user_macos`.
 
 #### Run
 
-Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker,
+Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writable by the user UID/GID in docker,
 which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time. If a build or service startup is failing
 due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
@@ -699,7 +692,8 @@ Windows users may run erigon in 3 possible ways:
 * Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
   would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (
   eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact
-  those mount points use `DrvFS` which is a [network file system](#blocks-execution-is-slow-on-cloud-network-drives)
+  those mount points use `DrvFS` which is
+  a [network file system](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
   and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data.
   This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#for-remote-db) even if
   it is executed on the very same computer. If instead your data is hosted on the native Linux filesystem non
@@ -756,7 +750,7 @@ Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS page
 memory.
 
 **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimisations: "reduce Disk random access".
+main Erigon optimizations: "reduce Disk random access".
 "Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
 running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
 same Disk.
@@ -765,10 +759,19 @@ same Disk.
 
 (Like gp3)
 You may read: https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
-In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
-non-batched way.
-Tricks: if you throw anough RAM and set env variable `ERIGON_SNAPSHOT_MADV_RND=false` - then Erigon will work
-good-enough on Cloud drives - in cost of higher IO.
+In short: network-disks are bad for blocks execution - because they are designed for parallel/batch workloads (databases
+with many parallel requests). But blocks execution in Erigon is non-parallel and using blocking-io.
+
+What can do:
+
+- reduce disk latency (not throughput, not iops)
+    - use latency-critical cloud-drives
+    - or attached-NVMe (at least for initial sync)
+- increase RAM
+- if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
+- Use `--db.pagesize=64kb` (less fragmentation, more IO)
+- Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
+- Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
 ### Filesystem's background features are expensive
 

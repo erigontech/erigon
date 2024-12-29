@@ -31,7 +31,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -51,7 +51,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -71,7 +71,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -91,7 +91,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -111,7 +111,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -131,7 +131,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -151,7 +151,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -171,7 +171,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -191,7 +191,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -211,7 +211,7 @@ builds:
       - CXX=o64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -232,7 +232,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -250,7 +250,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -268,7 +268,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -286,7 +286,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -304,7 +304,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -322,7 +322,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -340,7 +340,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -358,7 +358,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -376,7 +376,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -394,7 +394,7 @@ builds:
       - CXX=oa64-clang++
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT_DARWIN }}
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
@@ -418,12 +418,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-downloader
@@ -439,12 +439,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-devnet
@@ -460,12 +460,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-evm
@@ -481,12 +481,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-caplin
@@ -502,12 +502,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-diag
@@ -523,12 +523,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-integration
@@ -544,12 +544,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-rpcdaemon
@@ -565,12 +565,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-sentry
@@ -586,12 +586,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-amd64-txpool
@@ -607,12 +607,12 @@ builds:
       - CXX=x86_64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }}
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 ## End of Linux AMD64 (v1, v2)
 
@@ -628,12 +628,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-downloader
@@ -646,12 +646,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-devnet
@@ -664,12 +664,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-evm
@@ -682,12 +682,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-caplin
@@ -700,12 +700,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-diag
@@ -718,12 +718,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-integration
@@ -736,12 +736,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-rpcdaemon
@@ -754,12 +754,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-sentry
@@ -772,12 +772,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 
   - id: linux-arm64-txpool
@@ -790,12 +790,12 @@ builds:
       - CXX=aarch64-linux-gnu-g++
       - CGO_CFLAGS={{ .Env.CGO_CFLAGS_DEFAULT }} -D__BLST_PORTABLE__
       - CGO_LDFLAGS={{ .Env.CGO_LDFLAGS_DEFAULT }}
-    tags: [ nosqlite, noboltdb, nosilkworm, netgo ]
+    tags: [ nosqlite, noboltdb, nosilkworm ]
     flags:
       - -trimpath
       - -buildvcs=false
     ldflags:
-      - -s -w -extldflags "-static"
+      - -s -w
       - -X {{ .Env.PACKAGE }}/params.GitCommit={{ .Env.GIT_COMMIT }} -X {{ .Env.PACKAGE }}/params.GitBranch={{ .Env.GIT_BRANCH }} -X {{ .Env.PACKAGE }}/params.GitTag={{ .Env.GIT_TAG }}
 ## End of Linux ARM64
 

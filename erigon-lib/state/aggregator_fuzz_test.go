@@ -107,14 +107,14 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			var v [8]byte
 			binary.BigEndian.PutUint64(v[:], txNum)
 			if txNum%135 == 0 {
-				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, nil, rwTx)
+				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey2, rwTx)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, commKey2, nil, v[:], pv, step)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
-				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, nil, rwTx)
+				pv, step, _, err := ac.GetLatest(kv.CommitmentDomain, commKey1, rwTx)
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, commKey1, nil, v[:], pv, step)
@@ -159,13 +159,13 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		dc := agg.BeginFilesRo()
 
-		v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, nil, roTx)
+		v, _, ex, err := dc.GetLatest(kv.CommitmentDomain, commKey1, roTx)
 		require.NoError(t, err)
 		require.Truef(t, ex, "key %x not found", commKey1)
 
 		require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
-		v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, nil, roTx)
+		v, _, ex, err = dc.GetLatest(kv.CommitmentDomain, commKey2, roTx)
 		require.NoError(t, err)
 		require.Truef(t, ex, "key %x not found", commKey2)
 		dc.Close()
@@ -273,9 +273,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, aggStep uint64) (kv.RwDB, *Aggregat
 	require := require.New(f)
 	dirs := datadir.New(f.TempDir())
 	logger := log.New()
-	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
 	agg, err := NewAggregator(context.Background(), dirs, aggStep, db, logger)

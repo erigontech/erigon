@@ -101,9 +101,11 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			startSize := len(dst)
 			if obj.Static() {
 				// If the object is static (fixed size), encode it using SSZ and update the dst
-				if dst, err = obj.EncodeSSZ(dst); err != nil {
+				encodedBytes, err := obj.EncodeSSZ(nil)
+				if err != nil {
 					return nil, err
 				}
+				dst = append(dst, encodedBytes...)
 			} else {
 				// If the object is dynamic (variable size), store the start offset and the object in separate slices
 				offsetsStarts = append(offsetsStarts, startSize)

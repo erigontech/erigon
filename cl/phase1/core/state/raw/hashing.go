@@ -35,7 +35,11 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	// 	fmt.Println(i/32, libcommon.BytesToHash(b.leaves[i:i+32]))
 	// }
 	// Pad to 32 of length
-	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves, out[:])
+	endIndex := StateLeafSize * 32
+	if b.Version() <= clparams.DenebVersion {
+		endIndex = StateLeafSizeDeneb * 32
+	}
+	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:endIndex], out[:])
 	return
 }
 
@@ -43,33 +47,55 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 	if err := b.computeDirtyLeaves(); err != nil {
 		return nil, err
 	}
+	depth := 5
+	leafSize := StateLeafSizeDeneb
+	if b.Version() >= clparams.ElectraVersion {
+		depth = 6
+		leafSize = StateLeafSize
+	}
+
 	schema := []interface{}{}
-	for i := 0; i < len(b.leaves); i += 32 {
+	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
-	return merkle_tree.MerkleProof(5, 22, schema...)
+
+	return merkle_tree.MerkleProof(depth, 22, schema...)
 }
 
 func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 	if err := b.computeDirtyLeaves(); err != nil {
 		return nil, err
 	}
+	depth := 5
+	leafSize := StateLeafSizeDeneb
+	if b.Version() >= clparams.ElectraVersion {
+		depth = 6
+		leafSize = StateLeafSize
+	}
+
 	schema := []interface{}{}
-	for i := 0; i < len(b.leaves); i += 32 {
+	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
-	return merkle_tree.MerkleProof(5, 23, schema...)
+	return merkle_tree.MerkleProof(depth, 23, schema...)
 }
 
 func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 	if err := b.computeDirtyLeaves(); err != nil {
 		return nil, err
 	}
+	depth := 5
+	leafSize := StateLeafSizeDeneb
+	if b.Version() >= clparams.ElectraVersion {
+		depth = 6
+		leafSize = StateLeafSize
+	}
+
 	schema := []interface{}{}
-	for i := 0; i < len(b.leaves); i += 32 {
+	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
-	proof, err := merkle_tree.MerkleProof(5, 20, schema...)
+	proof, err := merkle_tree.MerkleProof(depth, 20, schema...)
 	if err != nil {
 		return nil, err
 	}
@@ -156,28 +182,38 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	beaconStateHasher.add(PreviousJustifiedCheckpointLeafIndex, &b.previousJustifiedCheckpoint)
 	beaconStateHasher.add(CurrentJustifiedCheckpointLeafIndex, &b.currentJustifiedCheckpoint)
 	beaconStateHasher.add(FinalizedCheckpointLeafIndex, &b.finalizedCheckpoint)
-	if b.version == clparams.Phase0Version {
-		beaconStateHasher.run()
-		return nil
+
+	if b.version >= clparams.AltairVersion {
+		// Altair fields
+		beaconStateHasher.add(InactivityScoresLeafIndex, b.inactivityScores)
+		beaconStateHasher.add(CurrentSyncCommitteeLeafIndex, b.currentSyncCommittee)
+		beaconStateHasher.add(NextSyncCommitteeLeafIndex, b.nextSyncCommittee)
 	}
-	// Altair fields
-	beaconStateHasher.add(InactivityScoresLeafIndex, b.inactivityScores)
-	beaconStateHasher.add(CurrentSyncCommitteeLeafIndex, b.currentSyncCommittee)
-	beaconStateHasher.add(NextSyncCommitteeLeafIndex, b.nextSyncCommittee)
-	if b.version < clparams.BellatrixVersion {
-		beaconStateHasher.run()
-		return nil
+
+	if b.version >= clparams.BellatrixVersion {
+		// Bellatrix fields
+		beaconStateHasher.add(LatestExecutionPayloadHeaderLeafIndex, b.latestExecutionPayloadHeader)
 	}
-	// Bellatrix fields
-	beaconStateHasher.add(LatestExecutionPayloadHeaderLeafIndex, b.latestExecutionPayloadHeader)
-	if b.version < clparams.CapellaVersion {
-		beaconStateHasher.run()
-		return nil
+
+	if b.version >= clparams.CapellaVersion {
+		// Capella fields
+		beaconStateHasher.add(NextWithdrawalIndexLeafIndex, b.nextWithdrawalIndex)
+		beaconStateHasher.add(NextWithdrawalValidatorIndexLeafIndex, b.nextWithdrawalValidatorIndex)
+		beaconStateHasher.add(HistoricalSummariesLeafIndex, b.historicalSummaries)
 	}
-	// Capella fields
-	beaconStateHasher.add(NextWithdrawalIndexLeafIndex, b.nextWithdrawalIndex)
-	beaconStateHasher.add(NextWithdrawalValidatorIndexLeafIndex, b.nextWithdrawalValidatorIndex)
-	beaconStateHasher.add(HistoricalSummariesLeafIndex, b.historicalSummaries)
+
+	if b.version >= clparams.ElectraVersion {
+		// Electra fields
+		beaconStateHasher.add(DepositRequestsStartIndexLeafIndex, b.depositRequestsStartIndex)
+		beaconStateHasher.add(DepositBalanceToConsumeLeafIndex, b.depositBalanceToConsume)
+		beaconStateHasher.add(ExitBalanceToConsumeLeafIndex, b.exitBalanceToConsume)
+		beaconStateHasher.add(EarliestExitEpochLeafIndex, b.earliestExitEpoch)
+		beaconStateHasher.add(ConsolidationBalanceToConsumeLeafIndex, b.consolidationBalanceToConsume)
+		beaconStateHasher.add(EarliestConsolidationEpochLeafIndex, b.earliestConsolidationEpoch)
+		beaconStateHasher.add(PendingDepositsLeafIndex, b.pendingDeposits)
+		beaconStateHasher.add(PendingPartialWithdrawalsLeafIndex, b.pendingPartialWithdrawals)
+		beaconStateHasher.add(PendingConsolidationsLeafIndex, b.pendingConsolidations)
+	}
 
 	beaconStateHasher.run()
 

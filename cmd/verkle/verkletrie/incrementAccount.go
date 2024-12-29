@@ -28,8 +28,8 @@ import (
 	"github.com/erigontech/erigon-lib/kv/temporal/historyv2"
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common/debug"
-	"github.com/erigontech/erigon/core/types/accounts"
+	"github.com/erigontech/erigon-lib/common/debug"
+	"github.com/erigontech/erigon-lib/types/accounts"
 )
 
 func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64, tmpdir string) error {
@@ -50,7 +50,7 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	}
 	defer cancelWorkers()
 
-	accountCursor, err := tx.CursorDupSort(kv.AccountChangeSet)
+	accountCursor, err := tx.CursorDupSort(kv.AccountChangeSetDeprecated)
 	if err != nil {
 		return err
 	}

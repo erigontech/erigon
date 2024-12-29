@@ -123,3 +123,13 @@ var recordsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessParticipationRecordUpdates(s)
 	return nil
 })
+
+var pendingDepositTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessPendingDeposits(s)
+	return nil
+})
+
+var PendingConsolidationTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessPendingConsolidations(s)
+	return nil
+})

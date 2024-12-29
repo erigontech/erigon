@@ -30,19 +30,19 @@ import (
 )
 
 // nolint:thelper
-func NewTestDB(tb testing.TB, dirs datadir.Dirs) (db kv.RwDB, agg *state.Aggregator) {
+func NewTestDB(tb testing.TB, dirs datadir.Dirs) (kv.TemporalRwDB, *state.Aggregator) {
 	if tb != nil {
 		tb.Helper()
 	}
 
+	var rawDB kv.RwDB
 	if tb != nil {
-		db = memdb.NewTestDB(tb)
+		rawDB = memdb.NewTestDB(tb, kv.ChainDB)
 	} else {
-		db = memdb.New(dirs.DataDir)
+		rawDB = memdb.New(dirs.DataDir, kv.ChainDB)
 	}
 
-	var err error
-	agg, err = state.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, db, log.New())
+	agg, err := state.NewAggregator(context.Background(), dirs, config3.DefaultStepSize, rawDB, log.New())
 	if err != nil {
 		panic(err)
 	}
@@ -53,7 +53,7 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs) (db kv.RwDB, agg *state.Aggrega
 		tb.Cleanup(agg.Close)
 	}
 
-	db, err = temporal.New(db, agg)
+	db, err := temporal.New(rawDB, agg)
 	if err != nil {
 		panic(err)
 	}

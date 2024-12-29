@@ -41,6 +41,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/metrics"
+	"github.com/erigontech/erigon-lib/common/paths"
 	"github.com/erigontech/erigon-lib/crypto"
 	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
 	"github.com/erigontech/erigon-lib/direct"
@@ -49,8 +50,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	common2 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/paths"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/eth/ethconfig"
@@ -64,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -154,18 +154,10 @@ var (
 		Usage: "Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
 		Value: txpoolcfg.DefaultConfig.NoGossip,
 	}
-	TxPoolLocalsFlag = cli.StringFlag{
-		Name:  "txpool.locals",
-		Usage: "Comma separated accounts to treat as locals (no flush, priority inclusion)",
-	}
-	TxPoolNoLocalsFlag = cli.BoolFlag{
-		Name:  "txpool.nolocals",
-		Usage: "Disables price exemptions for locally submitted transactions",
-	}
 	TxPoolPriceLimitFlag = cli.Uint64Flag{
 		Name:  "txpool.pricelimit",
 		Usage: "Minimum gas price (fee cap) limit to enforce for acceptance into the pool",
-		Value: ethconfig.Defaults.DeprecatedTxPool.PriceLimit,
+		Value: txpoolcfg.DefaultConfig.MinFeeCap,
 	}
 	TxPoolPriceBumpFlag = cli.Uint64Flag{
 		Name:  "txpool.pricebump",
@@ -180,7 +172,7 @@ var (
 	TxPoolAccountSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.accountslots",
 		Usage: "Minimum number of executable transaction slots guaranteed per account",
-		Value: ethconfig.Defaults.DeprecatedTxPool.AccountSlots,
+		Value: txpoolcfg.DefaultConfig.AccountSlots,
 	}
 	TxPoolBlobSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.blobslots",
@@ -192,30 +184,20 @@ var (
 		Usage: "Total limit of number of all blobs in txs within the txpool",
 		Value: txpoolcfg.DefaultConfig.TotalBlobPoolLimit,
 	}
-	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
+	TxPoolGlobalSlotsFlag = cli.IntFlag{
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
-		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalSlots,
+		Value: txpoolcfg.DefaultConfig.PendingSubPoolLimit,
 	}
-	TxPoolGlobalBaseFeeSlotsFlag = cli.Uint64Flag{
+	TxPoolGlobalBaseFeeSlotsFlag = cli.IntFlag{
 		Name:  "txpool.globalbasefeeslots",
 		Usage: "Maximum number of non-executable transactions where only not enough baseFee",
-		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
+		Value: txpoolcfg.DefaultConfig.BaseFeeSubPoolLimit,
 	}
-	TxPoolAccountQueueFlag = cli.Uint64Flag{
-		Name:  "txpool.accountqueue",
-		Usage: "Maximum number of non-executable transaction slots permitted per account",
-		Value: ethconfig.Defaults.DeprecatedTxPool.AccountQueue,
-	}
-	TxPoolGlobalQueueFlag = cli.Uint64Flag{
+	TxPoolGlobalQueueFlag = cli.IntFlag{
 		Name:  "txpool.globalqueue",
 		Usage: "Maximum number of non-executable transaction slots for all accounts",
-		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
-	}
-	TxPoolLifetimeFlag = cli.DurationFlag{
-		Name:  "txpool.lifetime",
-		Usage: "Maximum amount of time non-executable transaction are queued",
-		Value: ethconfig.Defaults.DeprecatedTxPool.Lifetime,
+		Value: txpoolcfg.DefaultConfig.QueuedSubPoolLimit,
 	}
 	TxPoolTraceSendersFlag = cli.StringFlag{
 		Name:  "txpool.trace.senders",
@@ -693,6 +675,11 @@ var (
 		Name:  ethconfig.FlagSnapStateStop,
 		Usage: "Workaround to stop producing new state files, if you meet some state-related critical bug. It will stop aggregate DB history in a state files. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce).",
 	}
+	SnapSkipStateSnapshotDownloadFlag = cli.BoolFlag{
+		Name:  "snap.skip-state-snapshot-download",
+		Usage: "Skip state download and start from genesis block",
+		Value: false,
+	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 2,
@@ -767,6 +754,7 @@ var (
 		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
 		Value: true,
 	}
+
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
 		Usage: "Enabling grpc health check",
@@ -843,13 +831,33 @@ var (
 		Usage: "TCP Port for Caplin DISCV5 protocol",
 		Value: 4001,
 	}
+	CaplinEnableUPNPlag = cli.BoolFlag{
+		Name:  "caplin.enable-upnp",
+		Usage: "Enable NAT porting for Caplin",
+		Value: false,
+	}
+	CaplinMaxInboundTrafficPerPeerFlag = cli.StringFlag{
+		Name:  "caplin.max-inbound-traffic-per-peer",
+		Usage: "Max inbound traffic per second per peer",
+		Value: "256KB",
+	}
+	CaplinMaxOutboundTrafficPerPeerFlag = cli.StringFlag{
+		Name:  "caplin.max-outbound-traffic-per-peer",
+		Usage: "Max outbound traffic per second per peer",
+		Value: "256KB",
+	}
+	CaplinAdaptableTrafficRequirementsFlag = cli.BoolFlag{
+		Name:  "caplin.adaptable-maximum-traffic-requirements",
+		Usage: "Make the node adaptable to the maximum traffic requirement based on how many validators are being ran",
+		Value: true,
+	}
 	CaplinCheckpointSyncUrlFlag = cli.StringSliceFlag{
 		Name:  "caplin.checkpoint-sync-url",
 		Usage: "checkpoint sync endpoint",
 		Value: cli.NewStringSlice(),
 	}
 	CaplinSubscribeAllTopicsFlag = cli.BoolFlag{
-		Name:  "caplin.subscibe-all-topics",
+		Name:  "caplin.subscribe-all-topics",
 		Usage: "Subscribe to all gossip topics",
 		Value: false,
 	}
@@ -866,7 +874,7 @@ var (
 	CaplinMaxPeerCount = cli.Uint64Flag{
 		Name:  "caplin.max-peer-count",
 		Usage: "Max number of peers to connect",
-		Value: 128,
+		Value: 80,
 	}
 
 	SentinelAddrFlag = cli.StringFlag{
@@ -976,7 +984,7 @@ var (
 	BeaconApiWriteTimeoutFlag = cli.Uint64Flag{
 		Name:  "beacon.api.write.timeout",
 		Usage: "Sets the seconds for a write time out in the beacon api",
-		Value: 5,
+		Value: 31536000,
 	}
 	BeaconApiIdleTimeoutFlag = cli.Uint64Flag{
 		Name:  "beacon.api.ide.timeout",
@@ -1073,11 +1081,18 @@ var (
 		Usage: "Enable speed test",
 		Value: false,
 	}
-
 	ChaosMonkeyFlag = cli.BoolFlag{
 		Name:  "chaos.monkey",
 		Usage: "Enable 'chaos monkey' to generate spontaneous network/consensus/etc failures. Use ONLY for testing",
 		Value: false,
+	}
+	ShutterEnabled = cli.BoolFlag{
+		Name:  "shutter",
+		Usage: "Enable the Shutter encrypted transactions mempool (defaults to false)",
+	}
+	ShutterKeyperBootnodes = cli.StringSliceFlag{
+		Name:  "shutter.keyper.bootnodes",
+		Usage: "Use to override the default keyper bootnodes (defaults to using the bootnodes from the embedded config)",
 	}
 )
 
@@ -1506,56 +1521,37 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
 	}
 }
 
-func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
-	cfg := &fullCfg.DeprecatedTxPool
+func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
+	cfg := txpoolcfg.DefaultConfig
 	if ctx.IsSet(TxPoolDisableFlag.Name) || TxPoolDisableFlag.Value {
 		cfg.Disable = true
 	}
-	if ctx.IsSet(TxPoolLocalsFlag.Name) {
-		locals := libcommon.CliString2Array(ctx.String(TxPoolLocalsFlag.Name))
-		for _, account := range locals {
-			if !libcommon.IsHexAddress(account) {
-				Fatalf("Invalid account in --txpool.locals: %s", account)
-			} else {
-				cfg.Locals = append(cfg.Locals, libcommon.HexToAddress(account))
-			}
-		}
-	}
-	if ctx.IsSet(TxPoolNoLocalsFlag.Name) {
-		cfg.NoLocals = ctx.Bool(TxPoolNoLocalsFlag.Name)
-	}
 	if ctx.IsSet(TxPoolPriceLimitFlag.Name) {
-		cfg.PriceLimit = ctx.Uint64(TxPoolPriceLimitFlag.Name)
+		cfg.MinFeeCap = ctx.Uint64(TxPoolPriceLimitFlag.Name)
 	}
 	if ctx.IsSet(TxPoolPriceBumpFlag.Name) {
 		cfg.PriceBump = ctx.Uint64(TxPoolPriceBumpFlag.Name)
 	}
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
-		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+		cfg.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
 	}
 	if ctx.IsSet(TxPoolAccountSlotsFlag.Name) {
 		cfg.AccountSlots = ctx.Uint64(TxPoolAccountSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolBlobSlotsFlag.Name) {
-		fullCfg.TxPool.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
+		cfg.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolTotalBlobPoolLimit.Name) {
-		fullCfg.TxPool.TotalBlobPoolLimit = ctx.Uint64(TxPoolTotalBlobPoolLimit.Name)
+		cfg.TotalBlobPoolLimit = ctx.Uint64(TxPoolTotalBlobPoolLimit.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalSlotsFlag.Name) {
-		cfg.GlobalSlots = ctx.Uint64(TxPoolGlobalSlotsFlag.Name)
-	}
-	if ctx.IsSet(TxPoolAccountQueueFlag.Name) {
-		cfg.AccountQueue = ctx.Uint64(TxPoolAccountQueueFlag.Name)
+		cfg.PendingSubPoolLimit = ctx.Int(TxPoolGlobalSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalQueueFlag.Name) {
-		cfg.GlobalQueue = ctx.Uint64(TxPoolGlobalQueueFlag.Name)
+		cfg.QueuedSubPoolLimit = ctx.Int(TxPoolGlobalQueueFlag.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalBaseFeeSlotsFlag.Name) {
-		cfg.GlobalBaseFeeQueue = ctx.Uint64(TxPoolGlobalBaseFeeSlotsFlag.Name)
-	}
-	if ctx.IsSet(TxPoolLifetimeFlag.Name) {
-		cfg.Lifetime = ctx.Duration(TxPoolLifetimeFlag.Name)
+		cfg.BaseFeeSubPoolLimit = ctx.Int(TxPoolGlobalBaseFeeSlotsFlag.Name)
 	}
 	if ctx.IsSet(TxPoolTraceSendersFlag.Name) {
 		// Parse the command separated flag
@@ -1567,12 +1563,32 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 		}
 	}
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
-		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
+		cfg.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
 	}
 	if ctx.IsSet(DbWriteMapFlag.Name) {
-		fullCfg.TxPool.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
+		cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
 	}
-	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
+	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
+		cfg.NoGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
+	}
+	cfg.LogEvery = 3 * time.Minute
+	cfg.CommitEvery = libcommon.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
+	cfg.DBDir = dbDir
+	fullCfg.TxPool = cfg
+}
+
+func setShutter(ctx *cli.Context, chainName string, cfg *ethconfig.Config) {
+	if enabled := ctx.Bool(ShutterEnabled.Name); !enabled {
+		return
+	}
+
+	config := shutter.ConfigByChainName(chainName)
+	// check for cli overrides
+	if ctx.IsSet(ShutterKeyperBootnodes.Name) {
+		config.KeyperBootnodes = ctx.StringSlice(ShutterKeyperBootnodes.Name)
+	}
+
+	cfg.Shutter = config
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
@@ -1814,6 +1830,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
+	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
+	var err error
+	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
+	if err != nil {
+		Fatalf("Option %s: %v", CaplinMaxInboundTrafficPerPeerFlag.Name, err)
+	}
+	cfg.CaplinConfig.MaxOutboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxOutboundTrafficPerPeerFlag.Name))
+	if err != nil {
+		Fatalf("Option %s: %v", CaplinMaxOutboundTrafficPerPeerFlag.Name, err)
+	}
+	cfg.CaplinConfig.AdptableTrafficRequirements = ctx.Bool(CaplinAdaptableTrafficRequirementsFlag.Name)
+
 	cfg.CaplinConfig.SubscribeAllTopics = ctx.Bool(CaplinSubscribeAllTopicsFlag.Name)
 	cfg.CaplinConfig.MaxPeerCount = ctx.Uint64(CaplinMaxPeerCount.Name)
 
@@ -1841,9 +1869,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.ProduceE2 = !ctx.Bool(SnapStopFlag.Name)
 	cfg.Snapshot.ProduceE3 = !ctx.Bool(SnapStateStopFlag.Name)
+	cfg.Snapshot.DisableDownloadE3 = ctx.Bool(SnapSkipStateSnapshotDownloadFlag.Name)
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
 	cfg.Snapshot.Verify = ctx.Bool(DownloaderVerifyFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
+	cfg.Snapshot.ChainName = chain
 	if cfg.Snapshot.DownloaderAddr == "" {
 		downloadRateStr := ctx.String(TorrentDownloadRateFlag.Name)
 		uploadRateStr := ctx.String(TorrentUploadRateFlag.Name)
@@ -1884,9 +1914,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 
-	setTxPool(ctx, cfg)
-	cfg.TxPool = ethconfig.DefaultTxPool2Config(cfg)
-	cfg.TxPool.DBDir = nodeConfig.Dirs.TxPool
+	setTxPool(ctx, nodeConfig.Dirs.TxPool, cfg)
+	setShutter(ctx, chain, cfg)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)
@@ -1965,10 +1994,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TrustedSetupFile.Name) {
 		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
-	}
-
-	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
-		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
 }
 

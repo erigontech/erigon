@@ -33,10 +33,10 @@ import (
 	math2 "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers/config"
@@ -662,16 +662,30 @@ func (sd *StateDiff) CreateContract(address libcommon.Address) error {
 }
 
 // CompareStates uses the addresses accumulated in the sdMap and compares balances, nonces, and codes of the accounts, and fills the rest of the sdMap
-func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
+func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error {
 	var toRemove []libcommon.Address
 	for addr, accountDiff := range sd.sdMap {
-		initialExist := initialIbs.Exist(addr)
-		exist := ibs.Exist(addr)
+		initialExist, err := initialIbs.Exist(addr)
+		if err != nil {
+			return err
+		}
+		exist, err := ibs.Exist(addr)
+		if err != nil {
+			return err
+		}
 		if initialExist {
 			if exist {
 				var allEqual = len(accountDiff.Storage) == 0
-				fromBalance := initialIbs.GetBalance(addr).ToBig()
-				toBalance := ibs.GetBalance(addr).ToBig()
+				ifromBalance, err := initialIbs.GetBalance(addr)
+				if err != nil {
+					return err
+				}
+				fromBalance := ifromBalance.ToBig()
+				itoBalance, err := ibs.GetBalance(addr)
+				if err != nil {
+					return err
+				}
+				toBalance := itoBalance.ToBig()
 				if fromBalance.Cmp(toBalance) == 0 {
 					accountDiff.Balance = "="
 				} else {
@@ -680,8 +694,14 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 					accountDiff.Balance = m
 					allEqual = false
 				}
-				fromCode := initialIbs.GetCode(addr)
-				toCode := ibs.GetCode(addr)
+				fromCode, err := initialIbs.GetCode(addr)
+				if err != nil {
+					return err
+				}
+				toCode, err := ibs.GetCode(addr)
+				if err != nil {
+					return err
+				}
 				if bytes.Equal(fromCode, toCode) {
 					accountDiff.Code = "="
 				} else {
@@ -690,8 +710,14 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 					accountDiff.Code = m
 					allEqual = false
 				}
-				fromNonce := initialIbs.GetNonce(addr)
-				toNonce := ibs.GetNonce(addr)
+				fromNonce, err := initialIbs.GetNonce(addr)
+				if err != nil {
+					return err
+				}
+				toNonce, err := ibs.GetNonce(addr)
+				if err != nil {
+					return err
+				}
 				if fromNonce == toNonce {
 					accountDiff.Nonce = "="
 				} else {
@@ -705,35 +731,59 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 				}
 			} else {
 				{
+					balance, err := initialIbs.GetBalance(addr)
+					if err != nil {
+						return err
+					}
 					m := make(map[string]*hexutil.Big)
-					m["-"] = (*hexutil.Big)(initialIbs.GetBalance(addr).ToBig())
+					m["-"] = (*hexutil.Big)(balance.ToBig())
 					accountDiff.Balance = m
 				}
 				{
+					code, err := initialIbs.GetCode(addr)
+					if err != nil {
+						return err
+					}
 					m := make(map[string]hexutility.Bytes)
-					m["-"] = initialIbs.GetCode(addr)
+					m["-"] = code
 					accountDiff.Code = m
 				}
 				{
+					nonce, err := initialIbs.GetNonce(addr)
+					if err != nil {
+						return err
+					}
 					m := make(map[string]hexutil.Uint64)
-					m["-"] = hexutil.Uint64(initialIbs.GetNonce(addr))
+					m["-"] = hexutil.Uint64(nonce)
 					accountDiff.Nonce = m
 				}
 			}
 		} else if exist {
 			{
+				balance, err := ibs.GetBalance(addr)
+				if err != nil {
+					return err
+				}
 				m := make(map[string]*hexutil.Big)
-				m["+"] = (*hexutil.Big)(ibs.GetBalance(addr).ToBig())
+				m["+"] = (*hexutil.Big)(balance.ToBig())
 				accountDiff.Balance = m
 			}
 			{
+				code, err := ibs.GetCode(addr)
+				if err != nil {
+					return err
+				}
 				m := make(map[string]hexutility.Bytes)
-				m["+"] = ibs.GetCode(addr)
+				m["+"] = code
 				accountDiff.Code = m
 			}
 			{
+				nonce, err := ibs.GetNonce(addr)
+				if err != nil {
+					return err
+				}
 				m := make(map[string]hexutil.Uint64)
-				m["+"] = hexutil.Uint64(ibs.GetNonce(addr))
+				m["+"] = hexutil.Uint64(nonce)
 				accountDiff.Nonce = m
 			}
 			// Transform storage
@@ -749,13 +799,14 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 	for _, addr := range toRemove {
 		delete(sd.sdMap, addr)
 	}
+	return nil
 }
 
 func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
-	tx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -766,7 +817,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 	}
 
 	var isBorStateSyncTxn bool
-	blockNum, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -860,7 +911,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
-	tx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -928,7 +979,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 
 // Call implements trace_call.
 func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error) {
-	tx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1066,7 +1117,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 // CallMany implements trace_callMany.
 func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
-	dbtx, err := api.kv.BeginRo(ctx)
+	dbtx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
