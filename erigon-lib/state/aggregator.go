@@ -195,7 +195,7 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.CommitmentDomain: {
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 
-		indexList:   withHashMap | withExistence,
+		indexList:   withHashMap,
 		compression: seg.CompressKeys,
 		compressCfg: DomainCompressCfg,
 
