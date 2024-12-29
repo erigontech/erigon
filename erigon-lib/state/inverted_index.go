@@ -1201,7 +1201,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		LessFalsePositives: true,
 
 		BucketSize: 2000,
-		LeafSize:   8,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     ii.dirs.Tmp,
 		IndexFile:  idxPath,
 		Salt:       ii.salt,

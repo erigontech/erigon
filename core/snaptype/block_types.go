@@ -118,7 +118,7 @@ var (
 				cfg := recsplit.RecSplitArgs{
 					Enums:              true,
 					BucketSize:         2000,
-					LeafSize:           8,
+					LeafSize:           recsplit.DefaultLeafSize,
 					TmpDir:             tmpDir,
 					Salt:               &salt,
 					BaseDataID:         info.From,
@@ -160,7 +160,7 @@ var (
 				cfg := recsplit.RecSplitArgs{
 					Enums:      true,
 					BucketSize: 2000,
-					LeafSize:   8,
+					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					Salt:       &salt,
 					BaseDataID: info.From,
@@ -232,7 +232,7 @@ var (
 					LessFalsePositives: true,
 
 					BucketSize: 2000,
-					LeafSize:   8,
+					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
 					BaseDataID: baseTxnID.U64(),
@@ -245,7 +245,7 @@ var (
 					KeyCount:   d.Count(),
 					Enums:      false,
 					BucketSize: 2000,
-					LeafSize:   8,
+					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, Indexes.TxnHash2BlockNum)),
 					BaseDataID: firstBlockNum,

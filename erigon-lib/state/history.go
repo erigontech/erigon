@@ -361,7 +361,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		KeyCount:   hist.Count(),
 		Enums:      false,
 		BucketSize: 2000,
-		LeafSize:   8,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     h.dirs.Tmp,
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt,

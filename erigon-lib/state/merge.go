@@ -826,7 +826,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			KeyCount:   keyCount,
 			Enums:      false,
 			BucketSize: 2000,
-			LeafSize:   8,
+			LeafSize:   recsplit.DefaultLeafSize,
 			TmpDir:     ht.h.dirs.Tmp,
 			IndexFile:  idxPath,
 			Salt:       ht.h.salt,
