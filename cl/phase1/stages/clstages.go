@@ -102,6 +102,7 @@ func ClStagesCfg(
 		rpc:             rpc,
 		antiquary:       antiquary,
 		ethClock:        ethClock,
+		caplinConfig:    caplinConfig,
 		beaconCfg:       beaconCfg,
 		state:           state,
 		executionClient: executionClient,
