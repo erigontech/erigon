@@ -360,8 +360,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   hist.Count(),
 		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     h.dirs.Tmp,
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt,

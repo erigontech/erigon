@@ -1133,11 +1133,25 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			block = sendersProgress
 		}
 
-		for bn := execProgress; bn < block; bn++ {
-			if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if noCommit {
+			tx, err := db.BeginTemporalRw(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			for bn := execProgress; bn < block; bn++ {
 				txc.Tx = tx
 				if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
 					return err
+				}
+			}
+		} else {
+			if err := db.Update(ctx, func(tx kv.RwTx) error {
+				for bn := execProgress; bn < block; bn++ {
+					txc.Tx = tx
+					if err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, bn, ctx, cfg, logger); err != nil {
+						return err
+					}
 				}
 				return nil
 			}); err != nil {
