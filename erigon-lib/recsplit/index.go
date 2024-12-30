@@ -252,7 +252,9 @@ func (idx *Index) DataHandle() unsafe.Pointer {
 func (idx *Index) Size() int64 { return idx.size }
 func (idx *Index) Sizes() (total, offsets, golombRice, existence, layer1 datasize.ByteSize) {
 	total = datasize.ByteSize(idx.size)
-	offsets = idx.offsetEf.Size()
+	if idx.offsetEf != nil {
+		offsets = idx.offsetEf.Size()
+	}
 	golombRice = datasize.ByteSize(len(idx.grData) * 8)
 	existence = datasize.ByteSize(len(idx.existence))
 	layer1 = total - offsets - golombRice - existence
