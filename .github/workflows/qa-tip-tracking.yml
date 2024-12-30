@@ -40,9 +40,9 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
-    - name: Restore Erigon Testbed Data Directory
-      run: |
-        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+    #- name: Restore Erigon Testbed Data Directory
+    #  run: |
+    #    rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
 
     - name: Run Erigon, wait sync and check ability to maintain sync
       id: test_step
@@ -52,7 +52,7 @@ jobs:
         # 1. Launch the testbed Erigon instance
         # 2. Allow time for the Erigon to achieve synchronization
         # 3. Begin timing the duration that Erigon maintains synchronization
-        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon2 $CHAIN
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py ${{ github.workspace }}/build/bin $ERIGON_REFERENCE_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon2 $CHAIN
   
         # Capture monitoring script exit status
         test_exit_status=$?
@@ -76,10 +76,10 @@ jobs:
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Delete Erigon Testbed Data Directory
-      if: always()
-      run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR
+    #- name: Delete Erigon Testbed Data Directory
+    #  if: always()
+    #  run: |
+    #    rm -rf $ERIGON_TESTBED_DATA_DIR
 
     - name: Resume the Erigon instance dedicated to db maintenance
       run: |
