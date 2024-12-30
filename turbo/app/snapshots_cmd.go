@@ -953,6 +953,7 @@ func doMeta(cliCtx *cli.Context) error {
 	} else if strings.Contains(fname, ".kvi") || strings.Contains(fname, ".idx") || strings.Contains(fname, ".efi") || strings.Contains(fname, ".vi") {
 		idx, err := recsplit.OpenIndex(fname)
 		if err != nil {
+			panic(err)
 			return err
 		}
 		defer idx.Close()
