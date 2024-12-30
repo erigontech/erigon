@@ -226,14 +226,16 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 		defer idx.Close()
 		reader := NewIndexReader(idx)
 
-		keys := make([][]byte, N)
+		hi := make([]uint64, N)
+		lo := make([]uint64, N)
 		for j := 0; j < N; j++ {
-			keys[j] = []byte(fmt.Sprintf("key %d", j))
+			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
 		}
+
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			for j := 0; j < N; j++ {
-				_, _ = reader.TwoLayerLookup(keys[j])
+				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
 			}
 		}
 	})
@@ -264,17 +266,17 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 		defer idx.Close()
 		reader := NewIndexReader(idx)
 
-		keys := make([][]byte, N)
+		hi := make([]uint64, N)
+		lo := make([]uint64, N)
 		for j := 0; j < N; j++ {
-			keys[j] = []byte(fmt.Sprintf("key %d", j))
+			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
 		}
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			for j := 0; j < N; j++ {
-				_, _ = reader.TwoLayerLookup(keys[j])
+				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
 			}
 		}
 	})
-
 }
