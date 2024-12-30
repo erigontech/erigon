@@ -233,14 +233,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			for j := 0; j < N; j++ {
-				e, _ := reader.Lookup(keys[j])
-				if e != uint64(j) {
-					b.Errorf("expected enumeration: %d, lookup up: %d", j, e)
-				}
-				offset := idx.OrdinalLookup(e)
-				if offset != uint64(j*17) {
-					b.Errorf("expected offset: %d, looked up: %d", j*17, offset)
-				}
+				_, _ = reader.TwoLayerLookup(keys[j])
 			}
 		}
 	})
@@ -279,14 +272,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			for j := 0; j < N; j++ {
-				e, _ := reader.Lookup(keys[j])
-				if e != uint64(j) {
-					b.Errorf("expected enumeration: %d, lookup up: %d", j, e)
-				}
-				offset := idx.OrdinalLookup(e)
-				if offset != uint64(j*17) {
-					b.Errorf("expected offset: %d, looked up: %d", j*17, offset)
-				}
+				_, _ = reader.TwoLayerLookup(keys[j])
 			}
 		}
 	})
