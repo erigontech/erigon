@@ -197,7 +197,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	tmpDir := b.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
-	N := 1_000_000
+	N := 10_000_000
 
 	b.Run("1", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
