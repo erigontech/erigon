@@ -210,6 +210,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 			Enums:              true,
 			LessFalsePositives: true,
 		}, logger)
+		defer rs.Close()
 		// failsCnt=25251323, LeafSize=24
 		// failsCnt=13944472, LeafSize=16
 		// failsCnt=105941, LeafSize=8
@@ -250,6 +251,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 			Enums:              true,
 			LessFalsePositives: true,
 		}, logger)
+		defer rs.Close()
 		// failsCnt=25251323, LeafSize=24
 		// failsCnt=13944472, LeafSize=16
 		// failsCnt=105941, LeafSize=8
@@ -290,6 +292,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 			Enums:              false,
 			LessFalsePositives: false,
 		}, logger)
+		defer rs.Close()
 		// failsCnt=25251323, LeafSize=24
 		// failsCnt=13944472, LeafSize=16
 		// failsCnt=105941, LeafSize=8
@@ -330,6 +333,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 			Enums:              false,
 			LessFalsePositives: false,
 		}, logger)
+		defer rs.Close()
 		// failsCnt=25251323, LeafSize=24
 		// failsCnt=13944472, LeafSize=16
 		// failsCnt=105941, LeafSize=8
