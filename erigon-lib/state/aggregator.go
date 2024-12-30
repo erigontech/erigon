@@ -126,7 +126,9 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 	}
 }
 
-var Schema = map[kv.Domain]domainCfg{
+var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
+
+var Schema = map[kv.Domain]*domainCfg{
 	kv.AccountsDomain: {
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 
@@ -244,6 +246,9 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		return nil, err
 	}
 
+	if dbgCommBtIndex {
+		Schema[kv.CommitmentDomain].indexList = withBTree | withExistence
+	}
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &Aggregator{
 		ctx:                    ctx,
@@ -351,7 +356,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	cfg.hist.iiCfg.salt = salt
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.aggregationStep = aggregationStep
-	a.d[name], err = NewDomain(cfg, logger)
+	a.d[name], err = NewDomain(*cfg, logger)
 	if err != nil {
 		return err
 	}
