@@ -1204,7 +1204,7 @@ func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, dat
 		Enums:              true,
 		LessFalsePositives: true,
 
-		BucketSize: 2000,
+		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     d.dirs.Tmp,
 		IndexFile:  idxPath,

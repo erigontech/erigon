@@ -197,7 +197,7 @@ var (
 				rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 					KeyCount:   blockCount,
 					Enums:      blockCount > 0,
-					BucketSize: 2000,
+					BucketSize: recsplit.DefaultBucketSize,
 					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, Enums.Events.String())),
@@ -519,7 +519,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
 		Enums:      d.Count() > 0,
-		BucketSize: 2000,
+		BucketSize: recsplit.DefaultBucketSize,
 		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
