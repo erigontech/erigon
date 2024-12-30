@@ -161,10 +161,6 @@ func TestTwoLayerIndex(t *testing.T) {
 		Enums:              true,
 		LessFalsePositives: true,
 	}, logger)
-	// failsCnt=25251323, LeafSize=24
-	// failsCnt=13944472, LeafSize=16
-	// failsCnt=105941, LeafSize=8
-	// failsCnt=7210, LeafSize=4
 	if err != nil {
 		t.Fatal(err)
 	}

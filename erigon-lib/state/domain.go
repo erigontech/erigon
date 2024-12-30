@@ -1625,13 +1625,7 @@ func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	}
 	r := dt.idxReaders[i]
 	if r == nil {
-		if dt.files[i].src.index == nil {
-			panic("asser: nil " + dt.files[i].src.decompressor.FileName())
-		}
 		r = dt.files[i].src.index.GetReaderFromPool()
-		if r == nil {
-			panic("asser: nil " + dt.files[i].src.decompressor.FileName())
-		}
 		dt.idxReaders[i] = r
 	}
 	return r
