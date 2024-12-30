@@ -250,8 +250,13 @@ func (idx *Index) DataHandle() unsafe.Pointer {
 }
 
 func (idx *Index) Size() int64 { return idx.size }
-func (idx *Index) Sizes() (total, offsets, golombRice, existence datasize.ByteSize) {
-	return datasize.ByteSize(idx.size), idx.offsetEf.Size(), datasize.ByteSize(len(idx.grData) * 8), datasize.ByteSize(len(idx.existence))
+func (idx *Index) Sizes() (total, offsets, golombRice, existence, layer1 datasize.ByteSize) {
+	total = datasize.ByteSize(idx.size)
+	offsets = idx.offsetEf.Size()
+	golombRice = datasize.ByteSize(len(idx.grData) * 8)
+	existence = datasize.ByteSize(len(idx.existence))
+	layer1 = total - offsets - golombRice - existence
+	return
 }
 func (idx *Index) ModTime() time.Time { return idx.modTime }
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
