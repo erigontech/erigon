@@ -1111,8 +1111,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 
 	hStaticFiles, err := d.History.buildFiles(ctx, step, collation.HistoryCollation, ps)
 	if err != nil {
-		panic(err)
-
 		return StaticFiles{}, err
 	}
 	valuesComp := collation.valuesComp
@@ -1162,7 +1160,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		}
 		valuesIdx, err = recsplit.OpenIndex(d.kvAccessorFilePath(step, step+1))
 		if err != nil {
-			panic(err)
 			return StaticFiles{}, err
 		}
 	}
