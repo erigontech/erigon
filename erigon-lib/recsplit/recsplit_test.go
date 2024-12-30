@@ -448,4 +448,50 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 			}
 		}
 	})
+
+	b.Run("build10", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			rs, err := NewRecSplit(RecSplitArgs{
+				KeyCount:           N,
+				BucketSize:         10,
+				Salt:               &salt,
+				TmpDir:             tmpDir,
+				IndexFile:          indexFile,
+				LeafSize:           4,
+				Enums:              false,
+				LessFalsePositives: false,
+			}, logger)
+			defer rs.Close()
+			require.NoError(b, err)
+			for i := 0; i < N; i++ {
+				err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
+				require.NoError(b, err)
+			}
+			err = rs.Build(context.Background())
+			require.NoError(b, err)
+		}
+	})
+
+	b.Run("build100", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			rs, err := NewRecSplit(RecSplitArgs{
+				KeyCount:           N,
+				BucketSize:         100,
+				Salt:               &salt,
+				TmpDir:             tmpDir,
+				IndexFile:          indexFile,
+				LeafSize:           4,
+				Enums:              false,
+				LessFalsePositives: false,
+			}, logger)
+			defer rs.Close()
+			require.NoError(b, err)
+			for i := 0; i < N; i++ {
+				err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
+				require.NoError(b, err)
+			}
+			err = rs.Build(context.Background())
+			require.NoError(b, err)
+		}
+	})
 }
