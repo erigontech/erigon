@@ -687,14 +687,14 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if reader.Empty() {
 			return nil, false, 0, nil
 		}
-		offset, ok := reader.Lookup(filekey)
+		offset, ok := reader.TwoLayerLookup(filekey)
 		if !ok {
 			return nil, false, 0, nil
 		}
 		g.Reset(offset)
 
 		k, _ := g.Next(nil)
-		if !bytes.Equal(filekey, k) {
+		if !bytes.Equal(filekey, k) { // MPH false-positives protection
 			return nil, false, 0, nil
 		}
 		v, _ := g.Next(nil)
