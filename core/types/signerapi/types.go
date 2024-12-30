@@ -218,7 +218,7 @@ func (v *ValidationMessages) GetWarnings() error {
 //		}
 //	}
 //
-//	return types.NewTx(data), nil
+//	return types.NewArbTx(data), nil
 //}
 //
 //// validateTxSidecar validates blob data, if present

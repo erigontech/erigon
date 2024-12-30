@@ -134,7 +134,7 @@ package apitypes
 ////		//	Proofs:      []kzg4844.Proof{proof},
 ////		//},
 ////	}
-////	tx := types.NewTx(b)
+////	tx := types.NewArbTx(b)
 ////	data, err := json.Marshal(tx)
 ////	if err != nil {
 ////		t.Fatal(err)

@@ -321,4 +321,3 @@ func (b *Bytes) UnmarshalGraphQL(input interface{}) error {
 	}
 	return err
 }
-

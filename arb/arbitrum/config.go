@@ -249,6 +249,7 @@ func WriteOrTestGenblock(chainDb kv.TemporalRwTx, initData statetransfer.InitDat
 		}
 		timestamp = prevHeader.Time
 	}
+
 	stateRoot, err := arbosState.InitializeArbosInDatabase(chainDb, initData, chainConfig, initMessage, timestamp, accountsPerSync)
 	if err != nil {
 		return err
@@ -314,7 +315,7 @@ func WriteOrTestChainConfig(tx kv.TemporalRwTx, config *chain.Config) error {
 	return nil
 }
 
-func GetBlockChain(chainDb kv.TemporalRwDB, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (*core.BlockChain, error) {
+func GetBlockChain(chainDb kv.TemporalRwTx, cacheConfig *CachingConfig, chainConfig *chain.Config, txLookupLimit uint64) (*core.BlockChain, error) {
 	engine := arbos.Engine{
 		IsSequencer: true,
 	}
@@ -390,23 +391,23 @@ func SequencerConfigAddOptions(prefix string, f *flag.FlagSet) {
 }
 
 type SequencerConfig struct {
-	Enable                       bool            `koanf:"enable"`
-	MaxBlockSpeed                time.Duration   `koanf:"max-block-speed" reload:"hot"`
-	MaxRevertGasReject           uint64          `koanf:"max-revert-gas-reject" reload:"hot"`
-	MaxAcceptableTimestampDelta  time.Duration   `koanf:"max-acceptable-timestamp-delta" reload:"hot"`
-	SenderWhitelist              []string        `koanf:"sender-whitelist"`
-	Forwarder                    ForwarderConfig `koanf:"forwarder"`
-	QueueSize                    int             `koanf:"queue-size"`
-	QueueTimeout                 time.Duration   `koanf:"queue-timeout" reload:"hot"`
-	NonceCacheSize               int             `koanf:"nonce-cache-size" reload:"hot"`
-	MaxTxDataSize                int             `koanf:"max-tx-data-size" reload:"hot"`
-	NonceFailureCacheSize        int             `koanf:"nonce-failure-cache-size" reload:"hot"`
-	NonceFailureCacheExpiry      time.Duration   `koanf:"nonce-failure-cache-expiry" reload:"hot"`
-	ExpectedSurplusSoftThreshold string          `koanf:"expected-surplus-soft-threshold" reload:"hot"`
-	ExpectedSurplusHardThreshold string          `koanf:"expected-surplus-hard-threshold" reload:"hot"`
-	EnableProfiling              bool            `koanf:"enable-profiling" reload:"hot"`
-	expectedSurplusSoftThreshold int
-	expectedSurplusHardThreshold int
+	Enable                          bool            `koanf:"enable"`
+	MaxBlockSpeed                   time.Duration   `koanf:"max-block-speed" reload:"hot"`
+	MaxRevertGasReject              uint64          `koanf:"max-revert-gas-reject" reload:"hot"`
+	MaxAcceptableTimestampDelta     time.Duration   `koanf:"max-acceptable-timestamp-delta" reload:"hot"`
+	SenderWhitelist                 []string        `koanf:"sender-whitelist"`
+	Forwarder                       ForwarderConfig `koanf:"forwarder"`
+	QueueSize                       int             `koanf:"queue-size"`
+	QueueTimeout                    time.Duration   `koanf:"queue-timeout" reload:"hot"`
+	NonceCacheSize                  int             `koanf:"nonce-cache-size" reload:"hot"`
+	MaxTxDataSize                   int             `koanf:"max-tx-data-size" reload:"hot"`
+	NonceFailureCacheSize           int             `koanf:"nonce-failure-cache-size" reload:"hot"`
+	NonceFailureCacheExpiry         time.Duration   `koanf:"nonce-failure-cache-expiry" reload:"hot"`
+	ExpectedSurplusSoftThreshold    string          `koanf:"expected-surplus-soft-threshold" reload:"hot"`
+	ExpectedSurplusHardThreshold    string          `koanf:"expected-surplus-hard-threshold" reload:"hot"`
+	EnableProfiling                 bool            `koanf:"enable-profiling" reload:"hot"`
+	ExpectedSurplusSoftThresholdInt int
+	ExpectedSurplusHardThresholdInt int
 }
 
 func (c *SequencerConfig) Validate() error {
@@ -420,16 +421,16 @@ func (c *SequencerConfig) Validate() error {
 	}
 	var err error
 	if c.ExpectedSurplusSoftThreshold != "default" {
-		if c.expectedSurplusSoftThreshold, err = strconv.Atoi(c.ExpectedSurplusSoftThreshold); err != nil {
+		if c.ExpectedSurplusSoftThresholdInt, err = strconv.Atoi(c.ExpectedSurplusSoftThreshold); err != nil {
 			return fmt.Errorf("invalid expected-surplus-soft-threshold value provided in batchposter config %w", err)
 		}
 	}
 	if c.ExpectedSurplusHardThreshold != "default" {
-		if c.expectedSurplusHardThreshold, err = strconv.Atoi(c.ExpectedSurplusHardThreshold); err != nil {
+		if c.ExpectedSurplusHardThresholdInt, err = strconv.Atoi(c.ExpectedSurplusHardThreshold); err != nil {
 			return fmt.Errorf("invalid expected-surplus-hard-threshold value provided in batchposter config %w", err)
 		}
 	}
-	if c.expectedSurplusSoftThreshold < c.expectedSurplusHardThreshold {
+	if c.ExpectedSurplusSoftThresholdInt < c.ExpectedSurplusHardThresholdInt {
 		return errors.New("expected-surplus-soft-threshold cannot be lower than expected-surplus-hard-threshold")
 	}
 	if c.MaxTxDataSize > arbostypes.MaxL2MessageSize-50000 {
