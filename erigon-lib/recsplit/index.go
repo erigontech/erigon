@@ -30,6 +30,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -248,7 +249,10 @@ func (idx *Index) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&idx.data[0])
 }
 
-func (idx *Index) Size() int64        { return idx.size }
+func (idx *Index) Size() int64 { return idx.size }
+func (idx *Index) Sizes() (total, offsets, golombRice, existence datasize.ByteSize) {
+	return datasize.ByteSize(idx.size), idx.offsetEf.Size(), datasize.ByteSize(len(idx.grData) * 8), datasize.ByteSize(len(idx.existence))
+}
 func (idx *Index) ModTime() time.Time { return idx.modTime }
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
 func (idx *Index) FilePath() string   { return idx.filePath }
@@ -287,9 +291,9 @@ func (idx *Index) Empty() bool {
 	return idx.keyCount == 0
 }
 
-func (idx *Index) KeyCount() uint64 {
-	return idx.keyCount
-}
+func (idx *Index) KeyCount() uint64 { return idx.keyCount }
+func (idx *Index) LeafSize() uint16 { return idx.leafSize }
+func (idx *Index) BucketSize() int  { return idx.bucketSize }
 
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
