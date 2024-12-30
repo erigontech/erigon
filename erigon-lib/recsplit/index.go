@@ -250,6 +250,7 @@ func (idx *Index) DataHandle() unsafe.Pointer {
 }
 
 func (idx *Index) Size() int64 { return idx.size }
+func (idx *Index) Enums() bool { return idx.enums }
 func (idx *Index) Sizes() (total, offsets, golombRice, existence, layer1 datasize.ByteSize) {
 	total = datasize.ByteSize(idx.size)
 	if idx.offsetEf != nil {
