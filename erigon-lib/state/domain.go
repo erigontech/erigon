@@ -1172,7 +1172,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		}
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
 		if err != nil {
-			panic(err)
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
@@ -1180,7 +1179,6 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
-			panic(err)
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
