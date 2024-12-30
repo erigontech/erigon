@@ -245,8 +245,6 @@ func ExecV3(ctx context.Context,
 		agg.SetCollateAndBuildWorkers(1)
 	}
 
-	pruneNonEssentials := cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber
-
 	var err error
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
@@ -525,21 +523,20 @@ Loop:
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
-				BlockNum:           blockNum,
-				Header:             header,
-				Coinbase:           b.Coinbase(),
-				Uncles:             b.Uncles(),
-				Rules:              rules,
-				Txs:                txs,
-				TxNum:              inputTxNum,
-				TxIndex:            txIndex,
-				BlockHash:          b.Hash(),
-				SkipAnalysis:       skipAnalysis,
-				Final:              txIndex == len(txs),
-				GetHashFn:          getHashFn,
-				EvmBlockContext:    blockContext,
-				Withdrawals:        b.Withdrawals(),
-				PruneNonEssentials: pruneNonEssentials,
+				BlockNum:        blockNum,
+				Header:          header,
+				Coinbase:        b.Coinbase(),
+				Uncles:          b.Uncles(),
+				Rules:           rules,
+				Txs:             txs,
+				TxNum:           inputTxNum,
+				TxIndex:         txIndex,
+				BlockHash:       b.Hash(),
+				SkipAnalysis:    skipAnalysis,
+				Final:           txIndex == len(txs),
+				GetHashFn:       getHashFn,
+				EvmBlockContext: blockContext,
+				Withdrawals:     b.Withdrawals(),
 
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
