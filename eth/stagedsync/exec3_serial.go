@@ -100,6 +100,13 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []exec.Task, profil
 						return fmt.Errorf("%w, txnIdx=%d, %v", consensus.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
+
+				stateWriter := state.NewStateWriterV3(se.rs.StateV3, se.accumulator)
+
+				if err = ibs.MakeWriteSet(txTask.Rules, stateWriter); err != nil {
+					panic(err)
+				}
+
 			} else if txTask.TxIndex >= 0 {
 				var prev *types.Receipt
 				if txTask.TxIndex > 0 {

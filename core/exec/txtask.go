@@ -300,34 +300,15 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			break
 		}
 
-		if calcFees {
-			/*
-				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
-				// End of block transaction in a block
-				syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */ /*)
-			}
-
-			if isMining {
-				_, txTask.Txs, txTask.BlockReceipts, _, err = engine.FinalizeAndAssemble(chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, chainReader, syscall, nil, txTask.Logger)
-			} else {
-				_, _, _, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, chainReader, syscall, txTask.Logger)
-			}
-			*/
-		}
-		if err != nil {
-			result.Err = err
-		} else {
-			//incorrect unwind to block 2
-			//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
-			//	txTask.Error = err
-			//}
-			result.ExecutionResult = &evmtypes.ExecutionResult{}
-			result.TraceTos = map[libcommon.Address]struct{}{}
-			result.TraceTos[txTask.Header.Coinbase] = struct{}{}
-			for _, uncle := range txTask.Uncles {
-				result.TraceTos[uncle.Coinbase] = struct{}{}
-			}
+		//incorrect unwind to block 2
+		//if err := ibs.CommitBlock(rules, rw.stateWriter); err != nil {
+		//	txTask.Error = err
+		//}
+		result.ExecutionResult = &evmtypes.ExecutionResult{}
+		result.TraceTos = map[libcommon.Address]struct{}{}
+		result.TraceTos[txTask.Header.Coinbase] = struct{}{}
+		for _, uncle := range txTask.Uncles {
+			result.TraceTos[uncle.Coinbase] = struct{}{}
 		}
 	default:
 		gasPool.Reset(txTask.Tx.GetGas(), chainConfig.GetMaxBlobGasPerBlock())

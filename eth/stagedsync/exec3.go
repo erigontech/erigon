@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
@@ -208,9 +209,6 @@ func ExecV3(ctx context.Context,
 	initialCycle bool,
 	isMining bool,
 ) error {
-	// TODO: e35 doesn't support parallel-exec yet
-	parallel = true //nolint
-
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
 	totalGasUsed := uint64(0)
@@ -583,7 +581,6 @@ Loop:
 			agg.BuildFilesInBackground(outputTxNum.Load())
 		} else {
 			se := executor.(*serialExecutor)
-
 			se.skipPostEvaluation = skipPostEvaluation
 
 			continueLoop, err := se.execute(ctx, txTasks, false)
@@ -616,6 +613,10 @@ Loop:
 					logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 					return errors.New("wrong trie root")
 				}
+				if blockNum == 15029665 {
+					fmt.Println(blockNum, hex.EncodeToString(rh), hex.EncodeToString(header.Root.Bytes()))
+				}
+
 				ts += time.Since(start)
 				aggTx.RestrictSubsetFileDeletions(false)
 				executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeset)

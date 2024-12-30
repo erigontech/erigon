@@ -146,9 +146,6 @@ func (result *execResult) finalize(prev *types.Receipt, engine consensus.Engine,
 	ibs := state.New(versionedReader)
 	ibs.SetTxContext(txIndex)
 	fmt.Println("TXO", len(result.TxOut))
-	//for _, txo := range result.TxOut {
-	//	fmt.Println(txo)
-	//}
 	ibs.ApplyVersionedWrites(result.TxOut)
 	versionedReader.SetStateReader(stateReader)
 
@@ -670,6 +667,9 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 							return errors.New("wrong trie root")
 						}
 						fmt.Println("BC DONE", applyResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(applyResult.StateRoot.Bytes())) //Temp Done
+						//if applyResult.BlockNum == 15030944 {
+						//	fmt.Println(applyResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(applyResult.StateRoot.Bytes()))
+						//}
 					}
 
 					if (applyResult.complete || applyResult.Err != nil) && pe.blockResults != nil {

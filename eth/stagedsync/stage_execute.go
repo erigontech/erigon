@@ -116,23 +116,23 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:                db,
-		prune:             pm,
-		batchSize:         batchSize,
-		chainConfig:       chainConfig,
-		engine:            engine,
-		vmConfig:          vmConfig,
-		dirs:              dirs,
-		notifications:     notifications,
-		stateStream:       stateStream,
-		badBlockHalt:      badBlockHalt,
-		blockReader:       blockReader,
-		hd:                hd,
-		genesis:           genesis,
-		historyV3:         true,
-		syncCfg:           syncCfg,
-		silkworm:          silkworm,
-		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs),
+		db:            db,
+		prune:         pm,
+		batchSize:     batchSize,
+		chainConfig:   chainConfig,
+		engine:        engine,
+		vmConfig:      vmConfig,
+		dirs:          dirs,
+		notifications: notifications,
+		stateStream:   stateStream,
+		badBlockHalt:  badBlockHalt,
+		blockReader:   blockReader,
+		hd:            hd,
+		genesis:       genesis,
+		historyV3:     true,
+		syncCfg:       syncCfg,
+		silkworm:      silkworm,
+		applyWorker:   exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs),
 	}
 }
 
@@ -157,8 +157,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		return nil
 	}
 
-	parallel := txc.Tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, parallel, to, logger, initialCycle, isMining); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, txc, dbg.Exec3Parallel, to, logger, initialCycle, isMining); err != nil {
 		return err
 	}
 	return nil

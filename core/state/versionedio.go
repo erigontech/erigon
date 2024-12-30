@@ -50,7 +50,9 @@ func (vr *versionedStateReader) SetStateReader(stateReader StateReader) {
 
 func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[AddressKey(address)]; ok && r.Val != nil {
-		return &r.Val.(*stateObject).data, nil
+		if account, ok := r.Val.(accounts.Account); ok {
+			return &account, nil
+		}
 	}
 
 	if vr.stateReader != nil {
@@ -62,7 +64,9 @@ func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accoun
 
 func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[AddressKey(address)]; ok && r.Val != nil {
-		return &r.Val.(*stateObject).data, nil
+		if account, ok := r.Val.(accounts.Account); ok {
+			return &account, nil
+		}
 	}
 
 	if vr.stateReader != nil {
@@ -86,7 +90,9 @@ func (vr versionedStateReader) ReadAccountStorage(address common.Address, incarn
 
 func (vr versionedStateReader) ReadAccountCode(address common.Address, incarnation uint64) ([]byte, error) {
 	if r, ok := vr.reads[SubpathKey(address, CodePath)]; ok && r.Val != nil {
-		return r.Val.(*stateObject).Code()
+		if code, ok := r.Val.([]byte); ok {
+			return code, nil
+		}
 	}
 
 	if vr.stateReader != nil {
@@ -98,8 +104,9 @@ func (vr versionedStateReader) ReadAccountCode(address common.Address, incarnati
 
 func (vr versionedStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64) (int, error) {
 	if r, ok := vr.reads[SubpathKey(address, CodePath)]; ok && r.Val != nil {
-		code, err := r.Val.(*stateObject).Code()
-		return len(code), err
+		if code, ok := r.Val.([]byte); ok {
+			return len(code), nil
+		}
 	}
 
 	if vr.stateReader != nil {
@@ -111,7 +118,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address common.Address, incar
 
 func (vr versionedStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	if r, ok := vr.reads[AddressKey(address)]; ok && r.Val != nil {
-		return r.Val.(*stateObject).data.Incarnation, nil
+		return r.Val.(accounts.Account).Incarnation, nil
 	}
 
 	if vr.stateReader != nil {
@@ -236,26 +243,23 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 	return stateObjects, nil
 }
 
-func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, copyV func(T) any, readStorage func(sdb *stateObject) (T, error)) (T, error) {
+func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, error) {
 	if s.versionMap == nil {
-		so := s.stateObjects[k.GetAddress()]
-		if !k.IsAddress() {
-			var err error
-			if so, err = s.getStateObject(k.GetAddress()); err != nil {
-				return defaultV, err
-			}
+		so, err := s.getStateObject(k.GetAddress())
+
+		if err != nil {
+			return defaultV, err
 		}
 		return readStorage(so)
 	}
 
 	if v, ok := s.versionedWrite(k); ok {
-		return readStorage(v.Val.(*stateObject))
+		return v.Val.(T), nil
 	}
 
 	res := s.versionMap.Read(k, s.txIndex)
 
 	var v T
-	var err error
 	var vr = VersionedRead{
 		V: Version{
 			TxIndex:     res.DepIdx(),
@@ -267,8 +271,12 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, copyV fu
 	switch res.Status() {
 	case MVReadResultDone:
 		{
-			v, err = readStorage(res.Value().(*stateObject))
+			var ok bool
 			vr.Kind = ReadKindMap
+			if v, ok = res.Value().(T); !ok {
+				return defaultV, nil
+			}
+
 			vr.Val = copyV(v)
 		}
 	case MVReadResultDependency:
@@ -278,33 +286,33 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, copyV fu
 		}
 	case MVReadResultNone:
 		{
-			var so *stateObject
-			if !k.IsAddress() {
-				so, err = s.getStateObject(k.GetAddress())
-			}
-			if err == nil {
-				v, err = readStorage(so)
-			}
 			vr.Kind = ReadKindStorage
+
+			so, err := s.getStateObject(k.GetAddress())
+
+			if err != nil {
+				return defaultV, nil
+			}
+
+			if so != nil && so.db == nil {
+				so = so.deepCopy(s)
+			}
+
+			if v, err = readStorage(so); err != nil {
+				return defaultV, nil
+			}
+
 			vr.Val = copyV(v)
 		}
 	default:
 		return defaultV, nil
 	}
 
-	if err != nil {
-		return defaultV, err
-	}
-
 	if s.versionedReads == nil {
 		s.versionedReads = map[VersionKey]VersionedRead{}
 	}
 
-	// TODO: I assume we don't want to overwrite an existing read because this could - for example - change a storage
-	//  read to map if the same value is read multiple times.
-	if _, ok := s.versionedReads[k]; !ok {
-		s.versionedReads[k] = vr
-	}
+	s.versionedReads[k] = vr
 
 	return v, nil
 }
