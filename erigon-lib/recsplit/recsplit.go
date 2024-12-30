@@ -144,7 +144,7 @@ type RecSplitArgs struct {
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
-const DefaultLeafSize = 4
+const DefaultLeafSize = 8
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
 // Typical bucket size is 100 - 2000, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
@@ -737,7 +737,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	log.Warn(fmt.Sprintf("[dbg] build done: %s, leaf=%d, failsCnt=%d, took=%s\n", rs.indexFileName, rs.leafSize, rs.failsCnt, time.Since(rs.t)))
+	//log.Warn(fmt.Sprintf("[dbg] build done: %s, leaf=%d, failsCnt=%d, took=%s\n", rs.indexFileName, rs.leafSize, rs.failsCnt, time.Since(rs.t)))
 	return nil
 }
 
