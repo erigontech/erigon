@@ -291,9 +291,9 @@ func (idx *Index) Empty() bool {
 	return idx.keyCount == 0
 }
 
-func (idx *Index) KeyCount() uint64 {
-	return idx.keyCount
-}
+func (idx *Index) KeyCount() uint64 { return idx.keyCount }
+func (idx *Index) LeafSize() uint16 { return idx.leafSize }
+func (idx *Index) BucketSize() int  { return idx.bucketSize }
 
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {

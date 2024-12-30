@@ -957,7 +957,7 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 		defer idx.Close()
 		total, offsets, golombRice, existence := idx.Sizes()
-		log.Info("meta", "sz_total", total.HumanReadable(), "sc_offsets", offsets.HumanReadable(), "sz_golombRice", golombRice.HumanReadable(), "sz_existence", existence.HumanReadable(), "keys_count", idx.KeyCount())
+		log.Info("meta", "sz_total", total.HumanReadable(), "sc_offsets", offsets.HumanReadable(), "sz_golombRice", golombRice.HumanReadable(), "sz_existence", existence.HumanReadable(), "keys_count", idx.KeyCount(), "leaf_size", idx.KeyCount(), "bucket_size", idx.KeyCount())
 	}
 	return nil
 }
