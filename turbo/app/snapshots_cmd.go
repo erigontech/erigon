@@ -956,8 +956,8 @@ func doMeta(cliCtx *cli.Context) error {
 			return err
 		}
 		defer idx.Close()
-		total, offsets, golombRice := idx.Sizes()
-		log.Info("meta", "sz_total", total, "sc_offsets", offsets, "sz_golombRice", golombRice)
+		total, offsets, golombRice, existence := idx.Sizes()
+		log.Info("meta", "sz_total", total, "sc_offsets", offsets, "sz_golombRice", golombRice, "sz_existence")
 	}
 	return nil
 }
