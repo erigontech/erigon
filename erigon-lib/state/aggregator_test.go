@@ -547,13 +547,13 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		require.NoError(t, err)
 		codeRangeAfter = extractKVErrIterator(t, it)
 
-		its, err := ac.d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err := ac.d[kv.AccountsDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		accountHistRangeAfter = extractKVSErrIterator(t, its)
-		its, err = ac.d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err = ac.d[kv.CodeDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		codeHistRangeAfter = extractKVSErrIterator(t, its)
-		its, err = ac.d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		its, err = ac.d[kv.StorageDomain].ht.HistoryRange(0, int(maxTx), order.Asc, maxInt, afterTx)
 		require.NoError(t, err)
 		storageHistRangeAfter = extractKVSErrIterator(t, its)
 	}
@@ -1273,9 +1273,24 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	compression := ac.d[kv.CommitmentDomain].d.compression
 	fnames := []string{}
 	for _, f := range ac.d[kv.CommitmentDomain].files {
-		k, stateVal, _, found, err := f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
-		require.NoError(t, err)
-		require.True(t, found)
+		var k, stateVal []byte
+		if ac.d[kv.CommitmentDomain].d.indexList&withHashMap != 0 {
+			idx := f.src.index.GetReaderFromPool()
+			r := seg.NewReader(f.src.decompressor.MakeGetter(), compression)
+
+			offset, ok := idx.TwoLayerLookup(keyCommitmentState)
+			require.True(t, ok)
+			r.Reset(offset)
+			k, _ = r.Next(nil)
+			stateVal, _ = r.Next(nil)
+		} else {
+			var found bool
+			var err error
+			k, stateVal, _, found, err = f.src.bindex.Get(keyCommitmentState, seg.NewReader(f.src.decompressor.MakeGetter(), compression))
+			require.NoError(t, err)
+			require.True(t, found)
+			require.EqualValues(t, keyCommitmentState, k)
+		}
 		require.EqualValues(t, keyCommitmentState, k)
 		rh, err := commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)

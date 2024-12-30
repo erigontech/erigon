@@ -25,6 +25,7 @@ import (
 	"sort"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common/bitutil"
 	"github.com/erigontech/erigon-lib/kv/stream"
 )
@@ -72,6 +73,8 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	ef.wordsUpperBits = ef.deriveFields()
 	return ef
 }
+
+func (ef *EliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.data) * 8) }
 
 func (ef *EliasFano) AddOffset(offset uint64) {
 	//fmt.Printf("0x%x,\n", offset)
