@@ -279,43 +279,6 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 			}
 		}
 	})
-	b.Run("2", func(b *testing.B) {
-		rs, err := NewRecSplit(RecSplitArgs{
-			KeyCount:           N,
-			BucketSize:         BucketSize,
-			Salt:               &salt,
-			TmpDir:             tmpDir,
-			IndexFile:          indexFile,
-			LeafSize:           4,
-			Enums:              true,
-			LessFalsePositives: true,
-		}, logger)
-		defer rs.Close()
-		require.NoError(b, err)
-		for i := 0; i < N; i++ {
-			err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
-			require.NoError(b, err)
-		}
-		err = rs.Build(context.Background())
-		require.NoError(b, err)
-
-		idx := MustOpen(indexFile)
-		defer idx.Close()
-		reader := NewIndexReader(idx)
-
-		hi := make([]uint64, N)
-		lo := make([]uint64, N)
-		for j := 0; j < N; j++ {
-			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
-		}
-
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			for j := 0; j < N; j++ {
-				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
-			}
-		}
-	})
 
 	b.Run("4", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
@@ -325,43 +288,6 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 			TmpDir:             tmpDir,
 			IndexFile:          indexFile,
 			LeafSize:           8,
-			Enums:              true,
-			LessFalsePositives: true,
-		}, logger)
-		defer rs.Close()
-		require.NoError(b, err)
-		for i := 0; i < N; i++ {
-			err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
-			require.NoError(b, err)
-		}
-		err = rs.Build(context.Background())
-		require.NoError(b, err)
-
-		idx := MustOpen(indexFile)
-		defer idx.Close()
-		reader := NewIndexReader(idx)
-
-		hi := make([]uint64, N)
-		lo := make([]uint64, N)
-		for j := 0; j < N; j++ {
-			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
-		}
-
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			for j := 0; j < N; j++ {
-				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
-			}
-		}
-	})
-	b.Run("5", func(b *testing.B) {
-		rs, err := NewRecSplit(RecSplitArgs{
-			KeyCount:           N,
-			BucketSize:         100,
-			Salt:               &salt,
-			TmpDir:             tmpDir,
-			IndexFile:          indexFile,
-			LeafSize:           4,
 			Enums:              true,
 			LessFalsePositives: true,
 		}, logger)
@@ -429,43 +355,6 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 			}
 		}
 	})
-	b.Run("7", func(b *testing.B) {
-		rs, err := NewRecSplit(RecSplitArgs{
-			KeyCount:           N,
-			BucketSize:         2000,
-			Salt:               &salt,
-			TmpDir:             tmpDir,
-			IndexFile:          indexFile,
-			LeafSize:           4,
-			Enums:              true,
-			LessFalsePositives: true,
-		}, logger)
-		defer rs.Close()
-		require.NoError(b, err)
-		for i := 0; i < N; i++ {
-			err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
-			require.NoError(b, err)
-		}
-		err = rs.Build(context.Background())
-		require.NoError(b, err)
-
-		idx := MustOpen(indexFile)
-		defer idx.Close()
-		reader := NewIndexReader(idx)
-
-		hi := make([]uint64, N)
-		lo := make([]uint64, N)
-		for j := 0; j < N; j++ {
-			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
-		}
-
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			for j := 0; j < N; j++ {
-				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
-			}
-		}
-	})
 
 	b.Run("8", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
@@ -504,41 +393,5 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 			}
 		}
 	})
-	b.Run("9", func(b *testing.B) {
-		rs, err := NewRecSplit(RecSplitArgs{
-			KeyCount:           N,
-			BucketSize:         3000,
-			Salt:               &salt,
-			TmpDir:             tmpDir,
-			IndexFile:          indexFile,
-			LeafSize:           4,
-			Enums:              true,
-			LessFalsePositives: true,
-		}, logger)
-		defer rs.Close()
-		require.NoError(b, err)
-		for i := 0; i < N; i++ {
-			err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
-			require.NoError(b, err)
-		}
-		err = rs.Build(context.Background())
-		require.NoError(b, err)
 
-		idx := MustOpen(indexFile)
-		defer idx.Close()
-		reader := NewIndexReader(idx)
-
-		hi := make([]uint64, N)
-		lo := make([]uint64, N)
-		for j := 0; j < N; j++ {
-			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
-		}
-
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			for j := 0; j < N; j++ {
-				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
-			}
-		}
-	})
 }
