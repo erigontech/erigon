@@ -360,7 +360,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 	}
 
-	return logs, nil
+	return nil, nil
+	//return logs, nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
