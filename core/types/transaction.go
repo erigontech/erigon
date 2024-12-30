@@ -380,7 +380,29 @@ type Message struct {
 	isFree           bool
 	blobHashes       []libcommon.Hash
 	authorizations   []Authorization
+
+	// Arbitrum
+	// L1 charging is disabled when SkipL1Charging is true.
+	// This field might be set to true for operations like RPC eth_call.
+	SkipL1Charging bool
+	TxRunMode      MessageRunMode // deprecated (shoudl be)
 }
+
+type MessageRunMode uint8
+
+const (
+	MessageCommitMode MessageRunMode = iota
+	MessageGasEstimationMode
+	MessageEthcallMode
+	MessageReplayMode
+)
+
+// these message modes are executed onchain so cannot make any gas shortcuts
+func (m MessageRunMode) ExecutedOnChain() bool {
+	return m == MessageCommitMode || m == MessageReplayMode
+}
+
+// eof arb deprecated stuff
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool,

@@ -69,6 +69,24 @@ type Contract struct {
 
 	Gas   uint64
 	value *uint256.Int
+
+	// Arbitrum
+	delegateOrCallcode bool
+}
+
+// arbitrum
+func (c *Contract) BurnGas(amount uint64) error {
+	if c.Gas < amount {
+		c.Gas = 0
+		return ErrOutOfGas
+	}
+	c.Gas -= amount
+	return nil
+}
+
+// arbitrum
+func (c *Contract) IsDelegateOrCallcode() bool {
+	return c.delegateOrCallcode
 }
 
 type JumpDestCache struct {

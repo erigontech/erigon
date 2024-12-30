@@ -27,6 +27,8 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
+
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -108,6 +110,10 @@ func (b *Big) UnmarshalText(input []byte) error {
 	dec.SetBits(words)
 	*b = (Big)(dec)
 	return nil
+}
+
+func (b *Big) ToUint256() *uint256.Int {
+	return uint256.MustFromBig(b.ToInt())
 }
 
 // ToInt converts b to a big.Int.
