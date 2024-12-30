@@ -145,7 +145,7 @@ type RecSplitArgs struct {
 }
 
 const DefaultLeafSize = 8
-const DefaultBucketSize = 100
+const DefaultBucketSize = 50
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
 // Typical bucket size is 100 - 2000, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
