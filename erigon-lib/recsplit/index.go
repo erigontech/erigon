@@ -293,7 +293,13 @@ func (idx *Index) Empty() bool {
 
 func (idx *Index) KeyCount() uint64 { return idx.keyCount }
 func (idx *Index) LeafSize() uint16 { return idx.leafSize }
-func (idx *Index) BucketSize() int  { return idx.bucketSize }
+func (idx *Index) BucketSize() int {
+	return int(float64(idx.bucketSize) / float64(idx.keyCount))
+	//idx.bucketCount = (idx.KeyCount + idx.BucketSize - 1) / idx.BucketSize
+	//idx.bucketCount * idx.BucketSize -  idx.BucketSize = (idx.KeyCount - 1)
+	//idx.BucketSize*(idx.bucketCount   -1) = (idx.KeyCount - 1)
+	//idx.BucketSize* = (idx.KeyCount - 1) / (idx.bucketCount   -1)
+}
 
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
