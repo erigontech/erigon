@@ -717,6 +717,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
+				panic(err)
 				return err
 			}
 
@@ -755,6 +756,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
 			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
+				panic(err)
 				return err
 			}
 

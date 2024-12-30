@@ -151,7 +151,7 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 func (d *Domain) kvFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
 }
-func (d *Domain) kvAccessorFilePath(fromStep, toStep uint64) string {
+func (d *Domain) kviAccessorFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
 }
 func (d *Domain) kvExistenceIdxFilePath(fromStep, toStep uint64) string {
@@ -359,7 +359,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 			}
 
 			if item.index == nil && d.indexList&withHashMap != 0 {
-				fPath := d.kvAccessorFilePath(fromStep, toStep)
+				fPath := d.kviAccessorFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
@@ -1111,6 +1111,8 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 
 	hStaticFiles, err := d.History.buildFiles(ctx, step, collation.HistoryCollation, ps)
 	if err != nil {
+		panic(err)
+
 		return StaticFiles{}, err
 	}
 	valuesComp := collation.valuesComp
@@ -1158,8 +1160,9 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		if err = d.buildAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.efAccessorFilePath(step, step+1))
+		valuesIdx, err = recsplit.OpenIndex(d.kviAccessorFilePath(step, step+1))
 		if err != nil {
+			panic(err)
 			return StaticFiles{}, err
 		}
 	}
@@ -1172,6 +1175,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		}
 		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
 		if err != nil {
+			panic(err)
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
@@ -1179,6 +1183,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
+			panic(err)
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.filenameBase, err)
 		}
 		if exists {
@@ -1199,7 +1204,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 }
 
 func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
-	idxPath := d.kvAccessorFilePath(fromStep, toStep)
+	idxPath := d.kviAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Enums:              true,
 		LessFalsePositives: true,
@@ -1245,7 +1250,7 @@ func (d *Domain) missedAccessors() (l []*filesItem) {
 	d.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
 		for _, item := range items {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			fPath := d.kvAccessorFilePath(fromStep, toStep)
+			fPath := d.kviAccessorFilePath(fromStep, toStep)
 			exists, err := dir.FileExist(fPath)
 			if err != nil {
 				panic(err)
