@@ -197,7 +197,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	tmpDir := b.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
-	N := 10_000_000
+	N := 100_000
 	const BucketSize = 10
 
 	b.Run("1", func(b *testing.B) {
