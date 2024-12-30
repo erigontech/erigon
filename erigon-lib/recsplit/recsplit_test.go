@@ -22,8 +22,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 func TestRecSplit2(t *testing.T) {
@@ -184,4 +186,164 @@ func TestTwoLayerIndex(t *testing.T) {
 			t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
 		}
 	}
+}
+
+func BenchmarkTwoLayerIndex(b *testing.B) {
+	logger := log.New()
+	tmpDir := b.TempDir()
+	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
+	N := 10_000_000
+
+	b.Run("1", func(b *testing.B) {
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:           N,
+			BucketSize:         10,
+			Salt:               &salt,
+			TmpDir:             tmpDir,
+			IndexFile:          indexFile,
+			LeafSize:           8,
+			Enums:              true,
+			LessFalsePositives: true,
+		}, logger)
+		defer rs.Close()
+		require.NoError(b, err)
+		for i := 0; i < N; i++ {
+			err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
+			require.NoError(b, err)
+		}
+		err = rs.Build(context.Background())
+		require.NoError(b, err)
+
+		idx := MustOpen(indexFile)
+		defer idx.Close()
+		reader := NewIndexReader(idx)
+
+		hi := make([]uint64, N)
+		lo := make([]uint64, N)
+		for j := 0; j < N; j++ {
+			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < N; j++ {
+				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
+			}
+		}
+	})
+
+	b.Run("3", func(b *testing.B) {
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:           N,
+			BucketSize:         50,
+			Salt:               &salt,
+			TmpDir:             tmpDir,
+			IndexFile:          indexFile,
+			LeafSize:           8,
+			Enums:              true,
+			LessFalsePositives: true,
+		}, logger)
+		defer rs.Close()
+		require.NoError(b, err)
+		for i := 0; i < N; i++ {
+			err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
+			require.NoError(b, err)
+		}
+		err = rs.Build(context.Background())
+		require.NoError(b, err)
+
+		idx := MustOpen(indexFile)
+		defer idx.Close()
+		reader := NewIndexReader(idx)
+
+		hi := make([]uint64, N)
+		lo := make([]uint64, N)
+		for j := 0; j < N; j++ {
+			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < N; j++ {
+				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
+			}
+		}
+	})
+
+	b.Run("3", func(b *testing.B) {
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:           N,
+			BucketSize:         100,
+			Salt:               &salt,
+			TmpDir:             tmpDir,
+			IndexFile:          indexFile,
+			LeafSize:           8,
+			Enums:              true,
+			LessFalsePositives: true,
+		}, logger)
+		defer rs.Close()
+		require.NoError(b, err)
+		for i := 0; i < N; i++ {
+			err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
+			require.NoError(b, err)
+		}
+		err = rs.Build(context.Background())
+		require.NoError(b, err)
+
+		idx := MustOpen(indexFile)
+		defer idx.Close()
+		reader := NewIndexReader(idx)
+
+		hi := make([]uint64, N)
+		lo := make([]uint64, N)
+		for j := 0; j < N; j++ {
+			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < N; j++ {
+				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
+			}
+		}
+	})
+
+	b.Run("4", func(b *testing.B) {
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:           N,
+			BucketSize:         200,
+			Salt:               &salt,
+			TmpDir:             tmpDir,
+			IndexFile:          indexFile,
+			LeafSize:           8,
+			Enums:              true,
+			LessFalsePositives: true,
+		}, logger)
+		defer rs.Close()
+		require.NoError(b, err)
+		for i := 0; i < N; i++ {
+			err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17))
+			require.NoError(b, err)
+		}
+		err = rs.Build(context.Background())
+		require.NoError(b, err)
+
+		idx := MustOpen(indexFile)
+		defer idx.Close()
+		reader := NewIndexReader(idx)
+
+		hi := make([]uint64, N)
+		lo := make([]uint64, N)
+		for j := 0; j < N; j++ {
+			hi[j], lo[j] = reader.Sum([]byte(fmt.Sprintf("key %d", j)))
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < N; j++ {
+				_, _ = reader.TwoLayerLookupByHash(hi[j], lo[j])
+			}
+		}
+	})
 }
