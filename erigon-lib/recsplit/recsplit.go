@@ -739,9 +739,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		rs.logger.Warn("[index] rename", "file", rs.tmpFilePath, "err", err)
 		return err
 	}
-
-	st, _ := os.Stat(rs.indexFile)
-	log.Warn(fmt.Sprintf("[dbg] build done: %s, leaf=%d, failsCnt=%d, bktSz=%d, took=%s, fileSize=%dKb\n", rs.indexFileName, rs.leafSize, rs.failsCnt, rs.bucketSize, time.Since(rs.t), uint64(datasize.ByteSize(st.Size()).KBytes())))
 	return nil
 }
 
