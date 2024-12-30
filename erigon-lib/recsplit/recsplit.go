@@ -737,7 +737,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	//log.Warn(fmt.Sprintf("[dbg] build done: %s, leaf=%d, failsCnt=%d, took=%s\n", rs.indexFileName, rs.leafSize, rs.failsCnt, time.Since(rs.t)))
+	st, _ := os.Stat(rs.indexFile)
+	log.Warn(fmt.Sprintf("[dbg] build done: %s, leaf=%d, failsCnt=%d, took=%s, fileSize=%s\n", rs.indexFileName, rs.leafSize, rs.failsCnt, time.Since(rs.t), datasize.ByteSize(st.Size()).String()))
 	return nil
 }
 
