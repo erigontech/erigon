@@ -732,6 +732,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		rs.logger.Warn("[index] rename", "file", rs.tmpFilePath, "err", err)
 		return err
 	}
+
 	return nil
 }
 
