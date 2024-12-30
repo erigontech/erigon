@@ -140,6 +140,8 @@ type RecSplitArgs struct {
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
 }
 
+// DefaultLeafSize - LeafSize=8 and BucketSize=100, use abount 1.8 bits per key. Increasing the leaf and bucket
+// sizes gives more compact structures (1.56 bits per key), at the	price of a slower construction time
 const DefaultLeafSize = 8
 const DefaultBucketSize = 2000 // typical from 100 to 2000, with smaller buckets giving slightly larger but faster function
 
