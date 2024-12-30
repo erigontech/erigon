@@ -1109,6 +1109,9 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, id: tx.ID}
 	tx.ID++
 
+	if tx.tx == nil {
+		panic("assert: tx.tx nil. seems this `tx` was Rollback'ed")
+	}
 	var err error
 	c.c, err = tx.tx.OpenCursor(mdbx.DBI(tx.db.buckets[c.bucketName].DBI))
 	if err != nil {
