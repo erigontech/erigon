@@ -126,9 +126,7 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 	}
 }
 
-var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
-
-var Schema = map[kv.Domain]*domainCfg{
+var Schema = map[kv.Domain]domainCfg{
 	kv.AccountsDomain: {
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 
@@ -197,7 +195,7 @@ var Schema = map[kv.Domain]*domainCfg{
 	kv.CommitmentDomain: {
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 
-		indexList:   withHashMap,
+		indexList:   withBTree | withExistence,
 		compression: seg.CompressKeys,
 		compressCfg: DomainCompressCfg,
 
@@ -246,9 +244,6 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		return nil, err
 	}
 
-	if dbgCommBtIndex {
-		Schema[kv.CommitmentDomain].indexList = withBTree | withExistence
-	}
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &Aggregator{
 		ctx:                    ctx,
@@ -356,7 +351,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	cfg.hist.iiCfg.salt = salt
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.aggregationStep = aggregationStep
-	a.d[name], err = NewDomain(*cfg, logger)
+	a.d[name], err = NewDomain(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -1061,7 +1056,7 @@ func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.
 				ac.a.logger.Info("[snapshots] pruning state",
 					"until commit", time.Until(started.Add(timeout)).String(),
 					"pruneLimit", pruneLimit,
-					"aggregatedStep", ac.StepsInFiles(),
+					"aggregatedStep", ac.StepsInFiles(kv.StateDomains...),
 					"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 					"pruned", fullStat.String(),
 				)
@@ -1155,7 +1150,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			ac.a.logger.Info("[snapshots] pruning state",
 				"until commit", time.Until(started.Add(timeout)).String(),
 				"pruneLimit", pruneLimit,
-				"aggregatedStep", ac.StepsInFiles(),
+				"aggregatedStep", ac.StepsInFiles(kv.StateDomains...),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
