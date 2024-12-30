@@ -28,7 +28,6 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
@@ -67,8 +66,6 @@ func remix(z uint64) uint64 {
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
 	offsetCollector *etl.Collector // Collector that sorts by offsets
-
-	failsCnt int
 
 	indexW          *bufio.Writer
 	indexF          *os.File
@@ -121,7 +118,6 @@ type RecSplit struct {
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
-	t       time.Time
 }
 
 type RecSplitArgs struct {
@@ -160,7 +156,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
 	rs.tmpDir = args.TmpDir
-	rs.t = time.Now()
 	rs.indexFile = args.IndexFile
 	rs.tmpFilePath = args.IndexFile + ".tmp"
 	_, fname := filepath.Split(rs.indexFile)
@@ -481,7 +476,6 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			if !fail {
 				break
 			}
-			rs.failsCnt++
 			salt++
 		}
 		for i := uint16(0); i < m; i++ {
@@ -518,7 +512,6 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			if !fail {
 				break
 			}
-			rs.failsCnt++
 			salt++
 		}
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
@@ -738,8 +731,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	st, _ := os.Stat(rs.indexFile)
-	log.Warn(fmt.Sprintf("[dbg] build done: %s, leaf=%d, failsCnt=%d, bktSz=%d, took=%s, fileSize=%dKb\n", rs.indexFileName, rs.leafSize, rs.failsCnt, rs.bucketSize, time.Since(rs.t), uint64(datasize.ByteSize(st.Size()).KBytes())))
 	return nil
 }
 
