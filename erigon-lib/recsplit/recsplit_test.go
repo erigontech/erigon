@@ -197,12 +197,13 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	tmpDir := b.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
 	salt := uint32(1)
-	N := 10_000_000
+	N := 10_000
+	const BucketSize = 10
 
 	b.Run("0", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:           N,
-			BucketSize:         3000,
+			BucketSize:         BucketSize,
 			Salt:               &salt,
 			TmpDir:             tmpDir,
 			IndexFile:          indexFile,
@@ -243,7 +244,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	b.Run("1", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:           N,
-			BucketSize:         3000,
+			BucketSize:         BucketSize,
 			Salt:               &salt,
 			TmpDir:             tmpDir,
 			IndexFile:          indexFile,
@@ -284,7 +285,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	b.Run("2", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:           N,
-			BucketSize:         3000,
+			BucketSize:         BucketSize,
 			Salt:               &salt,
 			TmpDir:             tmpDir,
 			IndexFile:          indexFile,
@@ -326,7 +327,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	b.Run("3", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:           N,
-			BucketSize:         3000,
+			BucketSize:         BucketSize,
 			Salt:               &salt,
 			TmpDir:             tmpDir,
 			IndexFile:          indexFile,
@@ -367,7 +368,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	b.Run("4", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:           N,
-			BucketSize:         3000,
+			BucketSize:         BucketSize,
 			Salt:               &salt,
 			TmpDir:             tmpDir,
 			IndexFile:          indexFile,
@@ -408,7 +409,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	b.Run("5", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:           N,
-			BucketSize:         3000,
+			BucketSize:         BucketSize,
 			Salt:               &salt,
 			TmpDir:             tmpDir,
 			IndexFile:          indexFile,
