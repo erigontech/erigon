@@ -916,14 +916,14 @@ func doMeta(cliCtx *cli.Context) error {
 		return errors.New("expecting file path as a first argument")
 	}
 	fname := args.First()
-	if strings.Contains(fname, ".seg") || strings.Contains(fname, ".kv") || strings.Contains(fname, ".v") || strings.Contains(fname, ".ef") {
+	if strings.HasSuffix(fname, ".seg") || strings.HasSuffix(fname, ".kv") || strings.HasSuffix(fname, ".v") || strings.HasSuffix(fname, ".ef") {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
 			return err
 		}
 		defer src.Close()
 		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName())
-	} else if strings.Contains(fname, ".bt") {
+	} else if strings.HasSuffix(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
@@ -950,7 +950,7 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 
 		log.Info("meta", "distances(*100K)", fmt.Sprintf("%v", distances))
-	} else if strings.Contains(fname, ".kvi") || strings.Contains(fname, ".idx") || strings.Contains(fname, ".efi") || strings.Contains(fname, ".vi") {
+	} else if strings.HasSuffix(fname, ".kvi") || strings.HasSuffix(fname, ".idx") || strings.HasSuffix(fname, ".efi") || strings.HasSuffix(fname, ".vi") {
 		idx, err := recsplit.OpenIndex(fname)
 		if err != nil {
 			panic(err)
