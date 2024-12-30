@@ -165,7 +165,7 @@ func (a *APIBackend) GetAPIs(filterSystem *filters.FilterSystem) []rpc.API {
 	return apis
 }
 
-func (a *APIBackend) BlockChain() eth1_chain_reader.ChainReaderWriterEth1 {
+func (a *APIBackend) BlockChain() *eth1_chain_reader.ChainReaderWriterEth1 {
 	return a.b.BlockChain()
 }
 
@@ -583,7 +583,7 @@ func (a *APIBackend) GetTd(ctx context.Context, hash common.Hash) *big.Int {
 	return nil
 }
 
-func (a *APIBackend) GetEVM(ctx context.Context, msg *core.Message, state *state.IntraBlockState, header *types.Header, vmConfig *vm.Config, blockCtx *evmtypes.BlockContext) *vm.EVM {
+func (a *APIBackend) GetEVM(ctx context.Context, msg *types.Message, state *state.IntraBlockState, header *types.Header, vmConfig *vm.Config, blockCtx *evmtypes.BlockContext) *vm.EVM {
 	if vmConfig == nil {
 		vmConfig = a.BlockChain().GetVMConfig()
 	}

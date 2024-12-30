@@ -48,7 +48,7 @@ type KeyValueStore interface {
 	Iteratee
 	Compacter
 	Snapshotter
-	io.Closer
+	Close()
 }
 
 // AncientReaderOp contains the methods required to read from immutable ancient data.
