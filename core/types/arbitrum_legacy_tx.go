@@ -28,7 +28,7 @@ func NewArbitrumLegacyTx(origTx Transaction, hashOverride common.Hash, effective
 		L1BlockNumber:     l1Block,
 		OverrideSender:    senderOverride,
 	}
-	return NewTx(&inner), nil
+	return NewArbTx(&inner), nil
 }
 
 // func (tx *ArbitrumLegacyTxData) copy() *ArbitrumLegacyTxData {
