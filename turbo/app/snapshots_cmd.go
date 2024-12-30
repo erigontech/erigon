@@ -920,7 +920,6 @@ func doMeta(cliCtx *cli.Context) error {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
 			panic(err)
-			return err
 		}
 		defer src.Close()
 		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName())
@@ -929,7 +928,6 @@ func doMeta(cliCtx *cli.Context) error {
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
 			panic(err)
-			return err
 		}
 		defer src.Close()
 		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, seg.CompressNone)
