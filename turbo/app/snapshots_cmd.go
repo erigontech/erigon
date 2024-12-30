@@ -919,6 +919,7 @@ func doMeta(cliCtx *cli.Context) error {
 	if strings.HasSuffix(fname, ".seg") || strings.HasSuffix(fname, ".kv") || strings.HasSuffix(fname, ".v") || strings.HasSuffix(fname, ".ef") {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
+			panic(err)
 			return err
 		}
 		defer src.Close()
@@ -927,6 +928,7 @@ func doMeta(cliCtx *cli.Context) error {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
+			panic(err)
 			return err
 		}
 		defer src.Close()
@@ -954,7 +956,6 @@ func doMeta(cliCtx *cli.Context) error {
 		idx, err := recsplit.OpenIndex(fname)
 		if err != nil {
 			panic(err)
-			return err
 		}
 		defer idx.Close()
 		total, offsets, golombRice, existence := idx.Sizes()
