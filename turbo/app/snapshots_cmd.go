@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/urfave/cli/v2"
 
@@ -949,6 +950,14 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 
 		log.Info("meta", "distances(*100K)", fmt.Sprintf("%v", distances))
+	} else if strings.Contains(fname, ".kvi") || strings.Contains(fname, ".idx") || strings.Contains(fname, ".efi") || strings.Contains(fname, ".vi") {
+		idx, err := recsplit.OpenIndex(fname)
+		if err != nil {
+			return err
+		}
+		defer idx.Close()
+		total, offsets, golombRice := idx.Sizes()
+		log.Info("meta", "sz_total", total, "sc_offsets", offsets, "sz_golombRice", golombRice)
 	}
 	return nil
 }
