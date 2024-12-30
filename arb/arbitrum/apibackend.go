@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/adapter/ethapi"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/erigontech/erigon/turbo/services"
 )
 
@@ -110,11 +111,11 @@ func createRegisterAPIBackend(backend *eth.Ethereum, filterConfig filters.Config
 	if tag != 0 || len(backend.ChainDB().WasmTargets()) > 1 {
 		dbForAPICalls = rawdb.WrapDatabaseWithWasm(backend.ChainDB(), wasmStore, 0, []ethdb.WasmTarget{rawdb.LocalTarget()})
 	}
-	backend.apiBackend = &APIBackend{
-		b:              backend,
-		dbForAPICalls:  dbForAPICalls,
-		fallbackClient: fallbackClient,
-	}
+	// backend.apiBackend = &APIBackend{
+	// 	b:              backend,
+	// 	dbForAPICalls:  dbForAPICalls,
+	// 	fallbackClient: fallbackClient,
+	// }
 	// filterSystem := filters.NewFilterSystem(backend.apiBackend, filterConfig)
 	// backend.stack.RegisterAPIs(backend.apiBackend.GetAPIs(filterSystem))
 	return filterSystem, nil
@@ -164,7 +165,7 @@ func (a *APIBackend) GetAPIs(filterSystem *filters.FilterSystem) []rpc.API {
 	return apis
 }
 
-func (a *APIBackend) BlockChain() *core.BlockChain {
+func (a *APIBackend) BlockChain() eth1_chain_reader.ChainReaderWriterEth1 {
 	return a.b.BlockChain()
 }
 
