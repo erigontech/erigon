@@ -126,6 +126,16 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 	}
 }
 
+var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
+
+func init() {
+	if dbgCommBtIndex {
+		cfg := Schema[kv.CommitmentDomain]
+		cfg.indexList = withBTree | withExistence
+		Schema[kv.CommitmentDomain] = cfg
+	}
+}
+
 var Schema = map[kv.Domain]domainCfg{
 	kv.AccountsDomain: {
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
@@ -195,7 +205,7 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.CommitmentDomain: {
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 
-		indexList:   withBTree | withExistence,
+		indexList:   withHashMap,
 		compression: seg.CompressKeys,
 		compressCfg: DomainCompressCfg,
 
