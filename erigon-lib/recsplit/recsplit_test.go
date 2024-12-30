@@ -457,7 +457,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 				Salt:               &salt,
 				TmpDir:             tmpDir,
 				IndexFile:          indexFile,
-				LeafSize:           4,
+				LeafSize:           8,
 				Enums:              false,
 				LessFalsePositives: false,
 			}, logger)
@@ -480,7 +480,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 				Salt:               &salt,
 				TmpDir:             tmpDir,
 				IndexFile:          indexFile,
-				LeafSize:           4,
+				LeafSize:           8,
 				Enums:              false,
 				LessFalsePositives: false,
 			}, logger)
