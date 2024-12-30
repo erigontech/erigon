@@ -202,7 +202,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	b.Run("1", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:           N,
-			BucketSize:         10,
+			BucketSize:         3000,
 			Salt:               &salt,
 			TmpDir:             tmpDir,
 			IndexFile:          indexFile,
@@ -242,7 +242,7 @@ func BenchmarkTwoLayerIndex(b *testing.B) {
 	b.Run("2", func(b *testing.B) {
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:           N,
-			BucketSize:         10,
+			BucketSize:         3000,
 			Salt:               &salt,
 			TmpDir:             tmpDir,
 			IndexFile:          indexFile,
