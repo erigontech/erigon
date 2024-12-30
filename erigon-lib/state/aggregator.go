@@ -1056,7 +1056,7 @@ func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.
 				ac.a.logger.Info("[snapshots] pruning state",
 					"until commit", time.Until(started.Add(timeout)).String(),
 					"pruneLimit", pruneLimit,
-					"aggregatedStep", ac.StepsInFiles(),
+					"aggregatedStep", ac.StepsInFiles(kv.StateDomains...),
 					"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 					"pruned", fullStat.String(),
 				)
@@ -1150,7 +1150,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			ac.a.logger.Info("[snapshots] pruning state",
 				"until commit", time.Until(started.Add(timeout)).String(),
 				"pruneLimit", pruneLimit,
-				"aggregatedStep", ac.StepsInFiles(),
+				"aggregatedStep", ac.StepsInFiles(kv.StateDomains...),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
