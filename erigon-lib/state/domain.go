@@ -1324,7 +1324,6 @@ func buildMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.F
 
 	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
-	var err error
 	cfg.KeyCount = count
 	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
