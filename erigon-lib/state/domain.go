@@ -1619,7 +1619,12 @@ func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
 	}
 	r := dt.getters[i]
 	if r == nil {
-		r = seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
+		getter := dt.files[i].src.decompressor.MakeGetter()
+		compression := dt.d.compression
+		if compression != seg.DetectCompressType(getter) {
+			compression = dt.d.compression
+		}
+		r = seg.NewReader(getter, dt.d.compression)
 		dt.getters[i] = r
 	}
 	return r
