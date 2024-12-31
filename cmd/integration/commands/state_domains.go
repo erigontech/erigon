@@ -289,10 +289,16 @@ func makePurifiableIndexDB(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, dom
 	return tx.Commit()
 }
 
-func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domain string) error {
+func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domainName string) error {
+	domain, err := kv.String2Domain(domainName)
+	if err != nil {
+		return err
+	}
+
+	compressionType := statelib.Schema[domain].Compression
+
 	var tbl string
-	compressionType := seg.CompressNone
-	switch domain {
+	switch domainName {
 	case "account":
 		tbl = kv.MaxTxNum
 	case "storage":
@@ -306,7 +312,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 	case "receipt":
 		tbl = kv.BadHeaderNumber
 	default:
-		return fmt.Errorf("invalid domain %s", domain)
+		return fmt.Errorf("invalid domainName %s", domainName)
 	}
 	// Iterate over all the files in  dirs.SnapDomain and print them
 	filesNamesToPurify := []string{}
@@ -318,22 +324,22 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		if info.IsDir() {
 			return nil
 		}
-		if !strings.Contains(info.Name(), domain) {
+		if !strings.Contains(info.Name(), domainName) {
 			return nil
 		}
 		// Here you can decide if you only want to process certain file extensions
 		// e.g., .kv files
 		if filepath.Ext(path) != ".kv" {
-			// Skip non-kv files if that's your domain’s format
+			// Skip non-kv files if that's your domainName’s format
 			return nil
 		}
 
-		fmt.Printf("Add file to purification of %s: %s\n", domain, path)
+		fmt.Printf("Add file to purification of %s: %s\n", domainName, path)
 
 		filesNamesToPurify = append(filesNamesToPurify, info.Name())
 		return nil
 	}); err != nil {
-		return fmt.Errorf("failed to walk through the domainDir %s: %w", domain, err)
+		return fmt.Errorf("failed to walk through the domainDir %s: %w", domainName, err)
 	}
 	// sort the files by name
 	sort.Slice(filesNamesToPurify, func(i, j int) bool {
@@ -418,7 +424,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 
 		skipRatio := float64(skipped) / float64(count)
 		if skipRatio < minSkipRatioL0 && currentLayer == 0 {
-			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping the domain and file %s\n", skipRatio, minSkipRatioL0, fileName)
+			fmt.Printf("Skip ratio %.2f is less than min-skip-ratio-l0 %.2f, skipping the domainName and file %s\n", skipRatio, minSkipRatioL0, fileName)
 			return nil
 		}
 		fmt.Printf("Loaded %d keys in file %s. now compressing...\n", count, fileName)

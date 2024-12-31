@@ -142,7 +142,7 @@ var Schema = map[kv.Domain]domainCfg{
 
 		indexList:            withBTree | withExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
-		compression:          seg.CompressNone,
+		Compression:          seg.CompressNone,
 		compressCfg:          DomainCompressCfg,
 
 		hist: histCfg{
@@ -163,7 +163,7 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 
 		indexList:   withBTree | withExistence,
-		compression: seg.CompressKeys,
+		Compression: seg.CompressKeys,
 		compressCfg: DomainCompressCfg,
 
 		hist: histCfg{
@@ -184,7 +184,7 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 
 		indexList:   withBTree | withExistence,
-		compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 		compressCfg: DomainCompressCfg,
 		largeValues: true,
 
@@ -206,7 +206,7 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 
 		indexList:   withHashMap,
-		compression: seg.CompressKeys,
+		Compression: seg.CompressKeys,
 		compressCfg: DomainCompressCfg,
 
 		hist: histCfg{
@@ -228,7 +228,7 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 
 		indexList:   withBTree | withExistence,
-		compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 		compressCfg: DomainCompressCfg,
 
 		hist: histCfg{
