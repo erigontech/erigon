@@ -1310,6 +1310,7 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.File
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 
+	//allow disable compression in future:
 	detectedCompression := seg.DetectCompressType(d.MakeGetter())
 	if compressed != detectedCompression {
 		compressed = detectedCompression
