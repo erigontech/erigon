@@ -1315,9 +1315,6 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.File
 		compressed = detectedCompression
 	}
 
-	if d == nil {
-		panic("assert: d == nil, " + fileName)
-	}
 	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
 	var err error
