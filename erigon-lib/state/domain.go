@@ -1624,7 +1624,8 @@ func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
 	}
 	r := dt.getters[i]
 	if r == nil {
-		dt.getters[i] = dt.newReader(dt.files[i].src.decompressor.MakeGetter())
+		r = dt.newReader(dt.files[i].src.decompressor.MakeGetter())
+		dt.getters[i] = r
 	}
 	return r
 }
