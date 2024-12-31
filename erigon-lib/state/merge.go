@@ -343,7 +343,7 @@ func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, ou
 	seq := multiencseq.ReadMultiEncSeq(baseNum, val)
 	preIt := preSeq.Iterator(0)
 	efIt := seq.Iterator(0)
-	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max(), true)
+	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max())
 	for preIt.HasNext() {
 		v, err := preIt.Next()
 		if err != nil {
@@ -627,7 +627,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		// Pre-rebase the first sequence
 		preSeq := multiencseq.ReadMultiEncSeq(cp[0].startTxNum, lastVal)
 		preIt := preSeq.Iterator(0)
-		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max(), true)
+		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max())
 		for preIt.HasNext() {
 			v, err := preIt.Next()
 			if err != nil {

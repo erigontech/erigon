@@ -29,9 +29,8 @@ const SIMPLE_SEQUENCE_MAX_THRESHOLD = 16
 //
 // This is the "writer" counterpart of SequenceReader.
 type SequenceBuilder struct {
-	baseNum  uint64
-	ef       *eliasfano32.EliasFano
-	optimize bool
+	baseNum uint64
+	ef      *eliasfano32.EliasFano
 }
 
 // Creates a new builder. The builder is not meant to be reused. The construction
@@ -41,22 +40,21 @@ type SequenceBuilder struct {
 // The encoding being used depends on the parameters themselves and the characteristics
 // of the number sequence.
 //
+// While non-optimized "legacy mode" is supported (for now) on SequenceReader to be backwards
+// compatible with old files, this writer ONLY writes optimized multiencoding sequences.
+//
 // baseNum: this is used to calculate the deltas on simple encoding and on "rebased elias fano"
 // count: this is the number of elements in the sequence, used in case of elias fano
 // max: this is maximum value in the sequence, used in case of elias fano
-// optimize: if false, the builder will always output plain elias fano; it is "legacy mode",
-// and is used to be backwards compatible with E3 default format. If true, it will output
-// forward compatible, optimized multiencoding sequences.
-// TODO: remove optimize param
-func NewBuilder(baseNum, count, max uint64, optimize bool) *SequenceBuilder {
+func NewBuilder(baseNum, count, max uint64) *SequenceBuilder {
 	return &SequenceBuilder{
-		baseNum:  baseNum,
-		ef:       eliasfano32.NewEliasFano(count, max),
-		optimize: optimize,
+		baseNum: baseNum,
+		ef:      eliasfano32.NewEliasFano(count, max),
 	}
 }
 
 func (b *SequenceBuilder) AddOffset(offset uint64) {
+	// TODO: write offset already substracting baseNum now that PlainEF is gone
 	b.ef.AddOffset(offset)
 }
 
@@ -65,10 +63,6 @@ func (b *SequenceBuilder) Build() {
 }
 
 func (b *SequenceBuilder) AppendBytes(buf []byte) []byte {
-	if !b.optimize {
-		return b.ef.AppendBytes(buf)
-	}
-
 	if b.ef.Count() <= SIMPLE_SEQUENCE_MAX_THRESHOLD {
 		return b.simpleEncoding(buf)
 	}

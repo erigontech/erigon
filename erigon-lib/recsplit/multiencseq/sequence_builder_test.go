@@ -10,34 +10,8 @@ import (
 
 func TestMultiEncodingSeqBuilder(t *testing.T) {
 
-	t.Run("no optimization always encode to plain elias fano", func(t *testing.T) {
-		builder := NewBuilder(1000, 5, 1031, false)
-		builder.AddOffset(1000)
-		builder.AddOffset(1007)
-		builder.AddOffset(1015)
-		builder.AddOffset(1027)
-		builder.AddOffset(1031)
-		builder.Build()
-
-		b := make([]byte, 0)
-		b = builder.AppendBytes(b)
-
-		// plain EF; builder must build identical serialized sequence
-		ef := eliasfano32.NewEliasFano(5, 1031)
-		ef.AddOffset(1000)
-		ef.AddOffset(1007)
-		ef.AddOffset(1015)
-		ef.AddOffset(1027)
-		ef.AddOffset(1031)
-		ef.Build()
-		bExpected := make([]byte, 0)
-		bExpected = ef.AppendBytes(bExpected)
-
-		require.Equal(t, bExpected, b)
-	})
-
 	t.Run("singleton sequence", func(t *testing.T) {
-		builder := NewBuilder(1000, 1, 1005, true)
+		builder := NewBuilder(1000, 1, 1005)
 		builder.AddOffset(1005)
 		builder.Build()
 
@@ -47,7 +21,7 @@ func TestMultiEncodingSeqBuilder(t *testing.T) {
 	})
 
 	t.Run("short sequences must use simple encoding", func(t *testing.T) {
-		builder := NewBuilder(1000, 16, 1035, true)
+		builder := NewBuilder(1000, 16, 1035)
 		builder.AddOffset(1005)
 		builder.AddOffset(1007)
 		builder.AddOffset(1009)
@@ -89,7 +63,7 @@ func TestMultiEncodingSeqBuilder(t *testing.T) {
 	})
 
 	t.Run("large sequences must use rebased elias fano", func(t *testing.T) {
-		builder := NewBuilder(1000, 17, 1035, true)
+		builder := NewBuilder(1000, 17, 1035)
 		builder.AddOffset(1005)
 		builder.AddOffset(1007)
 		builder.AddOffset(1009)
