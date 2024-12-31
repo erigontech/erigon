@@ -131,7 +131,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
 		return nil
 	}
-	if err != nil {
+	if err != nil { //nolint:govet
 		g.sentinel.BanPeer(ctx, data.Peer)
 		return err
 	}
@@ -311,7 +311,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 					return
 				case data := <-ch:
 					l := log.Ctx{}
-					if err := g.onRecv(ctx, data, l); err != nil && !errors.Is(err, services.ErrIgnore) {
+					if err := g.onRecv(ctx, data, l); err != nil && !errors.Is(err, services.ErrIgnore) && !errors.Is(err, synced_data.ErrNotSynced) {
 						log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 					}
 				}

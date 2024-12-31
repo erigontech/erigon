@@ -207,7 +207,7 @@ func (s *Service) loop() {
 					break
 				}
 			}
-			if err != nil || conn == nil {
+			if conn == nil {
 				log.Warn("Stats server unreachable")
 				errTimer.Reset(10 * time.Second)
 				continue

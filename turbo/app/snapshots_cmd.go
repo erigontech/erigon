@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/recsplit"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/urfave/cli/v2"
 
@@ -508,10 +509,10 @@ func doDebugKey(cliCtx *cli.Context) error {
 
 	view := agg.BeginFilesRo()
 	defer view.Close()
-	if err := view.DebugKey(domain, key); err != nil {
+	if err := view.IntegrityKey(domain, key); err != nil {
 		return err
 	}
-	if err := view.DebugEFKey(domain, key); err != nil {
+	if err := view.IntegirtyInvertedIndexKey(domain, key); err != nil {
 		return err
 	}
 	return nil
@@ -915,18 +916,18 @@ func doMeta(cliCtx *cli.Context) error {
 		return errors.New("expecting file path as a first argument")
 	}
 	fname := args.First()
-	if strings.Contains(fname, ".seg") || strings.Contains(fname, ".kv") || strings.Contains(fname, ".v") || strings.Contains(fname, ".ef") {
+	if strings.HasSuffix(fname, ".seg") || strings.HasSuffix(fname, ".kv") || strings.HasSuffix(fname, ".v") || strings.HasSuffix(fname, ".ef") {
 		src, err := seg.NewDecompressor(fname)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer src.Close()
 		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).HumanReadable(), "serialized_dict", datasize.ByteSize(src.SerializedDictSize()).HumanReadable(), "dict_words", src.DictWords(), "name", src.FileName())
-	} else if strings.Contains(fname, ".bt") {
+	} else if strings.HasSuffix(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
 		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
-			return err
+			panic(err)
 		}
 		defer src.Close()
 		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, seg.CompressNone)
@@ -949,6 +950,14 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 
 		log.Info("meta", "distances(*100K)", fmt.Sprintf("%v", distances))
+	} else if strings.HasSuffix(fname, ".kvi") || strings.HasSuffix(fname, ".idx") || strings.HasSuffix(fname, ".efi") || strings.HasSuffix(fname, ".vi") {
+		idx, err := recsplit.OpenIndex(fname)
+		if err != nil {
+			panic(err)
+		}
+		defer idx.Close()
+		total, offsets, ef, golombRice, existence, layer1 := idx.Sizes()
+		log.Info("meta", "sz_total", total.HumanReadable(), "sz_offsets", offsets.HumanReadable(), "sz_double_ef", ef.HumanReadable(), "sz_golombRice", golombRice.HumanReadable(), "sz_existence", existence.HumanReadable(), "sz_l1", layer1.HumanReadable(), "keys_count", idx.KeyCount(), "leaf_size", idx.LeafSize(), "bucket_size", idx.BucketSize(), "enums", idx.Enums())
 	}
 	return nil
 }
@@ -1254,7 +1263,7 @@ func doCompress(cliCtx *cli.Context) error {
 		default:
 		}
 	}
-	if err != nil && !errors.Is(err, io.EOF) {
+	if !errors.Is(err, io.EOF) {
 		return err
 	}
 	if err := c.Compress(); err != nil {

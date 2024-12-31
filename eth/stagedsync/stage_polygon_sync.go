@@ -1039,7 +1039,7 @@ func (s polygonSyncStageBridgeStore) LastEventIdWithinWindow(ctx context.Context
 		return 0, err
 	}
 	if r.err != nil {
-		return 0, err
+		return 0, r.err
 	}
 
 	return r.id, nil

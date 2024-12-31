@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -87,6 +88,7 @@ type Pool interface {
 }
 
 var _ Pool = (*TxPool)(nil) // compile-time interface check
+var _ txnprovider.TxnProvider = (*TxPool)(nil)
 
 // TxPool - holds all pool-related data structures and lock-based tiny methods
 // most of logic implemented by pure tests-friendly functions
@@ -730,16 +732,18 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	return true, count, nil
 }
 
-func (p *TxPool) YieldBestTxns(
-	ctx context.Context,
-	amount int,
-	parentBlockNum uint64,
-	gasTarget uint64,
-	blobGasTarget uint64,
-	txnIdsFilter mapset.Set[[32]byte],
-) ([]types.Transaction, error) {
+func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	provideOptions := txnprovider.ApplyProvideOptions(opts...)
 	var txnsRlp TxnsRlp
-	_, _, err := p.YieldBest(ctx, amount, &txnsRlp, parentBlockNum, gasTarget, blobGasTarget, txnIdsFilter)
+	_, _, err := p.YieldBest(
+		ctx,
+		provideOptions.Amount,
+		&txnsRlp,
+		provideOptions.ParentBlockNum,
+		provideOptions.GasTarget,
+		provideOptions.BlobGasTarget,
+		provideOptions.TxnIdsFilter,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -228,6 +228,7 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) 
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
+func (db *DB) OnFreeze(f kv.OnFreezeFunc) { panic("not implemented") }
 
 func (tx *tx) ViewID() uint64  { return tx.viewID }
 func (tx *tx) CollectMetrics() {}
@@ -626,6 +627,12 @@ func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) { return c.pre
 func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.lastDup() }
 
 // Temporal Methods
+
+func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
+	// TODO: not yet implemented, return 0 for now
+	return 0
+}
+
 func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remote.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Ts: ts})
 	if err != nil {

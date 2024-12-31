@@ -202,7 +202,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 
-	env, err := mdbx.NewEnv()
+	env, err := mdbx.NewEnv(mdbx.Label(opts.label))
 	if err != nil {
 		return nil, err
 	}
@@ -1109,6 +1109,9 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, id: tx.ID}
 	tx.ID++
 
+	if tx.tx == nil {
+		panic("assert: tx.tx nil. seems this `tx` was Rollback'ed")
+	}
 	var err error
 	c.c, err = tx.tx.OpenCursor(mdbx.DBI(tx.db.buckets[c.bucketName].DBI))
 	if err != nil {
@@ -1119,7 +1122,7 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	if tx.toCloseMap == nil {
 		tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
-	tx.toCloseMap[c.id] = c.c
+	tx.toCloseMap[c.id] = c
 	return c, nil
 }
 
@@ -1267,6 +1270,8 @@ func (c *MdbxCursor) Close() {
 		c.c = nil
 	}
 }
+
+func (c *MdbxCursor) IsClosed() bool { return c.c == nil }
 
 type MdbxDupSortCursor struct {
 	*MdbxCursor

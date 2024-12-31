@@ -380,7 +380,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 		fromTxNumRange, toTxNumRange := r.FromTo()
 		lastTxnumInShard := toTxNumRange
-		if acRo.minimaxTxNumInDomainFiles() >= toTxNumRange {
+		if acRo.TxNumsInFiles(kv.StateDomains...) >= toTxNumRange {
 			a.logger.Info("skipping existing range", "range", r.String("", a.StepSize()))
 			continue
 		}
