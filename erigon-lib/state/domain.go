@@ -1310,6 +1310,9 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.File
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 
+	if d == nil {
+		panic("assert: d == nil")
+	}
 	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
 	var err error
