@@ -1312,7 +1312,7 @@ func buildMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.F
 
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%s %s: %s", d.FileName(), rec, dbg.Stack())
+			err = fmt.Errorf("%s %s: %s", fileName, rec, dbg.Stack())
 		}
 	}()
 
