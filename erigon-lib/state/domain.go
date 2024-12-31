@@ -1312,6 +1312,7 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.File
 
 	detectedCompression := seg.DetectCompressType(d.MakeGetter())
 	if compressed != detectedCompression {
+		log.Warn("[dbg] changing compression type", "f", fileName, "from", compressed, "to", detectedCompression)
 		compressed = detectedCompression
 	}
 
