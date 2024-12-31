@@ -68,7 +68,7 @@ type Server struct {
 
 // NewServer creates a new server instance with no registered handlers.
 // Parameters:
-//   - batchConcurrency: determines how many batch requests can be processed simultaneously
+//   - batchConcurrency: maximum number of goroutines processing batch requests (0 = unlimited)
 //   - traceRequests: enables detailed request tracing in logs
 //   - debugSingleRequest: enables debugging of individual requests
 //   - disableStreaming: disables streaming responses
