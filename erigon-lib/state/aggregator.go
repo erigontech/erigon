@@ -237,9 +237,7 @@ var Schema = map[kv.Domain]domainCfg{
 	},
 }
 
-// TODO: experimentalEFOptimization is a temporary flag to enable experimental .ef optimization.
-// It should be removed after the optimization is stable and enabled by default.
-func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger, experimentalEFOptimization bool) (*Aggregator, error) {
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	tmpdir := dirs.Tmp
 	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
@@ -266,31 +264,31 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		produce: true,
 	}
 
-	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, aggregationStep, logger, experimentalEFOptimization); err != nil {
+	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.StorageDomain, salt, dirs, aggregationStep, logger, experimentalEFOptimization); err != nil {
+	if err := a.registerDomain(kv.StorageDomain, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CodeDomain, salt, dirs, aggregationStep, logger, experimentalEFOptimization); err != nil {
+	if err := a.registerDomain(kv.CodeDomain, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, aggregationStep, logger, experimentalEFOptimization); err != nil {
+	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, aggregationStep, logger, experimentalEFOptimization); err != nil {
+	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, aggregationStep, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger, experimentalEFOptimization); err != nil {
+	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger, experimentalEFOptimization); err != nil {
+	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger, experimentalEFOptimization); err != nil {
+	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
 		return nil, err
 	}
-	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger, experimentalEFOptimization); err != nil {
+	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
 		return nil, err
 	}
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
@@ -348,7 +346,7 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
-func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, logger log.Logger, experimentalEFOptimization bool) (err error) {
+func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, logger log.Logger) (err error) {
 	cfg := Schema[name]
 	//TODO: move dynamic part of config to InvertedIndex
 	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
@@ -358,7 +356,6 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	cfg.hist.iiCfg.salt = salt
 	cfg.hist.iiCfg.dirs = dirs
 	cfg.hist.iiCfg.aggregationStep = aggregationStep
-	cfg.hist.iiCfg.experimentalEFOptimization = experimentalEFOptimization
 	a.d[name], err = NewDomain(cfg, logger)
 	if err != nil {
 		return err
@@ -366,7 +363,7 @@ func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.D
 	return nil
 }
 
-func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger, experimentalEFOptimization bool) error {
+func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
 	idxCfg := iiCfg{
 		salt: salt, dirs: dirs,
 		aggregationStep: aggregationStep,
@@ -374,8 +371,6 @@ func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadi
 		keysTable:       indexKeysTable,
 		valuesTable:     indexTable,
 		compression:     seg.CompressNone,
-
-		experimentalEFOptimization: experimentalEFOptimization,
 	}
 	var err error
 	a.iis[idx], err = NewInvertedIndex(idxCfg, logger)

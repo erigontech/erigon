@@ -338,12 +338,12 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
-func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64, experimentalEFOptimization bool) ([]byte, error) {
+func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64) ([]byte, error) {
 	preSeq := multiencseq.ReadMultiEncSeq(preBaseNum, preval)
 	seq := multiencseq.ReadMultiEncSeq(baseNum, val)
 	preIt := preSeq.Iterator(0)
 	efIt := seq.Iterator(0)
-	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max(), experimentalEFOptimization)
+	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max(), true)
 	for preIt.HasNext() {
 		v, err := preIt.Next()
 		if err != nil {
@@ -627,7 +627,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		// Pre-rebase the first sequence
 		preSeq := multiencseq.ReadMultiEncSeq(cp[0].startTxNum, lastVal)
 		preIt := preSeq.Iterator(0)
-		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max(), iit.ii.experimentalEFOptimization)
+		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max(), true)
 		for preIt.HasNext() {
 			v, err := preIt.Next()
 			if err != nil {
@@ -644,7 +644,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*filesItem
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if mergedOnce {
-				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum, iit.ii.experimentalEFOptimization); err != nil {
+				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum); err != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.filenameBase, err)
 				}
 			} else {

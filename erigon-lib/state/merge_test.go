@@ -485,7 +485,7 @@ func Test_mergeEliasFano(t *testing.T) {
 		require.Contains(t, secondList, int(v))
 	}
 
-	menc, err := mergeNumSeqs(firstBytes, secondBytes, 0, 0, nil, 0, false)
+	menc, err := mergeNumSeqs(firstBytes, secondBytes, 0, 0, nil, 0)
 	require.NoError(t, err)
 
 	merged, _ := eliasfano32.ReadEliasFano(menc)

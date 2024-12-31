@@ -90,8 +90,6 @@ type iiCfg struct {
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
 	indexList idxList
-
-	experimentalEFOptimization bool
 }
 
 type iiVisible struct {
@@ -1049,7 +1047,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 			return nil
 		}
 
-		seqBuilder := multiencseq.NewBuilder(step*ii.aggregationStep, bitmap.GetCardinality(), bitmap.Maximum(), ii.experimentalEFOptimization)
+		seqBuilder := multiencseq.NewBuilder(step*ii.aggregationStep, bitmap.GetCardinality(), bitmap.Maximum(), true)
 		it := bitmap.Iterator()
 		for it.HasNext() {
 			seqBuilder.AddOffset(it.Next())

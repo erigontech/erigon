@@ -47,6 +47,7 @@ type SequenceBuilder struct {
 // optimize: if false, the builder will always output plain elias fano; it is "legacy mode",
 // and is used to be backwards compatible with E3 default format. If true, it will output
 // forward compatible, optimized multiencoding sequences.
+// TODO: remove optimize param
 func NewBuilder(baseNum, count, max uint64, optimize bool) *SequenceBuilder {
 	return &SequenceBuilder{
 		baseNum:  baseNum,

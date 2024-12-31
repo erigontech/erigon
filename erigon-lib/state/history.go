@@ -697,7 +697,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 			return nil
 		}
 
-		seqBuilder := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum(), h.experimentalEFOptimization)
+		seqBuilder := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum(), true)
 		it := bitmap.Iterator()
 
 		for it.HasNext() {
