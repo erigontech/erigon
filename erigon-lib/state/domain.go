@@ -1310,7 +1310,7 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.File
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 
-	log.Warn("[dbg] ", "f", fileName, "c", compressed)
+	log.Warn("[dbg] ", "f", fileName, "c", compressed, "detect", seg.DetectCompressType(d.MakeGetter()))
 	if d == nil {
 		panic("assert: d == nil, " + fileName)
 	}
