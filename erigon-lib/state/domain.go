@@ -1299,7 +1299,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
@@ -1309,6 +1309,12 @@ func buildMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.F
 	defer ps.Delete(p)
 
 	defer d.EnableMadvNormal().DisableReadAhead()
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%s %s: %s", d.FileName(), rec, dbg.Stack())
+		}
+	}()
 
 	//allow disable compression in future:
 	detectedCompression := seg.DetectCompressType(d.MakeGetter())
