@@ -206,6 +206,8 @@ func ExecV3(ctx context.Context,
 	initialCycle bool,
 	isMining bool,
 ) error {
+	inMemExec := txc.Doms != nil
+
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
 	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
@@ -237,16 +239,17 @@ func ExecV3(ctx context.Context,
 		}
 	}
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
-	if initialCycle {
-		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	} else {
-		agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1)
+	if !inMemExec && !isMining {
+		if initialCycle {
+			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+			agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		} else {
+			agg.SetCompressWorkers(1)
+			agg.SetCollateAndBuildWorkers(1)
+		}
 	}
 
 	var err error
-	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
 	if inMemExec {
 		doms = txc.Doms
