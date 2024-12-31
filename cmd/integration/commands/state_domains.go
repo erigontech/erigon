@@ -366,16 +366,16 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		count := 0
 		skipped := 0
 
-		dec, err := seg.NewDecompressor(path.Join(dirs.SnapDomain, fileName))
+		dec, err := seg.NewDecompressor(filepath.Join(dirs.SnapDomain, fileName))
 		if err != nil {
 			return fmt.Errorf("failed to create decompressor: %w", err)
 		}
 		defer dec.Close()
 		getter := dec.MakeGetter()
 
-		valuesComp, err := seg.NewCompressor(context.Background(), "Purification", path.Join(outD.SnapDomain, fileName), dirs.Tmp, compressCfg, log.LvlTrace, log.New())
+		valuesComp, err := seg.NewCompressor(context.Background(), "Purification", filepath.Join(outD.SnapDomain, fileName), dirs.Tmp, compressCfg, log.LvlTrace, log.New())
 		if err != nil {
-			return fmt.Errorf("create %s values compressor: %w", path.Join(outD.SnapDomain, fileName), err)
+			return fmt.Errorf("create %s values compressor: %w", filepath.Join(outD.SnapDomain, fileName), err)
 		}
 
 		comp := seg.NewWriter(valuesComp, compressionType)
@@ -434,30 +434,21 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		comp.Close()
 		if replaceInDatadir {
 			fmt.Printf("Replacing the file %s in datadir\n", fileName)
-			if err := os.Rename(path.Join(outD.SnapDomain, fileName), path.Join(dirs.SnapDomain, fileName)); err != nil {
+			if err := os.Rename(filepath.Join(outD.SnapDomain, fileName), filepath.Join(dirs.SnapDomain, fileName)); err != nil {
 				return fmt.Errorf("failed to replace the file %s: %w", fileName, err)
 			}
 			kveiFile := strings.ReplaceAll(fileName, ".kv", ".kvei")
 			btFile := strings.ReplaceAll(fileName, ".kv", ".bt")
 			kviFile := strings.ReplaceAll(fileName, ".kv", ".kvi")
-			// also remove the .kvei and .bt files
-			if err := os.Remove(path.Join(dirs.SnapDomain, btFile)); err != nil {
-				return fmt.Errorf("failed to remove the file: %s, %w", btFile, err)
-			}
-			if err := os.Remove(path.Join(dirs.SnapDomain, btFile+".torrent")); err != nil {
-				return fmt.Errorf("failed to remove the file: %s, %w", btFile+".torrent", err)
-			}
-			if err := os.Remove(path.Join(dirs.SnapDomain, kveiFile)); err != nil {
-				return fmt.Errorf("failed to remove the file: %s, %w", kveiFile, err)
-			}
-			if err := os.Remove(path.Join(dirs.SnapDomain, kveiFile+".torrent")); err != nil {
-				return fmt.Errorf("failed to remove the file: %s, %w", kveiFile+".torrent", err)
-			}
-			if err := os.Remove(path.Join(dirs.SnapDomain, kviFile)); err != nil {
-				return fmt.Errorf("failed to remove the file: %s, %w", btFile, err)
-			}
-			if err := os.Remove(path.Join(dirs.SnapDomain, kviFile+".torrent")); err != nil {
-				return fmt.Errorf("failed to remove the file: %s, %w", kviFile+".torrent", err)
+			if err := removeMany(
+				filepath.Join(dirs.SnapDomain, btFile),
+				filepath.Join(dirs.SnapDomain, btFile+".torrent"),
+				filepath.Join(dirs.SnapDomain, kveiFile),
+				filepath.Join(dirs.SnapDomain, kveiFile+".torrent"),
+				filepath.Join(dirs.SnapDomain, kviFile),
+				filepath.Join(dirs.SnapDomain, kviFile+".torrent"),
+			); err != nil {
+				return err
 			}
 			fmt.Printf("Removed the files %s and %s\n", kveiFile, btFile)
 		}
@@ -522,6 +513,16 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 				continue
 			}
 			fmt.Printf("%s: %x\n", addr, code)
+		}
+	}
+	return nil
+}
+
+func removeMany(filePaths ...string) error {
+	for _, filePath := range filePaths {
+		if err := os.Remove(filePath); err != nil {
+			_, fileName := filepath.Split(filePath)
+			return fmt.Errorf("failed to remove the file: %s, %w", fileName, err)
 		}
 	}
 	return nil
