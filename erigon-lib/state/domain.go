@@ -1211,7 +1211,7 @@ func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, dat
 		Salt:       d.salt,
 		NoFsync:    d.noFsync,
 	}
-	return buildAccessor(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
+	return buildMapAccessor(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
 }
 
 func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
@@ -1299,7 +1299,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
