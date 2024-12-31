@@ -1309,6 +1309,7 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.File
 	defer ps.Delete(p)
 
 	defer d.EnableMadvNormal().DisableReadAhead()
+
 	detectedCompression := seg.DetectCompressType(d.MakeGetter())
 	if compressed != detectedCompression {
 		compressed = detectedCompression
