@@ -302,10 +302,8 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 	case "account":
 		tbl = kv.MaxTxNum
 	case "storage":
-		compressionType = seg.CompressKeys
 		tbl = kv.HeaderNumber
 	case "code":
-		compressionType = seg.CompressVals
 		tbl = kv.HeaderCanonical
 	case "commitment":
 		tbl = kv.HeaderTD
