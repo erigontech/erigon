@@ -733,45 +733,6 @@ func (c *bls12381G1Add) Run(input []byte) ([]byte, error) {
 	return encodePointG1(p0), nil
 }
 
-// bls12381G1Mul implements EIP-2537 G1Mul precompile.
-type bls12381G1Mul struct{}
-
-// RequiredGas returns the gas required to execute the pre-compiled contract.
-func (c *bls12381G1Mul) RequiredGas(input []byte) uint64 {
-	return params.Bls12381G1MulGas
-}
-
-func (c *bls12381G1Mul) Run(input []byte) ([]byte, error) {
-	// Implements EIP-2537 G1Mul precompile.
-	// > G1 multiplication call expects `160` bytes as an input that is interpreted as byte concatenation of encoding of G1 point (`128` bytes) and encoding of a scalar value (`32` bytes).
-	// > Output is an encoding of multiplication operation result - single G1 point (`128` bytes).
-	if len(input) != 160 {
-		return nil, errBLS12381InvalidInputLength
-	}
-	var err error
-	var p0 *bls12381.G1Affine
-
-	// Decode G1 point
-	if p0, err = decodePointG1(input[:128]); err != nil {
-		return nil, err
-	}
-
-	// Fast subgroup check
-	if !p0.IsInSubGroup() {
-		return nil, errBLS12381G1PointSubgroup
-	}
-
-	// Decode scalar value
-	e := new(big.Int).SetBytes(input[128:])
-
-	// Compute r = e * p_0
-	r := new(bls12381.G1Affine)
-	r.ScalarMultiplication(p0, e)
-
-	// Encode the G1 point into 128 bytes
-	return encodePointG1(r), nil
-}
-
 // bls12381G1MultiExp implements EIP-2537 G1MultiExp precompile.
 type bls12381G1MultiExp struct{}
 
@@ -861,45 +822,6 @@ func (c *bls12381G2Add) Run(input []byte) ([]byte, error) {
 	// Compute r = p_0 + p_1
 	r := new(bls12381.G2Affine)
 	r.Add(p0, p1)
-
-	// Encode the G2 point into 256 bytes
-	return encodePointG2(r), nil
-}
-
-// bls12381G2Mul implements EIP-2537 G2Mul precompile.
-type bls12381G2Mul struct{}
-
-// RequiredGas returns the gas required to execute the pre-compiled contract.
-func (c *bls12381G2Mul) RequiredGas(input []byte) uint64 {
-	return params.Bls12381G2MulGas
-}
-
-func (c *bls12381G2Mul) Run(input []byte) ([]byte, error) {
-	// Implements EIP-2537 G2MUL precompile logic.
-	// > G2 multiplication call expects `288` bytes as an input that is interpreted as byte concatenation of encoding of G2 point (`256` bytes) and encoding of a scalar value (`32` bytes).
-	// > Output is an encoding of multiplication operation result - single G2 point (`256` bytes).
-	if len(input) != 288 {
-		return nil, errBLS12381InvalidInputLength
-	}
-	var err error
-	var p0 *bls12381.G2Affine
-
-	// Decode G2 point
-	if p0, err = decodePointG2(input[:256]); err != nil {
-		return nil, err
-	}
-
-	// Fast subgroup check
-	if !p0.IsInSubGroup() {
-		return nil, errBLS12381G2PointSubgroup
-	}
-
-	// Decode scalar value
-	e := new(big.Int).SetBytes(input[256:])
-
-	// Compute r = e * p_0
-	r := new(bls12381.G2Affine)
-	r.ScalarMultiplication(p0, e)
 
 	// Encode the G2 point into 256 bytes
 	return encodePointG2(r), nil
