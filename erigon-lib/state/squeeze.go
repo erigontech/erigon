@@ -222,8 +222,8 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 			}
 			defer squeezedCompr.Close()
 
-			writer := seg.NewWriter(squeezedCompr, commitment.d.compression)
-			reader := seg.NewReader(cf.decompressor.MakeGetter(), compression)
+			writer := seg.NewWriter(squeezedCompr, compression)
+			reader := commitment.newReader(cf.decompressor.MakeGetter())
 			reader.Reset(0)
 
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
