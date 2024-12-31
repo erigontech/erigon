@@ -30,7 +30,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/seg"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
 
@@ -491,8 +490,8 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 		sd.logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.compression)
-	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.compression)
+	storageGetter := sto.newReader(storageItem.decompressor.MakeGetter())
+	accountGetter := acc.newReader(accountItem.decompressor.MakeGetter())
 	metricI := 0
 	for i, f := range sd.aggTx.d[kv.CommitmentDomain].files {
 		if i > 5 {
