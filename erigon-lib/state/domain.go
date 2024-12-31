@@ -1619,15 +1619,19 @@ func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
 	}
 	r := dt.getters[i]
 	if r == nil {
-		getter := dt.files[i].src.decompressor.MakeGetter()
-		compression := dt.d.compression
-		if compression != seg.DetectCompressType(getter) { // alow disable compression in future
-			compression = dt.d.compression
-		}
-		r = seg.NewReader(getter, compression)
-		dt.getters[i] = r
+		dt.getters[i] = dt.newReader(dt.files[i].src.decompressor.MakeGetter())
 	}
 	return r
+}
+
+func (dt *DomainRoTx) newReader(getter *seg.Getter) *seg.Reader {
+	compression := dt.d.compression
+	if dt.name == kv.CommitmentDomain { // alow disable compression in future
+		if compression != seg.DetectCompressType(getter) {
+			compression = dt.d.compression
+		}
+	}
+	return seg.NewReader(getter, compression)
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
