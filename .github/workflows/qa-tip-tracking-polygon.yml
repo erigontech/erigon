@@ -97,9 +97,21 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: test-results
-        path: |
-          ${{ github.workspace }}/result-${{ env.CHAIN }}.json
-          ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
+        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+
+    - name: Upload erigon log
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: erigon-log
+        path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
+
+    - name: Upload metric plots
+      if: steps.test_step.outputs.test_executed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: metric-plots
+        path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Delete Erigon Testbed Data Directory
       if: always()
