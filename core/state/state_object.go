@@ -346,7 +346,7 @@ func (so *stateObject) Code() ([]byte, error) {
 	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation)
 	if err != nil {
-		return nil, fmt.Errorf("can't load code hash %x: %w", so.data.CodeHash, err)
+		return nil, fmt.Errorf("can't code for %x: %w", so.Address(), err)
 	}
 	so.code = code
 	return code, nil

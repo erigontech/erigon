@@ -115,7 +115,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[libcommon.Address]*BalanceIncrease{},
 		txIndex:           0,
-		//trace:             true,
+		trace:             false,
 	}
 }
 
@@ -295,7 +295,7 @@ func (sdb *IntraBlockState) Empty(addr libcommon.Address) (bool, error) {
 // GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetBalance(addr libcommon.Address) (*uint256.Int, error) {
-	return versionedRead(sdb, SubpathKey(addr, BalancePath), u256.Num0,
+	return versionedRead(sdb, SubpathKey(addr, BalancePath), false, u256.Num0,
 		func(v *uint256.Int) *uint256.Int {
 			if v == nil {
 				return nil
@@ -313,7 +313,7 @@ func (sdb *IntraBlockState) GetBalance(addr libcommon.Address) (*uint256.Int, er
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetNonce(addr libcommon.Address) (uint64, error) {
-	return versionedRead(sdb, SubpathKey(addr, NoncePath), 0,
+	return versionedRead(sdb, SubpathKey(addr, NoncePath), false, 0,
 		func(v uint64) uint64 { return v },
 		func(s *stateObject) (uint64, error) {
 			if s != nil && !s.deleted {
@@ -330,7 +330,7 @@ func (sdb *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr libcommon.Address) ([]byte, error) {
-	return versionedRead(sdb, SubpathKey(addr, CodePath), nil,
+	return versionedRead(sdb, SubpathKey(addr, CodePath), false, nil,
 		func(v []byte) []byte {
 			if v == nil {
 				return nil
@@ -339,11 +339,11 @@ func (sdb *IntraBlockState) GetCode(addr libcommon.Address) ([]byte, error) {
 		},
 		func(s *stateObject) ([]byte, error) {
 			if s != nil && !s.deleted {
+				code, err := s.Code()
 				if sdb.trace || traceAccount(addr) {
-					code, _ := s.Code()
 					fmt.Printf("GetCode %x, returned %d\n", addr, len(code))
 				}
-				return s.Code()
+				return code, err
 			}
 			if sdb.trace || traceAccount(addr) {
 				fmt.Printf("GetCode %x, returned nil\n", addr)
@@ -354,7 +354,7 @@ func (sdb *IntraBlockState) GetCode(addr libcommon.Address) ([]byte, error) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) (int, error) {
-	return versionedRead(sdb, SubpathKey(addr, CodePath), 0,
+	return versionedRead(sdb, SubpathKey(addr, CodeSizePath), false, 0,
 		func(v int) int { return v },
 		func(s *stateObject) (int, error) {
 			if s == nil || s.deleted {
@@ -373,7 +373,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) (int, error) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) (libcommon.Hash, error) {
-	return versionedRead(sdb, SubpathKey(addr, CodePath), libcommon.Hash{},
+	return versionedRead(sdb, SubpathKey(addr, CodeHashPath), false, libcommon.Hash{},
 		func(v libcommon.Hash) libcommon.Hash { return v },
 		func(s *stateObject) (libcommon.Hash, error) {
 			if s == nil || s.deleted {
@@ -443,7 +443,7 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (lib
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error {
-	versionedValue, err := versionedRead(sdb, StateKey(addr, *key), nil,
+	versionedValue, err := versionedRead(sdb, StateKey(addr, *key), false, nil,
 		func(v *uint256.Int) *uint256.Int {
 			if v == nil {
 				return nil
@@ -471,7 +471,7 @@ func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error {
-	versionedValue, err := versionedRead(sdb, StateKey(addr, *key), nil,
+	versionedValue, err := versionedRead(sdb, StateKey(addr, *key), true, nil,
 		func(v *uint256.Int) *uint256.Int {
 			if v == nil {
 				return nil
@@ -497,7 +497,7 @@ func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libco
 }
 
 func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) (bool, error) {
-	return versionedRead(sdb, SubpathKey(addr, SelfDestructPath), false,
+	return versionedRead(sdb, SubpathKey(addr, SelfDestructPath), false, false,
 		func(v bool) bool { return v },
 		func(s *stateObject) (bool, error) {
 			if s == nil {
@@ -649,15 +649,8 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 	return nil
 }
 
-func traceAccount(addr libcommon.Address) bool {
-	switch fmt.Sprintf("%x", addr.Bytes()) {
-	case "134f1f02cd17f022a771e7d8ef8a3dcac0da39b2", "31394f2c518cd63dada2a74cc19e0b650854a187",
-		"2c8a9b87216933a98dfd25a72ddfb1df91497c31", "a105c311fa72b8fb78c992ecbdb8b02ea5bd394d",
-		"0000000000000000000000000000000000000001", "7ced6578124fa7a7edcca3766317d0804eb6654e":
-		return true
-	default:
-		return false
-	}
+func traceAccount(_ libcommon.Address) bool {
+	return false
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
@@ -810,6 +803,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 		}
 		return nil, nil
 	}
+
 	account, err := sdb.stateReader.ReadAccountData(addr)
 	if err != nil {
 		return nil, err
@@ -821,6 +815,21 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 			return sdb.createObject(addr, nil), nil
 		}
 		return nil, nil
+	}
+
+	if sdb.versionMap != nil {
+		// need to do a versioned read of balance/nonce/codehash
+		if balance, _ := versionedRead[*uint256.Int](sdb, SubpathKey(addr, BalancePath), false, nil, nil, nil); balance != nil {
+			account.Balance = *balance
+		}
+
+		if nonce, _ := versionedRead[uint64](sdb, SubpathKey(addr, NoncePath), false, 0, nil, nil); nonce > account.Nonce {
+			account.Nonce = nonce
+		}
+
+		if codeHash, _ := versionedRead[libcommon.Hash](sdb, SubpathKey(addr, CodeHashPath), false, libcommon.Hash{}, nil, nil); (codeHash != libcommon.Hash{}) {
+			account.CodeHash = codeHash
+		}
 	}
 
 	sdb.accountRead(addr, account)
@@ -1089,6 +1098,19 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 			return err
 		}
 	}
+
+	var revertedWrites []VersionKey
+
+	for key := range sdb.versionedWrites {
+		if _, isDirty := sdb.stateObjectsDirty[key.GetAddress()]; !isDirty {
+			revertedWrites = append(revertedWrites, key)
+		}
+	}
+
+	for _, key := range revertedWrites {
+		delete(sdb.versionedWrites, key)
+	}
+
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
@@ -1257,6 +1279,10 @@ func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 			s.versionedWrites = map[VersionKey]VersionedWrite{}
 		}
 
+		if s.trace || traceAccount(k.GetAddress()) {
+			fmt.Printf("Version Written %x: %v: %d\n", k.GetAddress(), s.Version(), val)
+		}
+
 		s.versionedWrites[k] = VersionedWrite{
 			Path: k,
 			V:    s.Version(),
@@ -1327,7 +1353,6 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 			if path.IsState() {
 				stateKey := path.GetStateKey()
 				state := *val.(*uint256.Int)
-				fmt.Printf("Set State %x %x %x\n", addr.Bytes(), stateKey, state.Bytes())
 				s.SetState(addr, &stateKey, state)
 			} else if path.IsAddress() {
 				continue
@@ -1335,7 +1360,6 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 				switch path.GetSubpath() {
 				case BalancePath:
 					balance := *val.(*uint256.Int)
-					fmt.Printf("Set Bal %x %d\n", addr.Bytes(), &balance)
 					s.SetBalance(addr, &balance, writes[i].Reason)
 				case NoncePath:
 					nonce := val.(uint64)

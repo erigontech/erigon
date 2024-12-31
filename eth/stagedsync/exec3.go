@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
@@ -613,9 +612,9 @@ Loop:
 					logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 					return errors.New("wrong trie root")
 				}
-				if blockNum == 15029665 {
-					fmt.Println(blockNum, hex.EncodeToString(rh), hex.EncodeToString(header.Root.Bytes()))
-				}
+				//if blockNum == 15032936 {
+				//	fmt.Println(blockNum, hex.EncodeToString(rh), hex.EncodeToString(header.Root.Bytes()))
+				//}
 
 				ts += time.Since(start)
 				aggTx.RestrictSubsetFileDeletions(false)

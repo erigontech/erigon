@@ -327,7 +327,7 @@ func NewStateWriterBufferedV3(rs *StateV3Buffered, accumulator *shards.Accumulat
 		rs:          rs,
 		writeLists:  newWriteList(),
 		accumulator: accumulator,
-		trace:       true,
+		trace:       false,
 	}
 }
 
@@ -479,7 +479,7 @@ func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriter
 	return &StateWriterV3{
 		rs:          rs,
 		accumulator: accumulator,
-		trace:       true,
+		trace:       false,
 	}
 }
 
@@ -590,10 +590,10 @@ func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()                  {}
-func (r *ReaderV3) SetTxNum(txNum uint64)             { r.txNum = txNum }
-func (r *ReaderV3) SetTx(tx kv.Tx)                    {}
-func (r *ReaderV3) SetTrace(trace bool)               { r.trace = trace }
+func (r *ReaderV3) DiscardReadList()      {}
+func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
+func (r *ReaderV3) SetTx(tx kv.Tx)        {}
+func (r *ReaderV3) SetTrace(trace bool)   { r.trace = trace }
 
 func (r *ReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.tx.GetLatest(kv.AccountsDomain, address[:], nil)
@@ -683,10 +683,10 @@ func NewReaderParallelV3(sd *state.SharedDomains) *ReaderParallelV3 {
 	}
 }
 
-func (r *ReaderParallelV3) DiscardReadList()                  { r.discardReadList = true }
-func (r *ReaderParallelV3) SetTxNum(txNum uint64)             { r.txNum = txNum }
-func (r *ReaderParallelV3) SetTx(tx kv.Tx)                    {}
-func (r *ReaderParallelV3) SetTrace(trace bool)               { r.trace = trace }
+func (r *ReaderParallelV3) DiscardReadList()      { r.discardReadList = true }
+func (r *ReaderParallelV3) SetTxNum(txNum uint64) { r.txNum = txNum }
+func (r *ReaderParallelV3) SetTx(tx kv.Tx)        {}
+func (r *ReaderParallelV3) SetTrace(trace bool)   { r.trace = trace }
 
 func (r *ReaderParallelV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, _, err := r.sd.GetLatest(kv.AccountsDomain, address[:], nil)

@@ -369,9 +369,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		for addr, bal := range txTask.BalanceIncreaseSet {
 			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
 		}
+
 		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 			panic(err)
 		}
+
+		result.TxIn = txTask.VersionedReads(ibs)
+		result.TxOut = txTask.VersionedWrites(ibs)
 	}
 
 	return &result

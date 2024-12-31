@@ -20,7 +20,9 @@ const subpathType = 3
 const BalancePath = 1
 const NoncePath = 2
 const CodePath = 3
-const SelfDestructPath = 4
+const CodeHashPath = 4
+const CodeSizePath = 5
+const SelfDestructPath = 6
 
 const KeyLength = length.Addr + length.Hash + 2
 

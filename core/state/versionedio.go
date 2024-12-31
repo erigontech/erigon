@@ -243,7 +243,7 @@ func (writes VersionedWrites) stateObjects() (map[libcommon.Address][]*stateObje
 	return stateObjects, nil
 }
 
-func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, error) {
+func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(k.GetAddress())
 
@@ -253,8 +253,10 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, copyV fu
 		return readStorage(so)
 	}
 
-	if v, ok := s.versionedWrite(k); ok {
-		return v.Val.(T), nil
+	if !commited {
+		if vw, ok := s.versionedWrite(k); ok {
+			return vw.Val.(T), nil
+		}
 	}
 
 	res := s.versionMap.Read(k, s.txIndex)
@@ -270,40 +272,40 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, defaultV T, copyV fu
 
 	switch res.Status() {
 	case MVReadResultDone:
-		{
-			var ok bool
-			vr.Kind = ReadKindMap
-			if v, ok = res.Value().(T); !ok {
-				return defaultV, nil
-			}
-
-			vr.Val = copyV(v)
+		var ok bool
+		vr.Kind = ReadKindMap
+		if v, ok = res.Value().(T); !ok {
+			return defaultV, nil
 		}
+
+		if copyV == nil {
+			return v, nil
+		}
+
+		vr.Val = copyV(v)
+
 	case MVReadResultDependency:
-		{
-			s.dep = res.DepIdx()
-			panic("Found denpendency")
-		}
+		s.dep = res.DepIdx()
+		panic("Found denpendency")
+
 	case MVReadResultNone:
-		{
-			vr.Kind = ReadKindStorage
-
-			so, err := s.getStateObject(k.GetAddress())
-
-			if err != nil {
-				return defaultV, nil
-			}
-
-			if so != nil && so.db == nil {
-				so = so.deepCopy(s)
-			}
-
-			if v, err = readStorage(so); err != nil {
-				return defaultV, nil
-			}
-
-			vr.Val = copyV(v)
+		if readStorage == nil {
+			return defaultV, nil
 		}
+
+		vr.Kind = ReadKindStorage
+		so, err := s.getStateObject(k.GetAddress())
+
+		if err != nil {
+			return defaultV, nil
+		}
+
+		if v, err = readStorage(so); err != nil {
+			return defaultV, nil
+		}
+
+		vr.Val = copyV(v)
+
 	default:
 		return defaultV, nil
 	}

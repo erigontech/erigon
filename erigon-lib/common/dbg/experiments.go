@@ -68,7 +68,7 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)
+	Exec3Parallel = EnvBool("ERIGON_EXEC3_PARALLEL", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

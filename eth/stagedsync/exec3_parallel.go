@@ -178,8 +178,8 @@ func (result *execResult) finalize(prev *types.Receipt, engine consensus.Engine,
 		cbInitBalance = cbInitBalance.Clone()
 		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
 
-		fmt.Println("Coinbase", hex.EncodeToString(result.Coinbase.Bytes()), result.ExecutionResult.FeeTipped, cbInitBalance)
-		fmt.Println("Burnt", hex.EncodeToString(result.ExecutionResult.BurntContractAddress.Bytes()), result.ExecutionResult.FeeBurnt, burntInitBalance)
+		//fmt.Println("Coinbase", hex.EncodeToString(result.Coinbase.Bytes()), result.ExecutionResult.FeeTipped, cbInitBalance)
+		//fmt.Println("Burnt", hex.EncodeToString(result.ExecutionResult.BurntContractAddress.Bytes()), result.ExecutionResult.FeeBurnt, burntInitBalance)
 
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
@@ -281,8 +281,6 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		return result
 	}
 
-	result.TxIn = ev.VersionedReads(ibs)
-	result.TxOut = ev.VersionedWrites(ibs)
 	ev.versionMap.FlushVersionedWrites(result.TxOut)
 
 	if ev.profile {
@@ -342,24 +340,25 @@ func (te *txExecutor) domains() *libstate.SharedDomains {
 }
 
 func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header) {
-	var err error
+
 	if te.applyTx != nil {
-		h, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
+		err := te.applyTx.Apply(func(tx kv.Tx) (err error) {
+			h, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
+			return err
+		})
+
 		if err != nil {
 			panic(err)
 		}
-		return h
 	}
 
-	if err = te.cfg.db.View(ctx, func(tx kv.Tx) error {
+	if err := te.cfg.db.View(ctx, func(tx kv.Tx) (err error) {
 		h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	}); err != nil {
 		panic(err)
 	}
+
 	return h
 }
 
@@ -1230,7 +1229,7 @@ func (pe *parallelExecutor) run(ctx context.Context) context.CancelFunc {
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
 		pe.RWMutex.RLocker(), pe.accumulator, pe.logger, ctx, true, pe.cfg.db, pe.rs, state.NewNoopWriter(), pe.in,
-		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.workerCount+1, pe.cfg.dirs, pe.isMining)
+		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, 1 /*pe.workerCount+1*/, pe.cfg.dirs, pe.isMining)
 
 	rwLoopCtx, rwLoopCtxCancel := context.WithCancel(ctx)
 	pe.rwLoopG, rwLoopCtx = errgroup.WithContext(rwLoopCtx)
