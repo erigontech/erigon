@@ -320,6 +320,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if err != nil {
 		return 0, err
 	}
+	fmt.Printf("SeekCommitment1: %d, %d\n", bn, txn)
 	if ok {
 		if bn > 0 {
 			lastBn, _, err := rawdbv3.TxNums.Last(tx)
@@ -330,6 +331,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 				return 0, errors.WithMessage(ErrBehindCommitment, fmt.Sprintf("TxNums index is at block %d and behind commitment %d", lastBn, bn))
 			}
 		}
+		fmt.Printf("SeekCommitment2: %d, %d\n", bn, txn)
 		sd.SetBlockNum(bn)
 		sd.SetTxNum(txn)
 		return 0, nil
@@ -347,10 +349,12 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		}
 	}
 	if bn == 0 && txn == 0 {
+		fmt.Printf("SeekCommitment3: %d, %d\n", bn, txn)
 		sd.SetBlockNum(0)
 		sd.SetTxNum(0)
 		return 0, nil
 	}
+	fmt.Printf("SeekCommitment4: %d, %d\n", bn, txn)
 	sd.SetBlockNum(bn)
 	sd.SetTxNum(txn)
 	newRh, err := sd.rebuildCommitment(ctx, tx, bn)
@@ -358,6 +362,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 		return 0, err
 	}
 	if bytes.Equal(newRh, commitment.EmptyRootHash) {
+		fmt.Printf("SeekCommitment5: %d, %d\n", bn, txn)
 		sd.SetBlockNum(0)
 		sd.SetTxNum(0)
 		return 0, nil
@@ -365,6 +370,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 	if sd.trace {
 		fmt.Printf("rebuilt commitment %x %d %d\n", newRh, sd.TxNum(), sd.BlockNum())
 	}
+	fmt.Printf("SeekCommitment6: %d, %d\n", bn, txn)
 	sd.SetBlockNum(bn)
 	sd.SetTxNum(txn)
 	return 0, nil
