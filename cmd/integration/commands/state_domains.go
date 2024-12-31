@@ -377,6 +377,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		if err != nil {
 			return fmt.Errorf("create %s values compressor: %w", filepath.Join(outD.SnapDomain, fileName), err)
 		}
+		defer valuesComp.Close()
 
 		comp := seg.NewWriter(valuesComp, compressionType)
 		defer comp.Close()
