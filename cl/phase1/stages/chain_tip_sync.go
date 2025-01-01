@@ -214,14 +214,15 @@ MainLoop:
 					continue
 				}
 
-				// Mark the block root as seen
-				seenBlockRoots[blockRoot] = struct{}{}
-
 				// Process the block
 				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, true); err != nil {
-					log.Debug("bad blocks segment received", "err", err)
+					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
 					continue
 				}
+
+				// Mark the block root as seen
+				seenBlockRoots[blockRoot] = struct{}{}
+				log.Debug("[Caplin] Processed block", "slot", block.Block.Slot, "root", blockRoot, "highestSeen", cfg.forkChoice.HighestSeen())
 
 				// Check if the block slot is greater than or equal to the target slot
 				if block.Block.Slot >= args.targetSlot {
