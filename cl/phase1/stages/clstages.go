@@ -274,12 +274,9 @@ func ConsensusClStages(ctx context.Context,
 			ChainTipSync: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					log.Warn("ChainTipSync", "seenSlot", args.seenSlot, "targetSlot", args.targetSlot, "err", err)
 					if x := MetaCatchingUp(args); x != "" {
-						log.Debug("[ChainTipSync] MetaCatchingUp", "x", x)
 						return x
 					}
-					log.Debug("[ChainTipSync] Jumping to ForkChoice")
 					return ForkChoice
 				},
 				ActionFunc: chainTipSync,
