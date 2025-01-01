@@ -644,17 +644,17 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	return nil
 }
 
-func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
+func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 	var stepSum uint64
 	var maxStep uint64
-	if err := filepath.Walk(dir.SnapDomain, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(dirs.SnapDomain, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() && path != dir.SnapDomain {
-			return fmt.Errorf("unexpected directory in domain (%s) check %s", dir.SnapDomain, path)
+		if info.IsDir() && path != dirs.SnapDomain {
+			return fmt.Errorf("unexpected directory in domain (%s) check %s", dirs.SnapDomain, path)
 		}
-		if path == dir.SnapDomain {
+		if path == dirs.SnapDomain {
 			return nil
 		}
 		rangeString := strings.Split(info.Name(), ".")[1]
@@ -677,38 +677,58 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 
 		stepSum += to - from
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "commitment"} {
-			expectedFileName := strings.Replace(info.Name(), "accounts", snapType, 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapDomain, expectedFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dir.SnapDomain, expectedFileName))
+		for _, snapType := range kv.StateDomains {
+			expectedFileName := strings.Replace(info.Name(), "accounts", snapType.String(), 1)
+			if _, err := os.Stat(filepath.Join(dirs.SnapDomain, expectedFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName))
 			}
 			// check that the index file exist
-			btFileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapDomain, btFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", btFileName, filepath.Join(dir.SnapDomain, btFileName))
+			if libstate.Schema[snapType].IndexList.Has(libstate.AccessorBTree) {
+				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
+				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				if err != nil {
+					return err
+				}
+				if !exists {
+					return fmt.Errorf("missing file %s", fileName)
+				}
 			}
-
-			kveiFileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapDomain, kveiFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", kveiFileName, filepath.Join(dir.SnapDomain, kveiFileName))
+			if libstate.Schema[snapType].IndexList.Has(libstate.AccessorExistence) {
+				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
+				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				if err != nil {
+					return err
+				}
+				if !exists {
+					return fmt.Errorf("missing file %s", fileName)
+				}
 			}
-
+			if libstate.Schema[snapType].IndexList.Has(libstate.AccessorHashMap) {
+				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
+				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, fileName))
+				if err != nil {
+					return err
+				}
+				if !exists {
+					return fmt.Errorf("missing file %s", fileName)
+				}
+			}
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	if err := filepath.Walk(dir.SnapIdx, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(dirs.SnapIdx, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if info.IsDir() && path != dir.SnapIdx {
-			return fmt.Errorf("unexpected directory in idx (%s) check %s", dir.SnapIdx, path)
+		if info.IsDir() && path != dirs.SnapIdx {
+			return fmt.Errorf("unexpected directory in idx (%s) check %s", dirs.SnapIdx, path)
 
 		}
-		if path == dir.SnapIdx {
+		if path == dirs.SnapIdx {
 			return nil
 		}
 		rangeString := strings.Split(info.Name(), ".")[1]
@@ -729,25 +749,25 @@ func checkIfStateSnapshotsPublishable(dir datadir.Dirs) error {
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range []string{"accounts", "storage", "code", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
 			expectedFileName := strings.Replace(info.Name(), "accounts", snapType, 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapIdx, expectedFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dir.SnapIdx, expectedFileName))
+			if _, err := os.Stat(filepath.Join(dirs.SnapIdx, expectedFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName))
 			}
 			// Check accessors
 			efiFileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapAccessors, efiFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", efiFileName, filepath.Join(dir.SnapAccessors, efiFileName))
+			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, efiFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", efiFileName, filepath.Join(dirs.SnapAccessors, efiFileName))
 			}
 			if !slices.Contains(viTypes, snapType) {
 				continue
 			}
 			viFileName := strings.Replace(expectedFileName, ".ef", ".vi", 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapAccessors, viFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dir.SnapAccessors, viFileName))
+			if _, err := os.Stat(filepath.Join(dirs.SnapAccessors, viFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", viFileName, filepath.Join(dirs.SnapAccessors, viFileName))
 			}
 			// check that .v
 			vFileName := strings.Replace(expectedFileName, ".ef", ".v", 1)
-			if _, err := os.Stat(filepath.Join(dir.SnapHistory, vFileName)); err != nil {
-				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dir.SnapHistory, vFileName))
+			if _, err := os.Stat(filepath.Join(dirs.SnapHistory, vFileName)); err != nil {
+				return fmt.Errorf("missing file %s at path %s", vFileName, filepath.Join(dirs.SnapHistory, vFileName))
 			}
 		}
 		return nil

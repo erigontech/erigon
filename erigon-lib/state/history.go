@@ -96,7 +96,7 @@ type histCfg struct {
 	snapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	historyDisabled    bool // skip all write operations to this History (even in DB)
 
-	indexList     idxList
+	indexList     Accessors
 	compressorCfg seg.Cfg             // compression settings for history files
 	compression   seg.FileCompression // defines type of compression for history files
 
@@ -108,7 +108,7 @@ func NewHistory(cfg histCfg, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
-		cfg.indexList = withHashMap
+		cfg.indexList = AccessorHashMap
 	}
 	if cfg.iiCfg.filenameBase == "" {
 		cfg.iiCfg.filenameBase = cfg.filenameBase
