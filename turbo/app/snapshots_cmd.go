@@ -834,10 +834,19 @@ func doPublishable(cliCtx *cli.Context) error {
 		return err
 	}
 	// check if salt-state.txt and salt-block.txt exist
-	if _, err := os.Stat(filepath.Join(dat.Snap, "salt-state.txt")); err != nil {
+	exists, err := dir.FileExist(filepath.Join(dat.Snap, "salt-state.txt"))
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return fmt.Errorf("missing file %s", filepath.Join(dat.Snap, "salt-state.txt"))
 	}
-	if _, err := os.Stat(filepath.Join(dat.Snap, "salt-blocks.txt")); err != nil {
+
+	exists, err = dir.FileExist(filepath.Join(dat.Snap, "salt-blocks.txt"))
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return fmt.Errorf("missing file %s", filepath.Join(dat.Snap, "salt-blocks.txt"))
 	}
 	log.Info("All snapshots are publishable")
