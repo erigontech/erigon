@@ -1233,6 +1233,9 @@ func doCompress(cliCtx *cli.Context) error {
 	if dbg.EnvBool("OnlyVals", false) {
 		compression = seg.CompressVals
 	}
+	if dbg.EnvBool("NoCompress", false) {
+		compression = seg.CompressNone
+	}
 
 	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg)
 	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
