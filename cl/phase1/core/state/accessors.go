@@ -192,11 +192,6 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 		return false, fmt.Errorf("error while validating signature: %v", err)
 	}
 	if !valid {
-		ps := make([]string, len(pks))
-		for i, pk := range pks {
-			ps[i] = libcommon.Bytes2Hex(pk)
-		}
-		log.Debug("Invalid aggregate signature", "signing root", libcommon.Bytes2Hex(signingRoot[:]), "pks", ps, "signature", libcommon.Bytes2Hex(att.Signature[:]))
 		return false, errors.New("invalid aggregate signature")
 	}
 	return true, nil

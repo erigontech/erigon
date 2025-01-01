@@ -221,7 +221,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// some standard http error code parsing
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
-		errorMessage := fmt.Errorf("SentinelHttp: %s. Status code %v", string(errBody), resp.StatusCode)
+		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
 		s.sentinel.Peers().RemovePeer(pid)
 		s.sentinel.Host().Peerstore().RemovePeer(pid)
 		s.sentinel.Host().Network().ClosePeer(pid)
@@ -236,12 +236,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	}
 	// known error codes, just remove the peer
 	if isError != 0 {
-		//s.sentinel.Peers().RemovePeer(pid)
-		//s.sentinel.Host().Peerstore().RemovePeer(pid)
-		//s.sentinel.Host().Network().ClosePeer(pid)
-
-		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("peer error code: %d. body: %s", isError, string(errBody))
+		s.sentinel.Peers().RemovePeer(pid)
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
+		return nil, fmt.Errorf("peer error code: %d", isError)
 	}
 
 	// read the body from the response
@@ -279,7 +277,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 			s.sentinel.Host().Network().ClosePeer(pid)
 			s.sentinel.Peers().SetBanStatus(pid, true)
 		}
-		s.logger.Info("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)
+		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)
 		return nil, err
 	}
 	return resp, nil

@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/pkg/errors"
 )
 
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.
@@ -59,25 +60,21 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 // It returns a PeeredObject containing the blocks and the peer ID, or an error if something goes wrong.
 func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	// spam requests to fetch blocks by range from the execution client
-	log.Debug("[fetchBlocksFromReqResp] fetching blocks", "from", from, "count", count)
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
 		blocks, pid, err = cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	}
-	log.Debug("[fetchBlocksFromReqResp] fetched blocks", "count", len(blocks), "from", from, "to", from+count)
 
 	// If no blocks are returned, return nil without error
 	if len(blocks) == 0 {
 		return nil, nil
 	}
-	log.Debug("[fetchBlocksFromReqResp] got blocks", "count", len(blocks), "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
 
 	// Generate blob identifiers from the retrieved blocks
 	ids, err := network2.BlobsIdentifiersFromBlocks(blocks)
 	if err != nil {
 		return nil, err
 	}
-	log.Debug("[fetchBlocksFromReqResp] number of blobs identifiers", "count", ids.Len())
 
 	var inserted uint64
 
@@ -93,17 +90,13 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 		// Request blobs frantically from the execution client
 		blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
 		if err != nil {
-			log.Debug("[fetchBlocksFromReqResp] failed to fetch blobs", "err", err)
-			return nil, err
+			return nil, errors.Wrap(err, "failed to request blobs frantically")
 		}
-		log.Debug("[fetchBlocksFromReqResp] got blobs", "count", len(blobs.Responses), "from", blobs.Peer)
 
 		// Verify the blobs against identifiers and insert them into the blob store
 		if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
-			log.Debug("[fetchBlocksFromReqResp] failed to insert blobs", "err", err)
-			return nil, err
+			return nil, errors.Wrap(err, "failed to verify blobs against identifiers and insert into the blob store")
 		}
-		log.Debug("[fetchBlocksFromReqResp] inserted blobs", "count", inserted)
 	}
 
 	// Return the blocks and the peer ID wrapped in a PeeredObject
@@ -130,7 +123,6 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		currentSlot := cfg.ethClock.GetCurrentSlot()
 		count := (currentSlot - from) + 4
 
-		log.Debug("[startFetchingBlocksMissedByGossipAfterSomeTime] fetching blocks", "highestSeen", cfg.forkChoice.HighestSeen(), "target", args.targetSlot, "from", from, "count", count)
 		// Stop fetching if the highest seen block is greater than or equal to the target slot
 		if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 			return
@@ -138,7 +130,6 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 
 		// Fetch blocks from the specified range
 		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count)
-		log.Debug("[startFetchingBlocksMissedByGossipAfterSomeTime] after fetched blocks", "highestSeen", cfg.forkChoice.HighestSeen(), "target", args.targetSlot)
 		if err != nil {
 			// Send error to the error channel and return
 			errCh <- err
@@ -159,8 +150,8 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 // It processes blocks, checks their validity, and publishes them. It also handles context cancellation and logs progress periodically.
 func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
 	// Timer to log progress every 30 seconds
-	logTimer := time.NewTicker(30 * time.Second)
-	defer logTimer.Stop()
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
 
 	// Timer to check block presence every 20 milliseconds
 	presenceTicker := time.NewTicker(20 * time.Millisecond)
@@ -168,7 +159,6 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
-	log.Debug("[listenToIncomingBlocksUntilANewBlockIsReceived] listening for incoming blocks", "targetSlot", args.targetSlot, "highestSeen", cfg.forkChoice.HighestSeen())
 MainLoop:
 	for {
 		select {
@@ -184,17 +174,10 @@ MainLoop:
 			// Handle errors received on the error channel
 			return err
 		case blocks := <-respCh:
-			log.Info("[Caplin] Received blocks", "count", len(blocks.Data), "highestSeen", cfg.forkChoice.HighestSeen(), "beginSlot", blocks.Data[0].Block.Slot, "endSlot", blocks.Data[len(blocks.Data)-1].Block.Slot)
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
 				// Check if the parent block is known
 				if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
-					// check if time is up
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
-					}
 					time.Sleep(time.Millisecond)
 					continue
 				}
@@ -222,19 +205,17 @@ MainLoop:
 
 				// Mark the block root as seen
 				seenBlockRoots[blockRoot] = struct{}{}
-				log.Debug("[Caplin] Processed block", "slot", block.Block.Slot, "root", blockRoot, "highestSeen", cfg.forkChoice.HighestSeen())
 
 				// Check if the block slot is greater than or equal to the target slot
 				if block.Block.Slot >= args.targetSlot {
 					break MainLoop
 				}
 			}
-		case <-logTimer.C:
+		case <-logTicker.C:
 			// Log progress periodically
 			logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
 		}
 	}
-	log.Info("[Caplin] Finished syncing chain tip", "highestSeen", cfg.forkChoice.HighestSeen(), "targetSlot", args.targetSlot, "seenSlot", args.seenSlot)
 	return nil
 }
 
@@ -243,23 +224,18 @@ MainLoop:
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	totalRequest := args.targetSlot - args.seenSlot
 	// If the execution engine is not ready, wait for it to be ready.
-	log.Debug("[chainTipSync] waiting for execution engine to be ready")
 	ready, err := waitForExecutionEngineToBeFinished(ctx, cfg)
 	if err != nil {
-		log.Warn("[chainTipSync] error waiting for execution engine to be ready", "err", err)
 		return err
 	}
 	if !ready {
-		log.Debug("[chainTipSync] execution engine not ready")
 		return nil
 	}
 
 	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
 		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
-			log.Warn("[chainTipSync] failed to flush block collector", "err", err)
 			return err
 		}
-		log.Info("[chainTipSync] flushed block collector")
 	}
 
 	logger.Debug("waiting for blocks...",

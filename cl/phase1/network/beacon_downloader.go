@@ -76,8 +76,7 @@ type peerAndBlocks struct {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
-	log.Info("Requesting more beacon blocks")
-	count := uint64(32)
+	count := uint64(16)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
@@ -95,37 +94,36 @@ Loop:
 				if f.highestSlotProcessed > 2 {
 					reqSlot = f.highestSlotProcessed - 2
 				}
+				// double the request count every 30 seconds. This is inspired by the mekong network, which has many consecutive missing blocks.
+				multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 30
 				reqCount := count
-				if time.Since(f.highestSlotUpdateTime) > 30*time.Second {
-					reqCount *= 2
-				} else if time.Since(f.highestSlotUpdateTime) > time.Minute {
-					reqCount *= 4
+				if multiplier > 0 {
+					reqCount *= uint64(1 << uint(multiplier))
 				}
+				if reqCount >= 256 {
+					reqCount = 256
+				}
+				// leave a warning if we are stuck for more than 90 seconds
 				if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
-					log.Warn("Forward beacon downloader gets stuck for %v seconds", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
+					log.Info("Forward beacon downloader gets stuck for %v seconds", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
 				}
 				// this is so we do not get stuck on a side-fork
-				log.Info("Requesting beacon blocks by range", "slot", reqSlot, "count", count)
 				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
 				if err != nil {
-					log.Warn("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "count", count)
+					log.Debug("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "count", count)
 					return
 				}
 				if responses == nil {
-					log.Warn("response is nil", "peer", peerId, "slot", reqSlot, "count", count)
 					return
 				}
 				if len(responses) == 0 {
-					log.Warn("response is empty", "peer", peerId, "slot", reqSlot, "count", count)
 					f.rpc.BanPeer(peerId)
 					return
 				}
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
-					log.Info("Already received blocks", "peer", peerId, "slot", reqSlot, "count", count)
 					return
 				}
 				atomicResp.Store(peerAndBlocks{peerId, responses})
-				log.Info("Received beacon blocks by range", "peer", peerId, "slot", reqSlot, "count", count)
 			}()
 		case <-ctx.Done():
 			return
@@ -137,19 +135,15 @@ Loop:
 		}
 	}
 
-	log.Info("before acquiring lock")
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	log.Info("after acquiring lock")
 
 	var highestSlotProcessed uint64
 	var err error
 	blocks := atomicResp.Load().(peerAndBlocks).blocks
 	pid := atomicResp.Load().(peerAndBlocks).peerId
 	if highestSlotProcessed, err = f.process(f.highestSlotProcessed, blocks); err != nil {
-		log.Info("Failed to process downloaded blocks", "err", err)
 		f.rpc.BanPeer(pid)
-		log.Info("Banned peer", "peer", pid)
 		return
 	}
 	if highestSlotProcessed > f.highestSlotProcessed {

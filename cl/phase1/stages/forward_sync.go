@@ -65,7 +65,6 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		err = fmt.Errorf("failed to get blob identifiers: %w", err)
 		return
 	}
-	log.Info("BlobsIdentifiersFromBlocks", "ids", ids.Len())
 	// If there are no blobs to retrieve, return the highest slot processed
 	if ids.Len() == 0 {
 		return highestSlotProcessed, nil
@@ -78,14 +77,8 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		err = fmt.Errorf("failed to get blobs: %w", err)
 		return
 	}
-	if blobs == nil {
-		lastSlot := blocks[len(blocks)-1].Block.Slot
-		log.Info("RequestBlobsFrantically nil blobs", "blobs", 0, "lastSlot", lastSlot)
-		return lastSlot, nil
-	}
-	log.Info("RequestBlobsFrantically", "blobs", len(blobs.Responses))
-	var highestProcessed, inserted uint64
 
+	var highestProcessed, inserted uint64
 	// Verify and insert blobs into the blob store
 	if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
 		// Ban the peer if verification fails
@@ -94,7 +87,6 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 		err = fmt.Errorf("failed to verify blobs: %w", err)
 		return
 	}
-	log.Info("VerifyAgainstIdentifiersAndInsertIntoTheBlobStore", "highestProcessed", highestProcessed, "inserted", inserted)
 	// If all blobs were inserted successfully, return the highest processed slot
 	if inserted == uint64(ids.Len()) {
 		return highestProcessed, nil
@@ -170,7 +162,6 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 
 		// If block version is less than BellatrixVersion or shouldInsert is false, skip insertion
 		if block.Version() < clparams.BellatrixVersion || !shouldInsert {
-			log.Debug("skip insertion", "block", block.Block.Slot, "version", block.Version(), "shouldInsert", shouldInsert)
 			continue
 		}
 		// Add the block to the block collector
@@ -180,7 +171,6 @@ func processDownloadedBlockBatches(ctx context.Context, cfg *Cfg, highestBlockPr
 			return
 		}
 	}
-	log.Debug("processDownloadedBlockBatches", "newHighestBlockProcessed", newHighestBlockProcessed)
 	return
 }
 
@@ -203,27 +193,22 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 
 	// Set the function to process downloaded blocks
 	downloader.SetProcessFunction(func(initialHighestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, err error) {
-		log.Info("Processing block batch", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
 		highestSlotProcessed, err := processDownloadedBlockBatches(ctx, cfg, initialHighestSlotProcessed, shouldInsert, blocks)
 		if err != nil {
 			logger.Warn("[Caplin] Failed to process block batch", "err", err)
 			return initialHighestSlotProcessed, err
 		}
-		log.Info("after processDownloadedBlockBatches", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 		// Exit if we are pre-EIP-4844
 		if !shouldProcessBlobs(blocks, cfg) {
-			log.Info("shouldProcessBlobs", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 			currentSlot.Store(highestSlotProcessed)
 			return highestSlotProcessed, nil
 		}
-		log.Info("before downloadAndProcessEip4844DA", "highestSlotProcessed", highestSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 		// Process blobs for EIP-4844
 		highestBlobSlotProcessed, err := downloadAndProcessEip4844DA(ctx, logger, cfg, initialHighestSlotProcessed, blocks)
 		if err != nil {
 			logger.Warn("[Caplin] Failed to process blobs", "err", err)
 			return initialHighestSlotProcessed, err
 		}
-		log.Info("after downloadAndProcessEip4844DA", "highestBlobSlotProcessed", highestBlobSlotProcessed, "initialHighestSlotProcessed", initialHighestSlotProcessed)
 		if highestBlobSlotProcessed <= initialHighestSlotProcessed {
 			return initialHighestSlotProcessed, nil
 		}
@@ -237,10 +222,8 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	prevProgress := currentSlot.Load()
 
 	// Run the log loop until the highest processed slot reaches the chain tip slot
-	log.Warn("Forward sync started", "highest-processed-slot", downloader.GetHighestProcessedSlot(), "chain-tip-slot", chainTipSlot)
 	for downloader.GetHighestProcessedSlot() < chainTipSlot {
 		downloader.RequestMore(ctx)
-		log.Info("End of request more")
 		select {
 		case <-ctx.Done():
 			// Return if the context is done
