@@ -1317,10 +1317,7 @@ func buildMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.F
 	}()
 
 	//allow disable compression in future:
-	detectedCompression := seg.DetectCompressType(d.MakeGetter())
-	if compressed != detectedCompression {
-		compressed = detectedCompression
-	}
+	compressed = seg.DetectCompressType(d.MakeGetter())
 
 	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
@@ -1633,9 +1630,7 @@ func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
 func (dt *DomainRoTx) newReader(getter *seg.Getter) *seg.Reader {
 	compression := dt.d.compression
 	if dt.name == kv.CommitmentDomain { // alow disable compression in future
-		if compression != seg.DetectCompressType(getter) {
-			compression = dt.d.compression
-		}
+		compression = seg.DetectCompressType(getter)
 	}
 	return seg.NewReader(getter, compression)
 }
