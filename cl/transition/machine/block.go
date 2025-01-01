@@ -121,8 +121,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 		if blockBody.GetDeposits().Len() != int(maximumDeposits(s)) {
 			return nil, nil, nil, errors.New("outstanding deposits do not match maximum deposits")
 		}
-	}
-	if s.Version() >= clparams.ElectraVersion {
+	} else if s.Version() >= clparams.ElectraVersion {
 		eth1DepositIndexLimit := min(s.Eth1Data().DepositCount, s.GetDepositRequestsStartIndex())
 		if s.Eth1DepositIndex() < eth1DepositIndexLimit {
 			if uint64(blockBody.GetDeposits().Len()) != min(s.BeaconConfig().MaxDeposits, eth1DepositIndexLimit-s.Eth1DepositIndex()) {

@@ -254,7 +254,7 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 				//SingleAttestation: &solid.SingleAttestation{},
 				ImmediateProcess: false,
 			}
-			if version < clparams.ElectraVersion {
+			if version <= clparams.DenebVersion {
 				obj.Attestation = &solid.Attestation{}
 				if err := obj.Attestation.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 					return err

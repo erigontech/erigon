@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/etl"
@@ -59,7 +58,7 @@ type blockCollector struct {
 // NewBlockCollector creates a new block collector
 func NewBlockCollector(logger log.Logger, engine execution_client.ExecutionEngine, beaconChainCfg *clparams.BeaconChainConfig, syncBackLoopAmount uint64, tmpdir string) BlockCollector {
 	return &blockCollector{
-		collector:      etl.NewCollector(etlPrefix, tmpdir, etl.NewSortableBuffer(datasize.MB), logger),
+		collector:      etl.NewCollector(etlPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger),
 		tmpdir:         tmpdir,
 		beaconChainCfg: beaconChainCfg,
 		logger:         logger,
@@ -86,7 +85,6 @@ func (b *blockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 }
 
 func (b *blockCollector) Flush(ctx context.Context) error {
-	log.Debug("[Caplin] Flushing blocks")
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.size == 0 {
