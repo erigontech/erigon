@@ -405,6 +405,22 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
+	// remove auths from pool map
+	for _, mt := range minedTxns.Txns {
+		if mt.Type == SetCodeTxnType {
+			numAuths := len(mt.AuthRaw)
+			for i := range numAuths {
+				signature := mt.Authorizations[i]
+				signer, err := types.RecoverSignerFromRLP(mt.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+				if err != nil {
+					continue
+				}
+
+				delete(p.auths, *signer)
+			}
+		}
+	}
+
 	var announcements Announcements
 
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
@@ -1239,29 +1255,6 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 			continue
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
-		if mt.TxnSlot.Type == SetCodeTxnType {
-			numAuths := len(mt.TxnSlot.AuthRaw)
-			foundDuplicate := false
-			for i := range numAuths {
-				signature := mt.TxnSlot.Authorizations[i]
-				signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
-				if err != nil {
-					continue
-				}
-
-				if _, ok := p.auths[*signer]; ok {
-					foundDuplicate = true
-					break
-				}
-
-				p.auths[*signer] = mt
-			}
-
-			if foundDuplicate {
-				discardReasons[i] = txpoolcfg.ErrAuthorityReserved
-				continue
-			}
-		}
 
 		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
@@ -1425,6 +1418,30 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	// Don't add blob txn to queued if it's less than current pending blob base fee
 	if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobFeeCap.LtUint64(p.pendingBlobFee.Load()) {
 		return txpoolcfg.FeeTooLow
+	}
+
+	// Check if we have txn with same authorization in the pool
+	if mt.TxnSlot.Type == SetCodeTxnType {
+		numAuths := len(mt.TxnSlot.AuthRaw)
+		foundDuplicate := false
+		for i := range numAuths {
+			signature := mt.TxnSlot.Authorizations[i]
+			signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			if err != nil {
+				continue
+			}
+
+			if _, ok := p.auths[*signer]; ok {
+				foundDuplicate = true
+				break
+			}
+
+			p.auths[*signer] = mt
+		}
+
+		if foundDuplicate {
+			return txpoolcfg.ErrAuthorityReserved
+		}
 	}
 
 	hashStr := string(mt.TxnSlot.IDHash[:])

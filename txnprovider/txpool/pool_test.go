@@ -182,6 +182,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
 	assert.NoError(t, err)
 	require.True(t, pool != nil)
+
 	ctx := context.Background()
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
@@ -277,9 +278,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 		logger := log.New()
 
-		if err = pool.senders.registerNewSenders(&txnSlots, logger); err != nil {
-			t.Error(err)
-		}
+		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
 
 		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 		assert.NoError(t, err)
