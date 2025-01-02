@@ -295,7 +295,7 @@ func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMess
 		DiscoveryAddresses: discoveryAddresses,
 		Metadata: &sentinelrpc.Metadata{
 			Seq:      metadata.SeqNumber,
-			Attnets:  fmt.Sprintf("%x", metadata.Attnets),
+			Attnets:  fmt.Sprintf("%x", metadata.Attnets), // crash here
 			Syncnets: fmt.Sprintf("%x", *metadata.Syncnets),
 		},
 	}, nil

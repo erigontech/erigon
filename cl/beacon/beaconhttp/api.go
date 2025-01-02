@@ -124,7 +124,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				err := json.NewEncoder(w).Encode(ans)
 				if err != nil {
 					// this error is fatal, log to console
-					log.Error("beaconapi failed to encode json", "type", reflect.TypeOf(ans), "err", err) // TODO: should return to internal server error to client?
+					log.Error("beaconapi failed to encode json", "type", reflect.TypeOf(ans), "err", err)
 				}
 			} else {
 				w.WriteHeader(200)
