@@ -117,7 +117,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				keyBuf, _ = efReader.Next(nil)
 				valBuf, _ = efReader.Next(nil)
 
-				ef := multiencseq.ReadMultiEncSeq(0, valBuf)
+				ef := multiencseq.ReadMultiEncSeq(i, valBuf)
 				efIt := ef.Iterator(0)
 
 				require.Contains(t, values, string(keyBuf), "key not found in values")
