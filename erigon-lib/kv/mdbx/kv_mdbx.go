@@ -1270,6 +1270,7 @@ func (c *MdbxCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
 		delete(c.tx.toCloseMap, c.id)
+
 		c.c = nil
 	}
 }
