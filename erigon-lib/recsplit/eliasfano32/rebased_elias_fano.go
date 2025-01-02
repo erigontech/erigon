@@ -38,6 +38,10 @@ func (ref *RebasedEliasFano) Reset(baseNum uint64, raw []byte) {
 }
 
 func (ref *RebasedEliasFano) Search(v uint64) (uint64, bool) {
+	if v < ref.baseNum {
+		v = ref.baseNum
+	}
+
 	n, found := ref.ef.Search(v - ref.baseNum)
 	return ref.baseNum + n, found
 }
@@ -46,6 +50,7 @@ func (ref *RebasedEliasFano) Iterator() *RebasedIterWrapper {
 	return &RebasedIterWrapper{
 		baseNum: ref.baseNum,
 		it:      ref.ef.Iterator(),
+		reverse: false,
 	}
 }
 
@@ -53,12 +58,14 @@ func (ref *RebasedEliasFano) ReverseIterator() *RebasedIterWrapper {
 	return &RebasedIterWrapper{
 		baseNum: ref.baseNum,
 		it:      ref.ef.ReverseIterator(),
+		reverse: true,
 	}
 }
 
 type RebasedIterWrapper struct {
 	baseNum uint64
 	it      *EliasFanoIter
+	reverse bool
 }
 
 func (it *RebasedIterWrapper) HasNext() bool {
@@ -71,6 +78,15 @@ func (it *RebasedIterWrapper) Next() (uint64, error) {
 }
 
 func (it *RebasedIterWrapper) Seek(v uint64) {
+	if v < it.baseNum {
+		it.it.Seek(0)
+		if it.reverse {
+			// force exhaustion as we are seeking before the first elem
+			it.it.Next()
+		}
+		return
+	}
+
 	it.it.Seek(v - it.baseNum)
 }
 

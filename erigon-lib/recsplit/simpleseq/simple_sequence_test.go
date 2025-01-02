@@ -154,6 +154,37 @@ func TestSimpleSequence(t *testing.T) {
 		require.Equal(t, uint64(0), v)
 	})
 
+	t.Run("iterator seek before base num", func(t *testing.T) {
+		it := s.Iterator()
+		defer it.Close()
+
+		it.Seek(999)
+		require.True(t, it.HasNext())
+		v, err := it.Next()
+		require.NoError(t, err)
+		require.Equal(t, uint64(1001), v)
+
+		require.True(t, it.HasNext())
+		v, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, uint64(1007), v)
+
+		require.True(t, it.HasNext())
+		v, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, uint64(1015), v)
+
+		require.True(t, it.HasNext())
+		v, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, uint64(1027), v)
+
+		require.False(t, it.HasNext())
+		v, err = it.Next()
+		require.Error(t, stream.ErrIteratorExhausted, err)
+		require.Equal(t, uint64(0), v)
+	})
+
 	t.Run("reverse iterator", func(t *testing.T) {
 		it := s.ReverseIterator()
 		defer it.Close()
@@ -233,6 +264,17 @@ func TestSimpleSequence(t *testing.T) {
 		defer it.Close()
 
 		it.Seek(1000)
+		require.False(t, it.HasNext())
+		v, err := it.Next()
+		require.Error(t, stream.ErrIteratorExhausted, err)
+		require.Equal(t, uint64(0), v)
+	})
+
+	t.Run("reverse iterator seek before base num", func(t *testing.T) {
+		it := s.ReverseIterator()
+		defer it.Close()
+
+		it.Seek(999)
 		require.False(t, it.HasNext())
 		v, err := it.Next()
 		require.Error(t, stream.ErrIteratorExhausted, err)

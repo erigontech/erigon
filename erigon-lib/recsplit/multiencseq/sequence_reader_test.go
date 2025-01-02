@@ -112,6 +112,25 @@ func requireSequenceChecks(t *testing.T, s *SequenceReader) {
 
 	require.False(t, it.HasNext())
 
+	// check iterator + seek before base num
+	it = s.Iterator(999)
+	require.True(t, it.HasNext())
+	n, err = it.Next()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1000), n)
+
+	require.True(t, it.HasNext())
+	n, err = it.Next()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1015), n)
+
+	require.True(t, it.HasNext())
+	n, err = it.Next()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1027), n)
+
+	require.False(t, it.HasNext())
+
 	// check reverse iterator
 	it = s.ReverseIterator(2000)
 	require.True(t, it.HasNext())
@@ -144,6 +163,10 @@ func requireSequenceChecks(t *testing.T, s *SequenceReader) {
 	require.Equal(t, uint64(1000), n)
 
 	require.False(t, it.HasNext())
+
+	// check reverse iterator + seek before base num
+	it = s.ReverseIterator(999)
+	require.False(t, it.HasNext())
 }
 
 func requireRawDataChecks(t *testing.T, b []byte) {
@@ -161,4 +184,9 @@ func requireRawDataChecks(t *testing.T, b []byte) {
 
 	_, found = Seek(1000, b, 1028)
 	require.False(t, found)
+
+	// check search before base num
+	n, found = Seek(1000, b, 999)
+	require.True(t, found)
+	require.Equal(t, uint64(1000), n)
 }
