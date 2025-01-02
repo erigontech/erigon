@@ -57,9 +57,6 @@ func (r FlatRequests) Hash() *libcommon.Hash {
 	}
 	sha := sha256.New()
 	for i, t := range KnownRequestTypes {
-		if len(r[i].RequestData) == 0 {
-			continue
-		}
 		hi := sha256.Sum256(append([]byte{t}, r[i].RequestData...))
 		sha.Write(hi[:])
 	}
