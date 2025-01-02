@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	chaos_monkey "github.com/erigontech/erigon/tests/chaos-monkey"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -134,6 +135,8 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 }
 
 func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uint64, useExternalTx bool) (t2 time.Duration, err error) {
+	log.Warn(fmt.Sprintf("[dbg] commit! %s\n", dbg.Stack()))
+
 	se.doms.Close()
 	if err = se.execStage.Update(se.applyTx, blockNum); err != nil {
 		return 0, err
