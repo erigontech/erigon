@@ -339,7 +339,7 @@ Engine API.
 
 #### Caplin's Usage
 
-Caplin is be enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point
+Caplin is enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point
 on, an external Consensus Layer will not be need
 anymore.
 
@@ -368,7 +368,7 @@ Quote your path if it has spaces.
 
 ### Dev Chain
 
-<code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
+<code> 🔬 Detailed explanation is [DEV_CHAIN](/docs/DEV_CHAIN.md).</code>
 
 Key features
 ============
