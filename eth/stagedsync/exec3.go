@@ -725,6 +725,8 @@ Loop:
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
+			fmt.Printf("[dbg] outputTxNum.Load() = %d, %d\n", outputTxNum.Load(), executor.domains().TxNum())
+			fmt.Printf("[dbg] outputTxNum.Load() = %d, %d\n", b.NumberU64(), executor.domains().BlockNum())
 			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
