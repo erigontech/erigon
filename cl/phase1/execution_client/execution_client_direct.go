@@ -68,7 +68,9 @@ func (cc *ExecutionClientDirect) NewPayload(
 	// check header hash
 	if header.Hash() != payload.BlockHash {
 		log.Warn("[NewPayload] Header hash mismatch", "header", header.Hash(), "payload", payload.BlockHash, "block_number", payload.BlockNumber)
+		return PayloadStatusInvalidated, errors.New("header hash mismatch")
 	}
+	log.Debug("[NewPayload] Header hash match", "block_number", payload.BlockNumber)
 
 	body := payload.Body()
 	txs, err := types.DecodeTransactions(body.Transactions)
