@@ -679,8 +679,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range kv.StateDomains {
 			expectedFileName := strings.Replace(info.Name(), "accounts", snapType.String(), 1)
-			if _, err := os.Stat(filepath.Join(dirs.SnapDomain, expectedFileName)); err != nil {
-				return fmt.Errorf("domain: %d missing file %s at path %s", snapType, expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName))
+			{
+				exists, err := dir.FileExist(filepath.Join(dirs.SnapDomain, expectedFileName))
+				if err != nil {
+					return err
+				}
+				if !exists {
+					return fmt.Errorf("domain: %s, missing file %s", snapType, expectedFileName)
+				}
 			}
 			// check that the index file exist
 			if libstate.Schema[snapType].IndexList.Has(libstate.AccessorBTree) {
