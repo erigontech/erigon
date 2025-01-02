@@ -47,7 +47,7 @@ type CaplinConfig struct {
 	Archive                   bool
 	SnapshotGenerationEnabled bool
 	NetworkId                 NetworkType
-	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
+	// DisabledCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
 	DisabledCheckpointSync bool
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
 	// If it's set, the node will start in builder mode
