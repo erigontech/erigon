@@ -18,17 +18,16 @@ package diagnostics
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 )
 
 type DiagTxn struct {
-	Hash []byte
+	Hash []byte `json:"hash"`
 }
 
 type DiagTxnUpdate struct {
-	Txns []DiagTxn
+	Txns []DiagTxn `json:"txns"`
 }
 
 func (ti DiagTxnUpdate) Type() Type {
@@ -36,33 +35,42 @@ func (ti DiagTxnUpdate) Type() Type {
 }
 
 type DiagBlockTxnUpdate struct {
-	Txns []DiagTxn
+	Txns []DiagTxn `json:"txns"`
 }
 
 func (ti DiagBlockTxnUpdate) Type() Type {
 	return TypeOf(ti)
 }
 
+type WsTxnMsg struct {
+	Txns   []DiagTxn `json:"txns"`
+	Source string    `json:"source"`
+}
+
 func (d *DiagnosticClient) setupTxPoolDiagnostics(rootCtx context.Context) {
 	d.runOnNewTnxsListener(rootCtx)
 	d.runOnNewBlockListener(rootCtx)
+	d.SetupNotifier(rootCtx)
 }
 
 func (d *DiagnosticClient) runOnNewTnxsListener(rootCtx context.Context) {
 	go func() {
-		//ctx, ch, closeChannel := Context[DiagTxnUpdate](rootCtx, 1)
-		ctx, _, closeChannel := Context[DiagTxnUpdate](rootCtx, 1)
+		ctx, ch, closeChannel := Context[DiagTxnUpdate](rootCtx, 1)
 		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(DiagTxnUpdate{}), log.Root())
 		for {
 			select {
-				case <-rootCtx.Done():
-					return
-				//case info := <-ch:
-				//	for _, txn := range info.Txns {
-				//		fmt.Println("Added txn with hash: ", txn.Hash)
-				//	}
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					Type: "txpool",
+					Message: WsTxnMsg{
+						Source: "p2p",
+						Txns:   info.Txns,
+					},
+				})
 			}
 		}
 	}()
@@ -76,12 +84,16 @@ func (d *DiagnosticClient) runOnNewBlockListener(rootCtx context.Context) {
 		StartProviders(ctx, TypeOf(DiagBlockTxnUpdate{}), log.Root())
 		for {
 			select {
-				case <-rootCtx.Done():
-					return
-				case info := <-ch:
-					for _, txn := range info.Txns {
-						fmt.Println("DiagBlockTxnUpdate Added txn with hash: ", txn.Hash)
-					}
+			case <-rootCtx.Done():
+				return
+			case info := <-ch:
+				d.Notify(DiagMessages{
+					Type: "txpool",
+					Message: WsTxnMsg{
+						Source: "block",
+						Txns:   info.Txns,
+					},
+				})
 			}
 		}
 	}()

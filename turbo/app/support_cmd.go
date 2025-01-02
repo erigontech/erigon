@@ -148,9 +148,50 @@ func (c *conn) SetWriteDeadline(time time.Time) error {
 	return nil
 }
 
+func testWSS(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal) {
+	ctx1, cancel1 := context.WithCancel(ctx)
+	defer cancel1()
+
+	go func() {
+		select {
+		case <-sigs:
+			cancel()
+		case <-ctx1.Done():
+		}
+	}()
+
+	serverAddr := "ws://127.0.0.1:6063/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(serverAddr, nil)
+	if err != nil {
+		fmt.Println("6Error connecting to server:", err)
+		return
+	}
+	defer conn.Close()
+
+	fmt.Println("6Connected to server")
+
+	// Send a message
+	message := "6Hello, WebSocket!"
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
+		fmt.Println("6Error sending message:", err)
+	}
+	fmt.Println("6Sent:", message)
+
+	// Read response
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		fmt.Println("6Error reading message:", err)
+	}
+	fmt.Println("6Received:", string(msg))
+}
+
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
 // needs to be called repeatedly to implement re-connect logic
 func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal, diagnosticsUrl string, sessionIds []string, debugURLs []string, logger log.Logger) error {
+	testWSS(ctx, cancel, sigs)
+	for {
+
+	}
 	metricsClient := &http.Client{}
 	defer metricsClient.CloseIdleConnections()
 
@@ -165,70 +206,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 		}
 	}()
 
-	type enode struct {
-		Enode        string               `json:"enode,omitempty"`
-		Enr          string               `json:"enr,omitempty"`
-		Ports        *types.NodeInfoPorts `json:"ports,omitempty"`
-		ListenerAddr string               `json:"listener_addr,omitempty"`
-	}
-
-	type info struct {
-		Id        string          `json:"id,omitempty"`
-		Name      string          `json:"name,omitempty"`
-		Protocols json.RawMessage `json:"protocols,omitempty"`
-		Enodes    []enode         `json:"enodes,omitempty"`
-	}
-
-	type node struct {
-		debugURL string
-		info     *info
-	}
-
-	nodes := map[string]*node{}
-
-	for _, debugURL := range debugURLs {
-		debugResponse, err := metricsClient.Get(debugURL + "/debug/diag/nodeinfo")
-
-		if err != nil {
-			return err
-		}
-
-		if debugResponse.StatusCode != http.StatusOK {
-			return fmt.Errorf("debug request to %s failed: %s", debugURL, debugResponse.Status)
-		}
-
-		var reply remote.NodesInfoReply
-
-		err = json.NewDecoder(debugResponse.Body).Decode(&reply)
-
-		debugResponse.Body.Close()
-
-		if err != nil {
-			return err
-		}
-
-		for _, ni := range reply.NodesInfo {
-			if n, ok := nodes[ni.Id]; ok {
-				n.info.Enodes = append(n.info.Enodes, enode{
-					Enode:        ni.Enode,
-					Enr:          ni.Enr,
-					Ports:        ni.Ports,
-					ListenerAddr: ni.ListenerAddr,
-				})
-			} else {
-				nodes[ni.Id] = &node{debugURL, &info{
-					Id:        ni.Id,
-					Name:      ni.Name,
-					Protocols: ni.Protocols,
-					Enodes: []enode{{
-						Enode:        ni.Enode,
-						Enr:          ni.Enr,
-						Ports:        ni.Ports,
-						ListenerAddr: ni.ListenerAddr,
-					}}}}
-			}
-		}
-	}
+	nodes, _ := getNodes(metricsClient, debugURLs)
 
 	dialer := websocket.Dialer{
 		ReadBufferSize:  wsReadBuffer,
@@ -251,9 +229,9 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	}
 
 	type connectionInfo struct {
-		Version  uint64   `json:"version"`
-		Sessions []string `json:"sessions"`
-		Nodes    []*info  `json:"nodes"`
+		Version  uint64        `json:"version"`
+		Sessions []string      `json:"sessions"`
+		Nodes    []*tunnelInfo `json:"nodes"`
 	}
 
 	codec := rpc.NewWebsocketCodec(conn, "wss://"+diagnosticsUrl, nil) //TODO: revise why is it so
@@ -262,7 +240,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	err = codec.WriteJSON(ctx1, &connectionInfo{
 		Version:  Version,
 		Sessions: sessionIds,
-		Nodes: func() (replies []*info) {
+		Nodes: func() (replies []*tunnelInfo) {
 			for _, node := range nodes {
 				replies = append(replies, node.info)
 			}
@@ -464,4 +442,82 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 			}
 		}
 	}
+}
+
+func getNodes(metricsClient *http.Client, debugURLs []string) (map[string]*tunnelNode, error) {
+	nodes := map[string]*tunnelNode{}
+
+	for _, debugURL := range debugURLs {
+		reply, err := queryNode(metricsClient, debugURL)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, ni := range reply.NodesInfo {
+			if n, ok := nodes[ni.Id]; ok {
+				n.info.Enodes = append(n.info.Enodes, tunnelEnode{
+					Enode:        ni.Enode,
+					Enr:          ni.Enr,
+					Ports:        ni.Ports,
+					ListenerAddr: ni.ListenerAddr,
+				})
+			} else {
+				nodes[ni.Id] = &tunnelNode{debugURL, &tunnelInfo{
+					Id:        ni.Id,
+					Name:      ni.Name,
+					Protocols: ni.Protocols,
+					Enodes: []tunnelEnode{{
+						Enode:        ni.Enode,
+						Enr:          ni.Enr,
+						Ports:        ni.Ports,
+						ListenerAddr: ni.ListenerAddr,
+					}}}}
+			}
+		}
+	}
+
+	return nodes, nil
+}
+
+func queryNode(metricsClient *http.Client, debugURL string) (*remote.NodesInfoReply, error) {
+	debugResponse, err := metricsClient.Get(debugURL + "/debug/diag/nodeinfo")
+
+	if err != nil {
+		return nil, err
+	}
+
+	if debugResponse.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("debug request to %s failed: %s", debugURL, debugResponse.Status)
+	}
+
+	var reply remote.NodesInfoReply
+
+	err = json.NewDecoder(debugResponse.Body).Decode(&reply)
+
+	debugResponse.Body.Close()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &reply, nil
+}
+
+type tunnelEnode struct {
+	Enode        string               `json:"enode,omitempty"`
+	Enr          string               `json:"enr,omitempty"`
+	Ports        *types.NodeInfoPorts `json:"ports,omitempty"`
+	ListenerAddr string               `json:"listener_addr,omitempty"`
+}
+
+type tunnelInfo struct {
+	Id        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Protocols json.RawMessage `json:"protocols,omitempty"`
+	Enodes    []tunnelEnode   `json:"enodes,omitempty"`
+}
+
+type tunnelNode struct {
+	debugURL string
+	info     *tunnelInfo
 }

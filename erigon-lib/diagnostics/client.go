@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/gorilla/websocket"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -55,6 +56,8 @@ type DiagnosticClient struct {
 	networkSpeed        NetworkSpeedTestResult
 	networkSpeedMutex   sync.Mutex
 	webseedsList        []string
+	conn                *websocket.Conn
+	notifierChan        chan DiagMessages
 }
 
 func NewDiagnosticClient(ctx context.Context, metricsMux *http.ServeMux, dataDirPath string, speedTest bool, webseedsList []string) (*DiagnosticClient, error) {
