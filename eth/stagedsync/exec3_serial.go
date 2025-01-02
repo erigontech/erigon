@@ -163,6 +163,7 @@ func (se *serialExecutor) commit(ctx context.Context, txNum uint64, blockNum uin
 		return t2, err
 	}
 	se.doms.SetTxNum(txNum)
+	se.doms.SetBlockNum(blockNum)
 	se.rs = state.NewStateV3(se.doms, se.logger)
 
 	se.applyWorker.ResetTx(se.applyTx)
