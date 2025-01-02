@@ -1271,7 +1271,7 @@ func (c *MdbxCursor) Close() {
 		c.c.Close()
 		b := len(c.toCloseMap)
 		delete(c.toCloseMap, c.id)
-		if c.label == kv.ChainDB {
+		if c.label == kv.ChainDB && b > 200 {
 			fmt.Printf("[dbg] a %d, %d, %d\n", b, len(c.toCloseMap), c.id)
 		}
 		c.c = nil
