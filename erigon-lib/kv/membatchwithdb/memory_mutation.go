@@ -170,7 +170,7 @@ func (m *MemoryMutation) statelessCursor(table string) (kv.RwCursor, error) {
 	c, ok := m.statelessCursors[table]
 	if !ok {
 		var err error
-		c, err = m.RwCursor(table)
+		c, err = m.RwCursor(table) // nolint:gocritic
 		if err != nil {
 			return nil, err
 		}
@@ -665,7 +665,7 @@ func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	c.table = bucket
 
 	var err error
-	c.cursor, err = m.db.CursorDupSort(bucket)
+	c.cursor, err = m.db.CursorDupSort(bucket) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
