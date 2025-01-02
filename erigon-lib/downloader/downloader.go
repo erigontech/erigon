@@ -2880,7 +2880,8 @@ func (d *Downloader) logProgress() {
 	rate := d.stats.DownloadRate
 	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
 
-	if d.stats.CompletionRate > d.stats.DownloadRate {
+	//if completion rate significantly bigger than download rate - we are verifying
+	if float64(d.stats.CompletionRate)*1.5 > float64(d.stats.DownloadRate) {
 		status = "Verifying"
 	}
 
