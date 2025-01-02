@@ -690,7 +690,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return err
 				}
 				if !exists {
-					return fmt.Errorf("missing file %s", fileName)
+					return fmt.Errorf("domain: %s, missing file %s, indices: %b", snapType, fileName, libstate.Schema[snapType].IndexList)
 				}
 			}
 			if libstate.Schema[snapType].IndexList.Has(libstate.AccessorExistence) {
@@ -700,7 +700,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return err
 				}
 				if !exists {
-					return fmt.Errorf("missing file %s", fileName)
+					return fmt.Errorf("domain: %s, missing file %s, indices: %b", snapType, fileName, libstate.Schema[snapType].IndexList)
 				}
 			}
 			if libstate.Schema[snapType].IndexList.Has(libstate.AccessorHashMap) {
@@ -710,7 +710,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 					return err
 				}
 				if !exists {
-					return fmt.Errorf("missing file %s", fileName)
+					return fmt.Errorf("domain: %s, missing file %s, indices: %b", snapType, fileName, libstate.Schema[snapType].IndexList)
 				}
 			}
 		}
