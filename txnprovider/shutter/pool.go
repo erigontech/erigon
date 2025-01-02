@@ -19,6 +19,7 @@ package shutter
 import (
 	"context"
 
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -52,10 +53,10 @@ func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.
 func (p Pool) Run(ctx context.Context) error {
 	p.logger.Info("running pool")
 
-	//
-	// TODO register observer for decryption keys listener
-	//      introduce protobuf
-	//
+	unregisterDkpObserver := p.decryptionKeysListener.Register(func(msg *pubsub.Message) {
+		p.decryptionKeysProcessor.Enqueue(msg)
+	})
+	defer unregisterDkpObserver()
 
 	runner := errgroup.Group{}
 	runner.Go(func() error { return p.decryptionKeysListener.Run(ctx) })

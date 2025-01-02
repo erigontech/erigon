@@ -14,17 +14,17 @@ const DecryptionKeysTopic = "decryptionKeys"
 
 type DecryptionKeysListener struct {
 	logger    log.Logger
-	observers *event.Observers[any]
+	observers *event.Observers[*pubsub.Message]
 }
 
 func NewDecryptionKeysListener(logger log.Logger) DecryptionKeysListener {
 	return DecryptionKeysListener{
 		logger:    logger,
-		observers: event.NewObservers[any](),
+		observers: event.NewObservers[*pubsub.Message](),
 	}
 }
 
-func (dkl DecryptionKeysListener) Register(observer event.Observer[any]) event.UnregisterFunc {
+func (dkl DecryptionKeysListener) Register(observer event.Observer[*pubsub.Message]) event.UnregisterFunc {
 	return dkl.observers.Register(observer)
 }
 
