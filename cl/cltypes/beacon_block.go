@@ -547,7 +547,7 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
 		b.beaconCfg.ConsolidationRequestType: r.Consolidations,
 	} {
 		if requests != nil {
-			ssz, err := requests.EncodeSSZ(nil)
+			ssz, err := requests.EncodeSSZ([]byte{})
 			if err != nil {
 				log.Warn("Error encoding deposits", "err", err)
 				return nil
