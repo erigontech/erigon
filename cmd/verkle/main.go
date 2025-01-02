@@ -259,6 +259,7 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
+	verkleCursor.Close()
 	for k, v, err := verkleCursor.First(); k != nil; k, v, err = verkleCursor.Next() {
 		if err != nil {
 			return err
@@ -381,6 +382,7 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 	if err != nil {
 		return err
 	}
+	defer stateCursor.Close()
 	num, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err

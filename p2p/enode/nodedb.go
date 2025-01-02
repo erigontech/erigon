@@ -567,6 +567,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
 			// seekInFiles to a random entry. The first byte is incremented by a
