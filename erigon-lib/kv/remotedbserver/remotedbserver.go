@@ -270,7 +270,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			if err := s.with(id, func(tx kv.Tx) error {
 				for _, c := range cursors { // restore all cursors position
 					var err error
-					c.c, err = tx.Cursor(c.bucket)
+					c.c, err = tx.Cursor(c.bucket) //nolint:gocritic
 					if err != nil {
 						return err
 					}
@@ -331,7 +331,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			CursorID++
 			var err error
 			if err := s.with(id, func(tx kv.Tx) error {
-				c, err = tx.CursorDupSort(in.BucketName)
+				c, err = tx.CursorDupSort(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
 				}

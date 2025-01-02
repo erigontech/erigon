@@ -1487,7 +1487,7 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	if !s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) <= 0 {
 		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
 	}
-	c, err := tx.Cursor(table)
+	c, err := tx.Cursor(table) //nolint:gocritic
 	if err != nil {
 		return err
 	}
@@ -1651,7 +1651,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 	if !s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) <= 0 {
 		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
 	}
-	c, err := tx.CursorDupSort(table)
+	c, err := tx.CursorDupSort(table) //nolint:gocritic
 	if err != nil {
 		return err
 	}
