@@ -62,6 +62,7 @@ func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) 
 
 func (a *ApiHandler) GetEthV1NodeVersion(w http.ResponseWriter, r *http.Request) {
 	// Get OS and Arch
+	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"data": map[string]interface{}{
 			"version": fmt.Sprintf("Caplin/%s %s/%s", a.version, runtime.GOOS, runtime.GOARCH),
@@ -78,6 +79,7 @@ func (a *ApiHandler) GetEthV1NodePeerCount(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// all fields should be converted to string
+	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"data": map[string]interface{}{
 			"connected":     strconv.FormatUint(ret.Connected, 10),
@@ -121,6 +123,8 @@ func (a *ApiHandler) GetEthV1NodePeersInfos(w http.ResponseWriter, r *http.Reque
 			AgentVersion:       ret.Peers[i].AgentVersion,
 		})
 	}
+
+	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"data": peers,
 	}); err != nil {
@@ -142,6 +146,7 @@ func (a *ApiHandler) GetEthV1NodePeerInfos(w http.ResponseWriter, r *http.Reques
 	// find the peer with matching enr
 	for _, p := range ret.Peers {
 		if p.Pid == pid {
+			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(map[string]interface{}{
 				"data": peer{
 					PeerID:             p.Pid,
@@ -166,6 +171,8 @@ func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"data": map[string]interface{}{
 			"peer_id":             id.Pid,
@@ -186,6 +193,7 @@ func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request
 func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request) {
 	currentSlot := a.ethClock.GetCurrentSlot()
 
+	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"data": map[string]interface{}{
 			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
