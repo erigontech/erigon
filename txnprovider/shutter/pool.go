@@ -19,6 +19,8 @@ package shutter
 import (
 	"context"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/txnprovider"
@@ -27,26 +29,38 @@ import (
 var _ txnprovider.TxnProvider = (*Pool)(nil)
 
 type Pool struct {
-	logger               log.Logger
-	config               Config
-	secondaryTxnProvider txnprovider.TxnProvider
+	logger                  log.Logger
+	config                  Config
+	secondaryTxnProvider    txnprovider.TxnProvider
+	decryptionKeysListener  DecryptionKeysListener
+	decryptionKeysProcessor DecryptionKeysProcessor
 }
 
 func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.TxnProvider) *Pool {
+	logger = logger.New("component", "shutter")
+	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
+	decryptionKeysListener := NewDecryptionKeysListener(logger)
 	return &Pool{
-		logger:               logger.New("component", "shutter"),
-		config:               config,
-		secondaryTxnProvider: secondaryTxnProvider,
+		logger:                  logger,
+		config:                  config,
+		secondaryTxnProvider:    secondaryTxnProvider,
+		decryptionKeysListener:  decryptionKeysListener,
+		decryptionKeysProcessor: decryptionKeysProcessor,
 	}
 }
 
 func (p Pool) Run(ctx context.Context) error {
 	p.logger.Info("running pool")
+
 	//
-	// TODO - start pool, sentinel listeners for keyper decryption keys and other necessary background goroutines
-	//        blocks until all sub-components have shutdown or have error-ed
+	// TODO register observer for decryption keys listener
+	//      introduce protobuf
 	//
-	return nil
+
+	runner := errgroup.Group{}
+	runner.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
+	runner.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
+	return runner.Wait()
 }
 
 func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
