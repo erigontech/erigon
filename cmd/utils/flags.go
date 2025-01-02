@@ -1086,13 +1086,17 @@ var (
 		Usage: "Enable 'chaos monkey' to generate spontaneous network/consensus/etc failures. Use ONLY for testing",
 		Value: false,
 	}
-	ShutterEnabled = cli.BoolFlag{
+	ShutterEnabledFlag = cli.BoolFlag{
 		Name:  "shutter",
 		Usage: "Enable the Shutter encrypted transactions mempool (defaults to false)",
 	}
-	ShutterKeyperBootnodes = cli.StringSliceFlag{
-		Name:  "shutter.keyper.bootnodes",
-		Usage: "Use to override the default keyper bootnodes (defaults to using the bootnodes from the embedded config)",
+	ShutterP2PBootnodesFlag = cli.StringSliceFlag{
+		Name:  "shutter.p2p.bootnodes",
+		Usage: "Use to override the default p2p bootnodes (defaults to using the bootnodes from the embedded config)",
+	}
+	ShutterP2PListenPortFlag = cli.UintFlag{
+		Name:  "shutter.p2p.listen.port",
+		Usage: "Use to override the default p2p listen port (defaults to 23_000)",
 	}
 )
 
@@ -1578,14 +1582,17 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 }
 
 func setShutter(ctx *cli.Context, chainName string, cfg *ethconfig.Config) {
-	if enabled := ctx.Bool(ShutterEnabled.Name); !enabled {
+	if enabled := ctx.Bool(ShutterEnabledFlag.Name); !enabled {
 		return
 	}
 
 	config := shutter.ConfigByChainName(chainName)
 	// check for cli overrides
-	if ctx.IsSet(ShutterKeyperBootnodes.Name) {
-		config.KeyperBootnodes = ctx.StringSlice(ShutterKeyperBootnodes.Name)
+	if ctx.IsSet(ShutterP2PBootnodesFlag.Name) {
+		config.Bootnodes = ctx.StringSlice(ShutterP2PBootnodesFlag.Name)
+	}
+	if ctx.IsSet(ShutterP2PListenPortFlag.Name) {
+		config.ListenPort = ctx.Uint64(ShutterP2PListenPortFlag.Name)
 	}
 
 	cfg.Shutter = config

@@ -2,22 +2,25 @@ package shutter
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/params"
 )
 
 const DecryptionKeysTopic = "decryptionKeys"
 
 type DecryptionKeysListener struct {
 	logger    log.Logger
+	config    Config
 	observers *event.Observers[*pubsub.Message]
 }
 
-func NewDecryptionKeysListener(logger log.Logger) DecryptionKeysListener {
+func NewDecryptionKeysListener(logger log.Logger, config Config) DecryptionKeysListener {
 	return DecryptionKeysListener{
 		logger:    logger,
 		observers: event.NewObservers[*pubsub.Message](),
@@ -31,10 +34,14 @@ func (dkl DecryptionKeysListener) Register(observer event.Observer[*pubsub.Messa
 func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	dkl.logger.Info("running decryption keys listener")
 
-	//
-	// TODO set options
-	//
-	host, err := libp2p.New()
+	host, err := libp2p.New(
+		//
+		// TODO construct multiaddr from port number
+		//
+		libp2p.ListenAddrs(dkl.config.ListenAddrs...),
+		libp2p.UserAgent(fmt.Sprintf("erigon/shutter/%s", params.VersionWithCommit(params.GitCommit))),
+		libp2p.ProtocolVersion("/shutter/0.1.0"),
+	)
 	if err != nil {
 		return err
 	}

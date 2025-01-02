@@ -22,13 +22,18 @@ import (
 )
 
 type Config struct {
-	Enabled                          bool     `json:"-"`
-	InstanceId                       uint64   `json:"instanceId"`
-	SequencerContractAddress         string   `json:"sequencerContractAddress"`
-	ValidatorRegistryContractAddress string   `json:"validatorRegistryContractAddress"`
-	KeyBroadcastContractAddress      string   `json:"keyBroadcastContractAddress"`
-	KeyperSetManagerContractAddress  string   `json:"keyperSetManagerContractAddress"`
-	KeyperBootnodes                  []string `json:"keyperBootnodes"`
+	P2PConfig
+	Enabled                          bool
+	InstanceId                       uint64
+	SequencerContractAddress         string
+	ValidatorRegistryContractAddress string
+	KeyBroadcastContractAddress      string
+	KeyperSetManagerContractAddress  string
+}
+
+type P2PConfig struct {
+	ListenPort uint64
+	Bootnodes  []string
 }
 
 func ConfigByChainName(chainName string) Config {
@@ -50,9 +55,12 @@ var (
 		ValidatorRegistryContractAddress: "0xa9289A3Dd14FEBe10611119bE81E5d35eAaC3084",
 		KeyBroadcastContractAddress:      "0x9D31865BEffcE842FBd36CDA587aDDA8bef804B7",
 		KeyperSetManagerContractAddress:  "0xC4DE9FAf4ec882b33dA0162CBE628B0D8205D0c0",
-		KeyperBootnodes: []string{
-			"/ip4/167.99.177.227/tcp/23005/p2p/12D3KooWSdm5guPBdn8DSaBphVBzUUgPLg9sZLnazEUrcbtLy254",
-			"/ip4/159.89.15.119/tcp/23005/p2p/12D3KooWPP6bp2PJQR8rUvG1SD4qNH4WFrKve6DMgWThyKxwNbbH",
+		P2PConfig: P2PConfig{
+			ListenPort: defaultP2PListenPort,
+			Bootnodes: []string{
+				"/ip4/167.99.177.227/tcp/23005/p2p/12D3KooWSdm5guPBdn8DSaBphVBzUUgPLg9sZLnazEUrcbtLy254",
+				"/ip4/159.89.15.119/tcp/23005/p2p/12D3KooWPP6bp2PJQR8rUvG1SD4qNH4WFrKve6DMgWThyKxwNbbH",
+			},
 		},
 	}
 
@@ -63,9 +71,16 @@ var (
 		ValidatorRegistryContractAddress: "0xefCC23E71f6bA9B22C4D28F7588141d44496A6D6",
 		KeyBroadcastContractAddress:      "0x626dB87f9a9aC47070016A50e802dd5974341301",
 		KeyperSetManagerContractAddress:  "0x7C2337f9bFce19d8970661DA50dE8DD7d3D34abb",
-		KeyperBootnodes: []string{
-			"/ip4/167.99.177.227/tcp/23003/p2p/12D3KooWD35AESYCttDEi3J5WnQdTFuM5JNtmuXEb1x4eQ28gb1s",
-			"/ip4/159.89.15.119/tcp/23003/p2p/12D3KooWRzAhgPA16DiBQhiuYoasYzJaQSAbtc5i5FvgTi9ZDQtS",
+		P2PConfig: P2PConfig{
+			ListenPort: defaultP2PListenPort,
+			Bootnodes: []string{
+				"/ip4/167.99.177.227/tcp/23003/p2p/12D3KooWD35AESYCttDEi3J5WnQdTFuM5JNtmuXEb1x4eQ28gb1s",
+				"/ip4/159.89.15.119/tcp/23003/p2p/12D3KooWRzAhgPA16DiBQhiuYoasYzJaQSAbtc5i5FvgTi9ZDQtS",
+			},
 		},
 	}
+)
+
+const (
+	defaultP2PListenPort = 23_000
 )
