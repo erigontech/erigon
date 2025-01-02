@@ -259,7 +259,7 @@ func dump(ctx context.Context, cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
-	verkleCursor.Close()
+	defer verkleCursor.Close()
 	for k, v, err := verkleCursor.First(); k != nil; k, v, err = verkleCursor.Next() {
 		if err != nil {
 			return err
