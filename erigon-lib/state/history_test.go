@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/stream"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
+	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/stretchr/testify/require"
 )
@@ -117,8 +117,8 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				keyBuf, _ = efReader.Next(nil)
 				valBuf, _ = efReader.Next(nil)
 
-				ef, _ := eliasfano32.ReadEliasFano(valBuf)
-				efIt := ef.Iterator()
+				ef := multiencseq.ReadMultiEncSeq(0, valBuf)
+				efIt := ef.Iterator(0)
 
 				require.Contains(t, values, string(keyBuf), "key not found in values")
 				seenKeys = append(seenKeys, string(keyBuf))
@@ -240,8 +240,8 @@ func TestHistoryCollationBuild(t *testing.T) {
 			w, _ := g.Next(nil)
 			keyWords = append(keyWords, string(w))
 			w, _ = g.Next(w[:0])
-			ef, _ := eliasfano32.ReadEliasFano(w)
-			ints, err := stream.ToArrayU64(ef.Iterator())
+			ef := multiencseq.ReadMultiEncSeq(0, w)
+			ints, err := stream.ToArrayU64(ef.Iterator(0))
 			require.NoError(err)
 			intArrs = append(intArrs, ints)
 		}
