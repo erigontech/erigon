@@ -71,7 +71,8 @@ type Server struct {
 //   - batchConcurrency: maximum number of goroutines processing batch requests (0 = unlimited)
 //   - traceRequests: enables detailed request tracing in logs
 //   - debugSingleRequest: enables debugging of individual requests
-//   - disableStreaming: when true, forces immediate response for subscription requests
+//   - disableStreaming: when true, disables progressive streaming of large JSON responses (like block traces),
+//                      forcing the server to build complete response before sending
 //   - logger: logger instance for server operations
 //   - rpcSlowLogThreshold: duration after which RPC calls are considered slow and logged
 func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
