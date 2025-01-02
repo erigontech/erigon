@@ -79,7 +79,7 @@ func cursorDeferClose(m dsl.Matcher) {
 	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		//At(m["rollback"]).
-		Report(`Add "defer $cursor.Close()" right after cursor creation error check`)
+		Report(`Add "defer $c.Close()" right after cursor creation error check`)
 }
 
 func streamDeferClose(m dsl.Matcher) {
@@ -93,7 +93,7 @@ func streamDeferClose(m dsl.Matcher) {
 	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		//At(m["rollback"]).
-		Report(`Add "defer $cursor.Close()" right after cursor creation error check`)
+		Report(`Add "defer $c.Close()" right after cursor creation error check`)
 }
 
 func closeCollector(m dsl.Matcher) {

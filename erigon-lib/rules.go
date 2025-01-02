@@ -80,7 +80,21 @@ func cursorDeferClose(m dsl.Matcher) {
 	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		//At(m["rollback"]).
-		Report(`Add "defer $cursor.Close()" right after cursor creation error check`)
+		Report(`Add "defer $c.Close()" right after cursor creation error check`)
+}
+
+func streamDeferClose(m dsl.Matcher) {
+	m.Match(
+		`$c, $err = $db.Range($params); $chk; $close`,
+		`$c, $err := $db.Range($params); $chk; $close`,
+		`$c, $err = $db.RangeDupSort($params); $chk; $close`,
+		`$c, $err := $db.RangeDupSort($params); $chk; $close`,
+		`$c, $err = $db.Prefix($params); $chk; $close`,
+		`$c, $err := $db.Prefix($params); $chk; $close`,
+	).
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		//At(m["rollback"]).
+		Report(`Add "defer $c.Close()" right after cursor creation error check`)
 }
 
 func closeCollector(m dsl.Matcher) {
