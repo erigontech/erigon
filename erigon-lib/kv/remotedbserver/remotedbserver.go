@@ -311,7 +311,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			CursorID++
 			var err error
 			if err := s.with(id, func(tx kv.Tx) error {
-				c, err = tx.Cursor(in.BucketName)
+				c, err = tx.Cursor(in.BucketName) //nolint:gocritic
 				if err != nil {
 					return err
 				}
