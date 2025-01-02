@@ -192,7 +192,7 @@ func (it *RecentInvertedIdxIter) advanceInDB() {
 	var v []byte
 	var err error
 	if it.cursor == nil {
-		if it.cursor, err = it.roTx.CursorDupSort(it.indexTable); err != nil {
+		if it.cursor, err = it.roTx.CursorDupSort(it.indexTable); err != nil { //nolint:gocritic
 			// TODO pass error properly around
 			panic(err)
 		}
@@ -356,7 +356,7 @@ func (it *InvertedIterator1) advanceInDb() {
 	var k, v []byte
 	var err error
 	if it.cursor == nil {
-		if it.cursor, err = it.roTx.CursorDupSort(it.indexTable); err != nil {
+		if it.cursor, err = it.roTx.CursorDupSort(it.indexTable); err != nil { //nolint:gocritic
 			// TODO pass error properly around
 			panic(err)
 		}
