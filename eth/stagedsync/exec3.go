@@ -694,7 +694,7 @@ Loop:
 				}
 				t3 = time.Since(tt)
 
-				t2, err := executor.(*serialExecutor).commit(ctx, inputTxNum, outputBlockNum.GetValueUint64(), useExternalTx)
+				t2, err := executor.(*serialExecutor).commit(ctx, inputTxNum, stageProgress, useExternalTx)
 				if err != nil {
 					return err
 				}
