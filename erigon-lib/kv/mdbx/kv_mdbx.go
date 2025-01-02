@@ -1459,7 +1459,7 @@ func (tx *MdbxTx) Prefix(table string, prefix []byte) (stream.KV, error) {
 }
 
 func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: asc, limit: int64(limit), id: tx.cursorID}
+	s := &cursor2iter{ctx: tx.ctx, toCloseMap: tx.toCloseMap, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: asc, limit: int64(limit), id: tx.cursorID}
 	tx.cursorID++
 	if tx.toCloseMap == nil {
 		tx.toCloseMap = make(map[uint64]kv.Closer)
@@ -1473,9 +1473,9 @@ func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By,
 }
 
 type cursor2iter struct {
-	c  kv.Cursor
-	id uint64
-	tx *MdbxTx
+	c          kv.Cursor
+	id         uint64
+	toCloseMap map[uint64]kv.Closer
 
 	fromPrefix, toPrefix, nextK, nextV []byte
 	orderAscend                        order.By
@@ -1585,7 +1585,7 @@ func (s *cursor2iter) Close() {
 	}
 	if s.c != nil {
 		s.c.Close()
-		delete(s.tx.toCloseMap, s.id)
+		delete(s.toCloseMap, s.id)
 		s.c = nil
 	}
 }
@@ -1622,7 +1622,7 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 }
 
 func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s := &cursorDup2iter{ctx: tx.ctx, tx: tx, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit), id: tx.cursorID}
+	s := &cursorDup2iter{ctx: tx.ctx, toCloseMap: tx.toCloseMap, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit), id: tx.cursorID}
 	tx.cursorID++
 	if tx.toCloseMap == nil {
 		tx.toCloseMap = make(map[uint64]kv.Closer)
@@ -1636,9 +1636,9 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 }
 
 type cursorDup2iter struct {
-	c  kv.CursorDupSort
-	id uint64
-	tx *MdbxTx
+	c          kv.CursorDupSort
+	id         uint64
+	toCloseMap map[uint64]kv.Closer
 
 	key                         []byte
 	fromPrefix, toPrefix, nextV []byte
@@ -1748,7 +1748,7 @@ func (s *cursorDup2iter) Close() {
 	}
 	if s.c != nil {
 		s.c.Close()
-		delete(s.tx.toCloseMap, s.id)
+		delete(s.toCloseMap, s.id)
 		s.c = nil
 	}
 }
