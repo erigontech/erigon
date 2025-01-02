@@ -95,22 +95,20 @@ Loop:
 					reqSlot = f.highestSlotProcessed - 2
 				}
 				// double the request count every 30 seconds. This is inspired by the mekong network, which has many consecutive missing blocks.
-				multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 30
 				reqCount := count
-				if multiplier > 0 {
+				if !f.highestSlotUpdateTime.IsZero() {
+					multiplier := int(time.Since(f.highestSlotUpdateTime).Seconds()) / 30
+					multiplier = min(multiplier, 4)
 					reqCount *= uint64(1 << uint(multiplier))
 				}
-				if reqCount >= 256 {
-					reqCount = 256
-				}
 				// leave a warning if we are stuck for more than 90 seconds
-				if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
-					log.Info("Forward beacon downloader gets stuck for %v seconds", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
-				}
+				//if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
+				//	log.Info("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
+				//}
 				// this is so we do not get stuck on a side-fork
 				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
 				if err != nil {
-					log.Debug("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "count", count)
+					log.Debug("Failed to send beacon blocks by range request", "err", err, "peer", peerId, "slot", reqSlot, "reqCount", reqCount)
 					return
 				}
 				if responses == nil {
