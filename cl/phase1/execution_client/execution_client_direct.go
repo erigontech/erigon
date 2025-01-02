@@ -26,6 +26,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/core/types"
@@ -63,6 +64,10 @@ func (cc *ExecutionClientDirect) NewPayload(
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
+	}
+	// check header hash
+	if header.Hash() != payload.BlockHash {
+		log.Warn("[NewPayload] Header hash mismatch", "header", header.Hash(), "payload", payload.BlockHash, "block_number", payload.BlockNumber)
 	}
 
 	body := payload.Body()
