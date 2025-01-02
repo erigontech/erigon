@@ -636,11 +636,12 @@ type MdbxTx struct {
 }
 
 type MdbxCursor struct {
-	tx         *MdbxTx
+	toCloseMap map[uint64]kv.Closer
 	c          *mdbx.Cursor
 	bucketName string
-	bucketCfg  kv.TableCfgItem
+	isDupSort  bool
 	id         uint64
+	label      kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 }
 
 func (db *MdbxKV) Env() *mdbx.Env { return db.env }
@@ -1105,8 +1106,7 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 }
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
-	b := tx.db.buckets[bucket]
-	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, id: tx.cursorID}
+	c := &MdbxCursor{bucketName: bucket, toCloseMap: tx.toCloseMap, label: tx.db.opts.label, isDupSort: tx.db.buckets[bucket].Flags&mdbx.DupSort != 0, id: tx.cursorID}
 	tx.cursorID++
 
 	if tx.tx == nil {
@@ -1223,7 +1223,7 @@ func (c *MdbxCursor) Delete(k []byte) error {
 		return err
 	}
 
-	if c.bucketCfg.Flags&mdbx.DupSort != 0 {
+	if c.isDupSort {
 		return c.c.Del(mdbx.AllDups)
 	}
 
@@ -1240,7 +1240,7 @@ func (c *MdbxCursor) PutNoOverwrite(k, v []byte) error { return c.c.Put(k, v, md
 
 func (c *MdbxCursor) Put(key []byte, value []byte) error {
 	if err := c.c.Put(key, value, 0); err != nil {
-		return fmt.Errorf("label: %s, table: %s, err: %w", c.tx.db.opts.label, c.bucketName, err)
+		return fmt.Errorf("label: %s, table: %s, err: %w", c.label, c.bucketName, err)
 	}
 	return nil
 }
@@ -1261,7 +1261,7 @@ func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 // Return error - if provided data will not sorted (or bucket have old records which mess with new in sorting manner).
 func (c *MdbxCursor) Append(k []byte, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.Append); err != nil {
-		return fmt.Errorf("label: %s, bucket: %s, %w", c.tx.db.opts.label, c.bucketName, err)
+		return fmt.Errorf("label: %s, bucket: %s, %w", c.label, c.bucketName, err)
 	}
 	return nil
 }
@@ -1269,10 +1269,10 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 func (c *MdbxCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
-		b := len(c.tx.toCloseMap)
-		delete(c.tx.toCloseMap, c.id)
-		if c.tx.db.opts.label == kv.ChainDB {
-			fmt.Printf("[dbg] a %d, %d, %d\n", b, len(c.tx.toCloseMap), c.id)
+		b := len(c.toCloseMap)
+		delete(c.toCloseMap, c.id)
+		if c.label == kv.ChainDB {
+			fmt.Printf("[dbg] a %d, %d, %d\n", b, len(c.toCloseMap), c.id)
 		}
 		c.c = nil
 	}
@@ -1388,21 +1388,21 @@ func (c *MdbxDupSortCursor) LastDup() ([]byte, error) {
 
 func (c *MdbxDupSortCursor) Append(k []byte, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.Append|mdbx.AppendDup); err != nil {
-		return fmt.Errorf("label: %s, in Append: bucket=%s, %w", c.tx.db.opts.label, c.bucketName, err)
+		return fmt.Errorf("label: %s, in Append: bucket=%s, %w", c.label, c.bucketName, err)
 	}
 	return nil
 }
 
 func (c *MdbxDupSortCursor) AppendDup(k []byte, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.AppendDup); err != nil {
-		return fmt.Errorf("label: %s, in AppendDup: bucket=%s, %w", c.tx.db.opts.label, c.bucketName, err)
+		return fmt.Errorf("label: %s, in AppendDup: bucket=%s, %w", c.label, c.bucketName, err)
 	}
 	return nil
 }
 
 func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
 	if err := c.c.Put(k, v, mdbx.NoDupData); err != nil {
-		return fmt.Errorf("label: %s, in PutNoDupData: %w", c.tx.db.opts.label, err)
+		return fmt.Errorf("label: %s, in PutNoDupData: %w", c.label, err)
 	}
 
 	return nil
@@ -1411,7 +1411,7 @@ func (c *MdbxDupSortCursor) PutNoDupData(k, v []byte) error {
 // DeleteCurrentDuplicates - delete all of the data items for the current key.
 func (c *MdbxDupSortCursor) DeleteCurrentDuplicates() error {
 	if err := c.c.Del(mdbx.AllDups); err != nil {
-		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.tx.db.opts.label, err)
+		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.label, err)
 	}
 	return nil
 }
