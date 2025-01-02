@@ -67,6 +67,22 @@ func txDeferRollback(m dsl.Matcher) {
 			`)
 }
 
+func cursorDeferClose(m dsl.Matcher) {
+	m.Match(
+		`$c, $err = $db.Cursor($table); $chk; $close`,
+		`$c, $err := $db.Cursor($table); $chk; $close`,
+		`$c, $err = $db.RwCursor($table); $chk; $close`,
+		`$c, $err := $db.RwCursor($table); $chk; $close`,
+		`$c, $err = $db.CursorDupSort($table); $chk; $close`,
+		`$c, $err := $db.CursorDupSort($table); $chk; $close`,
+		`$c, $err = $db.RwCursorDupSort($table); $chk; $close`,
+		`$c, $err := $db.RwCursorDupSort($table); $chk; $close`,
+	).
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		//At(m["rollback"]).
+		Report(`Add "defer $cursor.Close()" right after cursor creation error check`)
+}
+
 func closeCollector(m dsl.Matcher) {
 	m.Match(`$c := etl.NewCollector($*_); $close`).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
