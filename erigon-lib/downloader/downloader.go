@@ -2880,6 +2880,10 @@ func (d *Downloader) logProgress() {
 	rate := d.stats.DownloadRate
 	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
 
+	if d.stats.CompletionRate > d.stats.DownloadRate {
+		status = "Verifying"
+	}
+
 	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
 		status = "Verifying"
 		percentDone = float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
@@ -2897,7 +2901,6 @@ func (d *Downloader) logProgress() {
 	if !d.stats.Completed {
 		log.Info(fmt.Sprintf("[%s] %s", prefix, status),
 			"progress", fmt.Sprintf("(%d/%d files) %.2f%% - %s/%s", d.stats.MetadataReady, d.stats.FilesTotal, percentDone, common.ByteCount(bytesDone), common.ByteCount(d.stats.BytesTotal)),
-			"rate", fmt.Sprintf("%s/s", common.ByteCount(rate)),
 			"time-left", timeLeft,
 			"total-time", time.Since(d.startTime).Round(time.Second).String(),
 			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.DownloadRate)),
