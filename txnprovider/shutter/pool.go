@@ -58,10 +58,10 @@ func (p Pool) Run(ctx context.Context) error {
 	})
 	defer unregisterDkpObserver()
 
-	runner := errgroup.Group{}
-	runner.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
-	runner.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
-	return runner.Wait()
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
+	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
+	return eg.Wait()
 }
 
 func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
