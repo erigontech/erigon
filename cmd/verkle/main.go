@@ -324,6 +324,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 	if err != nil {
 		return err
 	}
+	defer stateCursor.Close()
 	num, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err

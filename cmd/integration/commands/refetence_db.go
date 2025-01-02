@@ -271,6 +271,7 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 	if err != nil {
 		return err
 	}
+	defer refC.Close()
 	refK, refV, revErr := refC.First()
 	if revErr != nil {
 		return revErr

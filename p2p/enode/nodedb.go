@@ -141,6 +141,7 @@ func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, 
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		_, v, errGet := c.SeekExact([]byte(dbVersionKey))
 		if errGet != nil {
 			return errGet
@@ -381,6 +382,7 @@ func deleteRangeInBucket(tx kv.RwTx, prefix []byte, bucket string) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	var k []byte
 	for k, _, err = c.Seek(prefix); (err == nil) && (k != nil) && bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
 		if err = c.DeleteCurrent(); err != nil {
@@ -431,6 +433,7 @@ func (db *DB) expireNodes() {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		p := []byte(dbNodePrefix)
 		var prevId ID
 		var empty = true
