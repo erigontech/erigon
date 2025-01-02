@@ -1123,6 +1123,9 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 		tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
 	tx.toCloseMap[c.id] = c
+	if len(tx.toCloseMap) > 200 {
+		log.Warn("[dbg] toCloseMap of cursors", "label", tx.db.opts.label, "l", len(tx.toCloseMap), "stack", dbg.Stack())
+	}
 	return c, nil
 }
 
