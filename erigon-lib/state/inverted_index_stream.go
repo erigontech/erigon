@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/bitmapdb"
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/kv/stream"
-	"github.com/erigontech/erigon-lib/recsplit/eliasfano32"
 	"github.com/erigontech/erigon-lib/recsplit/multiencseq"
 )
 
@@ -337,7 +336,7 @@ func (it *InvertedIterator1) advanceInFiles() {
 			heap.Push(&it.h, top)
 		}
 		if !bytes.Equal(key, it.key) {
-			ef, _ := eliasfano32.ReadEliasFano(val)
+			ef := multiencseq.ReadMultiEncSeq(top.startTxNum, val)
 			_min := ef.Get(0)
 			_max := ef.Max()
 			if _min < it.endTxNum && _max >= it.startTxNum { // Intersection of [min; max) and [it.startTxNum; it.endTxNum)
