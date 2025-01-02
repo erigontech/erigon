@@ -957,7 +957,7 @@ func (tx *MdbxTx) statelessCursor(bucket string) (kv.RwCursor, error) {
 	c, ok := tx.statelessCursors[bucket]
 	if !ok {
 		var err error
-		c, err = tx.RwCursor(bucket)
+		c, err = tx.RwCursor(bucket) //nolint:gocritic
 		if err != nil {
 			return nil, err
 		}
