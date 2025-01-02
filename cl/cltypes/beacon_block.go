@@ -552,9 +552,9 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
 				log.Warn("Error encoding deposits", "err", err)
 				return nil
 			}
-			/*if len(ssz) == 0 {
+			if len(ssz) == 0 {
 				continue
-			}*/
+			}
 			// type + ssz
 			// ret = append(ret, append(hexutility.Bytes{requestType}, ssz...))
 			// in Mekong, we don't need to add type
