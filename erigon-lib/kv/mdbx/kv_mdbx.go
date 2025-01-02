@@ -1123,9 +1123,6 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 		tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
 	tx.toCloseMap[c.id] = c
-	if len(tx.toCloseMap) > 300 {
-		log.Warn("[dbg] toCloseMap of cursors", "label", tx.db.opts.label, "l", len(tx.toCloseMap), "stack", dbg.Stack())
-	}
 	return c, nil
 }
 
@@ -1269,11 +1266,7 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 func (c *MdbxCursor) Close() {
 	if c.c != nil {
 		c.c.Close()
-		b := len(c.toCloseMap)
 		delete(c.toCloseMap, c.id)
-		if c.label == kv.ChainDB && b > 200 {
-			fmt.Printf("[dbg] a %d, %d, %d\n", b, len(c.toCloseMap), c.id)
-		}
 		c.c = nil
 	}
 }
