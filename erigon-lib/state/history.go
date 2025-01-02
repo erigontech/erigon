@@ -1221,7 +1221,7 @@ func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if ht.valsC != nil {
 		return ht.valsC, nil
 	}
-	ht.valsC, err = tx.Cursor(ht.h.valuesTable)
+	ht.valsC, err = tx.Cursor(ht.h.valuesTable) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
@@ -1231,7 +1231,7 @@ func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	if ht.valsCDup != nil {
 		return ht.valsCDup, nil
 	}
-	ht.valsCDup, err = tx.CursorDupSort(ht.h.valuesTable)
+	ht.valsCDup, err = tx.CursorDupSort(ht.h.valuesTable) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}

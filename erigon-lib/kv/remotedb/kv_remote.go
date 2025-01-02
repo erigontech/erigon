@@ -262,7 +262,7 @@ func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {
 	c, ok := tx.statelessCursors[bucket]
 	if !ok {
 		var err error
-		c, err = tx.Cursor(bucket)
+		c, err = tx.Cursor(bucket) // nolint:gocritic
 		if err != nil {
 			return nil, err
 		}
@@ -282,6 +282,7 @@ func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte)
 	if err != nil {
 		return err
 	}
+	defer it.Close()
 	for it.HasNext() {
 		k, v, err := it.Next()
 		if err != nil {
@@ -689,9 +690,9 @@ func (tx *tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 func (tx *tx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return tx.Range(table, prefix, nil, order.Asc, kv.Unlim)
+		return tx.Range(table, prefix, nil, order.Asc, kv.Unlim) //nolint:gocritic
 	}
-	return tx.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
+	return tx.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim) //nolint:gocritic
 }
 
 func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
