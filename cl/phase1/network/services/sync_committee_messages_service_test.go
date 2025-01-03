@@ -43,16 +43,15 @@ func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (Sync
 	return s, syncedDataManager, ethClock
 }
 
-func getObjectsForSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (*state.CachingBeaconState, *cltypes.SyncCommitteeMessageWithGossipData) {
+func getObjectsForSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (*state.CachingBeaconState, *SyncCommitteeMessageForGossip) {
 	_, _, state := tests.GetBellatrixRandom()
 	br, _ := state.BlockRoot()
-	msg := &cltypes.SyncCommitteeMessageWithGossipData{
+	msg := &SyncCommitteeMessageForGossip{
 		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
 			Slot:            state.Slot(),
 			BeaconBlockRoot: br,
 			ValidatorIndex:  0,
 		},
-		GossipData:            nil,
 		ImmediateVerification: true,
 	}
 	return state, msg
