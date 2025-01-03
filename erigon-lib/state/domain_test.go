@@ -135,7 +135,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	ctx := context.Background()
 
 	if compressDomainVals {
-		d.compression = seg.CompressKeys | seg.CompressVals
+		d.Compression = seg.CompressKeys | seg.CompressVals
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -206,7 +206,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.compression)
+		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -1122,7 +1122,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer sf.CleanupOnError()
 	c.Close()
 
-	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.compression)
+	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
 	g.Reset(0)
 	var words []string
 	for g.HasNext() {
@@ -1459,7 +1459,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1529,7 +1529,7 @@ func TestDomainRange(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileAccountDomain
 
 	dc := d.BeginFilesRo()
@@ -1624,7 +1624,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1720,7 +1720,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1863,7 +1863,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -2479,7 +2479,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		lastFile := findFile(st, en)
 		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
 
-		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.compression)
+		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.Compression)
 
 		shortenedKey, found := dc.findShortenedKey([]byte(key), lf, lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())

@@ -142,8 +142,8 @@ var Schema = map[kv.Domain]domainCfg{
 
 		IndexList:            AccessorBTree | AccessorExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
-		compression:          seg.CompressNone,
-		compressCfg:          DomainCompressCfg,
+		Compression:          seg.CompressNone,
+		CompressCfg:          DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblAccountHistoryVals,
@@ -163,8 +163,8 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 
 		IndexList:   AccessorBTree | AccessorExistence,
-		compression: seg.CompressKeys,
-		compressCfg: DomainCompressCfg,
+		Compression: seg.CompressKeys,
+		CompressCfg: DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblStorageHistoryVals,
@@ -184,8 +184,8 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 
 		IndexList:   AccessorBTree | AccessorExistence,
-		compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
-		compressCfg: DomainCompressCfg,
+		Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
+		CompressCfg: DomainCompressCfg,
 		largeValues: true,
 
 		hist: histCfg{
@@ -206,8 +206,8 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 
 		IndexList:   AccessorHashMap,
-		compression: seg.CompressKeys,
-		compressCfg: DomainCompressCfg,
+		Compression: seg.CompressKeys,
+		CompressCfg: DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblCommitmentHistoryVals,
@@ -228,8 +228,8 @@ var Schema = map[kv.Domain]domainCfg{
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 
 		IndexList:   AccessorBTree | AccessorExistence,
-		compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		compressCfg: DomainCompressCfg,
+		Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+		CompressCfg: DomainCompressCfg,
 
 		hist: histCfg{
 			valuesTable: kv.TblReceiptHistoryVals,
@@ -473,7 +473,7 @@ func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers
 func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
-		d.compressCfg.Workers = i
+		d.CompressCfg.Workers = i
 		d.History.compressorCfg.Workers = i
 		d.History.InvertedIndex.compressorCfg.Workers = i
 	}
@@ -663,7 +663,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
-	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
+	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
@@ -849,7 +849,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 }
 
 func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
-	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
+	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()

@@ -75,8 +75,8 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 		panic("please use SqueezeCommitmentFiles func")
 	}
 
-	compression := a.d[domain].compression
-	compressCfg := a.d[domain].compressCfg
+	compression := a.d[domain].Compression
+	compressCfg := a.d[domain].CompressCfg
 
 	a.logger.Info("[sqeeze] file", "f", to, "cfg", compressCfg, "c", compression)
 	decompressor, err := seg.NewDecompressor(from)
@@ -200,24 +200,24 @@ func (ac *AggregatorRoTx) SqueezeCommitmentFiles() error {
 
 		err = func() error {
 			steps := cf.endTxNum/ac.a.aggregationStep - cf.startTxNum/ac.a.aggregationStep
-			compression := commitment.d.compression
+			compression := commitment.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
 			}
 			ac.a.logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
-				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.compressCfg, "compress", compression)
+				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			squeezedTmpPath := originalPath + sqExt + ".tmp"
 
 			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, ac.a.dirs.Tmp,
-				commitment.d.compressCfg, log.LvlInfo, commitment.d.logger)
+				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
 			if err != nil {
 				return err
 			}
 			defer squeezedCompr.Close()
 
-			writer := seg.NewWriter(squeezedCompr, commitment.d.compression)
+			writer := seg.NewWriter(squeezedCompr, commitment.d.Compression)
 			reader := seg.NewReader(cf.decompressor.MakeGetter(), compression)
 			reader.Reset(0)
 
