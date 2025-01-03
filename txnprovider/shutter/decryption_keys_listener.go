@@ -157,7 +157,7 @@ func (dkl DecryptionKeysListener) initGossipSub(ctx context.Context, host host.H
 		// possible if the AcceptPXThreshold peer-score is reached.
 
 		// NOTE: we have yet to determine a value that is
-		// sufficient to reach the AcceptPXThreshold most of the times,
+		// sufficient to reach the AcceptPXThreshold most of the time,
 		// but don't overshoot and trust the bootstrap peers
 		// unconditionally - they should still be punishable
 		// for malicous behavior
