@@ -51,18 +51,17 @@ const (
 // It supports both HTTP and WebSocket connections, batch processing,
 // and method filtering through an allow list.
 type Server struct {
-	services        serviceRegistry    // Registry of services and their callbacks
-	methodAllowList AllowList         // List of allowed RPC methods
-	idgen           func() ID         // Request ID generator
-	run             int32             // Server status indicator (0 = stopped, 1 = running)
-	codecs          mapset.Set        // Set of active connections
-
-	batchConcurrency    uint          // Number of batch requests that can be processed concurrently
-	disableStreaming    bool          // Whether to disable streaming responses
-	traceRequests       bool          // Whether to print requests at INFO level
-	debugSingleRequest  bool          // Whether to print single requests at INFO level
-	batchLimit          int           // Maximum number of requests in a batch
-	logger              log.Logger    // Logger instance for server operations
+	services          serviceRegistry  // Registry of services and their callbacks
+	methodAllowList   AllowList       // List of allowed RPC methods
+	idgen             func() ID       // Request ID generator
+	run               int32           // Server status indicator (0 = stopped, 1 = running)
+	codecs            mapset.Set      // Set of active connections
+	batchConcurrency  uint            // Number of batch requests that can be processed concurrently
+	disableStreaming  bool            // Whether to disable streaming responses
+	traceRequests     bool            // Whether to print requests at INFO level
+	debugSingleRequest bool           // Whether to print single requests at INFO level
+	batchLimit        int             // Maximum number of requests in a batch
+	logger            log.Logger      // Logger instance for server operations
 	rpcSlowLogThreshold time.Duration // Threshold for logging slow RPC calls
 }
 
