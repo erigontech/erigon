@@ -1211,7 +1211,7 @@ func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, dat
 		Salt:       d.salt,
 		NoFsync:    d.noFsync,
 	}
-	return buildAccessor(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
+	return buildMapAccessor(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
 }
 
 func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
@@ -1299,7 +1299,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
+func buildMapAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
@@ -1310,9 +1310,17 @@ func buildAccessor(ctx context.Context, d *seg.Decompressor, compressed seg.File
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%s %s: %s", fileName, rec, dbg.Stack())
+		}
+	}()
+
+	//allow disable compression in future:
+	compressed = seg.DetectCompressType(d.MakeGetter())
+
 	g := seg.NewReader(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
-	var err error
 	cfg.KeyCount = count
 	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
@@ -1613,10 +1621,18 @@ func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
 	}
 	r := dt.getters[i]
 	if r == nil {
-		r = seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
+		r = dt.newReader(dt.files[i].src.decompressor.MakeGetter())
 		dt.getters[i] = r
 	}
 	return r
+}
+
+func (dt *DomainRoTx) newReader(getter *seg.Getter) *seg.Reader {
+	compression := dt.d.compression
+	if dt.name == kv.CommitmentDomain { // alow disable compression in future
+		compression = seg.DetectCompressType(getter)
+	}
+	return seg.NewReader(getter, compression)
 }
 
 func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {

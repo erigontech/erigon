@@ -255,7 +255,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if _, ok := accountFileMap[f.startTxNum]; !ok {
 				accountFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
 			}
-			accountFileMap[f.startTxNum][f.endTxNum] = seg.NewReader(f.decompressor.MakeGetter(), accounts.d.compression)
+			accountFileMap[f.startTxNum][f.endTxNum] = accounts.newReader(f.decompressor.MakeGetter())
 		}
 	}
 	storageFileMap := make(map[uint64]map[uint64]*seg.Reader)
@@ -264,12 +264,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if _, ok := storageFileMap[f.startTxNum]; !ok {
 				storageFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
 			}
-			storageFileMap[f.startTxNum][f.endTxNum] = seg.NewReader(f.decompressor.MakeGetter(), storage.d.compression)
+			storageFileMap[f.startTxNum][f.endTxNum] = storage.newReader(f.decompressor.MakeGetter())
 		}
 	}
 
-	ms := seg.NewReader(mergedStorage.decompressor.MakeGetter(), storage.d.compression)
-	ma := seg.NewReader(mergedAccount.decompressor.MakeGetter(), accounts.d.compression)
+	ms := storage.newReader(mergedStorage.decompressor.MakeGetter())
+	ma := accounts.newReader(mergedAccount.decompressor.MakeGetter())
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.aggregationStep), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
@@ -285,7 +285,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
-			sig = seg.NewReader(dirty.decompressor.MakeGetter(), storage.d.compression)
+			sig = storage.newReader(dirty.decompressor.MakeGetter())
 			storageFileMap[keyFromTxNum][keyEndTxNum] = sig
 		}
 
@@ -298,7 +298,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
-			aig = seg.NewReader(dirty.decompressor.MakeGetter(), accounts.d.compression)
+			aig = accounts.newReader(dirty.decompressor.MakeGetter())
 			accountFileMap[keyFromTxNum][keyEndTxNum] = aig
 		}
 
