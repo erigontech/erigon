@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/params"
 )
 
+const ProtocolVersion = "/shutter/0.1.0"
 const DecryptionKeysTopic = "decryptionKeys"
 
 type DecryptionKeysListener struct {
@@ -99,7 +100,7 @@ func (dkl DecryptionKeysListener) initHost() (host.Host, error) {
 	return libp2p.New(
 		libp2p.ListenAddrs(listenAddr),
 		libp2p.UserAgent(fmt.Sprintf("erigon/shutter/%s", params.VersionWithCommit(params.GitCommit))),
-		libp2p.ProtocolVersion("/shutter/0.1.0"),
+		libp2p.ProtocolVersion(ProtocolVersion),
 	)
 }
 
