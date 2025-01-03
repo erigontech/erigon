@@ -397,9 +397,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 	}
 	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
-	if err := stateSnapshots.OpenFolder(); err != nil {
-		return err
-	}
+
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, states, backfilling, blobBackfilling, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
