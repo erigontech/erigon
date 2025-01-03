@@ -148,7 +148,7 @@ func (f *ForkChoiceStore) ProcessBlockConsensus(ctx context.Context, block *clty
 		return fmt.Errorf("ProcessBlockConsensus: replay block, status %+v", err)
 	}
 	if time.Since(start) > 1*time.Millisecond {
-		log.Debug("OnBlock", "elapsed", time.Since(start))
+		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
 	return nil
 }
@@ -345,7 +345,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.validatorMonitor.OnNewBlock(lastProcessedState, block.Block)
 	}
 	if !isVerifiedExecutionPayload {
-		log.Debug("OnBlock", "elapsed", time.Since(start))
+		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
 	return nil
 }

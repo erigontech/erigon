@@ -56,8 +56,11 @@ var (
 	BeaconBlocksByRootProtocolV2 = ProtocolPrefix + BeaconBlocksByRootTopic + Schema2 + EncodingProtocol
 
 	BlobSidecarByRootProtocolV1 = ProtocolPrefix + BlobSidecarByRootTopic + Schema1 + EncodingProtocol
+	BlobSidecarByRootProtocolV2 = ProtocolPrefix + BlobSidecarByRootTopic + Schema2 + EncodingProtocol
 
-	BlobSidecarByRangeProtocolV1          = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
+	BlobSidecarByRangeProtocolV1 = ProtocolPrefix + BlobSidecarByRangeTopic + Schema1 + EncodingProtocol
+	BlobSidecarByRangeProtocolV2 = ProtocolPrefix + BlobSidecarByRangeTopic + Schema2 + EncodingProtocol
+
 	LightClientOptimisticUpdateProtocolV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
 	LightClientFinalityUpdateProtocolV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol
 	LightClientBootstrapProtocolV1        = ProtocolPrefix + LightClientBootstrapTopic + Schema1 + EncodingProtocol
