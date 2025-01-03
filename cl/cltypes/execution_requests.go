@@ -87,9 +87,6 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 func ComputeExecutionRequestHash(executionRequests []hexutility.Bytes) common.Hash {
 	requests := make(types.FlatRequests, len(types.KnownRequestTypes))
 	for i, r := range types.KnownRequestTypes {
-		if len(executionRequests) == i {
-			executionRequests = append(executionRequests, []byte{})
-		}
 		requests[i] = types.FlatRequest{Type: r, RequestData: executionRequests[i]}
 	}
 	rh := requests.Hash()
