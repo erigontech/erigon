@@ -17,8 +17,10 @@ import (
 	"github.com/erigontech/erigon/params"
 )
 
-const ProtocolVersion = "/shutter/0.1.0"
-const DecryptionKeysTopic = "decryptionKeys"
+const (
+	ProtocolVersion     = "/shutter/0.1.0"
+	DecryptionKeysTopic = "decryptionKeys"
+)
 
 type DecryptionKeysListener struct {
 	logger    log.Logger
