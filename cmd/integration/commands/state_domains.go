@@ -441,16 +441,14 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 			kveiFile := strings.ReplaceAll(fileName, ".kv", ".kvei")
 			btFile := strings.ReplaceAll(fileName, ".kv", ".bt")
 			kviFile := strings.ReplaceAll(fileName, ".kv", ".kvi")
-			if err := removeMany(
+			removeManyIgnoreError(
 				filepath.Join(dirs.SnapDomain, btFile),
 				filepath.Join(dirs.SnapDomain, btFile+".torrent"),
 				filepath.Join(dirs.SnapDomain, kveiFile),
 				filepath.Join(dirs.SnapDomain, kveiFile+".torrent"),
 				filepath.Join(dirs.SnapDomain, kviFile),
 				filepath.Join(dirs.SnapDomain, kviFile+".torrent"),
-			); err != nil {
-				return err
-			}
+			)
 			fmt.Printf("Removed the files %s and %s\n", kveiFile, btFile)
 		}
 	}
@@ -527,4 +525,8 @@ func removeMany(filePaths ...string) error {
 		}
 	}
 	return nil
+}
+
+func removeManyIgnoreError(filePaths ...string) {
+	removeMany(filePaths...)
 }
