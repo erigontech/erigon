@@ -26,10 +26,10 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 type ServiceConfig struct {
@@ -222,7 +222,7 @@ func (s *Service) Producers(ctx context.Context, blockNum uint64) (*valset.Valid
 	return s.reader.Producers(ctx, blockNum)
 }
 
-func (s *Service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+func (s *Service) RegisterMilestoneObserver(callback func(*Milestone), opts ...ObserverOption) event.UnregisterFunc {
 	options := NewObserverOptions(opts...)
 	return s.milestoneScraper.RegisterObserver(func(entities []*Milestone) {
 		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
@@ -231,7 +231,7 @@ func (s *Service) RegisterMilestoneObserver(callback func(*Milestone), opts ...O
 	})
 }
 
-func (s *Service) RegisterCheckpointObserver(callback func(*Checkpoint), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+func (s *Service) RegisterCheckpointObserver(callback func(*Checkpoint), opts ...ObserverOption) event.UnregisterFunc {
 	options := NewObserverOptions(opts...)
 	return s.checkpointScraper.RegisterObserver(func(entities []*Checkpoint) {
 		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {
@@ -240,7 +240,7 @@ func (s *Service) RegisterCheckpointObserver(callback func(*Checkpoint), opts ..
 	})
 }
 
-func (s *Service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) polygoncommon.UnregisterFunc {
+func (s *Service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOption) event.UnregisterFunc {
 	options := NewObserverOptions(opts...)
 	return s.spanScraper.RegisterObserver(func(entities []*Span) {
 		for _, entity := range libcommon.SliceTakeLast(entities, options.eventsLimit) {

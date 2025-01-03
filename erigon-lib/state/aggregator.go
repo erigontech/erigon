@@ -131,7 +131,7 @@ var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
 func init() {
 	if dbgCommBtIndex {
 		cfg := Schema[kv.CommitmentDomain]
-		cfg.indexList = withBTree | withExistence
+		cfg.IndexList = AccessorBTree | AccessorExistence
 		Schema[kv.CommitmentDomain] = cfg
 	}
 }
@@ -140,7 +140,7 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.AccountsDomain: {
 		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
 
-		indexList:            withBTree | withExistence,
+		IndexList:            AccessorBTree | AccessorExistence,
 		crossDomainIntegrity: domainIntegrityCheck,
 		Compression:          seg.CompressNone,
 		CompressCfg:          DomainCompressCfg,
@@ -162,7 +162,7 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.StorageDomain: {
 		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
 
-		indexList:   withBTree | withExistence,
+		IndexList:   AccessorBTree | AccessorExistence,
 		Compression: seg.CompressKeys,
 		CompressCfg: DomainCompressCfg,
 
@@ -183,7 +183,7 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.CodeDomain: {
 		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
 
-		indexList:   withBTree | withExistence,
+		IndexList:   AccessorBTree | AccessorExistence,
 		Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
 		CompressCfg: DomainCompressCfg,
 		largeValues: true,
@@ -205,7 +205,7 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.CommitmentDomain: {
 		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
 
-		indexList:   withHashMap,
+		IndexList:   AccessorHashMap,
 		Compression: seg.CompressKeys,
 		CompressCfg: DomainCompressCfg,
 
@@ -227,7 +227,7 @@ var Schema = map[kv.Domain]domainCfg{
 	kv.ReceiptDomain: {
 		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
 
-		indexList:   withBTree | withExistence,
+		IndexList:   AccessorBTree | AccessorExistence,
 		Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 		CompressCfg: DomainCompressCfg,
 

@@ -331,7 +331,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, agg, logger); err != nil {
-		return err
+		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
 
 	if temporal, ok := tx.(*temporal.Tx); ok {

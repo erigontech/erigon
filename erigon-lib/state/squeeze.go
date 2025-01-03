@@ -57,14 +57,9 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 			strings.ReplaceAll(to, ".kv", ".bt"),
 			strings.ReplaceAll(to, ".kv", ".bt.torrent"),
 			strings.ReplaceAll(to, ".kv", ".kvei"),
-			strings.ReplaceAll(to, ".kv", ".kvei.torrent"))
-
-		// _ = os.Remove(tempFileCopy)
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei.torrent"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
+			strings.ReplaceAll(to, ".kv", ".kvei.torrent"),
+			strings.ReplaceAll(to, ".kv", ".kvi"),
+			strings.ReplaceAll(to, ".kv", ".kvi.torrent"))
 	}
 
 	for _, f := range filesToRemove {
