@@ -94,6 +94,10 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 }
 
 func (dkl DecryptionKeysListener) initHost() (host.Host, error) {
+	//
+	// TODO: do we need to create a shutter identity file? we can pass a config.Datadir attribute and store it in datadir/shutter/
+	//
+
 	listenAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", dkl.config.ListenPort))
 	if err != nil {
 		return nil, err
