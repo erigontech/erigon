@@ -47,24 +47,33 @@ const (
 	OptionSubscriptions = 1 << iota // support pub sub
 )
 
-// Server is an RPC server.
+// Server is an RPC server that handles JSON-RPC requests.
+// It supports both HTTP and WebSocket connections, batch processing,
+// and method filtering through an allow list.
 type Server struct {
-	services        serviceRegistry
-	methodAllowList AllowList
-	idgen           func() ID
-	run             int32
-	codecs          mapset.Set // mapset.Set[ServerCodec] requires go 1.20
-
-	batchConcurrency    uint
-	disableStreaming    bool
-	traceRequests       bool // Whether to print requests at INFO level
-	debugSingleRequest  bool // Whether to print requests at INFO level
-	batchLimit          int  // Maximum number of requests in a batch
-	logger              log.Logger
-	rpcSlowLogThreshold time.Duration
+	services          serviceRegistry  // Registry of services and their callbacks
+	methodAllowList   AllowList       // List of allowed RPC methods
+	idgen             func() ID       // Request ID generator
+	run               int32           // Server status indicator (0 = stopped, 1 = running)
+	codecs            mapset.Set      // Set of active connections
+	batchConcurrency  uint            // Number of batch requests that can be processed concurrently
+	disableStreaming  bool            // Whether to disable streaming responses
+	traceRequests     bool            // Whether to print requests at INFO level
+	debugSingleRequest bool           // Whether to print single requests at INFO level
+	batchLimit        int             // Maximum number of requests in a batch
+	logger            log.Logger      // Logger instance for server operations
+	rpcSlowLogThreshold time.Duration // Threshold for logging slow RPC calls
 }
 
 // NewServer creates a new server instance with no registered handlers.
+// Parameters:
+//   - batchConcurrency: maximum number of goroutines processing batch requests (0 = unlimited)
+//   - traceRequests: enables detailed request tracing in logs
+//   - debugSingleRequest: enables debugging of individual requests
+//   - disableStreaming: when true, disables progressive streaming of large JSON responses (like block traces),
+//                      forcing the server to build complete response before sending
+//   - logger: logger instance for server operations
+//   - rpcSlowLogThreshold: duration after which RPC calls are considered slow and logged
 func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
 	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
@@ -75,12 +84,15 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	return server
 }
 
-// SetAllowList sets the allow list for methods that are handled by this server
+// SetAllowList sets the allow list for methods that are handled by this server.
+// Methods not in the allow list will be rejected with an error.
 func (s *Server) SetAllowList(allowList AllowList) {
 	s.methodAllowList = allowList
 }
 
-// SetBatchLimit sets limit of number of requests in a batch
+// SetBatchLimit sets limit of number of requests in a batch.
+// If the limit is exceeded, the batch request will be rejected.
+// A limit of 0 means no limit.
 func (s *Server) SetBatchLimit(limit int) {
 	s.batchLimit = limit
 }
@@ -178,6 +190,8 @@ func (s *RPCService) Modules() map[string]string {
 }
 
 // PeerInfo contains information about the remote end of the network connection.
+// This structure provides details about the client connection including the transport
+// protocol used (HTTP, WebSocket, IPC) and various HTTP-specific information when applicable.
 //
 // This is available within RPC method handlers through the context. Call
 // PeerInfoFromContext to get information about the client connection related to
