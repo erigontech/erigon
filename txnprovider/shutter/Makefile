@@ -29,6 +29,9 @@ $(GOBINREL)/protoc: $(GOBINREL)
 	cp -R "$(PROTOC_TMP)/include/google/" "$(PROTOC_INCLUDE)"
 	rm -rf "$(PROTOC_TMP)"
 
+$(GOBINREL)/protoc-gen-go: $(GOBINREL)
+	go build -o "$(GOBIN)/protoc-gen-go" google.golang.org/protobuf/cmd/protoc-gen-go
+
 .PHONY: proto
-proto: $(GOBINREL)/protoc
+proto: $(GOBINREL)/protoc $(GOBINREL)/protoc-gen-go
 	PATH="$(GOBIN):$(PATH)" protoc -I=$(PROTO_DIR) --go_out=$(PROTO_DIR) $(PROTO_DIR)/shutter.proto
