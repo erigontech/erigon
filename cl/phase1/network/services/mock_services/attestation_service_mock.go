@@ -21,7 +21,6 @@ import (
 type MockAttestationService struct {
 	ctrl     *gomock.Controller
 	recorder *MockAttestationServiceMockRecorder
-	isgomock struct{}
 }
 
 // MockAttestationServiceMockRecorder is the mock recorder for MockAttestationService.
@@ -42,17 +41,17 @@ func (m *MockAttestationService) EXPECT() *MockAttestationServiceMockRecorder {
 }
 
 // ProcessMessage mocks base method.
-func (m *MockAttestationService) ProcessMessage(ctx context.Context, subnet *uint64, msg *services.AttestationWithGossipData) error {
+func (m *MockAttestationService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *services.AttestationForGossip) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessMessage", ctx, subnet, msg)
+	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // ProcessMessage indicates an expected call of ProcessMessage.
-func (mr *MockAttestationServiceMockRecorder) ProcessMessage(ctx, subnet, msg any) *MockAttestationServiceProcessMessageCall {
+func (mr *MockAttestationServiceMockRecorder) ProcessMessage(arg0, arg1, arg2 any) *MockAttestationServiceProcessMessageCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockAttestationService)(nil).ProcessMessage), ctx, subnet, msg)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessMessage", reflect.TypeOf((*MockAttestationService)(nil).ProcessMessage), arg0, arg1, arg2)
 	return &MockAttestationServiceProcessMessageCall{Call: call}
 }
 
@@ -68,13 +67,13 @@ func (c *MockAttestationServiceProcessMessageCall) Return(arg0 error) *MockAttes
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockAttestationServiceProcessMessageCall) Do(f func(context.Context, *uint64, *services.AttestationWithGossipData) error) *MockAttestationServiceProcessMessageCall {
+func (c *MockAttestationServiceProcessMessageCall) Do(f func(context.Context, *uint64, *services.AttestationForGossip) error) *MockAttestationServiceProcessMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockAttestationServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *services.AttestationWithGossipData) error) *MockAttestationServiceProcessMessageCall {
+func (c *MockAttestationServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *services.AttestationForGossip) error) *MockAttestationServiceProcessMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

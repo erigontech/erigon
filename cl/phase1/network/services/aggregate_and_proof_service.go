@@ -26,6 +26,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -42,8 +43,19 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
+// SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
+// asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
+// will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
+// that's why we are passing sentinel.SentinelClient and *sentinel.GossipData to enable the service
+// to do all of that by itself.
+type SignedAggregateAndProofForGossip struct {
+	SignedAggregateAndProof *cltypes.SignedAggregateAndProof
+	Receiver                *sentinel.Peer
+	ImmediateProcess        bool
+}
+
 type aggregateJob struct {
-	aggregate    *cltypes.SignedAggregateAndProofData
+	aggregate    *SignedAggregateAndProofForGossip
 	creationTime time.Time
 }
 
@@ -96,7 +108,7 @@ func NewAggregateAndProofService(
 func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	ctx context.Context,
 	subnet *uint64,
-	aggregateAndProof *cltypes.SignedAggregateAndProofData,
+	aggregateAndProof *SignedAggregateAndProofForGossip,
 ) error {
 	selectionProof := aggregateAndProof.SignedAggregateAndProof.Message.SelectionProof
 	aggregateData := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data
@@ -232,7 +244,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
-	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
+	aggregateVerificationData.SendingPeer = aggregateAndProof.Receiver
 
 	if aggregateAndProof.ImmediateProcess {
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
@@ -361,7 +373,7 @@ func AggregateMessageSignature(
 }
 
 func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
-	aggregateAndProof *cltypes.SignedAggregateAndProofData,
+	aggregateAndProof *SignedAggregateAndProofForGossip,
 ) {
 	key, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
 	if err != nil {

@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon-lib/types/ssz"
 
@@ -127,13 +126,6 @@ func (e *VoluntaryExit) HashSSZ() ([32]byte, error) {
 
 func (*VoluntaryExit) EncodingSizeSSZ() int {
 	return 16
-}
-
-// SignedVoluntaryExitWithGossipData type represents SignedVoluntaryExit with the gossip data where it's coming from.
-type SignedVoluntaryExitWithGossipData struct {
-	SignedVoluntaryExit   *SignedVoluntaryExit
-	GossipData            *sentinel.GossipData
-	ImmediateVerification bool
 }
 
 type SignedVoluntaryExit struct {
