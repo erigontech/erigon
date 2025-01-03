@@ -254,7 +254,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
 	}
 	if _, err := block.Block.Body.ExecutionPayload.RlpHeader(&block.Block.ParentRoot, requestsHash); err != nil {
-		log.Debug("OnBlock: invalid rlp block header", "block", libcommon.Hash(blockRoot), "err", err, "slot", block.Block.Slot)
+		log.Debug("OnBlock: invalid rlp block header", "block", libcommon.Hash(blockRoot), "err", err, "slot", block.Block.Slot, "requestsList", executionRequestsList)
 	}
 
 	log.Debug("[OnBlock] Added chain segment", "status", status.String(), "blockSlot", block.Block.Slot)
