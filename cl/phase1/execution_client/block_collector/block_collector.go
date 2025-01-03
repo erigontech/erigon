@@ -59,7 +59,7 @@ type blockCollector struct {
 // NewBlockCollector creates a new block collector
 func NewBlockCollector(logger log.Logger, engine execution_client.ExecutionEngine, beaconChainCfg *clparams.BeaconChainConfig, syncBackLoopAmount uint64, tmpdir string) BlockCollector {
 	return &blockCollector{
-		collector:      etl.NewCollector(etlPrefix, tmpdir, etl.NewSortableBuffer(datasize.MB), logger),
+		collector:      etl.NewCollector(etlPrefix, tmpdir, etl.NewSortableBuffer(32*datasize.MB), logger),
 		tmpdir:         tmpdir,
 		beaconChainCfg: beaconChainCfg,
 		logger:         logger,
