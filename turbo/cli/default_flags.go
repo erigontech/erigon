@@ -235,6 +235,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.ChaosMonkeyFlag,
 
 	&utils.ShutterEnabledFlag,
-	&utils.ShutterP2PBootnodesFlag,
-	&utils.ShutterP2PListenPortFlag,
+	&utils.ShutterP2pBootstrapNodesFlag,
+	&utils.ShutterP2pListenPortFlag,
 }

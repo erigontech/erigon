@@ -1090,13 +1090,13 @@ var (
 		Name:  "shutter",
 		Usage: "Enable the Shutter encrypted transactions mempool (defaults to false)",
 	}
-	ShutterP2PBootnodesFlag = cli.StringSliceFlag{
-		Name:  "shutter.p2p.bootnodes",
-		Usage: "Use to override the default p2p bootnodes (defaults to using the bootnodes from the embedded config)",
+	ShutterP2pBootstrapNodesFlag = cli.StringSliceFlag{
+		Name:  "shutter.p2p.bootstrap.nodes",
+		Usage: "Use to override the default p2p bootstrap nodes (defaults to using the values in the embedded config)",
 	}
-	ShutterP2PListenPortFlag = cli.UintFlag{
+	ShutterP2pListenPortFlag = cli.UintFlag{
 		Name:  "shutter.p2p.listen.port",
-		Usage: "Use to override the default p2p listen port (defaults to 23_000)",
+		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
 )
 
@@ -1588,11 +1588,11 @@ func setShutter(ctx *cli.Context, chainName string, cfg *ethconfig.Config) {
 
 	config := shutter.ConfigByChainName(chainName)
 	// check for cli overrides
-	if ctx.IsSet(ShutterP2PBootnodesFlag.Name) {
-		config.Bootnodes = ctx.StringSlice(ShutterP2PBootnodesFlag.Name)
+	if ctx.IsSet(ShutterP2pBootstrapNodesFlag.Name) {
+		config.BootstrapNodes = ctx.StringSlice(ShutterP2pBootstrapNodesFlag.Name)
 	}
-	if ctx.IsSet(ShutterP2PListenPortFlag.Name) {
-		config.ListenPort = ctx.Uint64(ShutterP2PListenPortFlag.Name)
+	if ctx.IsSet(ShutterP2pListenPortFlag.Name) {
+		config.ListenPort = ctx.Uint64(ShutterP2pListenPortFlag.Name)
 	}
 
 	cfg.Shutter = config

@@ -40,7 +40,7 @@ type Pool struct {
 func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.TxnProvider) *Pool {
 	logger = logger.New("component", "shutter")
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
-	decryptionKeysListener := NewDecryptionKeysListener(logger)
+	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
@@ -53,7 +53,7 @@ func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.
 func (p Pool) Run(ctx context.Context) error {
 	p.logger.Info("running pool")
 
-	unregisterDkpObserver := p.decryptionKeysListener.Register(func(msg *pubsub.Message) {
+	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *pubsub.Message) {
 		p.decryptionKeysProcessor.Enqueue(msg)
 	})
 	defer unregisterDkpObserver()
