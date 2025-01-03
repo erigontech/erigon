@@ -110,9 +110,6 @@ func TestGetProof(t *testing.T) {
 	var maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 
 	m, bankAddr, contractAddr := chainWithDeployedContract(t)
-	if m.HistoryV3 {
-		t.Skip("not supported by Erigon3")
-	}
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
 
 	key := func(b byte) libcommon.Hash {
