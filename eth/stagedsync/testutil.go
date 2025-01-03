@@ -31,7 +31,7 @@ import (
 const (
 	staticCodeStaticIncarnations         = iota // no incarnation changes, no code changes
 	changeCodeWithIncarnations                  // code changes with incarnation
-	changeCodeIndepenentlyOfIncarnations        // code changes with and without incarnation
+	changeCodeIndependentlyOfIncarnations        // code changes with and without incarnation
 )
 
 type testGenHook func(n, from, numberOfBlocks uint64)
@@ -72,7 +72,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 					}
 				}
 			}
-			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
+			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndependentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
 					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
 					codeHash, _ := libcommon.HashData(code)
