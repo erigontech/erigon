@@ -2176,11 +2176,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	d.lock.Unlock()
 
-	logger.Info("[snapshots] downloading",
-		"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
-		"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
-		"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
-		"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)))
+	/*logger.Info("[snapshots] downloading",
+	"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+	"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+	"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+	"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)))*/
 
 	if !stats.Completed {
 		logger.Debug("[snapshots] downloading",
