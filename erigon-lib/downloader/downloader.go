@@ -2907,22 +2907,18 @@ func (d *Downloader) logProgress() {
 
 	status := "Downloading"
 
-	percentDone := float32(100) * (float32(d.stats.BytesDownload) / float32(d.stats.BytesTotal))
-	bytesDone := d.stats.BytesDownload
-	rate := d.stats.DownloadRate
-	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
+	bytesDone := d.stats.BytesCompleted
+	percentDone := float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
+	rate := d.stats.CompletionRate
+	remainingBytes := d.stats.BytesTotal - d.stats.BytesCompleted
 
 	//if completion rate significantly bigger than download rate - we are verifying
-	if d.stats.CompletionRate > uint64(float64(d.stats.DownloadRate)*1.5) {
+	if d.stats.CompletionRate > d.stats.DownloadRate {
 		status = "Verifying"
 	}
 
 	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
 		status = "Verifying"
-		percentDone = float32(100) * (float32(d.stats.BytesCompleted) / float32(d.stats.BytesTotal))
-		bytesDone = d.stats.BytesCompleted
-		rate = d.stats.CompletionRate
-		remainingBytes = d.stats.BytesTotal - d.stats.BytesCompleted
 	}
 
 	if d.stats.BytesTotal == 0 {
