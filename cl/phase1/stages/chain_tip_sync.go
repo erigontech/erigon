@@ -226,9 +226,11 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// If the execution engine is not ready, wait for it to be ready.
 	ready, err := waitForExecutionEngineToBeFinished(ctx, cfg)
 	if err != nil {
+		log.Warn("[chainTipSync] error waiting for execution engine to be ready", "err", err)
 		return err
 	}
 	if !ready {
+		log.Debug("[chainTipSync] execution engine is not ready yet")
 		return nil
 	}
 
