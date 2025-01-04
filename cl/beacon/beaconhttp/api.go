@@ -99,14 +99,13 @@ func HandleEndpointFunc[T any](h EndpointHandlerFunc[T]) http.HandlerFunc {
 }
 
 func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		ans, err := h.Handle(w, r)
 		if err != nil {
 			var endpointError *EndpointError
-			if e, ok := err.(*EndpointError); ok {
+			var e *EndpointError
+			if errors.As(err, &e) {
 				endpointError = e
-			} else {
-				endpointError = WrapEndpointError(err)
 			}
 			endpointError.WriteTo(w)
 			return
@@ -131,14 +130,14 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				w.WriteHeader(200)
 			}
 		case strings.Contains(contentType, "application/octet-stream"):
-			sszMarshaler, ok := any(ans).(ssz.Marshaler)
+			sizeMarshaller, ok := any(ans).(ssz.Marshaler)
 			if !ok {
 				NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported).WriteTo(w)
 				return
 			}
 			w.Header().Set("Content-Type", "application/octet-stream")
 			// TODO: we should probably figure out some way to stream this in the future :)
-			encoded, err := sszMarshaler.EncodeSSZ(nil)
+			encoded, err := sizeMarshaller.EncodeSSZ(nil)
 			if err != nil {
 				WrapEndpointError(err).WriteTo(w)
 				return
@@ -149,7 +148,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		default:
 			http.Error(w, "content type must include application/json, application/octet-stream, or text/event-stream, got "+contentType, http.StatusBadRequest)
 		}
-	})
+	}
 }
 
 func isNil[T any](t T) bool {
