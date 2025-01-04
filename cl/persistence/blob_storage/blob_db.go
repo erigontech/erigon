@@ -39,7 +39,9 @@ import (
 	"github.com/spf13/afero"
 )
 
-const subdivisionSlot = 10_000
+const (
+	subdivisionSlot = 10_000
+)
 
 type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot libcommon.Hash, blobSidecars []*cltypes.BlobSidecar) error
@@ -160,8 +162,9 @@ func (bs *BlobStore) Prune() error {
 	currentSlot -= bs.slotsKept
 	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
 	var startPrune uint64
-	if currentSlot >= 1_000_000 {
-		startPrune = currentSlot - 1_000_000
+	minSlotsForBlobSidecarRequest := bs.beaconChainConfig.MinSlotsForBlobsSidecarsRequest()
+	if currentSlot >= minSlotsForBlobSidecarRequest {
+		startPrune = currentSlot - minSlotsForBlobSidecarRequest
 	}
 	// delete all the folders that are older than slotsKept
 	for i := startPrune; i < currentSlot; i += subdivisionSlot {
