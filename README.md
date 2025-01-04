@@ -134,7 +134,7 @@ datadir
         domain    # Latest State
         history   # Historical values 
         idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
-        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+        accessor # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
     txpool        # pending transactions. safe to remove.
     nodes         # p2p peers. safe to remove.
     temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
@@ -155,11 +155,11 @@ datadir
         domain    # link to fast disk
         history   
         idx       
-        accessors 
+        accessor 
     temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly   
 
 # Example: how to speedup history access: 
-#   - go step-by-step - first try store `accessors` on fast disk
+#   - go step-by-step - first try store `accessor` on fast disk
 #   - if speed is not good enough: `idx`
 #   - if still not enough: `history` 
 ```
