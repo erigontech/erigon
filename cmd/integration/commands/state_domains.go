@@ -63,7 +63,7 @@ func init() {
 	rootCmd.AddCommand(readDomains)
 
 	withDataDir(purifyDomains)
-	purifyDomains.Flags().StringVar(&purifyDir, "purifiedDomain", "purified-output", "")
+	purifyDomains.Flags().StringVar(&outDatadir, "out", "out-purified", "")
 	purifyDomains.Flags().BoolVar(&purifyOnlyCommitment, "only-commitment", true, "purify only commitment domain")
 	purifyDomains.Flags().BoolVar(&replaceInDatadir, "replace-in-datadir", false, "replace the purified domains directly in datadir (will remove .kvei and .bt too)")
 	purifyDomains.Flags().Float64Var(&minSkipRatioL0, "min-skip-ratio-l0", 0.1, "minimum ratio of keys to skip in L0")
@@ -75,7 +75,7 @@ var (
 	stepSize             uint64
 	lastStep             uint64
 	minSkipRatioL0       float64
-	purifyDir            string
+	outDatadir           string
 	purifyOnlyCommitment bool
 	replaceInDatadir     bool
 )
@@ -359,7 +359,7 @@ func makePurifiedDomains(db kv.RwDB, dirs datadir.Dirs, logger log.Logger, domai
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 	defer tx.Rollback()
-	outD := datadir.New(purifyDir)
+	outD := datadir.New(outDatadir)
 
 	// now start the file indexing
 	for currentLayer, fileName := range filesNamesToPurify {
