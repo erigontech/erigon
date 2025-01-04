@@ -1382,6 +1382,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 	var m runtime.MemStats
 
+	//Init stats
+	d.stats.BytesTotal, d.stats.BytesDownload = d.getCompletionState()
 	//Need to know is completed from previous stats in order to print "Download completed" message
 	prevStatsCompleted := d.stats.Completed
 	for {
@@ -1950,15 +1952,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		downloading[file] = &i
 	}
 
-	webDownloadClient := d.webDownloadClient
-
 	webDownloadInfo := map[string]webDownloadInfo{}
 
 	for key, value := range d.webDownloadInfo {
 		webDownloadInfo[key] = value
 	}
-
-	ctx := d.ctx
 
 	d.lock.RUnlock()
 
@@ -1992,8 +1990,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var dbInfo int
 	var tComplete int
 	var torrentInfo int
-
-	downloadedBytes := int64(0)
 
 	for _, t := range torrents {
 		select {
@@ -2033,7 +2029,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
-		downloadedBytes += bytesCompleted
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
@@ -2087,76 +2082,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = stats.Completed && torrentComplete
 	}
 
-	stats.BytesDownload = uint64(downloadedBytes)
-
 	var webTransfers int32
-
-	if webDownloadClient != nil {
-		webStats, _ := webDownloadClient.Stats(ctx)
-
-		if webStats != nil {
-			if len(webStats.Transferring) != 0 && stats.Completed {
-				stats.Completed = false
-			}
-
-			for _, transfer := range webStats.Transferring {
-				stats.MetadataReady++
-				webTransfers++
-
-				bytesCompleted := transfer.Bytes
-				tLen := transfer.Size
-				transferName := transfer.Name
-
-				delete(downloading, transferName)
-
-				if bytesCompleted > tLen {
-					bytesCompleted = tLen
-				}
-
-				stats.BytesTotal += tLen
-
-				stats.BytesDownload += bytesCompleted
-
-				if transfer.Percentage == 0 {
-					zeroProgress = append(zeroProgress, transferName)
-				}
-
-				var seeds []diagnostics.SegmentPeer
-				var webseedRates []interface{}
-				if peerUrl, err := url.Parse(transfer.Group); err == nil {
-					rate := uint64(transfer.SpeedAvg)
-					seeds = []diagnostics.SegmentPeer{
-						{
-							Url:          peerUrl.Host,
-							DownloadRate: rate,
-						}}
-
-					if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
-						webseedRates = []interface{}{strings.TrimSuffix(shortUrl, "/"), fmt.Sprintf("%s/s", common.ByteCount(rate))}
-					}
-				}
-
-				// more detailed statistic: download rate of each peer (for each file)
-				if transfer.Percentage != 0 {
-					logger.Log(verbosity, "[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
-					logger.Log(verbosity, "[snapshots] web peers", webseedRates...)
-				}
-
-				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-					Name:            transferName,
-					TotalBytes:      tLen,
-					DownloadedBytes: bytesCompleted,
-					Webseeds:        seeds,
-				})
-			}
-		}
-	}
+	d.collectWebDownloadClientStats(&downloading, &stats, &zeroProgress, &webTransfers)
 
 	if len(downloading) > 0 {
-		if webDownloadClient != nil {
-			webTransfers += int32(len(downloading))
-		}
-
 		stats.Completed = false
 	}
 
@@ -2221,13 +2150,90 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 	}
 
+	normalizeRates(&stats, &prevStats, interval)
+
+	if stats.BytesTotal == 0 {
+		stats.Progress = 0
+	} else {
+		stats.Progress = float32(float64(100) * (float64(stats.BytesCompleted) / float64(stats.BytesTotal)))
+		if int(stats.Progress) == 100 && !stats.Completed {
+			stats.Progress = 99.9
+		}
+	}
+
+	stats.PeersUnique = int32(len(peers))
+	stats.FilesTotal = int32(len(torrents)) + webTransfers
+
+	d.lock.Lock()
+	d.stats = stats
+
+	for file, info := range d.downloading {
+		if updated, ok := downloading[file]; ok {
+			info.time = updated.time
+			info.progress = updated.progress
+		}
+	}
+
+	d.lock.Unlock()
+
+	logger.Info("[snapshots] downloading",
+		"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+		"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+		"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+		"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)))
+
+	if !stats.Completed {
+		logger.Debug("[snapshots] downloading",
+			"len", len(torrents),
+			"webTransfers", webTransfers,
+			"torrent", torrentInfo,
+			"db", dbInfo,
+			"t-complete", tComplete,
+			"downloaded", common.ByteCount(stats.BytesDownload),
+			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)),
+			"hashed", common.ByteCount(stats.BytesHashed),
+			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+			"completed", common.ByteCount(stats.BytesCompleted),
+			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
+			"flushed", common.ByteCount(stats.BytesFlushed),
+			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+			"webseed-trips", stats.WebseedTripCount.Load(),
+			"webseed-active", stats.WebseedActiveTrips.Load(),
+			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
+			"webseed-discards", stats.WebseedDiscardCount.Load(),
+			"webseed-fails", stats.WebseedServerFails.Load(),
+			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
+			"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
+	}
+}
+
+func (d *Downloader) getCompletionState() (uint64, uint64) {
+	torrents := d.torrentClient.Torrents()
+
+	bytesTotal := uint64(0)
+	bytesCompleted := uint64(0)
+	for _, t := range torrents {
+		tLen := uint64(t.Length())
+		if t.Complete.Bool() {
+			bytesCompleted += tLen
+		} else {
+			bytesCompleted += uint64(t.BytesCompleted())
+		}
+
+		bytesTotal += tLen
+	}
+
+	return bytesTotal, bytesCompleted
+}
+
+func normalizeRates(stats, prevStats *AggStats, interval time.Duration) {
 	decay := func(prev uint64) uint64 {
 		switch {
 		case prev < 1000:
 			return prev / 16
-		case stats.FlushRate < 10000:
+		case prev < 10000:
 			return prev / 8
-		case stats.FlushRate < 100000:
+		case prev < 100000:
 			return prev / 4
 		default:
 			return prev / 2
@@ -2267,57 +2273,77 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	} else {
 		stats.UploadRate = decay(prevStats.UploadRate)
 	}
+}
 
-	if stats.BytesTotal == 0 {
-		stats.Progress = 0
-	} else {
-		stats.Progress = float32(float64(100) * (float64(stats.BytesCompleted) / float64(stats.BytesTotal)))
-		if int(stats.Progress) == 100 && !stats.Completed {
-			stats.Progress = 99.9
+func (d *Downloader) collectWebDownloadClientStats(downloading *map[string]*downloadInfo, stats *AggStats, zeroProgress *[]string, webTransfers *int32) {
+	if d.webDownloadClient != nil {
+		webDownloadClient := d.webDownloadClient
+		ctx := d.ctx
+		logger := d.logger
+		verbosity := d.verbosity
+
+		var webTransfers int32
+
+		webStats, _ := webDownloadClient.Stats(ctx)
+
+		if webStats != nil {
+			if len(webStats.Transferring) != 0 && stats.Completed {
+				stats.Completed = false
+			}
+
+			for _, transfer := range webStats.Transferring {
+				stats.MetadataReady++
+				webTransfers++
+
+				bytesCompleted := transfer.Bytes
+				tLen := transfer.Size
+				transferName := transfer.Name
+
+				delete(*downloading, transferName)
+
+				if bytesCompleted > tLen {
+					bytesCompleted = tLen
+				}
+
+				stats.BytesTotal += tLen
+
+				stats.BytesCompleted += bytesCompleted
+
+				if transfer.Percentage == 0 {
+					*zeroProgress = append(*zeroProgress, transferName)
+				}
+
+				var seeds []diagnostics.SegmentPeer
+				var webseedRates []interface{}
+				if peerUrl, err := url.Parse(transfer.Group); err == nil {
+					rate := uint64(transfer.SpeedAvg)
+					seeds = []diagnostics.SegmentPeer{
+						{
+							Url:          peerUrl.Host,
+							DownloadRate: rate,
+						}}
+
+					if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
+						webseedRates = []interface{}{strings.TrimSuffix(shortUrl, "/"), fmt.Sprintf("%s/s", common.ByteCount(rate))}
+					}
+				}
+
+				// more detailed statistic: download rate of each peer (for each file)
+				if transfer.Percentage != 0 {
+					logger.Log(verbosity, "[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
+					logger.Log(verbosity, "[snapshots] web peers", webseedRates...)
+				}
+
+				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+					Name:            transferName,
+					TotalBytes:      tLen,
+					DownloadedBytes: bytesCompleted,
+					Webseeds:        seeds,
+				})
+			}
 		}
-	}
 
-	stats.PeersUnique = int32(len(peers))
-	stats.FilesTotal = int32(len(torrents)) + webTransfers
-
-	d.lock.Lock()
-	d.stats = stats
-
-	for file, info := range d.downloading {
-		if updated, ok := downloading[file]; ok {
-			info.time = updated.time
-			info.progress = updated.progress
-		}
-	}
-
-	d.lock.Unlock()
-
-	logger.Info("[snapshots] downloading",
-		"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
-		"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
-		"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
-		"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)))
-
-	if !stats.Completed {
-		logger.Debug("[snapshots] downloading",
-			"len", len(torrents),
-			"webTransfers", webTransfers,
-			"torrent", torrentInfo,
-			"db", dbInfo,
-			"t-complete", tComplete,
-			"hashed", common.ByteCount(stats.BytesHashed),
-			"hash-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
-			"completed", common.ByteCount(stats.BytesCompleted),
-			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
-			"flushed", common.ByteCount(stats.BytesFlushed),
-			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
-			"webseed-trips", stats.WebseedTripCount.Load(),
-			"webseed-active", stats.WebseedActiveTrips.Load(),
-			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
-			"webseed-discards", stats.WebseedDiscardCount.Load(),
-			"webseed-fails", stats.WebseedServerFails.Load(),
-			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
-			"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
+		webTransfers += int32(len(*downloading))
 	}
 }
 
