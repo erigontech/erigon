@@ -528,5 +528,7 @@ func removeMany(filePaths ...string) error {
 }
 
 func removeManyIgnoreError(filePaths ...string) {
-	removeMany(filePaths...)
+	for _, filePath := range filePaths {
+		os.Remove(filePath)
+	}
 }
