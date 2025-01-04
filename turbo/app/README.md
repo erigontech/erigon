@@ -46,7 +46,7 @@ in the rclone config file.
 The **uploader** is configured to minimize disk usage by doing the following:
 
 * It removes snapshots once they are loaded
-* It agressively prunes the database once entities are transferred to snapshots
+* It aggressively prunes the database once entities are transferred to snapshots
 
 in addition to this it has the following performance related features:
 
