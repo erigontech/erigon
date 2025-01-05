@@ -41,8 +41,8 @@ func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
 	if currentEpoch > cfg.beaconCfg.MinEpochsForBlobsSidecarsRequest {
 		minEpochDist = currentEpoch - cfg.beaconCfg.MinEpochsForBlobsSidecarsRequest
 	}
-	finalizedEpoch := currentEpoch - 2
-	if highestEpoch < max(cfg.beaconCfg.DenebForkEpoch, minEpochDist, finalizedEpoch) {
+	//finalizedEpoch := currentEpoch - 2
+	if highestEpoch < max(cfg.beaconCfg.DenebForkEpoch, minEpochDist) {
 		return false
 	}
 
