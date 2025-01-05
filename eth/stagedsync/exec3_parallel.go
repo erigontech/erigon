@@ -145,7 +145,6 @@ func (result *execResult) finalize(prev *types.Receipt, engine consensus.Engine,
 	versionedReader := state.NewVersionedStateReader(result.TxIn)
 	ibs := state.New(versionedReader)
 	ibs.SetTxContext(txIndex)
-	fmt.Println("TXO", len(result.TxOut))
 	ibs.ApplyVersionedWrites(result.TxOut)
 	versionedReader.SetStateReader(stateReader)
 
@@ -350,13 +349,13 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 		if err != nil {
 			panic(err)
 		}
-	}
-
-	if err := te.cfg.db.View(ctx, func(tx kv.Tx) (err error) {
-		h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
-		return err
-	}); err != nil {
-		panic(err)
+	} else {
+		if err := te.cfg.db.View(ctx, func(tx kv.Tx) (err error) {
+			h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
+			return err
+		}); err != nil {
+			panic(err)
+		}
 	}
 
 	return h
@@ -655,7 +654,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 						pe.doms.SetBlockNum(applyResult.BlockNum)
 						lastBlockNum = applyResult.BlockNum
 						lastTxNum = applyResult.lastTxNum
-						fmt.Println("BC", applyResult.BlockNum) //Temp
+						//Temp
 						rhash, err := pe.doms.ComputeCommitment(ctx, false, applyResult.BlockNum, pe.execStage.LogPrefix())
 						if err != nil {
 							return err
@@ -1094,7 +1093,6 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 			}
 
 			txResult := blockStatus.results[tx]
-			fmt.Println("finalize", blockNum, txIndex)
 			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, blockStatus.versionMap, stateReader, stateWriter)
 
 			if err != nil {
@@ -1229,7 +1227,7 @@ func (pe *parallelExecutor) run(ctx context.Context) context.CancelFunc {
 
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
 		pe.RWMutex.RLocker(), pe.accumulator, pe.logger, ctx, true, pe.cfg.db, pe.rs, state.NewNoopWriter(), pe.in,
-		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, 1 /*pe.workerCount+1*/, pe.cfg.dirs, pe.isMining)
+		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.workerCount+1, pe.cfg.dirs, pe.isMining)
 
 	rwLoopCtx, rwLoopCtxCancel := context.WithCancel(ctx)
 	pe.rwLoopG, rwLoopCtx = errgroup.WithContext(rwLoopCtx)

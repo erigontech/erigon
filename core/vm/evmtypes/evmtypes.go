@@ -180,4 +180,7 @@ type IntraBlockState interface {
 	AddLog(*types.Log)
 
 	SetHooks(hooks *tracing.Hooks)
+
+	// temp
+	TraceAccount(common.Address) bool
 }

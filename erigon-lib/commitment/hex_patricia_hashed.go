@@ -1524,7 +1524,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		default:
 		}
 
-		if hph.trace {
+		if true /*hph.trace*/ {
 			fmt.Printf("%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 		// Keep folding until the currentKey is the prefix of the key we modify

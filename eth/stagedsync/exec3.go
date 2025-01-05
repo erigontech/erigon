@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
@@ -612,9 +613,9 @@ Loop:
 					logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 					return errors.New("wrong trie root")
 				}
-				//if blockNum == 15032936 {
-				//	fmt.Println(blockNum, hex.EncodeToString(rh), hex.EncodeToString(header.Root.Bytes()))
-				//}
+				if blockNum == 14695297 || blockNum == 14695345 || blockNum == 14697129 {
+					fmt.Println(blockNum, hex.EncodeToString(rh), hex.EncodeToString(header.Root.Bytes()))
+				}
 
 				ts += time.Since(start)
 				aggTx.RestrictSubsetFileDeletions(false)
@@ -685,7 +686,7 @@ Loop:
 					t1, t3 time.Duration
 				)
 
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -748,7 +749,7 @@ Loop:
 
 	if u != nil && !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), executor.tx(), executor.domains(), cfg, execStage, stageProgress, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -822,17 +823,15 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
-	if !parallel {
-		if err := e.Update(applyTx, maxBlockNum); err != nil {
-			return false, err
-		}
-		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
-			return false, fmt.Errorf("writing plain state version: %w", err)
-		}
+	if err := e.Update(applyTx, maxBlockNum); err != nil {
+		return false, err
+	}
+	if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
+		return false, fmt.Errorf("writing plain state version: %w", err)
 	}
 
 	if header == nil {

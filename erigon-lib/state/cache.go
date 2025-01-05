@@ -52,14 +52,14 @@ func (c *DomainGetFromFileCache) Add(key uint64, value domainGetFromFileCacheIte
 }
 
 func (c *DomainGetFromFileCache) Get(key uint64) (value domainGetFromFileCacheItem, ok bool) {
-	c.RLock()
-	defer c.RUnlock()
+	c.Lock() // get upates cache vars
+	defer c.Unlock()
 	return c.LRU.Get(key)
 }
 
 func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
 func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
-	if c == nil || !c.enabled || !c.trace {
+	if c == nil {
 		return
 	}
 	c.RLock()

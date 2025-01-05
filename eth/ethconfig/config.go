@@ -34,11 +34,11 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/consensus/ethash/ethashcfg"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/eth/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/ethdb/prune"
 	"github.com/erigontech/erigon/params"
@@ -73,7 +73,7 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		ExecWorkerCount:            estimate.BlocksExecution.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
+		ExecWorkerCount:            dbg.Exec3Workers, //only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,

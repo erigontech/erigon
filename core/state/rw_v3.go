@@ -327,7 +327,7 @@ func NewStateWriterBufferedV3(rs *StateV3Buffered, accumulator *shards.Accumulat
 		rs:          rs,
 		writeLists:  newWriteList(),
 		accumulator: accumulator,
-		trace:       false,
+		trace:       true,
 	}
 }
 
@@ -479,7 +479,7 @@ func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriter
 	return &StateWriterV3{
 		rs:          rs,
 		accumulator: accumulator,
-		trace:       false,
+		trace:       true,
 	}
 }
 

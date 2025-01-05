@@ -20,6 +20,8 @@
 package state
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -72,7 +74,11 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 
 		// Drop any dirty tracking induced by the change
 		if addr := j.entries[i].dirtied(); addr != nil {
+
 			if j.dirties[*addr]--; j.dirties[*addr] == 0 {
+				if traceAccount(*addr) {
+					fmt.Printf("Revert journal: %x\n", addr)
+				}
 				delete(j.dirties, *addr)
 			}
 		}

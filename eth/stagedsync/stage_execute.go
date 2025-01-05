@@ -140,9 +140,6 @@ func StageExecuteBlocksCfg(
 
 func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, logger log.Logger, isMining bool) (err error) {
 	workersCount := cfg.syncCfg.ExecWorkerCount
-	if !initialCycle {
-		workersCount = 1
-	}
 
 	prevStageProgress, err := stageProgress(txc.Tx, cfg.db, stages.Senders)
 	if err != nil {

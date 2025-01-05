@@ -376,11 +376,18 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
+	if interpreter.evm.IntraBlockState().TraceAccount(scope.Contract.Address()) {
+		fmt.Printf("EXTCODESIZE %x\n", slot.Bytes20())
+	}
 	codeSize, err := interpreter.evm.IntraBlockState().ResolveCodeSize(slot.Bytes20())
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
 	slot.SetUint64(uint64(codeSize))
+	if interpreter.evm.IntraBlockState().TraceAccount(scope.Contract.Address()) {
+		fmt.Println("EXTCODESIZE", codeSize)
+	}
+
 	return nil, nil
 }
 
@@ -580,7 +587,8 @@ func opMstore8(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	loc := scope.Stack.Peek()
 	interpreter.hasherBuf = loc.Bytes32()
-	return nil, interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), &interpreter.hasherBuf, loc)
+	err := interpreter.evm.IntraBlockState().GetState(scope.Contract.Address(), &interpreter.hasherBuf, loc)
+	return nil, err
 }
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {

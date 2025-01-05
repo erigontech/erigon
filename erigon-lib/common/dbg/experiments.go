@@ -69,6 +69,8 @@ var (
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
 	Exec3Parallel = EnvBool("ERIGON_EXEC3_PARALLEL", false)
+	numWorkers    = runtime.NumCPU() / 2
+	Exec3Workers  = EnvInt("ERIGON_EXEC3_WORKERS", numWorkers)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
