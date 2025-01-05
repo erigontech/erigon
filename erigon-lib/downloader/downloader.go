@@ -1973,6 +1973,14 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
 	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64())
 
+	if prevStats.BytesDownload == 0 {
+		prevStats.BytesDownload = stats.BytesDownload
+	}
+
+	if prevStats.BytesCompleted == 0 {
+		prevStats.BytesCompleted = stats.BytesCompleted
+	}
+
 	lastMetadataReady := stats.MetadataReady
 
 	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0
