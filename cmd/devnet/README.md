@@ -74,7 +74,7 @@ Scenarios are similarly specified in code in `main.go` in the `action` function.
     })
 ```
 
-Scenarios are created a groups of steps which are created by registering a `step` handler too see an example of this take a look at the `commands\ping.go` file which adds a ping rpc method (see `PingErigonRpc` above).
+Scenarios are created as groups of steps which are created by registering a `step` handler too see an example of this take a look at the `commands\ping.go` file which adds a ping rpc method (see `PingErigonRpc` above).
 
 This illustrates the registration process.  The `init` function in the file registers the method with the `scenarios` package - which uses the function name as the default step name.  Others can be added with additional string arguments fo the `StepHandler` call where they will treated as regular expressions to be matched when processing scenario steps.
 
