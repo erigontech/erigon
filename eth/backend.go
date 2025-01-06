@@ -270,14 +270,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
 	backend := &Ethereum{
-		sentryCtx:            ctx,
-		sentryCancel:         ctxCancel,
-		config:               config,
-		networkID:            config.NetworkID,
-		etherbase:            config.Miner.Etherbase,
-		waitForStageLoopStop: make(chan struct{}),
-		waitForMiningStop:    make(chan struct{}),
-		logger:               logger,
+		sentryCtx:                 ctx,
+		sentryCancel:              ctxCancel,
+		config:                    config,
+		networkID:                 config.NetworkID,
+		etherbase:                 config.Miner.Etherbase,
+		waitForStageLoopStop:      make(chan struct{}),
+		waitForMiningStop:         make(chan struct{}),
+		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
+		miningSealingQuit:         make(chan struct{}),
+		minedBlocks:               make(chan *types.Block, 1),
+		logger:                    logger,
 		stopNode: func() error {
 			return stack.Close()
 		},
@@ -675,11 +678,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.shutterPool = shutter.NewPool(logger, config.Shutter, backend.txPool)
 		txnProvider = backend.shutterPool
 	}
-
-	backend.blockBuilderNotifyNewTxns = make(chan struct{}, 1)
-	backend.miningSealingQuit = make(chan struct{})
-	backend.pendingBlocks = make(chan *types.Block, 1)
-	backend.minedBlocks = make(chan *types.Block, 1)
 
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
