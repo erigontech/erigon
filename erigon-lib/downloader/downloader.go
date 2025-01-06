@@ -2221,52 +2221,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 	}
 
-	decay := func(prev uint64) uint64 {
-		switch {
-		case prev < 1000:
-			return prev / 16
-		case stats.FlushRate < 10000:
-			return prev / 8
-		case stats.FlushRate < 100000:
-			return prev / 4
-		default:
-			return prev / 2
-		}
-	}
-
-	if stats.BytesDownload > prevStats.BytesDownload {
-		stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
-	} else {
-		stats.DownloadRate = decay(prevStats.DownloadRate)
-	}
-
-	if stats.BytesHashed > prevStats.BytesHashed {
-		stats.HashRate = (stats.BytesHashed - prevStats.BytesHashed) / uint64(interval.Seconds())
-	} else {
-		stats.HashRate = decay(prevStats.HashRate)
-	}
-
-	if stats.BytesCompleted > stats.BytesTotal {
-		stats.BytesCompleted = stats.BytesTotal
-	}
-
-	if stats.BytesCompleted > prevStats.BytesCompleted {
-		stats.CompletionRate = (stats.BytesCompleted - prevStats.BytesCompleted) / uint64(interval.Seconds())
-	} else {
-		stats.CompletionRate = decay(prevStats.CompletionRate)
-	}
-
-	if stats.BytesFlushed > prevStats.BytesFlushed {
-		stats.FlushRate = (stats.BytesFlushed - prevStats.BytesFlushed) / uint64(interval.Seconds())
-	} else {
-		stats.FlushRate = decay(prevStats.FlushRate)
-	}
-
-	if stats.BytesUpload > prevStats.BytesUpload {
-		stats.UploadRate = (stats.BytesUpload - prevStats.BytesUpload) / uint64(interval.Seconds())
-	} else {
-		stats.UploadRate = decay(prevStats.UploadRate)
-	}
+	calculateRates(&stats, &prevStats, interval)
 
 	if stats.BytesTotal == 0 {
 		stats.Progress = 0
@@ -2313,6 +2268,35 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
 			"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
 	}
+}
+
+// Calculating rates with decay in order to avoid rate jumps
+func calculateRates(stats, prevStats *AggStats, interval time.Duration) {
+	decay := func(prev uint64) uint64 {
+		switch {
+		case prev < 1000:
+			return prev / 16
+		case prev < 10000:
+			return prev / 8
+		case prev < 100000:
+			return prev / 4
+		default:
+			return prev / 2
+		}
+	}
+
+	calculateRate := func(current, previous uint64, prevRate uint64) uint64 {
+		if current > previous {
+			return (current - previous) / uint64(interval.Seconds())
+		}
+		return decay(prevRate)
+	}
+
+	stats.DownloadRate = calculateRate(stats.BytesDownload, prevStats.BytesDownload, prevStats.DownloadRate)
+	stats.HashRate = calculateRate(stats.BytesHashed, prevStats.BytesHashed, prevStats.HashRate)
+	stats.FlushRate = calculateRate(stats.BytesFlushed, prevStats.BytesFlushed, prevStats.FlushRate)
+	stats.UploadRate = calculateRate(stats.BytesUpload, prevStats.BytesUpload, prevStats.UploadRate)
+	stats.CompletionRate = calculateRate(stats.BytesCompleted, prevStats.BytesCompleted, prevStats.CompletionRate)
 }
 
 type filterWriter struct {
