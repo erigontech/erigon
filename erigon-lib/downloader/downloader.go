@@ -1973,6 +1973,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
 	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64())
 
+	// if we have no previous stats, it means that node was restarted and need to set initial values
 	if prevStats.BytesDownload == 0 {
 		prevStats.BytesDownload = stats.BytesCompleted
 	}
