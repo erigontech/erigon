@@ -11,8 +11,8 @@ type ValueProcessor interface {
 }
 
 type BaseFreezer struct {
-	gen  SourceKeyGenerator
-	fet  ValueFetcher
+	gen SourceKeyGenerator
+	//fet  ValueFetcher
 	proc ValueProcessor
 	coll Collector
 }
@@ -50,14 +50,6 @@ func (sf *BaseFreezer) Freeze(ctx context.Context, stepKeyFrom, stepKeyTo uint64
 	return 0, nil
 }
 
-// GetCompressorWorkers() uint64
-func (sf *BaseFreezer) GetCompressorWorkers() uint64 {
-	return 0
-}
-
-// SetCompressorWorkers(uint64)
-func (sf *BaseFreezer) SetCompressorWorkers(uint64) {}
-
 func (sf *BaseFreezer) SetCollector(coll Collector) {
 	sf.coll = coll
 }
@@ -66,9 +58,9 @@ func (sf *BaseFreezer) SetSourceKeyGenerator(gen SourceKeyGenerator) {
 	sf.gen = gen
 }
 
-func (sf *BaseFreezer) SetValueFetcher(fet ValueFetcher) {
-	sf.fet = fet
-}
+// func (sf *BaseFreezer) SetValueFetcher(fet ValueFetcher) {
+// 	sf.fet = fet
+// }
 
 func (sf *BaseFreezer) SetValueProcessor(proc ValueProcessor) {
 	sf.proc = proc

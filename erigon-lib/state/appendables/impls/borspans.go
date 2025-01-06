@@ -35,14 +35,14 @@ type SpanAppendable struct {
 
 func NewSpanAppendable(valsTable string) *SpanAppendable {
 	ap := &SpanAppendable{
-		BaseAppendable: ca.NewBaseAppendable(BorSpans),
+		BaseAppendable: ca.NewBaseAppendable(BorSpans, kv.BorSpans),
 		valsTable:      valsTable,
 	}
 
 	gen := &SpanSourceKeyGenerator{}
 	ap.SetSourceKeyGenerator(gen)
-	ap.SetValueFetcher(ca.NewPlainFetcher(valsTable))
-	ap.SetValuePutter(ca.NewPlainPutter(valsTable))
+	// ap.SetValueFetcher(ca.NewPlainFetcher(valsTable))
+	// ap.SetValuePutter(ca.NewPlainPutter(valsTable))
 	ap.SetFreezer(ca.NewPlainFreezer(valsTable, gen))
 
 	salt := uint32(4343) // load from salt-blocks.txt etc.
@@ -52,21 +52,21 @@ func NewSpanAppendable(valsTable string) *SpanAppendable {
 	return ap
 }
 
-// prune function
-func (ap *SpanAppendable) Prune(ctx context.Context, limit uint64, rwTx kv.RwTx) error {
-	// TODO
-	return nil
-}
+// // prune function
+// func (ap *SpanAppendable) Prune(ctx context.Context, limit uint64, rwTx kv.RwTx) error {
+// 	// TODO
+// 	return nil
+// }
 
-func (ap *SpanAppendable) Unwind(ctx context.Context, stepKeyFrom uint64, rwTx kv.RwTx) {
-	cursor, err := rwTx.Cursor(ap.valsTable)
-	if err != nil {
-		return
-	}
+// func (ap *SpanAppendable) Unwind(ctx context.Context, stepKeyFrom uint64, rwTx kv.RwTx) {
+// 	cursor, err := rwTx.Cursor(ap.valsTable)
+// 	if err != nil {
+// 		return
+// 	}
 
-	defer cursor.Close()
+// 	defer cursor.Close()
 
-}
+// }
 
 type SpanSourceKeyGenerator struct{}
 

@@ -276,7 +276,6 @@ func (s *VisibleSegment) Src() *DirtySegment {
 func (s *VisibleSegment) IsIndexed() bool {
 	return s.src.IsIndexed()
 }
-
 func (v *VisibleSegment) Get(globalId uint64) ([]byte, error) {
 	idxSlot := v.src.Index()
 

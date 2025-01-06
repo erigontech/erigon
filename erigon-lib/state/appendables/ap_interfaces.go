@@ -8,9 +8,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type CanFreeze interface {
-	Evaluate(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (bool, error)
-}
+// why this is needed?
+// commenting this out because: appendable only checks if enough "stuff" is present in db
+// type CanFreeze interface {
+// 	Evaluate(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (bool, error)
+// }
 
 type VKType []byte // value table key type
 type VVType []byte // value table value type
@@ -22,8 +24,8 @@ type Appendable interface {
 
 	SetFreezer(freezer Freezer)
 	SetIndexBuilders(ib []AccessorIndexBuilder)
-	SetCanFreeze(canFreeze CanFreeze)
-	GetRoSnapshots() *RoSnapshots
+	// SetCanFreeze(canFreeze CanFreeze)
+	// GetRoSnapshots() *RoSnapshots
 
 	// freeze
 	BuildFiles(ctx context.Context, stepKeyFrom, stepKeyTo uint64, db kv.RoDB, ps *background.ProgressSet) error
@@ -36,8 +38,8 @@ type Appendable interface {
 	Unwind(ctx context.Context, stepKeyFrom uint64, rwTx kv.RwTx) // stepKey or tsId/tsNum
 
 	// queries and put
-	Get(tsNum uint64, roTx kv.Tx) (VVType, bool, error)
-	NCGet(tsId uint64, forkId []byte, roTx kv.Tx) (VVType, bool, error)
+	Get(tsNum uint64, roTx kv.Tx) (VVType, error)
+	NCGet(tsId uint64, forkId []byte, roTx kv.Tx) (VVType, error)
 
 	Put(tsId uint64, forkId []byte, value VVType, rwTx kv.RwTx) error
 }
@@ -53,8 +55,6 @@ type Freezer interface {
 	// to ensure this.
 	Freeze(ctx context.Context, stepKeyFrom uint64, stepKeyTo uint64, tx kv.Tx) (lastKeyValue uint64, err error)
 	SetCollector(coll Collector)
-	GetCompressorWorkers() uint64
-	SetCompressorWorkers(uint64)
 }
 
 type SnapshotConfig struct {

@@ -4,7 +4,6 @@ import (
 	"io"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
@@ -41,40 +40,10 @@ func (s *SequentialStream) Close() {
 
 // plains
 
-type PlainPutter struct {
-	valsTable string
-}
-
-func NewPlainPutter(valsTable string) *PlainPutter {
-	return &PlainPutter{valsTable}
-}
-
-func (p *PlainPutter) Put(tsId uint64, forkId []byte, value VVType, tx kv.RwTx) error {
-	return tx.Put(p.valsTable, hexutility.EncodeTs(tsId), value)
-}
-
 type PlainProcessor struct{}
 
 func (p *PlainProcessor) Process(sourceKey VKType, value VVType) (data VVType, shouldSkip bool, err error) {
 	return value, false, nil
-}
-
-type PlainFetcher struct {
-	valsTable string
-}
-
-func NewPlainFetcher(valsTable string) *PlainFetcher {
-	return &PlainFetcher{valsTable}
-}
-
-func (f *PlainFetcher) GetValues(sourceKey VKType, tx kv.Tx) (value VVType, shouldSkip bool, found bool, err error) {
-	found = true
-	shouldSkip = false
-	value, err = tx.GetOne(f.valsTable, sourceKey)
-	if err != nil {
-		return nil, false, false, err
-	}
-	return value, shouldSkip, found, nil
 }
 
 func NewSequentialStream(from uint64, to uint64) stream.Uno[VKType] {
@@ -100,5 +69,34 @@ func NewPlainFreezer(valsTable string, gen SourceKeyGenerator) *PlainFreezer {
 		fet:  &PlainFetcher{valsTable},
 		proc: &PlainProcessor{},
 	}
-
 }
+
+// type PlainFetcher struct {
+// 	valsTable string
+// }
+
+// func NewPlainFetcher(valsTable string) *PlainFetcher {
+// 	return &PlainFetcher{valsTable}
+// }
+
+// func (f *PlainFetcher) GetValues(sourceKey VKType, tx kv.Tx) (value VVType, shouldSkip bool, found bool, err error) {
+// 	found = true
+// 	shouldSkip = false
+// 	value, err = tx.GetOne(f.valsTable, sourceKey)
+// 	if err != nil {
+// 		return nil, false, false, err
+// 	}
+// 	return value, shouldSkip, found, nil
+// }
+
+// type PlainPutter struct {
+// 	valsTable string
+// }
+
+// func NewPlainPutter(valsTable string) *PlainPutter {
+// 	return &PlainPutter{valsTable}
+// }
+
+// func (p *PlainPutter) Put(tsId uint64, forkId []byte, value VVType, tx kv.RwTx) error {
+// 	return tx.Put(p.valsTable, hexutility.EncodeTs(tsId), value)
+// }
