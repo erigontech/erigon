@@ -103,7 +103,8 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		ans, err := h.Handle(w, r)
 		if err != nil {
 			var endpointError *EndpointError
-			if e, ok := err.(*EndpointError); ok {
+			var e *EndpointError
+			if errors.As(err, &e) {
 				endpointError = e
 			} else {
 				endpointError = WrapEndpointError(err)
