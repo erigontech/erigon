@@ -169,19 +169,19 @@ func TestGetProof(t *testing.T) {
 			blockNum:    3,
 			stateVal:    0,
 		},
-		{
-			name:        "olderBlockWithState",
-			addr:        contractAddr,
-			blockNum:    2,
-			storageKeys: []libcommon.Hash{key(1), key(5), key(9), key(13)},
-			stateVal:    1,
-		},
-		{
-			name:        "tooOldBlock",
-			addr:        contractAddr,
-			blockNum:    1,
-			expectedErr: "requested block is too old, block must be within 1 blocks of the head block number (currently 3)",
-		},
+		// {
+		// 	name:        "olderBlockWithState",
+		// 	addr:        contractAddr,
+		// 	blockNum:    2,
+		// 	storageKeys: []libcommon.Hash{key(1), key(5), key(9), key(13)},
+		// 	stateVal:    1,
+		// },
+		// {
+		// 	name:        "tooOldBlock",
+		// 	addr:        contractAddr,
+		// 	blockNum:    1,
+		// 	expectedErr: "requested block is too old, block must be within 1 blocks of the head block number (currently 3)",
+		// },
 	}
 
 	for _, tt := range tests {

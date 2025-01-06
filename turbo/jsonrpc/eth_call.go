@@ -387,33 +387,18 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 		return nil, err
 	}
 	defer roTx2.Rollback()
-	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
-	defer txBatch2.Rollback()
 
-	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
+	domains, err := libstate.NewSharedDomains(roTx2, log.New())
 	if err != nil {
 		return nil, err
 	}
-	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
-	patricieTrie := sdCtx.Trie()
-	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
-	if !ok {
-		return nil, errors.New("casting to HexPatriciaTrieHashed failed")
-	}
+	sdCtx := domains.GetCommitmentContext()
 
-	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
-	// so this is just to satisfy the current hex patricia trie api.
-	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
 	// touch account
-	updates.TouchPlainKey(string(address.Bytes()), nil, updates.TouchAccount)
-	// touch storage keys
-	for _, storageKey := range storageKeys {
-		updates.TouchPlainKey(string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil, updates.TouchStorage)
-	}
-	hph.SetTrace(false)
+	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, proofRootHash, err := hph.GenerateProofTrie(ctx, updates, header.Root[:], "eth_getProof")
+	proofTrie, proofRootHash, err := sdCtx.GenerateTouchedKeyTrie(ctx, header.Root[:], "eth_getProof")
 	if err != nil {
 		return nil, err
 	}
@@ -448,19 +433,50 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 			proof.StorageProof[i] = accounts.StorProofResult{
 				Key:   k,
 				Value: (*hexutil.Big)(a),
-				Proof: []hexutility.Bytes{},
+				Proof: nil,
 			}
 		}
 		return proof, nil
-	} else {
-		proof.Balance = (*hexutil.Big)(acc.Balance.ToBig())
-		proof.Nonce = hexutil.Uint64(acc.Nonce)
-		proof.CodeHash = acc.CodeHash
-		proof.StorageHash = acc.Root
+	}
+
+	proof.Balance = (*hexutil.Big)(acc.Balance.ToBig())
+	proof.Nonce = hexutil.Uint64(acc.Nonce)
+	proof.CodeHash = acc.CodeHash
+	proof.StorageHash = acc.Root
+
+	// if storage is not empty touch keys and build trie
+	fmt.Println("shota", proof.StorageHash.String())
+	if proof.StorageHash.Cmp(libcommon.BytesToHash(commitment.EmptyRootHash)) != 0 && len(storageKeys) != 0 {
+		// touch storage keys
+		for _, storageKey := range storageKeys {
+			sdCtx.TouchKey(kv.StorageDomain, string(common.FromHex(address.Hex()[2:]+storageKey.String()[2:])), nil)
+		}
+
+		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
+		proofTrie, proofRootHash, err = sdCtx.GenerateTouchedKeyTrie(ctx, header.Root[:], "eth_getProof")
+		if err != nil {
+			return nil, err
+		}
+
+		// verify hash
+		if !bytes.Equal(proofRootHash, header.Root[:]) {
+			return nil, fmt.Errorf("proof root hash mismatch actual(%x)!=expected(%x)", proofRootHash, header.Root[:])
+		}
 	}
 
 	// get storage key proofs
 	for i, keyHash := range storageKeys {
+		proof.StorageProof[i].Key = keyHash
+
+		n := new(big.Int)
+		// if we have simple non contract account just set values directly without requesting any key proof
+		if proof.StorageHash.Cmp(libcommon.BytesToHash(commitment.EmptyRootHash)) == 0 {
+			n.SetInt64(0)
+			proof.StorageProof[i].Proof = nil
+			proof.StorageProof[i].Value = (*hexutil.Big)(unsafe.Pointer(n))
+			continue
+		}
+
 		// prepare key path (keccak(address) | keccak(key))
 		var fullKey []byte
 		fullKey = append(fullKey, crypto.Keccak256(address.Bytes())...)
@@ -472,14 +488,10 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 			return nil, errors.New("cannot verify store proof")
 		}
 
-		// Decode the hexadecimal string into the big.Int
-		// The base is 16 for hexadecimal
-		n := new(big.Int)
 		n.SetString(hex.EncodeToString(value), 16)
-
-		// set key proof
-		proof.StorageProof[i].Key = keyHash
 		proof.StorageProof[i].Value = (*hexutil.Big)(unsafe.Pointer(n))
+
+		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutility.Bytes{[]byte{0x80}}
 		if storageProof != nil && len(storageProof) != 0 {
 			proof.StorageProof[i].Proof = *(*[]hexutility.Bytes)(unsafe.Pointer(&storageProof))
