@@ -167,6 +167,20 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	return msg, nil
 }
 
+// Raises the vanilla gas cap by the tx's l1 data costs in l2 terms. This creates a new gas cap that after
+// data payments are made, equals the original vanilla cap for the remaining, L2-specific work the tx does.
+func (args *CallArgs) L2OnlyGasCap(gasCap uint64, header *types.Header) (uint64, error) {
+	msg, err := args.ToMessage(gasCap, nil)
+	if err != nil {
+		return 0, err
+	}
+	InterceptRPCGasCap(&gasCap, &msg, header)
+	return gasCap, nil
+}
+
+// Allows ArbOS to update the gas cap so that it ignores the message's specific L1 poster costs.
+var InterceptRPCGasCap = func(gascap *uint64, msg *types.Message, header *types.Header) {}
+
 // account indicates the overriding fields of account during the execution of
 // a message call.
 // Note, state and stateDiff can't be specified at the same time. If state is
@@ -1084,7 +1098,7 @@ func checkTxFee(gasPrice *big.Int, gas uint64, cap float64) error {
 // successfully at block `blockNrOrHash`. It returns error if the transaction would revert, or if
 // there are unexpected failures. The gas limit is capped by both `args.Gas` (if non-nil &
 // non-zero) and `gasCap` (if non-zero).
-func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, gasCap uint64) (hexutil.Uint64, error) {
+func DoEstimateGas(ctx context.Context, b Backend, args SendTxArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverrides, gasCap uint64) (hexutil.Uint64, error) {
 	// Retrieve the base state and mutate it with any overrides
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if state == nil || err != nil {
@@ -1107,14 +1121,14 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 	}
 	// Run the gas estimation andwrap any revertals into a custom return
 	// Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
-	call, err := args.ToMessage(gasCap, header, state, core.MessageGasEstimationMode)
+	call, err := args.ToMessage(gasCap, header, state, types.MessageGasEstimationMode)
 	if err != nil {
 		return 0, err
 	}
 
 	// Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
 	{
-		gasCap, err = args.L2OnlyGasCap(gasCap, header, state, core.MessageGasEstimationMode)
+		gasCap, err = args.L2OnlyGasCap(gasCap, header, state, types.MessageGasEstimationMode)
 		if err != nil {
 			return 0, err
 		}
