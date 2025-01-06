@@ -20,8 +20,6 @@
 package ethapi
 
 import (
-	"bytes"
-	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -38,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/rpc"
 )
 
 // CallArgs represents the arguments for a call.
@@ -783,70 +780,70 @@ type SendTxArgs struct {
 }
 
 // setDefaults fills in default values for unspecified txn fields.
-func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
-	if args.GasPrice == nil {
-		price, err := b.SuggestPrice(ctx)
-		if err != nil {
-			return err
-		}
-		args.GasPrice = (*hexutil.Big)(price)
-	}
-	if args.Value == nil {
-		args.Value = new(hexutil.Big)
-	}
-	if args.Nonce == nil {
-		nonce, err := b.GetPoolNonce(ctx, args.From)
-		if err != nil {
-			return err
-		}
-		args.Nonce = (*hexutil.Uint64)(&nonce)
-	}
-	if args.Data != nil && args.Input != nil && !bytes.Equal(*args.Data, *args.Input) {
-		return errors.New(`both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`)
-	}
-	if args.To == nil {
-		// Contract creation
-		var input []byte
-		if args.Data != nil {
-			input = *args.Data
-		} else if args.Input != nil {
-			input = *args.Input
-		}
-		if len(input) == 0 {
-			return errors.New(`contract creation without any data provided`)
-		}
-	}
+// func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
+// 	if args.GasPrice == nil {
+// 		price, err := b.SuggestPrice(ctx)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		args.GasPrice = (*hexutil.Big)(price)
+// 	}
+// 	if args.Value == nil {
+// 		args.Value = new(hexutil.Big)
+// 	}
+// 	if args.Nonce == nil {
+// 		nonce, err := b.GetPoolNonce(ctx, args.From)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		args.Nonce = (*hexutil.Uint64)(&nonce)
+// 	}
+// 	if args.Data != nil && args.Input != nil && !bytes.Equal(*args.Data, *args.Input) {
+// 		return errors.New(`both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`)
+// 	}
+// 	if args.To == nil {
+// 		// Contract creation
+// 		var input []byte
+// 		if args.Data != nil {
+// 			input = *args.Data
+// 		} else if args.Input != nil {
+// 			input = *args.Input
+// 		}
+// 		if len(input) == 0 {
+// 			return errors.New(`contract creation without any data provided`)
+// 		}
+// 	}
 
-	// Estimate the gas usage if necessary.
-	if args.Gas == nil {
-		// For backwards-compatibility reason, we try both input and data
-		// but input is preferred.
-		input := args.Input
-		if input == nil {
-			input = args.Data
-		}
-		callArgs := CallArgs{
-			From:       &args.From, // From shouldn't be nil
-			To:         args.To,
-			GasPrice:   args.GasPrice,
-			Value:      args.Value,
-			Data:       (*hexutility.Bytes)(input),
-			AccessList: args.AccessList,
-		}
-		pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-		estimated, err := DoEstimateGas(ctx, b, callArgs, pendingBlockNr, b.RPCGasCap())
-		if err != nil {
-			return err
-		}
-		args.Gas = &estimated
-		log.Trace("Estimate gas usage automatically", "gas", args.Gas)
-	}
-	if args.ChainID == nil {
-		id := (*hexutil.Big)(b.ChainConfig().ChainID)
-		args.ChainID = id
-	}
-	return nil
-}
+// 	// Estimate the gas usage if necessary.
+// 	if args.Gas == nil {
+// 		// For backwards-compatibility reason, we try both input and data
+// 		// but input is preferred.
+// 		input := args.Input
+// 		if input == nil {
+// 			input = args.Data
+// 		}
+// 		callArgs := CallArgs{
+// 			From:       &args.From, // From shouldn't be nil
+// 			To:         args.To,
+// 			GasPrice:   args.GasPrice,
+// 			Value:      args.Value,
+// 			Data:       (*hexutility.Bytes)(input),
+// 			AccessList: args.AccessList,
+// 		}
+// 		pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+// 		estimated, err := DoEstimateGas(ctx, b, callArgs, pendingBlockNr, b.RPCGasCap())
+// 		if err != nil {
+// 			return err
+// 		}
+// 		args.Gas = &estimated
+// 		log.Trace("Estimate gas usage automatically", "gas", args.Gas)
+// 	}
+// 	if args.ChainID == nil {
+// 		id := (*hexutil.Big)(b.ChainConfig().ChainID)
+// 		args.ChainID = id
+// 	}
+// 	return nil
+// }
 
 // toTransaction converts the arguments to a transaction.
 // This assumes that setDefaults has been called.
@@ -1098,48 +1095,48 @@ func checkTxFee(gasPrice *big.Int, gas uint64, cap float64) error {
 // successfully at block `blockNrOrHash`. It returns error if the transaction would revert, or if
 // there are unexpected failures. The gas limit is capped by both `args.Gas` (if non-nil &
 // non-zero) and `gasCap` (if non-zero).
-func DoEstimateGas(ctx context.Context, b Backend, args SendTxArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverrides, gasCap uint64) (hexutil.Uint64, error) {
-	// Retrieve the base state and mutate it with any overrides
-	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-	if state == nil || err != nil {
-		return 0, err
-	}
-	if err = overrides.Apply(state); err != nil {
-		return 0, err
-	}
-	header = updateHeaderForPendingBlocks(blockNrOrHash, header)
+// func DoEstimateGas(ctx context.Context, b Backend, args SendTxArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverrides, gasCap uint64) (hexutil.Uint64, error) {
+// 	// Retrieve the base state and mutate it with any overrides
+// 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+// 	if state == nil || err != nil {
+// 		return 0, err
+// 	}
+// 	if err = overrides.Apply(state); err != nil {
+// 		return 0, err
+// 	}
+// 	header = updateHeaderForPendingBlocks(blockNrOrHash, header)
 
-	// Construct the gas estimator option from the user input
-	opts := &gasestimator.Options{
-		Config:           b.ChainConfig(),
-		Chain:            NewChainContext(ctx, b),
-		Header:           header,
-		State:            state,
-		Backend:          b,
-		ErrorRatio:       gasestimator.EstimateGasErrorRatio,
-		RunScheduledTxes: runScheduledTxes,
-	}
-	// Run the gas estimation andwrap any revertals into a custom return
-	// Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
-	call, err := args.ToMessage(gasCap, header, state, types.MessageGasEstimationMode)
-	if err != nil {
-		return 0, err
-	}
+// 	// Construct the gas estimator option from the user input
+// 	opts := &gasestimator.Options{
+// 		Config:           b.ChainConfig(),
+// 		Chain:            NewChainContext(ctx, b),
+// 		Header:           header,
+// 		State:            state,
+// 		Backend:          b,
+// 		ErrorRatio:       gasestimator.EstimateGasErrorRatio,
+// 		RunScheduledTxes: runScheduledTxes,
+// 	}
+// 	// Run the gas estimation andwrap any revertals into a custom return
+// 	// Arbitrum: this also appropriately recursively calls another args.ToMessage with increased gasCap by posterCostInL2Gas amount
+// 	call, err := args.ToMessage(gasCap, header, state, types.MessageGasEstimationMode)
+// 	if err != nil {
+// 		return 0, err
+// 	}
 
-	// Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
-	{
-		gasCap, err = args.L2OnlyGasCap(gasCap, header, state, types.MessageGasEstimationMode)
-		if err != nil {
-			return 0, err
-		}
-	}
+// 	// Arbitrum: raise the gas cap to ignore L1 costs so that it's compute-only
+// 	{
+// 		gasCap, err = args.L2OnlyGasCap(gasCap, header, state, types.MessageGasEstimationMode)
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 	}
 
-	estimate, revert, err := gasestimator.Estimate(ctx, call, opts, gasCap)
-	if err != nil {
-		if len(revert) > 0 {
-			return 0, newRevertError(revert)
-		}
-		return 0, err
-	}
-	return hexutil.Uint64(estimate), nil
-}
+// 	estimate, revert, err := gasestimator.Estimate(ctx, call, opts, gasCap)
+// 	if err != nil {
+// 		if len(revert) > 0 {
+// 			return 0, newRevertError(revert)
+// 		}
+// 		return 0, err
+// 	}
+// 	return hexutil.Uint64(estimate), nil
+// }
