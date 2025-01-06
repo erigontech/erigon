@@ -1383,7 +1383,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 	var m runtime.MemStats
 
 	//Init stats
-	d.stats.BytesTotal, d.stats.BytesDownload = d.getCompletionState()
+	d.stats.BytesTotal, d.stats.BytesDownload, d.stats.BytesCompleted = d.getCompletionState()
 	//Need to know is completed from previous stats in order to print "Download completed" message
 	prevStatsCompleted := d.stats.Completed
 	for {
@@ -1991,6 +1991,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var tComplete int
 	var torrentInfo int
 
+	downloadedBytes := int64(0)
+
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
@@ -2029,6 +2031,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
+		downloadedBytes += bytesCompleted
 		stats.BytesTotal += uint64(tLen)
 
 		for _, peer := range peersOfThisFile {
@@ -2081,6 +2084,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		stats.Completed = stats.Completed && torrentComplete
 	}
+
+	stats.BytesDownload = uint64(downloadedBytes)
 
 	var webTransfers int32
 	d.collectWebDownloadClientStats(&downloading, &stats, &zeroProgress, &webTransfers)
@@ -2207,7 +2212,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 }
 
-func (d *Downloader) getCompletionState() (uint64, uint64) {
+func (d *Downloader) getCompletionState() (uint64, uint64, uint64) {
 	torrents := d.torrentClient.Torrents()
 
 	bytesTotal := uint64(0)
@@ -2223,7 +2228,7 @@ func (d *Downloader) getCompletionState() (uint64, uint64) {
 		bytesTotal += tLen
 	}
 
-	return bytesTotal, bytesCompleted
+	return bytesTotal, bytesCompleted, bytesCompleted
 }
 
 func normalizeRates(stats, prevStats *AggStats, interval time.Duration) {
@@ -2911,11 +2916,6 @@ func (d *Downloader) logProgress() {
 	bytesDone := d.stats.BytesDownload
 	rate := d.stats.DownloadRate
 	remainingBytes := d.stats.BytesTotal - d.stats.BytesDownload
-
-	//if completion rate significantly bigger than download rate - we are verifying
-	if d.stats.CompletionRate > uint64(float64(d.stats.DownloadRate)*1.5) {
-		status = "Verifying"
-	}
 
 	if d.stats.BytesDownload >= d.stats.BytesTotal && d.stats.MetadataReady == d.stats.FilesTotal && d.stats.BytesTotal > 0 {
 		status = "Verifying"
