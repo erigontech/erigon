@@ -1524,9 +1524,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		default:
 		}
 
-		if true /*hph.trace*/ {
-			fmt.Printf("%d/%d) plainKey [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
-		}
 		// Keep folding until the currentKey is the prefix of the key we modify
 		for hph.needFolding(hashedKey) {
 			if err := hph.fold(); err != nil {
@@ -1561,6 +1558,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 				update.Merge(stateUpdate)
 			}
 		}
+
+		if true /*hph.trace*/ {
+			fmt.Printf("%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
+		}
+
 		hph.updateCell(plainKey, hashedKey, update)
 
 		mxTrieProcessedKeys.Inc()

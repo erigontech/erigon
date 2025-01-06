@@ -232,7 +232,7 @@ func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.VersionedReads
 }
 
 func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites {
-	return ibs.VersionedWrites()
+	return ibs.VersionedWrites(false)
 }
 
 func (t *TxTask) IsBlockEnd() bool {

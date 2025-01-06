@@ -39,7 +39,7 @@ func (k VersionKey) String() string {
 		key = fmt.Sprintf("%x", k[0:length.Addr])
 	case stateType:
 		keyType = "State"
-		key = fmt.Sprintf("%x", k[0:length.Addr+length.Hash])
+		key = fmt.Sprintf("%x %x", k[0:length.Addr], k[length.Addr:KeyLength-2])
 	case subpathType:
 		switch k[KeyLength-2] {
 		case BalancePath:
@@ -48,6 +48,10 @@ func (k VersionKey) String() string {
 			keyType = "Nonce"
 		case CodePath:
 			keyType = "Code"
+		case CodeHashPath:
+			keyType = "Code Hash"
+		case CodeSizePath:
+			keyType = "Code Size"
 		case SelfDestructPath:
 			keyType = "Destruct"
 		case 0:
@@ -58,10 +62,10 @@ func (k VersionKey) String() string {
 		key = fmt.Sprintf("%x", k[0:length.Addr])
 	default:
 		keyType = "Unkwnown"
-		key = fmt.Sprintf("%x", k[0:length.Addr+length.Hash])
+		key = fmt.Sprintf("%x %x", k[0:length.Addr], k[length.Addr:KeyLength-2])
 	}
 
-	return fmt.Sprintf("%-8s %s%s", keyType, key, subpath)
+	return fmt.Sprintf("%-9s %s%s", keyType, key, subpath)
 }
 
 func (k VersionKey) IsAddress() bool {
@@ -121,8 +125,9 @@ func SubpathKey(addr common.Address, subpath byte) VersionKey {
 }
 
 type VersionMap struct {
-	m sync.Map
-	s sync.Map
+	m     sync.Map
+	s     sync.Map
+	trace bool
 }
 
 type WriteCell struct {
@@ -223,10 +228,17 @@ func (vm *VersionMap) MarkEstimate(k VersionKey, txIdx int) {
 	}
 }
 
-func (vm *VersionMap) Delete(k VersionKey, txIdx int) {
-	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
+func (vm *VersionMap) Delete(k VersionKey, txIdx int, checkExists bool) {
+
+	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells { return nil })
+
+	if cells == nil {
+		if !checkExists {
+			return
+		}
+
 		panic(fmt.Errorf("path must already exist"))
-	})
+	}
 
 	cells.rw.Lock()
 	defer cells.rw.Unlock()
@@ -316,15 +328,18 @@ func (vm *VersionMap) Read(k VersionKey, txIdx int) (res ReadResult) {
 
 func (vm *VersionMap) FlushVersionedWrites(writes []VersionedWrite) {
 	for _, v := range writes {
-		vm.Write(v.Path, v.V, v.Val)
+		if vm.trace {
+			fmt.Println("WRT", v.Path, v.Version)
+		}
+		vm.Write(v.Path, v.Version, v.Val)
 	}
 }
 
-func ValidateVersion(txIdx int, lastInputOutput *VersionedIO, versionedData *VersionMap) (valid bool) {
+func ValidateVersion(txIdx int, lastInputOutput *VersionedIO, versionMap *VersionMap) (valid bool) {
 	valid = true
 
 	for _, rd := range lastInputOutput.ReadSet(txIdx) {
-		mvResult := versionedData.Read(rd.Path, txIdx)
+		mvResult := versionMap.Read(rd.Path, txIdx)
 		switch mvResult.Status() {
 		case MVReadResultDone:
 			// Having a write record for a path in VersionedMap doesn't necessarily mean there is a conflict,
@@ -334,7 +349,7 @@ func ValidateVersion(txIdx int, lastInputOutput *VersionedIO, versionedData *Ver
 			// 	continue
 			// }
 
-			valid = rd.Kind == ReadKindMap && rd.V == Version{
+			valid = rd.Kind == ReadKindMap && rd.Version == Version{
 				TxIndex:     mvResult.depIdx,
 				Incarnation: mvResult.incarnation,
 			}
@@ -344,6 +359,21 @@ func ValidateVersion(txIdx int, lastInputOutput *VersionedIO, versionedData *Ver
 			valid = rd.Kind == ReadKindStorage
 		default:
 			panic(fmt.Errorf("should not happen - undefined vm read status: %ver", mvResult.Status()))
+		}
+
+		if versionMap.trace {
+			fmt.Println("RD", rd.Path, txIdx, func() string {
+				switch mvResult.Status() {
+				case MVReadResultDone:
+					return "done"
+				case MVReadResultDependency:
+					return "dependency"
+				case MVReadResultNone:
+					return "none"
+				default:
+					return "unknown"
+				}
+			}(), rd.Version, mvResult.depIdx, valid)
 		}
 
 		if !valid {

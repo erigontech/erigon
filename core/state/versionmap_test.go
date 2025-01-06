@@ -66,34 +66,34 @@ func TestFlushMVWrite(t *testing.T) {
 	wd := []VersionedWrite{}
 
 	wd = append(wd, VersionedWrite{
-		Path: ap1,
-		V:    Version{0, 0, 0, 1},
-		Val:  valueFor(0, 1),
+		Path:    ap1,
+		Version: Version{0, 0, 0, 1},
+		Val:     valueFor(0, 1),
 	})
 	wd = append(wd, VersionedWrite{
-		Path: ap1,
-		V:    Version{0, 0, 0, 2},
-		Val:  valueFor(0, 2),
+		Path:    ap1,
+		Version: Version{0, 0, 0, 2},
+		Val:     valueFor(0, 2),
 	})
 	wd = append(wd, VersionedWrite{
-		Path: ap2,
-		V:    Version{0, 0, 1, 1},
-		Val:  valueFor(1, 1),
+		Path:    ap2,
+		Version: Version{0, 0, 1, 1},
+		Val:     valueFor(1, 1),
 	})
 	wd = append(wd, VersionedWrite{
-		Path: ap2,
-		V:    Version{0, 0, 1, 2},
-		Val:  valueFor(1, 2),
+		Path:    ap2,
+		Version: Version{0, 0, 1, 2},
+		Val:     valueFor(1, 2),
 	})
 	wd = append(wd, VersionedWrite{
-		Path: ap1,
-		V:    Version{0, 0, 2, 1},
-		Val:  valueFor(2, 1),
+		Path:    ap1,
+		Version: Version{0, 0, 2, 1},
+		Val:     valueFor(2, 1),
 	})
 	wd = append(wd, VersionedWrite{
-		Path: ap1,
-		V:    Version{0, 0, 2, 2},
-		Val:  valueFor(2, 2),
+		Path:    ap1,
+		Version: Version{0, 0, 2, 2},
+		Val:     valueFor(2, 2),
 	})
 
 	mvh.FlushVersionedWrites(wd)
@@ -197,7 +197,7 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, -1, res.incarnation, "dep at tx 10 is now an estimate")
 
 	// Delete the entry written by 10, write to a different ap.
-	mvh.Delete(ap1, 10)
+	mvh.Delete(ap1, 10, true)
 	mvh.Write(ap2, Version{0, 0, 10, 2}, valueFor(10, 2))
 
 	// Read by txn 11 no longer observes entry from txn 10.
@@ -221,9 +221,9 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, valueFor(20, 4), res.value)
 
 	// Clear ap1 and ap3.
-	mvh.Delete(ap1, 12)
-	mvh.Delete(ap1, 8)
-	mvh.Delete(ap3, 20)
+	mvh.Delete(ap1, 12, true)
+	mvh.Delete(ap1, 8, true)
+	mvh.Delete(ap3, 20, true)
 
 	// Reads from ap1 and ap3 go to db.
 	res = mvh.Read(ap1, 30)
@@ -233,7 +233,7 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, -1, res.depIdx)
 
 	// No-op delete at ap2 - doesn't panic because ap2 does exist
-	mvh.Delete(ap2, 11)
+	mvh.Delete(ap2, 11, true)
 
 	// Read entry by txn 10 at ap2.
 	res = mvh.Read(ap2, 15)

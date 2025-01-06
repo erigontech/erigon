@@ -20,17 +20,17 @@ const (
 )
 
 type VersionedRead struct {
-	Path VersionKey
-	Kind int
-	V    Version
-	Val  interface{}
+	Path    VersionKey
+	Kind    int
+	Version Version
+	Val     interface{}
 }
 
 type VersionedWrite struct {
-	Path   VersionKey
-	V      Version
-	Val    interface{}
-	Reason tracing.BalanceChangeReason
+	Path    VersionKey
+	Version Version
+	Val     interface{}
+	Reason  tracing.BalanceChangeReason
 }
 
 type VersionedReads map[VersionKey]VersionedRead
@@ -263,7 +263,7 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 
 	var v T
 	var vr = VersionedRead{
-		V: Version{
+		Version: Version{
 			TxIndex:     res.DepIdx(),
 			Incarnation: res.Incarnation(),
 		},
@@ -272,6 +272,19 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 
 	switch res.Status() {
 	case MVReadResultDone:
+		if pr, ok := s.versionedReads[k]; ok {
+			if pr.Version == vr.Version {
+				return pr.Val.(T), nil
+			}
+
+			if pr.Version.Incarnation < vr.Version.Incarnation {
+				if res.DepIdx() > s.dep {
+					s.dep = res.DepIdx()
+				}
+				panic("Found denpendency")
+			}
+		}
+
 		var ok bool
 		vr.Kind = ReadKindMap
 		if v, ok = res.Value().(T); !ok {

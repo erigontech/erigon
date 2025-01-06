@@ -149,9 +149,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			sleep(op.duration)
 
-			t.readMap[k] = state.VersionedRead{Path: k, Kind: readKind, V: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}}
+			t.readMap[k] = state.VersionedRead{Path: k, Kind: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}}
 		case writeType:
-			t.writeMap[k] = state.VersionedWrite{Path: k, V: version, Val: op.val}
+			t.writeMap[k] = state.VersionedWrite{Path: k, Version: version, Val: op.val}
 		case otherType:
 			sleep(op.duration)
 		default:
@@ -970,8 +970,8 @@ func TestDexScenario(t *testing.T) {
 			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
 				for i, inputs := range blockStatus.result.TxIO.Inputs() {
 					for _, input := range inputs {
-						if input.V.TxIndex != i-1 {
-							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.V.TxIndex)
+						if input.Version.TxIndex != i-1 {
+							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
 						}
 					}
 				}
@@ -1007,8 +1007,8 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 			if blockStatus.validateTasks.maxAllComplete() == len(blockStatus.tasks) {
 				for i, inputs := range blockStatus.result.TxIO.Inputs() {
 					for _, input := range inputs {
-						if input.V.TxIndex != i-1 {
-							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.V.TxIndex)
+						if input.Version.TxIndex != i-1 {
+							return fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
 						}
 					}
 				}

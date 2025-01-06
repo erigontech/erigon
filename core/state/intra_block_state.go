@@ -341,12 +341,12 @@ func (sdb *IntraBlockState) GetCode(addr libcommon.Address) ([]byte, error) {
 			if s != nil && !s.deleted {
 				code, err := s.Code()
 				if sdb.trace || traceAccount(addr) {
-					fmt.Printf("GetCode %x, returned %d\n", addr, len(code))
+					fmt.Printf("(%d) GetCode %x, returned %d\n", sdb.txIndex, addr, len(code))
 				}
 				return code, err
 			}
 			if sdb.trace || traceAccount(addr) {
-				fmt.Printf("GetCode %x, returned nil\n", addr)
+				fmt.Printf("(%d) GetCode %x, returned nil\n", sdb.txIndex, addr)
 			}
 			return nil, nil
 		})
@@ -378,7 +378,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) (int, error) {
 		})
 
 	if sdb.trace || traceAccount(addr) {
-		fmt.Printf("GetCodeSize %x: %d\n", addr, size)
+		fmt.Printf("(%d) GetCodeSize %x: %d\n", sdb.txIndex, addr, size)
 	}
 
 	return size, err
@@ -456,9 +456,6 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr libcommon.Address) (lib
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error {
-	if sdb.trace || traceAccount(addr) {
-		fmt.Printf("(%d) GS VR %x, %x\n", sdb.txIndex, addr, key)
-	}
 	versionedValue, err := versionedRead(sdb, StateKey(addr, *key), false, nil,
 		func(v *uint256.Int) *uint256.Int {
 			if v == nil {
@@ -506,7 +503,7 @@ func (sdb *IntraBlockState) GetCommittedState(addr libcommon.Address, key *libco
 	*value = *versionedValue
 
 	if sdb.trace || traceAccount(addr) {
-		fmt.Printf("GetCommittedState %x, %x=%x\n", addr, key, value)
+		fmt.Printf("(%d) GetCommittedState %x, %x=%x\n", sdb.txIndex, addr, key, value)
 	}
 
 	return err
@@ -546,7 +543,7 @@ func (sdb *IntraBlockState) ReadVersion(k VersionKey, txIdx int) ReadResult {
 func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace || traceAccount(addr) {
 		bal, _ := sdb.GetBalance(addr)
-		fmt.Printf("AddBalance %x, %d+%d=%d\n", addr, bal, amount, (&uint256.Int{}).Add(bal, amount))
+		fmt.Printf("(%d) AddBalance %x, %d+%d=%d\n", sdb.txIndex, addr, bal, amount, (&uint256.Int{}).Add(bal, amount))
 	}
 
 	if sdb.versionMap != nil {
@@ -600,7 +597,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace || traceAccount(addr) {
 		bal, _ := sdb.GetBalance(addr)
-		fmt.Printf("SubBalance %x, %d-%d=%d\n", addr, bal, amount, (&uint256.Int{}).Sub(bal, amount))
+		fmt.Printf("(%d) SubBalance %x, %d-%d=%d\n", sdb.txIndex, addr, bal, amount, (&uint256.Int{}).Sub(bal, amount))
 	}
 
 	if sdb.versionMap != nil {
@@ -622,7 +619,7 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
 	if sdb.trace || traceAccount(addr) {
-		fmt.Printf("SetBalance %x, %d\n", addr, amount)
+		fmt.Printf("(%d) SetBalance %x, %d\n", sdb.txIndex, addr, amount)
 	}
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
@@ -636,7 +633,7 @@ func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.I
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) error {
 	if sdb.trace || traceAccount(addr) {
-		fmt.Printf("SetNonce %x, %d\n", addr, nonce)
+		fmt.Printf("(%d) SetNonce %x, %d\n", sdb.txIndex, addr, nonce)
 	}
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
@@ -658,20 +655,22 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 		if lenv > 41 {
 			v = v[0:40]
 		}
-		fmt.Printf("SetCode %x, %d: %x...\n", addr, lenv, v)
+		fmt.Printf("(%d) SetCode %x, %d: %x...\n", sdb.txIndex, addr, lenv, v)
 	}
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
 	}
-	stateObject.SetCode(crypto.Keccak256Hash(code), code)
+	codeHash := crypto.Keccak256Hash(code)
+	stateObject.SetCode(codeHash, code)
 	sdb.versionWritten(SubpathKey(addr, CodePath), code)
+	sdb.versionWritten(SubpathKey(addr, CodeHashPath), codeHash)
 	return nil
 }
 
 var tracedAccounts = map[libcommon.Address]struct{}{
-	libcommon.HexToAddress("3f639e666275aa4f0df6a9dfca66d25fd4b2f389"): {},
+	libcommon.HexToAddress("ed11b1f3148cf5c1b818faac07a2724e039534b3"): {},
 }
 
 func traceAccount(addr libcommon.Address) bool {
@@ -687,6 +686,9 @@ func (sdb *IntraBlockState) TraceAccount(addr libcommon.Address) bool {
 func (sdb *IntraBlockState) SetState(addr libcommon.Address, key *libcommon.Hash, value uint256.Int) error {
 	if sdb.trace || traceAccount(addr) {
 		fmt.Printf("(%d) SetState %x, %x=%x\n", sdb.txIndex, addr, key.Bytes(), &value)
+		//if fmt.Sprintf("%x", key) == "53045942ab85c160ea91ee236c9e23258238d4facb253249bdcf00df2729ac0f"  {
+		//	fmt.Printf("%x=%x\n", key, &value)
+		//}
 	}
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
@@ -714,7 +716,7 @@ func (sdb *IntraBlockState) SetStorage(addr libcommon.Address, storage Storage) 
 // SetIncarnation sets incarnation for account if account exists
 func (sdb *IntraBlockState) SetIncarnation(addr libcommon.Address, incarnation uint64) error {
 	if sdb.trace || traceAccount(addr) {
-		fmt.Printf("SetIncarnation %x, %d\n", addr, incarnation)
+		fmt.Printf("(%d) SetIncarnation %x, %d\n", sdb.txIndex, addr, incarnation)
 	}
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
@@ -841,10 +843,6 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (*stateObject
 
 	if account == nil {
 		if sdb.versionMap != nil {
-			if traceAccount(addr) {
-				fmt.Printf("Nil Account: %x\n", addr)
-			}
-
 			account, _ = versionedRead[*accounts.Account](sdb, AddressKey(addr), false, nil, nil, nil)
 
 			if account == nil {
@@ -1015,9 +1013,6 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 }
 
 func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, tracingHooks *tracing.Hooks) error {
-	if traceAccount(addr) {
-		fmt.Printf("Update Account: %x: isdirty: %v\n", addr, isDirty)
-	}
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
@@ -1159,14 +1154,12 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 
 	for key := range sdb.versionedWrites {
 		if _, isDirty := sdb.stateObjectsDirty[key.GetAddress()]; !isDirty {
-			if traceAccount(key.GetAddress()) {
-				fmt.Printf("Revert Write: %s\n", key.String())
-			}
 			revertedWrites = append(revertedWrites, key)
 		}
 	}
 
 	for _, key := range revertedWrites {
+		sdb.versionMap.Delete(key, sdb.txIndex, false)
 		delete(sdb.versionedWrites, key)
 	}
 
@@ -1324,10 +1317,10 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 		k := AddressKey(addr)
 
 		s.versionedReads[k] = VersionedRead{
-			Path: k,
-			Kind: ReadKindStorage,
-			V:    s.Version(),
-			Val:  *account,
+			Path:    k,
+			Kind:    ReadKindStorage,
+			Version: s.Version(),
+			Val:     *account,
 		}
 	}
 }
@@ -1345,16 +1338,16 @@ func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 				if lenv > 41 {
 					v = v[0:40]
 				}
-				fmt.Printf("Version Written %x: %v: %d: %x...\n", k.GetAddress(), s.Version(), lenv, v[0:40])
+				fmt.Printf("(%d) Version Written %x: %v: %d: %x...\n", s.txIndex, k.GetAddress(), s.Version(), lenv, v[0:40])
 			default:
-				fmt.Printf("Version Written %x: %v: %d\n", k.GetAddress(), s.Version(), val)
+				fmt.Printf("(%d) Version Written %x: %v: %d\n", s.txIndex, k.GetAddress(), s.Version(), val)
 			}
 		}
 
 		s.versionedWrites[k] = VersionedWrite{
-			Path: k,
-			V:    s.Version(),
-			Val:  val,
+			Path:    k,
+			Version: s.Version(),
+			Val:     val,
 		}
 	}
 }
@@ -1365,6 +1358,12 @@ func (sdb *IntraBlockState) versionedWrite(k VersionKey) (VersionedWrite, bool) 
 	}
 
 	v, ok := sdb.versionedWrites[k]
+
+	if ok {
+		if _, isDirty := sdb.journal.dirties[k.GetAddress()]; !isDirty {
+			return VersionedWrite{}, false
+		}
+	}
 
 	return v, ok
 }
@@ -1392,21 +1391,27 @@ func (ibs *IntraBlockState) VersionedReads() VersionedReads {
 	return ibs.versionedReads
 }
 
-func (ibs *IntraBlockState) VersionedWrites() VersionedWrites {
+// VersionedWrites returns the current versioned write set if this block
+// checkDirty - is mainly for testing, for block processing this is called
+// after the block execution is completed and non dirty writes (due to reversions)
+// will already have been cleaned in MakeWriteSet
+// (TODO the writes should probably be unset in revert - but this requires extended revert logic)
+func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 	writes := make(VersionedWrites, 0, len(ibs.versionedWrites))
 
-	for _, v := range ibs.versionedWrites {
-		writes = append(writes, v)
+	for key, v := range ibs.versionedWrites {
+		if checkDirty {
+			if _, isDirty := ibs.journal.dirties[key.GetAddress()]; isDirty {
+				writes = append(writes, v)
+			} else {
+				ibs.versionMap.Delete(key, ibs.txIndex, false)
+			}
+		} else {
+			writes = append(writes, v)
+		}
 	}
 
 	return writes
-}
-
-// Apply entries in the write set to versoinMap. Note that this function does not clear the write set.
-func (s *IntraBlockState) FlushVersionedWrites() {
-	if s.versionMap != nil && s.versionedWrites != nil {
-		s.versionMap.FlushVersionedWrites(s.VersionedWrites())
-	}
 }
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
@@ -1435,6 +1440,8 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 				case CodePath:
 					code := val.([]byte)
 					s.SetCode(addr, code)
+				case CodeHashPath:
+					// set by SetCode
 				case SelfDestructPath:
 					deleted := val.(bool)
 					if deleted {

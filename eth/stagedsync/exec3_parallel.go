@@ -1020,7 +1020,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 
 			for _, v := range prevWrite {
 				if _, ok := cmpMap[v.Path]; !ok {
-					blockStatus.versionMap.Delete(v.Path, txIndex)
+					blockStatus.versionMap.Delete(v.Path, txIndex, true)
 				}
 			}
 
@@ -1050,6 +1050,10 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 		tx := toValidate[i]
 		txTask := blockStatus.tasks[tx].Task.(*exec.TxTask)
 		txIndex := txTask.TxIndex
+
+		if blockNum == 14695297 && txIndex == 3 {
+			fmt.Println("VAL")
+		}
 
 		if blockStatus.skipCheck[tx] || state.ValidateVersion(txIndex, blockStatus.blockIO, blockStatus.versionMap) {
 			blockStatus.validateTasks.markComplete(tx)
