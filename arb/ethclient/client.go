@@ -183,7 +183,7 @@ func (ec *Client) getBlock(ctx context.Context, method string, args ...interface
 	//block :=types.NewBlockWithHeader(head).
 	//return .WithBody(txs, uncles).WithWithdrawals(body.Withdrawals), nil
 	// Assemble block
-	block := types.NewBlockForAsembling(head, txs, nil, receipts, body.Withdrawals)
+	block := types.NewBlockForAsembling(head, txs, uncles, nil, body.Withdrawals)
 	return block, nil
 }
 
@@ -251,7 +251,7 @@ func (ec *Client) TransactionByHash(ctx context.Context, hash common.Hash) (tx t
 // TransactionInBlock. Getting their sender address can be done without an RPC interaction.
 func (ec *Client) TransactionSender(ctx context.Context, tx types.Transaction, block common.Hash, index uint) (common.Address, error) {
 	// Try to load the address from the cache.
-	sender, err := types.Sender(&senderFromServer{blockhash: block}, tx)
+	sender, err := tx.Sender(&senderFromServer{blockhash: block})
 	if err == nil {
 		return sender, nil
 	}

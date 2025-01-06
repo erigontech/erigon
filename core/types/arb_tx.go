@@ -531,6 +531,14 @@ func (tx *ArbTx) Hash() common.Hash {
 // ArbTxs implements DerivableList for transactions.
 type ArbTxs []*ArbTx
 
+func WrapArbTransactions(txs ArbTxs) Transactions {
+	txns := make([]Transaction, len(txs))
+	for i := 0; i < len(txs); i++ {
+		txns[i] = Transaction(txs[i])
+	}
+	return txns
+}
+
 // Len returns the length of s.
 func (s ArbTxs) Len() int { return len(s) }
 
