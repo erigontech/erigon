@@ -79,6 +79,14 @@ func DecodeUint64(input string) (uint64, error) {
 	return dec, nil
 }
 
+// Encode encodes b as a hex string with 0x prefix.
+func Encode(b []byte) string {
+	enc := make([]byte, len(b)*2+2)
+	copy(enc, "0x")
+	hex.Encode(enc[2:], b)
+	return string(enc)
+}
+
 // EncodeUint64 encodes i as a hex string with 0x prefix.
 func EncodeUint64(i uint64) string {
 	enc := make([]byte, 2, 10)

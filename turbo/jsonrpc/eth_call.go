@@ -334,6 +334,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	return hexutil.Uint64(hi), nil
 }
 
+func toHexutilityBytes(bytes [][]byte) []hexutility.Bytes {
+	result := make([]hexutility.Bytes, len(bytes))
+	for i, b := range bytes {
+		result[i] = hexutility.Bytes(b)
+	}
+	return result
+}
+
 // maxGetProofRewindBlockCount limits the number of blocks into the past that
 // GetProof will allow computing proofs.  Because we must rewind the hash state
 // and re-compute the state trie, the further back in time the request, the more
@@ -455,10 +463,61 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
 	witnessTrie, _, err := hph.GenerateWitness(ctx, updates, nil /* codeReads */, header.Root[:], "computeWitness(eth_getProof)")
 	if err != nil {
+		return nil, errors.New("could not generate merkle proof for account")
+	}
+
+	accountHashedKey := hph.HashAndNibblizeKey(address.Bytes())
+	accountHashedKeyCompact, err := commitment.CompactKey(accountHashedKey)
+	if err != nil {
+		return nil, errors.New("could not compact account hashed key")
+	}
+	accNode, gotValue := witnessTrie.GetAccount(accountHashedKeyCompact)
+	if !gotValue {
+		return nil, errors.New("could not find account node in proof trie")
+	}
+	storageRoot := accNode.Root
+	fmt.Printf("storageRoot = %x\n", storageRoot)
+	if err != nil {
 		return nil, err
 	}
-	_ = witnessTrie
-	return pr.ProofResult()
+	pr.SetStorageRoot(storageRoot)
+
+	accProof, err := witnessTrie.Prove(accountHashedKeyCompact, 0, false)
+	if err != nil {
+		return nil, err
+	}
+	pr.SetAccountProof(toHexutilityBytes(accProof))
+
+	// Proofs for storage keys
+	var storageProof = make([]accounts.StorageProofResult, len(storageKeys))
+
+	// Create the proofs for the storageKeys.
+	for i, key := range storageKeys {
+		storageKeyProof, err := witnessTrie.Prove(crypto.Keccak256(key.Bytes()) /*fromLevel */, 0 /*storage */, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prove storage key %x : %w", key, err)
+		}
+		_ = storageKeyProof
+		value, err := stateReader.ReadAccountStorage(address, 0, &key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get storage value for key %x : %w", key, err)
+		}
+		valueAsHash := libcommon.Hash(value)
+		storageValue := (*hexutil.Big)(valueAsHash.Big())
+		storageProof[i] = accounts.StorageProofResult{Key: key, Value: storageValue, Proof: toHexutilityBytes(storageKeyProof)}
+	}
+	pr.SetStorageProof(storageProof)
+	proofResult, err := pr.ProofResult()
+	if err != nil {
+		return nil, fmt.Errorf("failed to produce final proof result: %w", err)
+	}
+
+	err = trie.VerifyAccountProof(header.Root, proofResult)
+	if err != nil {
+		return nil, fmt.Errorf("internal error: failed to verify account proof for generated proof : %w", err)
+	}
+
+	return proofResult, nil
 }
 
 func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {

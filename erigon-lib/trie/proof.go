@@ -337,7 +337,7 @@ func VerifyAccountProofByHash(stateRoot libcommon.Hash, accountKey libcommon.Has
 	return nil
 }
 
-func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResult) error {
+func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorageProofResult) error {
 	storageKey := crypto.Keccak256Hash(proof.Key[:])
 	return VerifyStorageProofByHash(storageRoot, storageKey, proof)
 }
@@ -345,7 +345,7 @@ func VerifyStorageProof(storageRoot libcommon.Hash, proof accounts.StorProofResu
 // VerifyAccountProofByHash will verify a storage proof under the assumption
 // that the pre-image of the storage key hashes to the provided keyHash.
 // Consequently, the Key of the proof is ignored in the validation.
-func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash, proof accounts.StorProofResult) error {
+func VerifyStorageProofByHash(storageRoot libcommon.Hash, keyHash libcommon.Hash, proof accounts.StorageProofResult) error {
 	if storageRoot == EmptyRoot || storageRoot == (libcommon.Hash{}) {
 		if proof.Value.ToInt().Sign() != 0 {
 			return errors.New("empty storage root cannot have non-zero values")
