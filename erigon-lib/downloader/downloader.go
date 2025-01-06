@@ -2013,6 +2013,68 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		peersOfThisFile := t.PeerConns()
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
+		if len(weebseedPeersOfThisFile) == 0 {
+			//fmt.Println("torrents", len(torrents))
+			fmt.Println("byFileName", len(d.webseeds.byFileName))
+			byFilenameArry := make([]string, 0, len(d.webseeds.byFileName))
+
+			// Retrieve all keys
+			for key := range d.webseeds.byFileName {
+				byFilenameArry = append(byFilenameArry, key)
+			}
+
+			fmt.Println("byFileName1", len(byFilenameArry))
+
+			//fmt.Println("torrentUrls", len(d.webseeds.torrentUrls))
+			fmt.Println("torrentsWhitelist", len(d.webseeds.torrentsWhitelist))
+			torrentsWhitelistArry := make([]string, 0, len(d.webseeds.torrentsWhitelist))
+			// Retrieve all keys
+			for _, key := range d.webseeds.torrentsWhitelist {
+				torrentsWhitelistArry = append(torrentsWhitelistArry, key.Name)
+			}
+
+			fmt.Println("torrentsWhitelistArry1", len(torrentsWhitelistArry))
+			if len(byFilenameArry) > 0 {
+				var missing []string
+				for fi := range torrentsWhitelistArry {
+					found := false
+					for si := range byFilenameArry {
+						if torrentsWhitelistArry[fi] == byFilenameArry[si] {
+							found = true
+							break
+						}
+					}
+
+					if !found {
+						missing = append(missing, torrentsWhitelistArry[fi])
+					}
+				}
+
+				if len(missing) > 0 {
+					suffixes := make([]string, 0)
+					for _, m := range missing {
+						splt := strings.Split(m, ".")
+						suffix := splt[len(splt)-1]
+
+						//check if suffix is already in the list
+						found := false
+						for _, suff := range suffixes {
+							if suffix == suff {
+								found = true
+								break
+							}
+						}
+						if !found {
+							suffixes = append(suffixes, suffix)
+						}
+
+					}
+
+					fmt.Println("file tyopes which is probably not whitelisted", suffixes)
+				}
+			}
+		}
+
 		tLen := t.Length()
 		var bytesCompleted int64
 

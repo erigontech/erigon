@@ -587,9 +587,9 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			strings.HasSuffix(name, ".v.torrent") ||
 			strings.HasSuffix(name, ".ef.torrent") ||
 			strings.HasSuffix(name, ".idx.torrent") ||
-			strings.HasSuffix(name, ".kvei.torrent") ||
+			//strings.HasSuffix(name, ".kvei.torrent") ||
 			strings.HasSuffix(name, ".bt.torrent") ||
-			strings.HasSuffix(name, ".kvi.torrent") ||
+			//strings.HasSuffix(name, ".kvi.torrent") ||
 			strings.HasSuffix(name, ".vi.torrent") ||
 			strings.HasSuffix(name, ".txt.torrent") ||
 			strings.HasSuffix(name, ".efi.torrent")
