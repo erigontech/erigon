@@ -22,7 +22,7 @@ the initial state, environment, and the transaction object. So they look more li
 
 `EXPRESSION(STATE_init, env, tx, STATE_end) == true?`
 
-Moreover, this representation allows for some non determinism, which means that there could be some extra "oracle" input that helps the
+Moreover, this representation allows for some non-determinism, which means that there could be some extra "oracle" input that helps the
 evaluation:
 
 `EXPRESSION(STATE_init, env, tx, STATE_end, ORACLE_input) == true?`
@@ -50,7 +50,7 @@ Obviously, oracle input of the `EXPRESSION` could simply be a collection of all 
 Next observation we make is that the intermediate transitions are usually quite "local", which means that if we compare
 the initial state and the end state of each of those transitions, the difference between can be described succinctly. This
 can be understood as the length of the description having a pre-determined upper bound. Since there is no upper bound on
-the size of the state, we need a way of specifying part of the state the state transition modifies. At this point, we
+the size of the state, we need a way of specifying part of the state transition modifies. At this point, we
 choose to represent the state as an array of accounts. Here, we use "array" in the context of theory of arrays. In this
 theory, there are two main functions defined for an array: `select` and `store`. Expression `select(a, i)` evaluates to the
 `i`-th element of the array `a`. Expression `store(a, i, v)` evaluates to a new array which is equal to the array `a`
