@@ -152,7 +152,7 @@ func HashFromQueryParams(r *http.Request, name string) (*common.Hash, error) {
 	if hashStr == "" {
 		return nil, nil
 	}
-	// check if hashstr is an hex string
+	// check if hashstr is a hex string
 	if len(hashStr) != 2+2*32 {
 		return nil, errors.New("invalid hash length")
 	}
