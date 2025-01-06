@@ -142,7 +142,7 @@ From the RPC daemon terminal, you will see something like this
  
 <img width="1633" alt="Transaction example" src="https://user-images.githubusercontent.com/24697803/140479146-94b6e66c-22b7-4d8a-a160-b3643d27b612.png">
 
- Finally you will see the ethers in the Dev 2 account balance.
+ Finally, you will see the ethers in the Dev 2 account balance.
     
 
 
