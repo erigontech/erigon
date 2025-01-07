@@ -88,7 +88,7 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 
 func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidationTestCase {
 	tcs := decryptionKeysValidatorTestCases(t)
-	tcs = append(tcs, invalidEnvelopeVersionTestCases(t))
+	tcs = append(tcs, invalidEnvelopeVersionTestCase(t))
 	tcs = append(tcs, invalidMsgBytesTestCase())
 	return tcs
 }
@@ -116,7 +116,7 @@ func instanceIdMismatchTestCase(t *testing.T) decryptionKeysValidationTestCase {
 	}
 }
 
-func invalidEnvelopeVersionTestCases(t *testing.T) decryptionKeysValidationTestCase {
+func invalidEnvelopeVersionTestCase(t *testing.T) decryptionKeysValidationTestCase {
 	decryptionKeys, err := anypb.New(&shutterproto.DecryptionKeys{InstanceId: testInstanceId})
 	require.NoError(t, err)
 	envelopeBytes, err := proto.Marshal(&shutterproto.Envelope{
