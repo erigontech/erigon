@@ -75,10 +75,6 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 		return err
 	}
 
-	//
-	// TODO do we need pubSub.RegisterTopicValidator()?
-	//
-
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return dkl.listenLoop(ctx, pubSub) })
 	eg.Go(func() error { return dkl.peerInfoLoop(ctx, pubSub) })
@@ -193,6 +189,12 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 }
 
 func (dkl DecryptionKeysListener) listenLoop(ctx context.Context, pubSub *pubsub.PubSub) error {
+	topicValidator := NewDecryptionKeysP2pValidatorEx(dkl.logger, dkl.config.InstanceId)
+	err := pubSub.RegisterTopicValidator(DecryptionKeysTopic, topicValidator)
+	if err != nil {
+		return err
+	}
+
 	topic, err := pubSub.Join(DecryptionKeysTopic)
 	if err != nil {
 		return err
