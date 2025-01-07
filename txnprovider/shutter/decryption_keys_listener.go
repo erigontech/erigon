@@ -122,7 +122,7 @@ func (dkl DecryptionKeysListener) initGossipSub(ctx context.Context, host host.H
 	appSpecificScoringFn := func(p peer.ID) float64 {
 		_, ok := bootstrapNodesSet[p]
 		if !ok {
-			return 0.
+			return 0
 		}
 		// In order to be able to participate in the gossipsub,
 		// a peer has to be PX'ed by a bootstrap node - this is only
@@ -133,7 +133,7 @@ func (dkl DecryptionKeysListener) initGossipSub(ctx context.Context, host host.H
 		// but don't overshoot and trust the bootstrap peers
 		// unconditionally - they should still be punishable
 		// for malicous behavior
-		return 200.
+		return 200
 	}
 	peerScoreParams := &pubsub.PeerScoreParams{
 		// Topics score-map will be filled later while subscribing to topics.

@@ -86,6 +86,13 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 	}
 }
 
+func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidationTestCase {
+	tcs := decryptionKeysValidatorTestCases(t)
+	tcs = append(tcs, invalidEnvelopeVersionTestCases(t))
+	tcs = append(tcs, invalidMsgBytesTestCase())
+	return tcs
+}
+
 func instanceIdMismatchTestCase(t *testing.T) decryptionKeysValidationTestCase {
 	decryptionKeys, err := anypb.New(&shutterproto.DecryptionKeys{InstanceId: 999999})
 	require.NoError(t, err)
@@ -107,13 +114,6 @@ func instanceIdMismatchTestCase(t *testing.T) decryptionKeysValidationTestCase {
 		wantValidationResult: pubsub.ValidationReject,
 		wantValidationLogMsg: "rejecting decryption keys msg due to data validation error err=\"instance id mismatch: 999999\"",
 	}
-}
-
-func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidationTestCase {
-	tcs := decryptionKeysValidatorTestCases(t)
-	tcs = append(tcs, invalidEnvelopeVersionTestCases(t))
-	tcs = append(tcs, invalidMsgBytesTestCase())
-	return tcs
 }
 
 func invalidEnvelopeVersionTestCases(t *testing.T) decryptionKeysValidationTestCase {
