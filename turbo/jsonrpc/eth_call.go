@@ -427,7 +427,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 			return nil, err
 		}
 	} else {
-		stateReader = rpchelper.NewLatestStateReader(txBatch2)
+		stateReader = rpchelper.NewLatestStateReader(roTx2)
 	}
 
 	a, err := stateReader.ReadAccountData(address)
@@ -443,11 +443,11 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, err
 	}
 
-	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
+	domains, err := libstate.NewSharedDomains(roTx2, log.New())
 	if err != nil {
 		return nil, err
 	}
-	sdCtx := libstate.NewSharedDomainsCommitmentContext(domains, commitment.ModeUpdate, commitment.VariantHexPatriciaTrie)
+	sdCtx := domains.GetCommitmentContext()
 	patricieTrie := sdCtx.Trie()
 	hph, ok := patricieTrie.(*commitment.HexPatriciaHashed)
 	if !ok {
