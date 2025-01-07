@@ -221,6 +221,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 	assert.NoError(t, err)
 	authAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
 
+	// Generate auth data for transactions
 	var b [33]byte
 	data := bytes.NewBuffer(b[:])
 	data.Reset()
@@ -283,6 +284,15 @@ func TestMultipleAuthorizations(t *testing.T) {
 		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 		assert.NoError(t, err)
 		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.ErrAuthorityReserved})
+
+		assert.Len(t, pool.auths, 1) // auth address should be in pool auth
+		_, ok := pool.auths[authAddress]
+		assert.True(t, ok)
+
+		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{[]*TxnSlot{txnSlot1}, Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
+		assert.NoError(t, err)
+
+		assert.Len(t, pool.auths, 0) // auth address should not be there after block has been mined
 	}
 }
 
