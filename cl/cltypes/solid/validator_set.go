@@ -137,9 +137,9 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		t.attesterBits = make([]byte, len(v.attesterBits))
 	}
 	if v.MerkleTree != nil {
-		if t.MerkleTree == nil {
-			t.MerkleTree = &merkle_tree.MerkleTree{}
-		}
+		//if t.MerkleTree == nil {
+		t.MerkleTree = &merkle_tree.MerkleTree{}
+		//}
 		v.MerkleTree.CopyInto(t.MerkleTree)
 	} else {
 		t.MerkleTree = nil
