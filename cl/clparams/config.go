@@ -41,12 +41,15 @@ import (
 var LatestStateFileName = "latest.ssz_snappy"
 
 type CaplinConfig struct {
-	Backfilling               bool
-	BlobBackfilling           bool
+	// Archive related config
+	ArchiveBlocks             bool
+	ArchiveBlobs              bool
+	ArchiveStates             bool
+	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
-	Archive                   bool
 	SnapshotGenerationEnabled bool
-	NetworkId                 NetworkType
+	// Network related config
+	NetworkId NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
 	DisabledCheckpointSync bool
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
@@ -341,7 +344,11 @@ var ConfigurableCheckpointsURLs = []string{}
 // MinEpochsForBlockRequests  equal to MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT / 2
 func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
 	return b.MinValidatorWithdrawabilityDelay + (b.ChurnLimitQuotient)/2
+}
 
+// MinSlotsForBlobRequests  equal to MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUEST * SLOTS_PER_EPOCH
+func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
+	return b.MinEpochsForBlobsSidecarsRequest * b.SlotsPerEpoch
 }
 
 type ConfigByte byte

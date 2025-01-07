@@ -1006,18 +1006,28 @@ var (
 		Usage: "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: " + strings.Join(rpccfg.SlowLogBlackList, ","),
 		Value: 0,
 	}
-	CaplinBackfillingFlag = cli.BoolFlag{
-		Name:  "caplin.backfilling",
+	CaplinArchiveBlocksFlag = cli.BoolFlag{
+		Name:  "caplin.blocks-archive",
 		Usage: "sets whether backfilling is enabled for caplin",
 		Value: false,
 	}
-	CaplinBlobBackfillingFlag = cli.BoolFlag{
-		Name:  "caplin.backfilling.blob",
+	CaplinArchiveStatesFlag = cli.BoolFlag{
+		Name:  "caplin.states-archive",
+		Usage: "enables archival node for historical states in caplin (it will enable block archival as well)",
+		Value: false,
+	}
+	CaplinArchiveBlobsFlag = cli.BoolFlag{
+		Name:  "caplin.blobs-archive",
 		Usage: "sets whether backfilling is enabled for caplin",
+		Value: false,
+	}
+	CaplinImmediateBlobBackfillFlag = cli.BoolFlag{
+		Name:  "caplin.blobs-immediate-backfill",
+		Usage: "sets whether caplin should immediatelly backfill blobs (4096 epochs)",
 		Value: false,
 	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{
-		Name:  "caplin.backfilling.blob.no-pruning",
+		Name:  "caplin.blobs-no-pruning",
 		Usage: "disable blob pruning in caplin",
 		Value: false,
 	}
@@ -1026,11 +1036,7 @@ var (
 		Usage: "disable checkpoint sync in caplin",
 		Value: false,
 	}
-	CaplinArchiveFlag = cli.BoolFlag{
-		Name:  "caplin.archive",
-		Usage: "enables archival node in caplin",
-		Value: false,
-	}
+
 	CaplinEnableSnapshotGeneration = cli.BoolFlag{
 		Name:  "caplin.snapgen",
 		Usage: "enables snapshot generation in caplin",
@@ -1760,13 +1766,14 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
 
 func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	// Caplin's block's backfilling is enabled if any of the following flags are set
-	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name) || ctx.Bool(CaplinArchiveFlag.Name) || ctx.Bool(CaplinBlobBackfillingFlag.Name)
+	cfg.CaplinConfig.ArchiveBlocks = ctx.Bool(CaplinArchiveBlocksFlag.Name) || ctx.Bool(CaplinArchiveStatesFlag.Name) || ctx.Bool(CaplinArchiveBlobsFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	// More granularity here.
-	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
+	cfg.CaplinConfig.ArchiveBlobs = ctx.Bool(CaplinArchiveBlobsFlag.Name)
+	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
-	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
+	cfg.CaplinConfig.ArchiveStates = ctx.Bool(CaplinArchiveStatesFlag.Name)
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
 	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {

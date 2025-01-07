@@ -106,6 +106,8 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			var e *EndpointError
 			if errors.As(err, &e) {
 				endpointError = e
+			} else {
+				endpointError = WrapEndpointError(err)
 			}
 			endpointError.WriteTo(w)
 			return
