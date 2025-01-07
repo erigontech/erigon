@@ -187,21 +187,21 @@ func (v *ValidatorSet) Get(idx int) Validator {
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	// generate root list
-	if v.MerkleTree == nil {
-		v.MerkleTree = &merkle_tree.MerkleTree{}
-		cap := uint64(v.c)
-		hashBuffer := make([]byte, 8*32)
-		v.MerkleTree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			validator := v.Get(idx)
-			if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
-				panic(err)
-			}
-			hashBuffer = hashBuffer[:(8 * 32)]
-			if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, out); err != nil {
-				panic(err)
-			}
-		}, &cap)
-	}
+	//if v.MerkleTree == nil {
+	v.MerkleTree = &merkle_tree.MerkleTree{}
+	cap := uint64(v.c)
+	hashBuffer := make([]byte, 8*32)
+	v.MerkleTree.Initialize(v.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+		validator := v.Get(idx)
+		if err := validator.CopyHashBufferTo(hashBuffer); err != nil {
+			panic(err)
+		}
+		hashBuffer = hashBuffer[:(8 * 32)]
+		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer, out); err != nil {
+			panic(err)
+		}
+	}, &cap)
+	//}
 	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
 	coreRoot := v.MerkleTree.ComputeRoot()
 	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil

@@ -176,14 +176,14 @@ func (arr *byteBasedUint64Slice) Cap() int {
 
 // HashListSSZ computes the SSZ hash of the slice as a list. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
-	if arr.MerkleTree == nil {
-		arr.MerkleTree = &merkle_tree.MerkleTree{}
-		cap := uint64((arr.c*8 + length.Hash - 1) / length.Hash)
+	//if arr.MerkleTree == nil {
+	arr.MerkleTree = &merkle_tree.MerkleTree{}
+	cap := uint64((arr.c*8 + length.Hash - 1) / length.Hash)
 
-		arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			copy(out, arr.u[idx*length.Hash:])
-		}, &cap)
-	}
+	arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+		copy(out, arr.u[idx*length.Hash:])
+	}, &cap)
+	//}
 
 	coreRoot := arr.ComputeRoot()
 	lengthRoot := merkle_tree.Uint64Root(uint64(arr.l))
@@ -192,12 +192,12 @@ func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 
 // HashVectorSSZ computes the SSZ hash of the slice as a vector. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashVectorSSZ() ([32]byte, error) {
-	if arr.MerkleTree == nil {
-		arr.MerkleTree = &merkle_tree.MerkleTree{}
-		arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			copy(out, arr.u[idx*length.Hash:])
-		}, nil)
-	}
+	//if arr.MerkleTree == nil {
+	arr.MerkleTree = &merkle_tree.MerkleTree{}
+	arr.MerkleTree.Initialize((arr.l+3)/4, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+		copy(out, arr.u[idx*length.Hash:])
+	}, nil)
+	//}
 
 	return arr.ComputeRoot(), nil
 }
