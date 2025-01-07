@@ -119,6 +119,7 @@ func FindOldestWitness(tx kv.Tx, tableName string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	defer cursor.Close()
 
 	k, _, err := cursor.First()
 	if err != nil {
