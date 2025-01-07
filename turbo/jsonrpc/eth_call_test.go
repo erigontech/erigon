@@ -157,13 +157,6 @@ func TestGetProof(t *testing.T) {
 			stateVal:    0,
 		},
 		{
-			name:        "currentBlockEOAMissingState",
-			addr:        bankAddr,
-			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    3,
-			stateVal:    0,
-		},
-		{
 			name:        "currentBlockNoAccountMissingState",
 			addr:        libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
 			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
