@@ -79,41 +79,10 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	// TODO do we need pubSub.RegisterTopicValidator()?
 	//
 
-	topic, err := pubSub.Join(DecryptionKeysTopic)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := topic.Close(); err != nil {
-			dkl.logger.Error("failed to close decryption keys topic", "err", err)
-		}
-	}()
-
-	err = topic.SetScoreParams(decryptionKeysTopicScoreParams())
-	if err != nil {
-		return err
-	}
-
-	sub, err := topic.Subscribe()
-	if err != nil {
-		return err
-	}
-	defer sub.Cancel()
-
-	for {
-		msg, err := sub.Next(ctx)
-		if err != nil {
-			return err
-		}
-
-		decryptionKeys, err := proto.UnmarshallDecryptionKeys(msg.Data)
-		if err != nil {
-			dkl.logger.Debug("failed to unmarshal decryption keys, skipping message", "err", err)
-			continue
-		}
-
-		dkl.observers.Notify(decryptionKeys)
-	}
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return dkl.listenLoop(ctx, pubSub) })
+	eg.Go(func() error { return dkl.peerInfoLoop(ctx, pubSub) })
+	return eg.Wait()
 }
 
 func (dkl DecryptionKeysListener) initHost() (host.Host, error) {
@@ -221,6 +190,59 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 	}
 
 	return wg.Wait()
+}
+
+func (dkl DecryptionKeysListener) listenLoop(ctx context.Context, pubSub *pubsub.PubSub) error {
+	topic, err := pubSub.Join(DecryptionKeysTopic)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := topic.Close(); err != nil {
+			dkl.logger.Error("failed to close decryption keys topic", "err", err)
+		}
+	}()
+
+	err = topic.SetScoreParams(decryptionKeysTopicScoreParams())
+	if err != nil {
+		return err
+	}
+
+	sub, err := topic.Subscribe()
+	if err != nil {
+		return err
+	}
+	defer sub.Cancel()
+
+	for {
+		msg, err := sub.Next(ctx)
+		if err != nil {
+			return err
+		}
+
+		decryptionKeys, err := proto.UnmarshallDecryptionKeys(msg.Data)
+		if err != nil {
+			dkl.logger.Debug("failed to unmarshal decryption keys, skipping message", "err", err)
+			continue
+		}
+
+		dkl.observers.Notify(decryptionKeys)
+	}
+}
+
+func (dkl DecryptionKeysListener) peerInfoLoop(ctx context.Context, pubSub *pubsub.PubSub) error {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			peers := pubSub.ListPeers(DecryptionKeysTopic)
+			dkl.logger.Info("decryption keys peer count", "peers", len(peers))
+		}
+	}
 }
 
 func decryptionKeysTopicScoreParams() *pubsub.TopicScoreParams {
