@@ -19,9 +19,11 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
+	"unsafe"
 
 	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon-lib/trie"
@@ -418,9 +420,14 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	}
 
 	txNumsReader := rawdbv3.TxNums
-	stateReader, err := rpchelper.CreateHistoryStateReader(txBatch2, txNumsReader, blockNr, 0, chainConfig.ChainName)
-	if err != nil {
-		return nil, err
+	var stateReader state.StateReader
+	if blockNr != latestBlock {
+		stateReader, err = rpchelper.CreateHistoryStateReader(txBatch2, txNumsReader, blockNr+1, 0, chainConfig.ChainName)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		stateReader = rpchelper.NewLatestStateReader(txBatch2)
 	}
 
 	a, err := stateReader.ReadAccountData(address)
@@ -471,40 +478,87 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	if err != nil {
 		return nil, errors.New("could not compact account hashed key")
 	}
-	accNode, gotValue := witnessTrie.GetAccount(accountHashedKeyCompact)
+	accInTrie, gotValue := witnessTrie.GetAccount(accountHashedKeyCompact)
+	if !gotValue {
+		return nil, errors.New("could not find account in proof trie")
+	}
+
+	accNode, gotValue := witnessTrie.GetAccountNode(accountHashedKeyCompact)
 	if !gotValue {
 		return nil, errors.New("could not find account node in proof trie")
 	}
-	storageRoot := accNode.Root
-	fmt.Printf("storageRoot = %x\n", storageRoot)
-	if err != nil {
-		return nil, err
-	}
-	pr.SetStorageRoot(storageRoot)
 
+	if accInTrie != nil { // sanity checks to ensure the values from state reader much the values in trie
+		if accInTrie.Balance.Uint64() != a.Balance.Uint64() {
+			panic("differing balances between state and trie")
+		}
+		if accInTrie.Nonce != a.Nonce {
+			return nil, errors.New("differing nonces between state and trie")
+		}
+
+		if accInTrie.CodeHash != a.CodeHash {
+			return nil, errors.New("differing codehashes betweeen state and trie")
+		}
+	}
+
+	// compute account proof
 	accProof, err := witnessTrie.Prove(accountHashedKeyCompact, 0, false)
 	if err != nil {
 		return nil, err
 	}
 	pr.SetAccountProof(toHexutilityBytes(accProof))
 
+	var storageRoot libcommon.Hash
+	if !a.Initialised || accInTrie == nil { // account does not exist
+		storageRoot = libcommon.Hash{}
+	} else {
+		storageRoot = accInTrie.Root
+	}
+
+	fmt.Printf("storageRoot = %x\n", storageRoot)
+	pr.SetStorageRoot(storageRoot)
+
 	// Proofs for storage keys
 	var storageProof = make([]accounts.StorageProofResult, len(storageKeys))
 
 	// Create the proofs for the storageKeys.
 	for i, key := range storageKeys {
-		storageKeyProof, err := witnessTrie.Prove(crypto.Keccak256(key.Bytes()) /*fromLevel */, 0 /*storage */, true)
-		if err != nil {
-			return nil, fmt.Errorf("failed to prove storage key %x : %w", key, err)
+		if !a.Initialised || accInTrie == nil { // account does not exist
+			storageProof[i] = accounts.StorageProofResult{Key: key, Value: (*hexutil.Big)(libcommon.Big0), Proof: nil}
+			continue
 		}
-		_ = storageKeyProof
+		// Get storage value
 		value, err := stateReader.ReadAccountStorage(address, 0, &key)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get storage value for key %x : %w", key, err)
 		}
-		valueAsHash := libcommon.Hash(value)
-		storageValue := (*hexutil.Big)(valueAsHash.Big())
-		storageProof[i] = accounts.StorageProofResult{Key: key, Value: storageValue, Proof: toHexutilityBytes(storageKeyProof)}
+
+		// Decode the hexadecimal string into the big.Int
+		// The base is 16 for hexadecimal
+		valueAsBigInt := new(big.Int)
+		valueAsBigInt.SetString(hex.EncodeToString(value), 16)
+		storageValue := (*hexutil.Big)(unsafe.Pointer(valueAsBigInt))
+
+		if storageRoot == trie.EmptyRoot {
+			storageProof[i] = accounts.StorageProofResult{Key: key, Value: storageValue, Proof: nil}
+		} else {
+			var fullStorageKey []byte
+			fullStorageKey = append(fullStorageKey, crypto.Keccak256(address.Bytes())...)
+			fullStorageKey = append(fullStorageKey, crypto.Keccak256(key.Bytes())...)
+
+			// fullStorageKey := make([]byte, 64)
+			// copy(fullStorageKey[:32], accountHashedKeyCompact)
+			// copy(fullStorageKey[32:], crypto.Keccak256(key.Bytes()))
+			// Get the proof for the storage key in the storage trie
+			storageTrie := trie.NewInMemoryTrie(accNode.Storage)
+			storageKeyProof, err := storageTrie.Prove(fullStorageKey[32:], 0 /*fromLevel */, false /* storage */)
+			if err != nil {
+				return nil, fmt.Errorf("failed to prove storage key %x : %w", key, err)
+			}
+
+			storageProof[i] = accounts.StorageProofResult{Key: key, Value: storageValue, Proof: toHexutilityBytes(storageKeyProof)}
+		}
+
 	}
 	pr.SetStorageProof(storageProof)
 	proofResult, err := pr.ProofResult()
@@ -512,9 +566,18 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, fmt.Errorf("failed to produce final proof result: %w", err)
 	}
 
+	// Verify proofs before returning result to the user
 	err = trie.VerifyAccountProof(header.Root, proofResult)
 	if err != nil {
 		return nil, fmt.Errorf("internal error: failed to verify account proof for generated proof : %w", err)
+	}
+
+	// verify storage proofs
+	for _, storageProof := range proofResult.StorageProof {
+		err = trie.VerifyStorageProof(proofResult.StorageHash, storageProof)
+		if err != nil {
+			return nil, fmt.Errorf("internal error: failed to verify storage proof for key=%x : %w", storageProof.Key.Bytes(), err)
+		}
 	}
 
 	return proofResult, nil
