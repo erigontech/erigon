@@ -47,7 +47,7 @@ type BaseAppendable struct {
 	freezer       Freezer
 	indexBuilders []AccessorIndexBuilder
 
-	//canFreeze CanFreeze
+	canFreeze CanFreeze
 
 	//rosnapshot *RoSnapshots
 	enum ApEnum
@@ -119,6 +119,22 @@ func (ap *BaseAppendable) BuildFiles(ctx context.Context, stepKeyFrom, stepKeyTo
 	for step := stepFrom; step < stepTo; step++ {
 		stepKeyFrom, stepKeyTo := step*ap.stepSize, (step+1)*ap.stepSize // TODO: more complicated logic can be there e.g.. snapcfg.MergeLimit()
 
+		// can freeze?
+		canDo := false
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			if ok, err := ap.canFreeze.Evaluate(stepKeyFrom, stepKeyTo, tx); !ok {
+				// can't freeze
+				return err
+			}
+			canDo = true
+			return nil
+		}); err != nil {
+			return err
+		}
+		if !canDo {
+			return nil
+		}
+
 		path := AppeSegName(ap.enum, 1, step, step+1)
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+string(ap.enum), path, tmpDir, seg.DefaultCfg, log.LvlTrace, logger)
 		// freeze
@@ -182,6 +198,10 @@ func (ap *BaseAppendable) Prune(ctx context.Context, stepKeyTo, limit uint64, rw
 }
 
 func (ap *BaseAppendable) Unwind(ctx context.Context, stepKeyFrom uint64, rwTx kv.RwTx) error {
+	if !ap.doesUnwind {
+		return nil
+	}
+
 	c, err := rwTx.Cursor(ap.valsTbl)
 	if err != nil {
 		return err
@@ -237,9 +257,9 @@ func (ap *BaseAppendable) SetSourceKeyGenerator(gen SourceKeyGenerator) {
 // 	ap.put = put
 // }
 
-// func (ap *BaseAppendable) SetCanFreeze(canFreeze CanFreeze) {
-// 	ap.canFreeze = canFreeze
-// }
+func (ap *BaseAppendable) SetCanFreeze(canFreeze CanFreeze) {
+	ap.canFreeze = canFreeze
+}
 
 type AppendableFiles struct {
 	valuesDecomp *seg.Decompressor

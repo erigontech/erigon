@@ -10,9 +10,9 @@ import (
 
 // why this is needed?
 // commenting this out because: appendable only checks if enough "stuff" is present in db
-// type CanFreeze interface {
-// 	Evaluate(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (bool, error)
-// }
+type CanFreeze interface {
+	Evaluate(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (bool, error)
+}
 
 type VKType []byte // value table key type
 type VVType []byte // value table value type
@@ -24,7 +24,7 @@ type Appendable interface {
 
 	SetFreezer(freezer Freezer)
 	SetIndexBuilders(ib []AccessorIndexBuilder)
-	// SetCanFreeze(canFreeze CanFreeze)
+	SetCanFreeze(canFreeze CanFreeze)
 	// GetRoSnapshots() *RoSnapshots
 
 	// freeze
