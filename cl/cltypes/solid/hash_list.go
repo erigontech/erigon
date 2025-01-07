@@ -18,7 +18,6 @@ package solid
 
 import (
 	"encoding/json"
-	"io"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
@@ -104,14 +103,15 @@ func (h *hashList) CopyTo(t IterableSSZ[libcommon.Hash]) {
 	if len(h.u) > len(tu.u) {
 		tu.u = make([]byte, len(h.u))
 	}
-	// if h.MerkleTree != nil {
-	// 	if tu.MerkleTree == nil {
-	// 		tu.MerkleTree = &merkle_tree.MerkleTree{}
-	// 	}
-	// 	h.MerkleTree.CopyInto(tu.MerkleTree)
-	// } else {
-	tu.MerkleTree = nil
-	//}
+	if h.MerkleTree != nil {
+		if tu.MerkleTree == nil {
+			tu.MerkleTree = &merkle_tree.MerkleTree{}
+			tu.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+				copy(out, tu.u[idx*length.Hash:(idx+1)*length.Hash])
+			}, /*limit=*/ nil)
+		}
+		h.MerkleTree.CopyInto(tu.MerkleTree)
+	}
 	copy(tu.u, h.u)
 }
 
@@ -187,23 +187,23 @@ func (h *hashList) Pop() libcommon.Hash {
 	panic("didnt ask, dont need it, go fuck yourself")
 }
 
-func (h *hashList) ReadMerkleTree(r io.Reader) error {
-	if h.MerkleTree == nil {
-		h.MerkleTree = &merkle_tree.MerkleTree{}
-		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
-		}, /*limit=*/ nil)
-	}
-	return h.MerkleTree.ReadMerkleTree(r)
-}
+// func (h *hashList) ReadMerkleTree(r io.Reader) error {
+// 	if h.MerkleTree == nil {
+// 		h.MerkleTree = &merkle_tree.MerkleTree{}
+// 		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+// 			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
+// 		}, /*limit=*/ nil)
+// 	}
+// 	return h.MerkleTree.ReadMerkleTree(r)
+// }
 
-func (h *hashList) WriteMerkleTree(w io.Writer) error {
-	if h.MerkleTree == nil {
-		cap := uint64(h.c)
-		h.MerkleTree = &merkle_tree.MerkleTree{}
-		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
-		}, /*limit=*/ &cap)
-	}
-	return h.MerkleTree.WriteMerkleTree(w)
-}
+// func (h *hashList) WriteMerkleTree(w io.Writer) error {
+// 	if h.MerkleTree == nil {
+// 		cap := uint64(h.c)
+// 		h.MerkleTree = &merkle_tree.MerkleTree{}
+// 		h.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
+// 			copy(out, h.u[idx*length.Hash:(idx+1)*length.Hash])
+// 		}, /*limit=*/ &cap)
+// 	}
+// 	return h.MerkleTree.WriteMerkleTree(w)
+// }

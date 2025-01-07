@@ -207,7 +207,7 @@ func (m *MerkleTree) CopyInto(other *MerkleTree) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	defer other.mu.Unlock()
-	other.computeLeaf = m.computeLeaf
+	//other.computeLeaf = m.computeLeaf
 	if len(other.layers) > len(m.layers) {
 		// reset the internal layers
 		for i := len(m.layers); i < len(other.layers); i++ {
