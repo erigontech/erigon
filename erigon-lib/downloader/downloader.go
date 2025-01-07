@@ -1950,15 +1950,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		downloading[file] = &i
 	}
 
-	webDownloadClient := d.webDownloadClient
-
 	webDownloadInfo := map[string]webDownloadInfo{}
 
 	for key, value := range d.webDownloadInfo {
 		webDownloadInfo[key] = value
 	}
-
-	ctx := d.ctx
 
 	d.lock.RUnlock()
 
@@ -2091,72 +2087,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	var webTransfers int32
 
-	if webDownloadClient != nil {
-		webStats, _ := webDownloadClient.Stats(ctx)
-
-		if webStats != nil {
-			if len(webStats.Transferring) != 0 && stats.Completed {
-				stats.Completed = false
-			}
-
-			for _, transfer := range webStats.Transferring {
-				stats.MetadataReady++
-				webTransfers++
-
-				bytesCompleted := transfer.Bytes
-				tLen := transfer.Size
-				transferName := transfer.Name
-
-				delete(downloading, transferName)
-
-				if bytesCompleted > tLen {
-					bytesCompleted = tLen
-				}
-
-				stats.BytesTotal += tLen
-
-				stats.BytesDownload += bytesCompleted
-
-				if transfer.Percentage == 0 {
-					zeroProgress = append(zeroProgress, transferName)
-				}
-
-				var seeds []diagnostics.SegmentPeer
-				var webseedRates []interface{}
-				if peerUrl, err := url.Parse(transfer.Group); err == nil {
-					rate := uint64(transfer.SpeedAvg)
-					seeds = []diagnostics.SegmentPeer{
-						{
-							Url:          peerUrl.Host,
-							DownloadRate: rate,
-						}}
-
-					if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
-						webseedRates = []interface{}{strings.TrimSuffix(shortUrl, "/"), fmt.Sprintf("%s/s", common.ByteCount(rate))}
-					}
-				}
-
-				// more detailed statistic: download rate of each peer (for each file)
-				if transfer.Percentage != 0 {
-					logger.Log(verbosity, "[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
-					logger.Log(verbosity, "[snapshots] web peers", webseedRates...)
-				}
-
-				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-					Name:            transferName,
-					TotalBytes:      tLen,
-					DownloadedBytes: bytesCompleted,
-					Webseeds:        seeds,
-				})
-			}
-		}
+	//Calculate web download stats (not used at the moment)
+	if d.webDownloadClient != nil {
+		d.collectWebDownloadClientStats(&downloading, &stats, &zeroProgress, &webTransfers)
 	}
 
 	if len(downloading) > 0 {
-		if webDownloadClient != nil {
-			webTransfers += int32(len(downloading))
-		}
-
 		stats.Completed = false
 	}
 
@@ -2967,4 +2903,72 @@ func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
 	defer d.lock.RUnlock()
 
 	return d.completedTorrents
+}
+
+func (d *Downloader) collectWebDownloadClientStats(downloading *map[string]*downloadInfo, stats *AggStats, zeroProgress *[]string, webTransfers *int32) {
+	webDownloadClient := d.webDownloadClient
+	ctx := d.ctx
+	logger := d.logger
+	verbosity := d.verbosity
+
+	webStats, _ := webDownloadClient.Stats(ctx)
+
+	if webStats != nil {
+		if len(webStats.Transferring) != 0 && stats.Completed {
+			stats.Completed = false
+		}
+
+		for _, transfer := range webStats.Transferring {
+			stats.MetadataReady++
+			(*webTransfers)++
+
+			bytesCompleted := transfer.Bytes
+			tLen := transfer.Size
+			transferName := transfer.Name
+
+			delete(*downloading, transferName)
+
+			if bytesCompleted > tLen {
+				bytesCompleted = tLen
+			}
+
+			stats.BytesTotal += tLen
+
+			stats.BytesCompleted += bytesCompleted
+
+			if transfer.Percentage == 0 {
+				*zeroProgress = append(*zeroProgress, transferName)
+			}
+
+			var seeds []diagnostics.SegmentPeer
+			var webseedRates []interface{}
+			if peerUrl, err := url.Parse(transfer.Group); err == nil {
+				rate := uint64(transfer.SpeedAvg)
+				seeds = []diagnostics.SegmentPeer{
+					{
+						Url:          peerUrl.Host,
+						DownloadRate: rate,
+					}}
+
+				if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
+					webseedRates = []interface{}{strings.TrimSuffix(shortUrl, "/"), fmt.Sprintf("%s/s", common.ByteCount(rate))}
+				}
+			}
+
+			// more detailed statistic: download rate of each peer (for each file)
+			if transfer.Percentage != 0 {
+				logger.Log(verbosity, "[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
+				logger.Log(verbosity, "[snapshots] web peers", webseedRates...)
+			}
+
+			diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+				Name:            transferName,
+				TotalBytes:      tLen,
+				DownloadedBytes: bytesCompleted,
+				Webseeds:        seeds,
+			})
+		}
+	}
+
+	*webTransfers += int32(len(*downloading))
 }
