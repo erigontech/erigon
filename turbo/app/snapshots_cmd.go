@@ -1381,15 +1381,18 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	logger.Info("Prune state history")
-	ac := agg.BeginFilesRo()
-	defer ac.Close()
 	for hasMoreToPrune := true; hasMoreToPrune; {
-		hasMoreToPrune, err = ac.PruneSmallBatchesDb(ctx, 2*time.Minute, db)
-		if err != nil {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 	}
-	ac.Close()
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
@@ -1435,15 +1438,18 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	ac = agg.BeginFilesRo()
-	defer ac.Close()
 	for hasMoreToPrune := true; hasMoreToPrune; {
-		hasMoreToPrune, err = ac.PruneSmallBatchesDb(context.Background(), 2*time.Minute, db)
-		if err != nil {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			ac := tx.(libstate.HasAggTx).AggTx().(*libstate.AggregatorRoTx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 	}
-	ac.Close()
 
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
