@@ -104,14 +104,14 @@ func (h *hashList) CopyTo(t IterableSSZ[libcommon.Hash]) {
 	if len(h.u) > len(tu.u) {
 		tu.u = make([]byte, len(h.u))
 	}
-	if h.MerkleTree != nil {
-		//if tu.MerkleTree == nil {
-		tu.MerkleTree = &merkle_tree.MerkleTree{}
-		//}
-		h.MerkleTree.CopyInto(tu.MerkleTree)
-	} else {
-		tu.MerkleTree = nil
-	}
+	// if h.MerkleTree != nil {
+	// 	if tu.MerkleTree == nil {
+	// 		tu.MerkleTree = &merkle_tree.MerkleTree{}
+	// 	}
+	// 	h.MerkleTree.CopyInto(tu.MerkleTree)
+	// } else {
+	tu.MerkleTree = nil
+	//}
 	copy(tu.u, h.u)
 }
 

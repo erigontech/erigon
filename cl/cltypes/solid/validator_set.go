@@ -136,14 +136,14 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 		t.expandBuffer(v.l)
 		t.attesterBits = make([]byte, len(v.attesterBits))
 	}
-	if v.MerkleTree != nil {
-		//if t.MerkleTree == nil {
-		t.MerkleTree = &merkle_tree.MerkleTree{}
-		//}
-		v.MerkleTree.CopyInto(t.MerkleTree)
-	} else {
-		t.MerkleTree = nil
-	}
+	// if v.MerkleTree != nil {
+	// 	if t.MerkleTree == nil {
+	// 		t.MerkleTree = &merkle_tree.MerkleTree{}
+	// 	}
+	// 	v.MerkleTree.CopyInto(t.MerkleTree)
+	// } else {
+	t.MerkleTree = nil
+	//}
 	// skip copying (unsupported for phase0)
 	t.phase0Data = make([]Phase0Data, t.l)
 	copy(t.buffer, v.buffer)
