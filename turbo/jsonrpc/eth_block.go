@@ -261,6 +261,12 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 			response[field] = nil
 		}
 	}
+
+	if chainConfig.Bor != nil {
+		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+		response["miner"], _ = ecrecover(b.Header(), borConfig)
+	}
+
 	return response, err
 }
 
@@ -319,18 +325,18 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
-
-	if chainConfig.Bor != nil {
-		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
-		response["miner"], _ = ecrecover(block.Header(), borConfig)
-	}
-
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
 			response[field] = nil
 		}
 	}
+
+	if chainConfig.Bor != nil {
+		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+		response["miner"], _ = ecrecover(block.Header(), borConfig)
+	}
+
 	return response, err
 }
 
