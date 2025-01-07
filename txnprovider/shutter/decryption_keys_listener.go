@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/txnprovider/shutter/proto"
 )
 
 const (
@@ -41,18 +42,18 @@ const (
 type DecryptionKeysListener struct {
 	logger    log.Logger
 	config    Config
-	observers *event.Observers[*pubsub.Message]
+	observers *event.Observers[*proto.DecryptionKeys]
 }
 
 func NewDecryptionKeysListener(logger log.Logger, config Config) DecryptionKeysListener {
 	return DecryptionKeysListener{
 		logger:    logger,
 		config:    config,
-		observers: event.NewObservers[*pubsub.Message](),
+		observers: event.NewObservers[*proto.DecryptionKeys](),
 	}
 }
 
-func (dkl DecryptionKeysListener) RegisterObserver(observer event.Observer[*pubsub.Message]) event.UnregisterFunc {
+func (dkl DecryptionKeysListener) RegisterObserver(observer event.Observer[*proto.DecryptionKeys]) event.UnregisterFunc {
 	return dkl.observers.Register(observer)
 }
 
@@ -105,7 +106,13 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 			return err
 		}
 
-		dkl.observers.Notify(msg)
+		decryptionKeys, err := proto.UnmarshallDecryptionKeys(msg.Data)
+		if err != nil {
+			dkl.logger.Debug("failed to unmarshal decryption keys, skipping message", "err", err)
+			continue
+		}
+
+		dkl.observers.Notify(decryptionKeys)
 	}
 }
 

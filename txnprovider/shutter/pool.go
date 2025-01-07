@@ -19,12 +19,12 @@ package shutter
 import (
 	"context"
 
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/shutter/proto"
 )
 
 var _ txnprovider.TxnProvider = (*Pool)(nil)
@@ -53,7 +53,7 @@ func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.
 func (p Pool) Run(ctx context.Context) error {
 	p.logger.Info("running pool")
 
-	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *pubsub.Message) {
+	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *proto.DecryptionKeys) {
 		p.decryptionKeysProcessor.Enqueue(msg)
 	})
 	defer unregisterDkpObserver()

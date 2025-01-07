@@ -19,24 +19,23 @@ package shutter
 import (
 	"context"
 
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/txnprovider/shutter/proto"
 )
 
 type DecryptionKeysProcessor struct {
 	logger log.Logger
-	queue  chan *pubsub.Message
+	queue  chan *proto.DecryptionKeys
 }
 
 func NewDecryptionKeysProcessor(logger log.Logger) DecryptionKeysProcessor {
 	return DecryptionKeysProcessor{
 		logger: logger,
-		queue:  make(chan *pubsub.Message),
+		queue:  make(chan *proto.DecryptionKeys),
 	}
 }
 
-func (dkp DecryptionKeysProcessor) Enqueue(msg *pubsub.Message) {
+func (dkp DecryptionKeysProcessor) Enqueue(msg *proto.DecryptionKeys) {
 	dkp.queue <- msg
 }
 
@@ -45,8 +44,14 @@ func (dkp DecryptionKeysProcessor) Run(ctx context.Context) error {
 
 	for {
 		select {
-		case _ = <-dkp.queue:
-			dkp.logger.Debug("received decryption keys message")
+		case msg := <-dkp.queue:
+			dkp.logger.Debug(
+				"processing decryption keys message",
+				"instanceId", msg.InstanceId,
+				"eon", msg.Eon,
+				"slot", msg.GetGnosis().Slot,
+				"txPointer", msg.GetGnosis().TxPointer,
+			)
 		//
 		// TODO process msg
 		//
