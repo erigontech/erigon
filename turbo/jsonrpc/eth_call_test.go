@@ -127,49 +127,49 @@ func TestGetProof(t *testing.T) {
 		stateVal    uint64
 		expectedErr string
 	}{
-		// {
-		// 	name:     "currentBlockNoState",
-		// 	addr:     contractAddr,
-		// 	blockNum: 3,
-		// },
-		// {
-		// 	name:     "currentBlockEOA",
-		// 	addr:     bankAddr,
-		// 	blockNum: 3,
-		// },
-		// {
-		// 	name:     "currentBlockNoAccount",
-		// 	addr:     libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
-		// 	blockNum: 3,
-		// },
-		// {
-		// 	name:        "currentBlockWithState",
-		// 	addr:        contractAddr,
-		// 	blockNum:    3,
-		// 	storageKeys: []libcommon.Hash{key(0), key(4), key(8), key(10)},
-		// 	stateVal:    2,
-		// },
-		// {
-		// 	name:        "currentBlockWithMissingState",
-		// 	addr:        contractAddr,
-		// 	storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-		// 	blockNum:    3,
-		// 	stateVal:    0,
-		// },
-		// {
-		// 	name:        "currentBlockEOAMissingState",
-		// 	addr:        bankAddr,
-		// 	storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-		// 	blockNum:    3,
-		// 	stateVal:    0,
-		// },
-		// {
-		// 	name:        "currentBlockNoAccountMissingState",
-		// 	addr:        libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
-		// 	storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-		// 	blockNum:    3,
-		// 	stateVal:    0,
-		// },
+		{
+			name:     "currentBlockNoState",
+			addr:     contractAddr,
+			blockNum: 3,
+		},
+		{
+			name:     "currentBlockEOA",
+			addr:     bankAddr,
+			blockNum: 3,
+		},
+		{
+			name:     "currentBlockNoAccount",
+			addr:     libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
+			blockNum: 3,
+		},
+		{
+			name:        "currentBlockWithState",
+			addr:        contractAddr,
+			blockNum:    3,
+			storageKeys: []libcommon.Hash{key(0), key(4), key(8), key(10)},
+			stateVal:    2,
+		},
+		{
+			name:        "currentBlockWithMissingState",
+			addr:        contractAddr,
+			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			blockNum:    3,
+			stateVal:    0,
+		},
+		{
+			name:        "currentBlockEOAMissingState",
+			addr:        bankAddr,
+			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			blockNum:    3,
+			stateVal:    0,
+		},
+		{
+			name:        "currentBlockNoAccountMissingState",
+			addr:        libcommon.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
+			storageKeys: []libcommon.Hash{libcommon.HexToHash("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
+			blockNum:    3,
+			stateVal:    0,
+		},
 		{
 			name:        "olderBlockWithState",
 			addr:        contractAddr,

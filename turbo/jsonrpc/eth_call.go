@@ -427,7 +427,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 			return nil, err
 		}
 	} else {
-		stateReader = rpchelper.NewLatestStateReader(roTx2)
+		stateReader = rpchelper.NewLatestStateReader(txBatch2)
 	}
 
 	a, err := stateReader.ReadAccountData(address)
@@ -443,7 +443,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, err
 	}
 
-	domains, err := libstate.NewSharedDomains(roTx2, log.New())
+	domains, err := libstate.NewSharedDomains(txBatch2, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -459,10 +459,10 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	updates := commitment.NewUpdates(commitment.ModeDirect, sdCtx.TempDir(), hph.HashAndNibblizeKey)
 	updates.TouchPlainKey(string(address.Bytes()), nil, updates.TouchAccount)
 	for _, storageKey := range storageKeys {
-		// the full storage key is concat(address, storageKey) which is 32+32 = 64 bytes
-		fullStorageKey := make([]byte, 64)
-		copy(fullStorageKey[:32], address.Bytes())
-		copy(fullStorageKey[32:], storageKey.Bytes())
+		// the full storage key is concat(address, storageKey) which is 20+32 = 52 bytes
+		fullStorageKey := make([]byte, 52)
+		copy(fullStorageKey[:20], address.Bytes())
+		copy(fullStorageKey[20:], storageKey.Bytes())
 		updates.TouchPlainKey(string(fullStorageKey), nil, updates.TouchAccount)
 	}
 
@@ -470,7 +470,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	// generate the block witness, this works by loading the merkle paths to the touched keys (they are loaded from the state at block #blockNr-1)
 	witnessTrie, _, err := hph.GenerateWitness(ctx, updates, nil /* codeReads */, header.Root[:], "computeWitness(eth_getProof)")
 	if err != nil {
-		return nil, errors.New("could not generate merkle proof for account")
+		return nil, fmt.Errorf("could not generate merkle proof for account: %w", err)
 	}
 
 	accountHashedKey := hph.HashAndNibblizeKey(address.Bytes())
