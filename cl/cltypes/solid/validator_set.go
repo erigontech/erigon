@@ -141,6 +141,8 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 			t.MerkleTree = &merkle_tree.MerkleTree{}
 		}
 		v.MerkleTree.CopyInto(t.MerkleTree)
+	} else {
+		t.MerkleTree = nil
 	}
 	// skip copying (unsupported for phase0)
 	t.phase0Data = make([]Phase0Data, t.l)

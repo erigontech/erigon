@@ -109,6 +109,8 @@ func (h *hashList) CopyTo(t IterableSSZ[libcommon.Hash]) {
 			tu.MerkleTree = &merkle_tree.MerkleTree{}
 		}
 		h.MerkleTree.CopyInto(tu.MerkleTree)
+	} else {
+		tu.MerkleTree = nil
 	}
 	copy(tu.u, h.u)
 }
