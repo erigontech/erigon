@@ -76,14 +76,17 @@ func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 	if len(target.u) < len(arr.u) {
 		target.u = make([]byte, len(arr.u))
 	}
-	// if arr.MerkleTree != nil {
-	// 	if target.MerkleTree == nil {
-	// 		target.MerkleTree = &merkle_tree.MerkleTree{}
-	// 	}
-	// 	arr.MerkleTree.CopyInto(target.MerkleTree)
-	// } else {
-	target.MerkleTree = nil
-	//}
+	if arr.MerkleTree != nil {
+		if target.MerkleTree == nil {
+			target.MerkleTree = &merkle_tree.MerkleTree{}
+		}
+		arr.MerkleTree.CopyInto(target.MerkleTree)
+		target.SetComputeLeafFn(func(idx int, out []byte) {
+			copy(out, arr.u[idx*length.Hash:])
+		})
+	} else {
+		target.MerkleTree = nil
+	}
 
 	target.u = target.u[:len(arr.u)]
 	copy(target.u, arr.u)

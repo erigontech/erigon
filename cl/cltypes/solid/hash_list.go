@@ -106,11 +106,12 @@ func (h *hashList) CopyTo(t IterableSSZ[libcommon.Hash]) {
 	if h.MerkleTree != nil {
 		if tu.MerkleTree == nil {
 			tu.MerkleTree = &merkle_tree.MerkleTree{}
-			tu.MerkleTree.Initialize(h.l, merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
-				copy(out, tu.u[idx*length.Hash:(idx+1)*length.Hash])
-			}, /*limit=*/ nil)
 		}
 		h.MerkleTree.CopyInto(tu.MerkleTree)
+		// make the leaf function on the new buffer
+		tu.MerkleTree.SetComputeLeafFn(func(idx int, out []byte) {
+			copy(out, tu.u[idx*length.Hash:])
+		})
 	}
 	copy(tu.u, h.u)
 }

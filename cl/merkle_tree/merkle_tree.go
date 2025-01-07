@@ -58,6 +58,10 @@ func (m *MerkleTree) Initialize(leavesCount, maxTreeCacheDepth int, computeLeaf 
 	m.dirtyLeaves = make([]atomic.Bool, leavesCount)
 }
 
+func (m *MerkleTree) SetComputeLeafFn(computeLeaf func(idx int, out []byte)) {
+	m.computeLeaf = computeLeaf
+}
+
 func (m *MerkleTree) MarkLeafAsDirty(idx int) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
