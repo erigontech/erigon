@@ -911,12 +911,13 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return reason
 	}
-	if gas > txn.Gas {
+	if txn.Gas > gas {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.Gas))
 		}
 		return txpoolcfg.IntrinsicGas
 	}
+	fmt.Println(txn.Gas, p.blockGasLimit.Load())
 	if txn.Gas > p.blockGasLimit.Load() {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas > block gas limit idHash=%x gas=%d, block gas limit=%d", txn.IDHash, txn.Gas, p.blockGasLimit.Load()))
