@@ -733,7 +733,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			asrt.NoError(err)
 			view, err := cache.View(ctx, tx)
 			asrt.NoError(err)
-
+			pool.blockGasLimit.Store(30_000_000)
 			reason := pool.validateTx(txn, false, view)
 
 			if reason != test.expected {
