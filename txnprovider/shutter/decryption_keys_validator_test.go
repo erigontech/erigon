@@ -62,7 +62,7 @@ func TestDecryptionKeysP2pValidatorEx(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
-			logger := testlog.Logger(t, log.LvlDebug)
+			logger := testlog.Logger(t, log.LvlCrit)
 			logHandler := &CollectingLogHandler{handler: logger.GetHandler()}
 			logger.SetHandler(logHandler)
 
@@ -72,7 +72,13 @@ func TestDecryptionKeysP2pValidatorEx(t *testing.T) {
 			})
 			haveValidationResult := validator(ctx, "peer1", tc.msg)
 			require.Equal(t, tc.wantValidationResult, haveValidationResult)
-			require.True(t, logHandler.ContainsAll(tc.wantValidationLogMsgs))
+			require.True(
+				t,
+				logHandler.ContainsAll(tc.wantValidationLogMsgs),
+				"%v vs %v",
+				tc.wantValidationLogMsgs,
+				logHandler.FormattedRecords(),
+			)
 		})
 	}
 }
@@ -322,4 +328,12 @@ func (clh *CollectingLogHandler) Contains(subStr string) bool {
 		}
 	}
 	return false
+}
+
+func (clh *CollectingLogHandler) FormattedRecords() []string {
+	formattedRecords := make([]string, len(clh.records))
+	for i, record := range clh.records {
+		formattedRecords[i] = strings.TrimSuffix(string(log.TerminalFormatNoColor().Format(record)), "\n")
+	}
+	return formattedRecords
 }
