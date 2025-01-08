@@ -24,18 +24,13 @@ var (
 )
 
 func main() {
-	// TODO(racytech): take output file name only, no need to take full path,
-	// so the file will be generated in the package directory
 	var (
 		pkgdir    = flag.String("dir", ".", "input package")
 		typename  = flag.String("type", "", "type to generate methods for")
 		writefile = flag.Bool("wfile", true, "set to false if no need to write to the file")
 	)
 	flag.Parse()
-	// fmt.Println("pkgdir: ", *pkgdir)
-	// fmt.Println("output: ", *output)
-	// fmt.Println("typename: ", *typename)
-	// fmt.Println("-----------------------")
+
 	pcfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedTypes,
 		Dir:  *pkgdir,
