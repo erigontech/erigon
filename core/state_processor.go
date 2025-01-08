@@ -72,6 +72,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	if usedBlobGas != nil {
 		*usedBlobGas += txn.GetBlobGas()
 	}
+	// TODO add resultFilter from Arbitrum?
 
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.

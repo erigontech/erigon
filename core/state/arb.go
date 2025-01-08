@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/ethdb"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/holiman/uint256"
 )
 
@@ -52,6 +53,27 @@ func StripStylusPrefix(b []byte) ([]byte, byte, error) {
 func NewStylusPrefix(dictionary byte) []byte {
 	prefix := bytes.Clone(StylusDiscriminant)
 	return append(prefix, dictionary)
+}
+
+type WasmTarget string
+
+type IntraBlockStateArbitrum interface {
+	evmtypes.IntraBlockState
+
+	// Arbitrum: manage Stylus wasms
+	ActivateWasm(moduleHash common.Hash, asmMap map[WasmTarget][]byte)
+	TryGetActivatedAsm(target WasmTarget, moduleHash common.Hash) (asm []byte, err error)
+	TryGetActivatedAsmMap(targets []WasmTarget, moduleHash common.Hash) (asmMap map[WasmTarget][]byte, err error)
+	RecordCacheWasm(wasm CacheWasm)
+	RecordEvictWasm(wasm EvictWasm)
+	GetRecentWasms() RecentWasms
+
+	// Arbitrum: track stylus's memory footprint
+	GetStylusPages() (uint16, uint16)
+	GetStylusPagesOpen() uint16
+	SetStylusPagesOpen(open uint16)
+	AddStylusPages(new uint16) (uint16, uint16)
+	AddStylusPagesEver(new uint16)
 }
 
 func (s *IntraBlockState) ActivateWasm(moduleHash common.Hash, asmMap map[ethdb.WasmTarget][]byte) {
