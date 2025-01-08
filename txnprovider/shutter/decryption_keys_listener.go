@@ -76,6 +76,10 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 		return err
 	}
 
+	//
+	// TODO persist connected nodes to be able to re-use on restart
+	//
+
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error { return dkl.listenLoop(ctx, pubSub) })
 	eg.Go(func() error { return dkl.peerInfoLoop(ctx, pubSub) })
