@@ -143,8 +143,8 @@ func TestBlockExecution1(t *testing.T) {
 	}
 
 	fmt.Printf("block %d: %s\n", m.Genesis.Number(), m.Genesis.Hash().String())
-	for i, block := range chain.Blocks {
-		fmt.Printf("block %d: %s\n", i+1, block.Hash().String())
+	for _, block := range chain.Blocks {
+		fmt.Printf("block %d: %s\n", block.NumberU64(), block.Hash().String())
 	}
 
 	// Insert the first two blocks and make sure the chain is valid
@@ -203,7 +203,7 @@ func TestBlockExecution1(t *testing.T) {
 	// require.NotNil(t, silkwormInstance)
 	// defer silkwormInstance.Close()
 
-	// txn, err := m.DB.BeginRw(context.Background())
+	// txn, err = m.DB.BeginRw(context.Background())
 	// defer txn.Rollback()
 	// require.NoError(t, err)
 

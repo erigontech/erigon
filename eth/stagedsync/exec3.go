@@ -251,11 +251,11 @@ func ExecV3(ctx context.Context,
 	} else {
 		var err error
 
-		fmt.Println("JG NewSharedDomains exec3")
-		doms, err = state2.NewSharedDomains(applyTx, log.New())
+		// fmt.Println("JG NewSharedDomains exec3")
+		// doms, err = state2.NewSharedDomains(applyTx, log.New())
 
-		// fmt.Println("JG NewDirectAccessDomains exec3")
-		// doms, err = state2.NewDirectAccessDomains(applyTx, log.New())
+		fmt.Println("JG NewDirectAccessDomains exec3")
+		doms, err = state2.NewDirectAccessDomains(applyTx, log.New())
 
 		// if we are behind the commitment, we can't execute anything
 		// this can heppen if progress in domain is higher than progress in blocks
@@ -292,10 +292,8 @@ func ExecV3(ctx context.Context,
 		shouldGenerateChangesets = false
 	}
 
-	if maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
-	}
+	log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
+		"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "txNumInDB", txNumInDB, "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
@@ -426,10 +424,8 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	if maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
-	}
+	log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
+		"from", blockNum, "to", maxBlockNum, "fromTxNum", executor.domains().TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
 
 	agg.BuildFilesInBackground(outputTxNum.Load())
 
@@ -450,6 +446,8 @@ func ExecV3(ctx context.Context,
 
 	// Only needed by bor chains
 	shouldGenerateChangesetsForLastBlocks := cfg.chainConfig.Bor != nil
+
+	fmt.Println("JG ExecV3 Loop start", blockNum, "to", maxBlockNum)
 
 Loop:
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -482,6 +480,7 @@ Loop:
 		executor.domains().SetBlockNum(blockNum)
 
 		b, err = blockWithSenders(ctx, cfg.db, executor.tx(), blockReader, blockNum)
+		fmt.Println("JG block received", blockNum, b.Hash())
 		if err != nil {
 			return err
 		}

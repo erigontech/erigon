@@ -735,7 +735,7 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 }
 
 func (db *MdbxKV) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
-	fmt.Println("UpdateNosync")
+	fmt.Println("MdbxKV.UpdateNosync")
 	tx, err := db.BeginRwNosync(ctx)
 	if err != nil {
 		return err
@@ -753,6 +753,7 @@ func (db *MdbxKV) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (e
 }
 
 func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
+	fmt.Println("MdbxKV.Update")
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err

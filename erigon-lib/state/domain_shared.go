@@ -147,7 +147,7 @@ type HasAgg interface {
 }
 
 func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
-	fmt.Println("NewSharedDomains")
+	// fmt.Println("NewSharedDomains")
 	sd := &SharedDomains{
 		logger:  logger,
 		storage: btree2.NewMap[string, dataWithPrevStep](128),
@@ -356,7 +356,6 @@ type RebuiltCommitment struct {
 	Keys     uint64
 }
 
-// JG Not used in Silkworm context
 // SeekCommitment lookups latest available commitment and sets it as current
 func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromBlockBeginning uint64, err error) {
 	bn, txn, ok, err := sd.sdCtx.SeekCommitment(tx, sd.aggTx.d[kv.CommitmentDomain], 0, math.MaxUint64)
@@ -642,7 +641,6 @@ func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []b
 	addrS := string(addr)
 	sd.sdCtx.TouchKey(kv.AccountsDomain, addrS, account)
 	sd.put(kv.AccountsDomain, addrS, account)
-	fmt.Println(sd.ObjectInfo())
 	return sd.domainWriters[kv.AccountsDomain].PutWithPrev(addr, nil, account, prevAccount, prevStep)
 }
 
@@ -653,7 +651,6 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep
 	if len(code) == 0 {
 		return sd.domainWriters[kv.CodeDomain].DeleteWithPrev(addr, nil, prevCode, prevStep)
 	}
-	fmt.Println(sd.ObjectInfo())
 	return sd.domainWriters[kv.CodeDomain].PutWithPrev(addr, nil, code, prevCode, prevStep)
 }
 
@@ -692,7 +689,6 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	compositeS := string(composite)
 	sd.sdCtx.TouchKey(kv.StorageDomain, compositeS, value)
 	sd.put(kv.StorageDomain, compositeS, value)
-	fmt.Println(sd.ObjectInfo())
 	return sd.domainWriters[kv.StorageDomain].PutWithPrev(composite, nil, value, preVal, prevStep)
 }
 
@@ -1009,7 +1005,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 		return sd.LatestCommitment(k)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
-		fmt.Println("JG GetLatest", sd.ObjectInfo(), domain.String(), hexutility.Encode(k), hexutility.Encode(v), prevStep)
+		fmt.Println("JG GetLatest", domain.String(), hexutility.Encode(k), hexutility.Encode(v), prevStep, "cached")
 		return v, prevStep, nil
 	}
 	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
@@ -1017,7 +1013,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step u
 		fmt.Println("JG GetLatest", domain.String(), err)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
-	fmt.Println("JG GetLatest", sd.ObjectInfo(), domain.String(), hexutility.Encode(k), hexutility.Encode(v), step)
+	fmt.Println("JG GetLatest", domain.String(), hexutility.Encode(k), hexutility.Encode(v), step)
 	return v, step, nil
 }
 
@@ -1046,6 +1042,7 @@ func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum 
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
+	fmt.Println("JG DomainPut", domain.String(), hexutility.Encode(k1), hexutility.Encode(k2), hexutility.Encode(val), prevStep)
 	if val == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}

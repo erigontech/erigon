@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/hexutility"
 
 	"github.com/erigontech/erigon-lib/etl"
 	"github.com/erigontech/erigon-lib/kv"
@@ -627,7 +626,7 @@ func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
 		if err := w.values.Collect(fullkey, value); err != nil {
 			return err
 		}
-		fmt.Println("JG addValue large", w.valsTable, hexutility.Encode(fullkey), hexutility.Encode(value))
+		// fmt.Println("JG addValue large", w.valsTable, hexutility.Encode(fullkey), hexutility.Encode(value))
 		return nil
 	}
 
@@ -645,7 +644,7 @@ func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
 	if err := w.values.Collect(w.aux, w.aux2); err != nil {
 		return err
 	}
-	fmt.Println("JG addValue", w.valsTable, hexutility.Encode(w.aux), hexutility.Encode(w.aux2))
+	// fmt.Println("JG addValue", w.valsTable, hexutility.Encode(w.aux), hexutility.Encode(w.aux2))
 	return nil
 }
 
