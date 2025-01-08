@@ -17,6 +17,8 @@
 package shutter
 
 import (
+	"crypto/ecdsa"
+
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
@@ -35,6 +37,7 @@ type Config struct {
 }
 
 type P2pConfig struct {
+	PrivateKey     *ecdsa.PrivateKey
 	ListenPort     uint64
 	BootstrapNodes []string
 }

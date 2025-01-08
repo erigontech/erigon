@@ -1587,12 +1587,13 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 	fullCfg.TxPool = cfg
 }
 
-func setShutter(ctx *cli.Context, chainName string, cfg *ethconfig.Config) {
+func setShutter(ctx *cli.Context, chainName string, nodeConfig *nodecfg.Config, ethConfig *ethconfig.Config) {
 	if enabled := ctx.Bool(ShutterEnabledFlag.Name); !enabled {
 		return
 	}
 
 	config := shutter.ConfigByChainName(chainName)
+	config.PrivateKey = nodeConfig.P2P.PrivateKey
 	// check for cli overrides
 	if ctx.IsSet(ShutterP2pBootstrapNodesFlag.Name) {
 		config.BootstrapNodes = ctx.StringSlice(ShutterP2pBootstrapNodesFlag.Name)
@@ -1601,7 +1602,7 @@ func setShutter(ctx *cli.Context, chainName string, cfg *ethconfig.Config) {
 		config.ListenPort = ctx.Uint64(ShutterP2pListenPortFlag.Name)
 	}
 
-	cfg.Shutter = config
+	ethConfig.Shutter = config
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
@@ -1929,7 +1930,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setGPO(ctx, &cfg.GPO)
 
 	setTxPool(ctx, nodeConfig.Dirs.TxPool, cfg)
-	setShutter(ctx, chain, cfg)
+	setShutter(ctx, chain, nodeConfig, cfg)
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.Dirs.DataDir)

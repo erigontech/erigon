@@ -23,6 +23,7 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -82,20 +83,28 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 }
 
 func (dkl DecryptionKeysListener) initHost() (host.Host, error) {
-	//
-	// TODO: do we need to create a shutter identity file? we can pass a config.Datadir attribute and store it in datadir/shutter/
-	//
-
 	listenAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", dkl.config.ListenPort))
 	if err != nil {
 		return nil, err
 	}
 
-	return libp2p.New(
+	privKey, err := libp2pcrypto.UnmarshalSecp256k1PrivateKey(dkl.config.PrivateKey.D.Bytes())
+	if err != nil {
+		return nil, err
+	}
+
+	host, err := libp2p.New(
+		libp2p.Identity(privKey),
 		libp2p.ListenAddrs(listenAddr),
 		libp2p.UserAgent(fmt.Sprintf("erigon/shutter/%s", params.VersionWithCommit(params.GitCommit))),
 		libp2p.ProtocolVersion(ProtocolVersion),
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	dkl.logger.Info("shutter libp2p host initialised", "addr", listenAddr, "id", host.ID())
+	return host, nil
 }
 
 func (dkl DecryptionKeysListener) initGossipSub(ctx context.Context, host host.Host) (*pubsub.PubSub, error) {
