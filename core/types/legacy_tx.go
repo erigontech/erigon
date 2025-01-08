@@ -283,7 +283,6 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen := tx.payloadSize()
-	fmt.Println("payloadSize1: ", payloadSize)
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
