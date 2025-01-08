@@ -645,11 +645,12 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 	stateObject.SetCode(codeHash, code)
 	sdb.versionWritten(SubpathKey(addr, CodePath), code)
 	sdb.versionWritten(SubpathKey(addr, CodeHashPath), codeHash)
+	sdb.versionWritten(SubpathKey(addr, CodeSizePath), len(code))
 	return nil
 }
 
 var tracedAccounts = map[libcommon.Address]struct{}{
-	//libcommon.HexToAddress("ecdd77ce6f146ccf5dab707941d318bd50eed2c9"): {},
+	libcommon.HexToAddress("6ef4b9c74cbf4abd76e088e91537b632380a1871"): {},
 }
 
 func traceAccount(addr libcommon.Address) bool {
@@ -1441,7 +1442,7 @@ func (s *IntraBlockState) ApplyVersionedWrites(writes []VersionedWrite) error {
 				case CodePath:
 					code := val.([]byte)
 					s.SetCode(addr, code)
-				case CodeHashPath:
+				case CodeHashPath, CodeSizePath:
 					// set by SetCode
 				case SelfDestructPath:
 					deleted := val.(bool)

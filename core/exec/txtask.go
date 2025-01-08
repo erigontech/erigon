@@ -445,7 +445,6 @@ func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + len(q.newTasks)
 // Add "new task" (which was never executed yet). May block internal channel is full.
 // Expecting already-ordered tasks.
 func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
-	fmt.Println("ADD", t.Version())
 	select {
 	case <-ctx.Done():
 		return
@@ -457,7 +456,6 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 // All failed tasks have higher priority than new one.
 // No limit on amount of txs added by this method.
 func (q *QueueWithRetry) ReTry(t Task) {
-	fmt.Println("RETRY", t.Version())
 	if t.Version().Incarnation > 300 {
 		fmt.Println("Too many")
 	}

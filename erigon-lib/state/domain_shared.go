@@ -1341,8 +1341,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
 	updateCount := sdc.updates.Size()
-	if true /*sdc.sharedDomains.trace*/ {
-		defer /*sdc.sharedDomains.logger.Trace*/ fmt.Println("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
+	if sdc.sharedDomains.trace {
+		defer sdc.sharedDomains.logger.Trace("ComputeCommitment", "block", blockNum, "keys", updateCount, "mode", sdc.updates.Mode())
 	}
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()

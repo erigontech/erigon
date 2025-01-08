@@ -104,12 +104,17 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 
 func (rw *Worker) LogLRUStats() { rw.evm.JumpDestCache.LogStats() }
 
-func (rw *Worker) ResetState(rs *state.StateV3Buffered, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
+func (rw *Worker) ResetState(rs *state.StateV3Buffered, stateReader state.ResettableStateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) {
 	rw.rs = rs
-	if rw.background {
-		rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
+
+	if stateReader != nil {
+		rw.SetReader(stateReader)
 	} else {
-		rw.SetReader(state.NewReaderV3(rs.Domains()))
+		if rw.background {
+			rw.SetReader(state.NewReaderParallelV3(rs.Domains()))
+		} else {
+			rw.SetReader(state.NewReaderV3(rs.Domains()))
+		}
 	}
 
 	if stateWriter != nil {
@@ -219,7 +224,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask exec.Task) *exec.Result {
 }
 
 func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger log.Logger, ctx context.Context, background bool, chainDb kv.RoDB,
-	rs *state.StateV3Buffered, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
+	rs *state.StateV3Buffered, stateReader state.ResettableStateReader, stateWriter state.StateWriter, in *exec.QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine consensus.Engine, workerCount int, dirs datadir.Dirs, isMining bool) (reconWorkers []*Worker, applyWorker *Worker, rws *exec.ResultsQueue, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
@@ -232,7 +237,7 @@ func NewWorkersPool(lock sync.Locker, accumulator *shards.Accumulator, logger lo
 		g, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < workerCount; i++ {
 			reconWorkers[i] = NewWorker(lock, logger, ctx, background, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs)
-			reconWorkers[i].ResetState(rs, stateWriter, accumulator)
+			reconWorkers[i].ResetState(rs, stateReader, stateWriter, accumulator)
 		}
 		if background {
 			for i := 0; i < workerCount; i++ {

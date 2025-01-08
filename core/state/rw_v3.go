@@ -327,7 +327,7 @@ func NewStateWriterBufferedV3(rs *StateV3Buffered, accumulator *shards.Accumulat
 		rs:          rs,
 		writeLists:  newWriteList(),
 		accumulator: accumulator,
-		trace:       true,
+		//trace:       true,
 	}
 }
 
@@ -479,7 +479,7 @@ func NewStateWriterV3(rs *StateV3, accumulator *shards.Accumulator) *StateWriter
 	return &StateWriterV3{
 		rs:          rs,
 		accumulator: accumulator,
-		trace:       true,
+		//trace:       true,
 	}
 }
 
@@ -547,6 +547,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	if *original == *value {
 		return nil
 	}
+
 	composite := append(address.Bytes(), key.Bytes()...)
 	v := value.Bytes()
 	if w.trace {
@@ -576,17 +577,15 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 }
 
 type ReaderV3 struct {
-	txNum     uint64
-	trace     bool
-	tx        kv.TemporalGetter
-	composite []byte
+	txNum uint64
+	trace bool
+	tx    kv.TemporalGetter
 }
 
 func NewReaderV3(tx kv.TemporalGetter) *ReaderV3 {
 	return &ReaderV3{
 		//trace:     true,
-		tx:        tx,
-		composite: make([]byte, 20+32),
+		tx: tx,
 	}
 }
 
@@ -622,16 +621,19 @@ func (r *ReaderV3) ReadAccountDataForDebug(address common.Address) (*accounts.Ac
 }
 
 func (r *ReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
-	enc, _, err := r.tx.GetLatest(kv.StorageDomain, r.composite, nil)
+	var composite [20 + 32]byte
+	copy(composite[0:20], address[0:20])
+	copy(composite[20:], key.Bytes())
+
+	enc, _, err := r.tx.GetLatest(kv.StorageDomain, composite[:], nil)
 	if err != nil {
 		return nil, err
 	}
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", r.composite, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", composite[:], r.txNum)
 		} else {
-			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", composite[:], enc, r.txNum)
 		}
 	}
 	return enc, nil
@@ -665,10 +667,9 @@ func (r *ReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error
 }
 
 type ReaderParallelV3 struct {
-	txNum     uint64
-	trace     bool
-	sd        *state.SharedDomains
-	composite []byte
+	txNum uint64
+	trace bool
+	sd    *state.SharedDomains
 
 	discardReadList bool
 	readLists       map[string]*state.KvList
@@ -679,7 +680,6 @@ func NewReaderParallelV3(sd *state.SharedDomains) *ReaderParallelV3 {
 		//trace:     true,
 		sd:        sd,
 		readLists: newReadList(),
-		composite: make([]byte, 20+32),
 	}
 }
 
@@ -739,19 +739,22 @@ func (r *ReaderParallelV3) ReadAccountDataForDebug(address common.Address) (*acc
 }
 
 func (r *ReaderParallelV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
-	enc, _, err := r.sd.GetLatest(kv.StorageDomain, r.composite, nil)
+	var composite [20 + 32]byte
+	copy(composite[0:20], address[0:20])
+	copy(composite[20:], key.Bytes())
+
+	enc, _, err := r.sd.GetLatest(kv.StorageDomain, composite[:], nil)
 	if err != nil {
 		return nil, err
 	}
 	if !r.discardReadList {
-		r.readLists[kv.StorageDomain.String()].Push(string(r.composite), enc)
+		r.readLists[kv.StorageDomain.String()].Push(string(composite[:]), enc)
 	}
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", r.composite, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [empty], txNum: %d\n", composite[:], r.txNum)
 		} else {
-			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", r.composite, enc, r.txNum)
+			fmt.Printf("ReadAccountStorage [%x] => [%x], txNum: %d\n", composite[:], enc, r.txNum)
 		}
 	}
 	return enc, nil
@@ -832,7 +835,11 @@ func (r *bufferedReader) ReadAccountStorage(address common.Address, incarnation 
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if ok && so.storage != nil {
-		if value, ok := so.storage[*key]; ok {
+		r.bufferedState.accountsMutex.RLock()
+		value, ok := so.storage[*key]
+		r.bufferedState.accountsMutex.RUnlock()
+		
+		if ok {
 			return value.Bytes(), nil
 		}
 	}

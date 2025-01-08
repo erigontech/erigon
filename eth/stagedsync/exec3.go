@@ -331,7 +331,7 @@ func ExecV3(ctx context.Context,
 	applyWorker := cfg.applyWorker
 	defer applyWorker.LogLRUStats()
 
-	applyWorker.ResetState(rs, nil, accumulator)
+	applyWorker.ResetState(rs, nil, nil, accumulator)
 
 	commitThreshold := cfg.batchSize.Bytes()
 
@@ -613,7 +613,7 @@ Loop:
 					logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 					return errors.New("wrong trie root")
 				}
-				if blockNum == 14731737 || blockNum == 14700562 || blockNum == 14700564 || blockNum == 14700005 {
+				if blockNum == 14694013 {
 					fmt.Println(blockNum, hex.EncodeToString(rh), hex.EncodeToString(header.Root.Bytes()))
 				}
 

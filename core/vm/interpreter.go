@@ -315,9 +315,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}
-		//if in.evm.IntraBlockState().TraceAccount(callContext.Contract.Address()) {
-		//	fmt.Println(opCodeToString[op])
-		//}
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 

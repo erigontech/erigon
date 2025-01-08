@@ -302,6 +302,12 @@ func versionedRead[T any](s *IntraBlockState, k VersionKey, commited bool, defau
 		panic("Found denpendency")
 
 	case MVReadResultNone:
+		if pr, ok := s.versionedReads[k]; ok {
+			if pr.Version == vr.Version {
+				return pr.Val.(T), nil
+			}
+		}
+
 		if readStorage == nil {
 			return defaultV, nil
 		}

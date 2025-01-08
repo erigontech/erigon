@@ -142,9 +142,6 @@ func (result *execResult) finalize(prev *types.Receipt, engine consensus.Engine,
 		return nil, nil
 	}
 
-	fmt.Println("Finalize", txIndex)
-	defer fmt.Println("Finalize", txIndex, "Done")
-
 	versionedReader := state.NewVersionedStateReader(result.TxIn)
 	ibs := state.New(versionedReader)
 	ibs.SetTxContext(txIndex)
@@ -437,6 +434,7 @@ type parallelExecutor struct {
 	logEvery                 *time.Ticker
 	slowDownLimit            *time.Ticker
 	progress                 *Progress
+	stateReader              state.ResettableStateReader
 
 	blockStatus map[uint64]*blockExecStatus
 
@@ -500,7 +498,7 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 						result := blockStatus.results[len(blockStatus.results)-1]
 						txTask := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
-						ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains())))
+						ibs := state.New(pe.stateReader)
 
 						syscall := func(contract common.Address, data []byte) ([]byte, error) {
 							return core.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false /* constCall */)
@@ -557,9 +555,8 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 
 					blockStatus.cntExec++
 					execTask := blockStatus.tasks[nextTx]
-					if blockResult.BlockNum+1 == 14699834 {
-						fmt.Println("Start Block", blockResult.BlockNum+1, len(blockStatus.tasks))
-					}
+
+					fmt.Println("Block", blockResult.BlockNum+1, len(blockStatus.tasks))
 					pe.in.Add(ctx,
 						&taskVersion{
 							execTask:   execTask,
@@ -606,7 +603,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 	pe.applyLoopWg.Add(1)
 
 	blockComplete := false
-	applyResults := make(chan applyResult)
+	applyResults := make(chan applyResult, 10_000)
 
 	go pe.applyLoop(applyCtx, applyResults)
 
@@ -932,12 +929,11 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 	if abortErr, ok := res.Err.(exec.ErrExecAbortError); ok && abortErr.OriginError != nil && blockStatus.skipCheck[tx] {
 		// If the transaction failed when we know it should not fail, this means the transaction itself is
 		// bad (e.g. wrong nonce), and we should exit the execution immediately
-		err = fmt.Errorf("could not apply tx %d [%v]: %w", tx, task.TxHash(), abortErr.OriginError)
+		err = fmt.Errorf("could not apply tx %d:%d [%v]: %w", blockNum, res.Version().TxIndex, task.TxHash(), abortErr.OriginError)
 		return result, err
 	}
 
 	if execErr, ok := res.Err.(exec.ErrExecAbortError); ok {
-		fmt.Println("ABORT", res.Version().TxIndex)
 		if res.Version().Incarnation > len(blockStatus.tasks) {
 			err = fmt.Errorf("could not apply tx %d [%v]: %w: too many incarnations: %d", tx, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
 			return result, err
@@ -1036,7 +1032,6 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 			blockStatus.versionMap.FlushVersionedWrites(blockStatus.blockIO.WriteSet(txIndex), true)
 			blockStatus.validateTasks.markComplete(tx)
 		} else {
-			fmt.Println("VAL FAIL", txIndex)
 			blockStatus.cntValidationFail++
 			blockStatus.diagExecAbort[tx]++
 			blockStatus.versionMap.FlushVersionedWrites(blockStatus.blockIO.WriteSet(txIndex), false)
@@ -1056,7 +1051,6 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 	maxFinalized := blockStatus.cntFinalized - 1
 
 	if maxValidated > maxFinalized {
-		stateReader := state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains()))
 		stateWriter := state.NewStateWriterBufferedV3(pe.rs, pe.accumulator)
 		applyResult := txResult{
 			blockNum:   blockNum,
@@ -1074,7 +1068,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 			}
 
 			txResult := blockStatus.results[tx]
-			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, blockStatus.versionMap, stateReader, stateWriter)
+			_, err = txResult.finalize(prevReceipt, pe.cfg.engine, blockStatus.versionMap, pe.stateReader, stateWriter)
 
 			if err != nil {
 				return result, err
@@ -1205,8 +1199,10 @@ func (pe *parallelExecutor) run(ctx context.Context) context.CancelFunc {
 	pe.execRequests = make(chan *execRequest, 10_000)
 	pe.in = exec.NewQueueWithRetry(100_000)
 
+	pe.stateReader = state.NewBufferedReader(pe.rs, state.NewReaderParallelV3(pe.rs.Domains()))
+
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec3.NewWorkersPool(
-		pe.RWMutex.RLocker(), pe.accumulator, pe.logger, ctx, true, pe.cfg.db, pe.rs, state.NewNoopWriter(), pe.in,
+		pe.RWMutex.RLocker(), pe.accumulator, pe.logger, ctx, true, pe.cfg.db, pe.rs, pe.stateReader, state.NewNoopWriter(), pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.workerCount+1, pe.cfg.dirs, pe.isMining)
 
 	rwLoopCtx, rwLoopCtxCancel := context.WithCancel(ctx)
