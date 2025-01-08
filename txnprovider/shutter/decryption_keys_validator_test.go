@@ -42,7 +42,10 @@ func TestDecryptionKeysValidator(t *testing.T) {
 			msg, err := shutterproto.UnmarshallDecryptionKeys(tc.msg.Data)
 			require.NoError(t, err)
 
-			validator := NewDecryptionKeysValidator(MockInstanceId)
+			validator := NewDecryptionKeysValidator(Config{
+				InstanceId:           TestInstanceId,
+				MaxNumKeysPerMessage: TestMaxNumKeysPerMessage,
+			})
 			haveErr := validator.Validate(msg)
 			require.ErrorIs(t, haveErr, tc.wantErr)
 		})
@@ -62,7 +65,10 @@ func TestDecryptionKeysP2pValidatorEx(t *testing.T) {
 			logHandler := &CollectingLogHandler{handler: logger.GetHandler()}
 			logger.SetHandler(logHandler)
 
-			validator := NewDecryptionKeysP2pValidatorEx(logger, MockInstanceId)
+			validator := NewDecryptionKeysP2pValidatorEx(logger, Config{
+				InstanceId:           TestInstanceId,
+				MaxNumKeysPerMessage: TestMaxNumKeysPerMessage,
+			})
 			haveValidationResult := validator(ctx, "peer1", tc.msg)
 			require.Equal(t, tc.wantValidationResult, haveValidationResult)
 			require.True(t, logHandler.ContainsAll(tc.wantValidationLogMsgs))
@@ -126,7 +132,10 @@ func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidat
 	)
 }
 
-const MockInstanceId = 123
+const (
+	TestInstanceId           = 123
+	TestMaxNumKeysPerMessage = 3
+)
 
 type DecryptionKeysMsgOptions struct {
 	Eon                   uint64
@@ -148,7 +157,7 @@ func MockDecryptionKeysMsg(t *testing.T, opts DecryptionKeysMsgOptions) *pubsub.
 	if opts.InstanceIdOverride != 0 {
 		instanceId = opts.InstanceIdOverride
 	} else {
-		instanceId = MockInstanceId
+		instanceId = TestInstanceId
 	}
 
 	decryptionKeys := &shutterproto.DecryptionKeys{

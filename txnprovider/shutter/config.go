@@ -31,6 +31,7 @@ type Config struct {
 	ValidatorRegistryContractAddress string
 	KeyBroadcastContractAddress      string
 	KeyperSetManagerContractAddress  string
+	MaxNumKeysPerMessage             uint64
 }
 
 type P2pConfig struct {
@@ -76,6 +77,7 @@ var (
 		ValidatorRegistryContractAddress: "0xa9289A3Dd14FEBe10611119bE81E5d35eAaC3084",
 		KeyBroadcastContractAddress:      "0x9D31865BEffcE842FBd36CDA587aDDA8bef804B7",
 		KeyperSetManagerContractAddress:  "0xC4DE9FAf4ec882b33dA0162CBE628B0D8205D0c0",
+		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -92,6 +94,7 @@ var (
 		ValidatorRegistryContractAddress: "0xefCC23E71f6bA9B22C4D28F7588141d44496A6D6",
 		KeyBroadcastContractAddress:      "0x626dB87f9a9aC47070016A50e802dd5974341301",
 		KeyperSetManagerContractAddress:  "0x7C2337f9bFce19d8970661DA50dE8DD7d3D34abb",
+		MaxNumKeysPerMessage:             defaultMaxNumKeysPerMessage,
 		P2pConfig: P2pConfig{
 			ListenPort: defaultP2PListenPort,
 			BootstrapNodes: []string{
@@ -103,5 +106,6 @@ var (
 )
 
 const (
-	defaultP2PListenPort = 23_102
+	defaultP2PListenPort        = 23_102
+	defaultMaxNumKeysPerMessage = 500
 )

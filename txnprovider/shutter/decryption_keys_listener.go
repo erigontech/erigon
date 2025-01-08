@@ -189,7 +189,7 @@ func (dkl DecryptionKeysListener) connectBootstrapNodes(ctx context.Context, hos
 }
 
 func (dkl DecryptionKeysListener) listenLoop(ctx context.Context, pubSub *pubsub.PubSub) error {
-	topicValidator := NewDecryptionKeysP2pValidatorEx(dkl.logger, dkl.config.InstanceId)
+	topicValidator := NewDecryptionKeysP2pValidatorEx(dkl.logger, dkl.config)
 	err := pubSub.RegisterTopicValidator(DecryptionKeysTopic, topicValidator)
 	if err != nil {
 		return err

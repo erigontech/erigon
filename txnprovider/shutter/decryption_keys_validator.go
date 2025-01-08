@@ -36,20 +36,21 @@ var (
 	ErrTxPointerTooLarge      = errors.New("tx pointer too large")
 	ErrEonTooLarge            = errors.New("eon too large")
 	ErrEmptyKeys              = errors.New("empty keys")
+	ErrTooManyKeys            = errors.New("too many keys")
 )
 
 type DecryptionKeysValidator struct {
-	instanceId uint64
+	config Config
 }
 
-func NewDecryptionKeysValidator(instanceId uint64) DecryptionKeysValidator {
+func NewDecryptionKeysValidator(config Config) DecryptionKeysValidator {
 	return DecryptionKeysValidator{
-		instanceId: instanceId,
+		config: config,
 	}
 }
 
 func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
-	if msg.InstanceId != v.instanceId {
+	if msg.InstanceId != v.config.InstanceId {
 		return fmt.Errorf("%w: %d", ErrInstanceIdMismatch, msg.InstanceId)
 	}
 
@@ -74,15 +75,13 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 		return ErrEmptyKeys
 	}
 
+	if len(msg.Keys) > int(v.config.MaxNumKeysPerMessage) {
+		return fmt.Errorf("%w: %d", ErrTooManyKeys, len(msg.Keys))
+	}
+
 	//
 	// TODO add more tests
 	//
-
-	//
-	// TODO decide what to do about MaxNumKeysPerMessage (check with shutter team whether it is keyper/accessnode only specific or consumers should also validate on it)
-	//if len(msg.Keys) > int(v.MaxNumKeysPerMessage) {
-	//	return ErrTooManyKeys
-	//}
 
 	//
 	// TODO add DecryptionKeys.Validate() equivalent which checks the Key unmarshalling into shcrypto.EpochSecretKey
@@ -98,8 +97,8 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 	return nil
 }
 
-func NewDecryptionKeysP2pValidatorEx(logger log.Logger, instanceId uint64) pubsub.ValidatorEx {
-	dkv := NewDecryptionKeysValidator(instanceId)
+func NewDecryptionKeysP2pValidatorEx(logger log.Logger, config Config) pubsub.ValidatorEx {
+	dkv := NewDecryptionKeysValidator(config)
 	return func(ctx context.Context, id peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 		if topic := msg.GetTopic(); topic != DecryptionKeysTopic {
 			logger.Debug("rejecting decryption keys msg due to topic mismatch", "topic", topic, "peer", id)
