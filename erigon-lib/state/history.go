@@ -315,21 +315,11 @@ func (ht *HistoryRoTx) Files() (res []string) {
 }
 
 func (h *History) missedAccessors() (l []*filesItem) {
-	h.dirtyFiles.Walk(func(items []*filesItem) bool { // don't run slow logic while iterating on btree
-		for _, item := range items {
-			fromStep, toStep := item.startTxNum/h.aggregationStep, item.endTxNum/h.aggregationStep
-			exists, err := dir.FileExist(h.vAccessorFilePath(fromStep, toStep))
-			if err != nil {
-				_, fName := filepath.Split(h.vAccessorFilePath(fromStep, toStep))
-				h.logger.Warn("[agg] History.missedAccessors", "err", err, "f", fName)
-			}
-			if !exists {
-				l = append(l, item)
-			}
+	return fileItemsWithMissingAccessors(h.dirtyFiles, h.aggregationStep, func(fromStep, toStep uint64) []string {
+		return []string{
+			h.vAccessorFilePath(fromStep, toStep),
 		}
-		return true
 	})
-	return l
 }
 
 func (h *History) buildVi(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
