@@ -96,7 +96,7 @@ type IntraBlockState struct {
 	// are maintaned across transactions until they are reset
 	// at the block level
 	versionMap      *VersionMap
-	versionedWrites map[VersionKey]VersionedWrite
+	versionedWrites map[VersionKey]*VersionedWrite
 	versionedReads  VersionedReads
 	version         int
 	dep             int
@@ -186,23 +186,13 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
-	//if len(sdb.nilAccounts) == 0 || len(sdb.stateObjects) == 0 || len(sdb.stateObjectsDirty) == 0 || len(sdb.balanceInc) == 0 {
-	//	log.Warn("zero", "len(sdb.nilAccounts)", len(sdb.nilAccounts),
-	//		"len(sdb.stateObjects)", len(sdb.stateObjects),
-	//		"len(sdb.stateObjectsDirty)", len(sdb.stateObjectsDirty),
-	//		"len(sdb.balanceInc)", len(sdb.balanceInc))
-	//}
-
 	sdb.nilAccounts = make(map[libcommon.Address]struct{})
-	//clear(sdb.nilAccounts)
 	sdb.stateObjects = make(map[libcommon.Address]*stateObject)
-	//clear(sdb.stateObjects)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
-	//clear(sdb.stateObjectsDirty)
 	clear(sdb.logs) // free pointers
 	sdb.logs = sdb.logs[:0]
 	sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
-	//clear(sdb.balanceInc)
+	sdb.refund = 0
 	sdb.txIndex = 0
 	sdb.logSize = 0
 	sdb.versionMap = nil
@@ -357,13 +347,6 @@ func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) (int, error) {
 	size, err := versionedRead(sdb, SubpathKey(addr, CodeSizePath), false, 0,
 		func(v int) int { return v },
 		func(s *stateObject) (int, error) {
-			if sdb.trace || traceAccount(addr) {
-				var clen int
-				if s != nil {
-					clen = len(s.code)
-				}
-				fmt.Println("GCS", s != nil, clen)
-			}
 			if s == nil || s.deleted {
 				return 0, nil
 			}
@@ -534,10 +517,6 @@ func (sdb *IntraBlockState) ReadVersion(k VersionKey, txIdx int) ReadResult {
 	return sdb.versionMap.Read(k, txIdx)
 }
 
-/*
- * SETTERS
- */
-
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) error {
@@ -670,7 +649,7 @@ func (sdb *IntraBlockState) SetCode(addr libcommon.Address, code []byte) error {
 }
 
 var tracedAccounts = map[libcommon.Address]struct{}{
-	libcommon.HexToAddress("ed11b1f3148cf5c1b818faac07a2724e039534b3"): {},
+	//libcommon.HexToAddress("ecdd77ce6f146ccf5dab707941d318bd50eed2c9"): {},
 }
 
 func traceAccount(addr libcommon.Address) bool {
@@ -680,6 +659,10 @@ func traceAccount(addr libcommon.Address) bool {
 
 func (sdb *IntraBlockState) TraceAccount(addr libcommon.Address) bool {
 	return traceAccount(addr)
+}
+
+func (sdb *IntraBlockState) TxIndex() int {
+	return sdb.txIndex
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
@@ -1005,6 +988,22 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int) {
 	// Replay the journal to undo changes and remove invalidated snapshots
 	sdb.journal.revert(sdb, snapshot)
 	sdb.validRevisions = sdb.validRevisions[:idx]
+
+	if sdb.versionMap != nil {
+		var revertedWrites []VersionKey
+
+		for key := range sdb.versionedWrites {
+			if _, isDirty := sdb.journal.dirties[key.GetAddress()]; !isDirty {
+				revertedWrites = append(revertedWrites, key)
+			} else {
+			}
+		}
+
+		for _, key := range revertedWrites {
+			sdb.versionMap.Delete(key, sdb.txIndex, false)
+			delete(sdb.versionedWrites, key)
+		}
+	}
 }
 
 // GetRefund returns the current value of the refund counter.
@@ -1328,7 +1327,7 @@ func (s *IntraBlockState) accountRead(addr libcommon.Address, account *accounts.
 func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 	if s.versionMap != nil {
 		if s.versionedWrites == nil {
-			s.versionedWrites = map[VersionKey]VersionedWrite{}
+			s.versionedWrites = map[VersionKey]*VersionedWrite{}
 		}
 
 		if s.trace || traceAccount(k.GetAddress()) {
@@ -1344,7 +1343,7 @@ func (s *IntraBlockState) versionWritten(k VersionKey, val any) {
 			}
 		}
 
-		s.versionedWrites[k] = VersionedWrite{
+		s.versionedWrites[k] = &VersionedWrite{
 			Path:    k,
 			Version: s.Version(),
 			Val:     val,
@@ -1359,13 +1358,15 @@ func (sdb *IntraBlockState) versionedWrite(k VersionKey) (VersionedWrite, bool) 
 
 	v, ok := sdb.versionedWrites[k]
 
-	if ok {
-		if _, isDirty := sdb.journal.dirties[k.GetAddress()]; !isDirty {
-			return VersionedWrite{}, false
-		}
+	if !ok {
+		return VersionedWrite{}, ok
 	}
 
-	return v, ok
+	if _, isDirty := sdb.journal.dirties[k.GetAddress()]; !isDirty {
+		return VersionedWrite{}, false
+	}
+
+	return *v, ok
 }
 
 func (ibs *IntraBlockState) HadInvalidRead() bool {
@@ -1402,12 +1403,12 @@ func (ibs *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 	for key, v := range ibs.versionedWrites {
 		if checkDirty {
 			if _, isDirty := ibs.journal.dirties[key.GetAddress()]; isDirty {
-				writes = append(writes, v)
+				writes = append(writes, *v)
 			} else {
 				ibs.versionMap.Delete(key, ibs.txIndex, false)
 			}
 		} else {
-			writes = append(writes, v)
+			writes = append(writes, *v)
 		}
 	}
 

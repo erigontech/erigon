@@ -228,7 +228,23 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	if err != nil {
 		return err
 	}
+	if traceAccount(*ch.account) {
+		fmt.Printf("Revert Balance %x: %d, prev: %d, orig: %d\n", *ch.account, obj.data.Balance, ch.prev, obj.original.Balance)
+	}
 	obj.setBalance(&ch.prev)
+	if s.versionMap != nil {
+		if obj.original.Balance == ch.prev {
+			key := SubpathKey(*ch.account, BalancePath)
+			delete(s.versionedWrites, key)
+		} else {
+			key := SubpathKey(*ch.account, BalancePath)
+			if wv, ok := s.versionedWrites[key]; ok {
+				val := ch.prev
+				wv.Val = &val
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -265,6 +281,18 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 		return err
 	}
 	obj.setNonce(ch.prev)
+	if s.versionMap != nil {
+		if obj.original.Nonce == ch.prev {
+			key := SubpathKey(*ch.account, NoncePath)
+			delete(s.versionedWrites, key)
+		} else {
+			key := SubpathKey(*ch.account, NoncePath)
+			if wv, ok := s.versionedWrites[key]; ok {
+				wv.Val = ch.prev
+			}
+		}
+	}
+
 	return nil
 }
 

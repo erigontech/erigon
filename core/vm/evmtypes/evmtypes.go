@@ -183,4 +183,5 @@ type IntraBlockState interface {
 
 	// temp
 	TraceAccount(common.Address) bool
+	TxIndex() int
 }

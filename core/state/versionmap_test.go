@@ -30,22 +30,22 @@ func TestHelperFunctions(t *testing.T) {
 
 	mvh := &VersionMap{}
 
-	mvh.Write(ap1, Version{0, 0, 0, 1}, valueFor(0, 1))
-	mvh.Write(ap1, Version{0, 0, 0, 2}, valueFor(0, 2))
+	mvh.Write(ap1, Version{0, 0, 0, 1}, valueFor(0, 1), true)
+	mvh.Write(ap1, Version{0, 0, 0, 2}, valueFor(0, 2), true)
 	res := mvh.Read(ap1, 0)
 	require.Equal(t, -1, res.DepIdx())
 	require.Equal(t, -1, res.Incarnation())
 	require.Equal(t, 2, res.Status())
 
-	mvh.Write(ap2, Version{0, 0, 1, 1}, valueFor(1, 1))
-	mvh.Write(ap2, Version{0, 0, 1, 2}, valueFor(1, 2))
+	mvh.Write(ap2, Version{0, 0, 1, 1}, valueFor(1, 1), true)
+	mvh.Write(ap2, Version{0, 0, 1, 2}, valueFor(1, 2), true)
 	res = mvh.Read(ap2, 1)
 	require.Equal(t, -1, res.DepIdx())
 	require.Equal(t, -1, res.Incarnation())
 	require.Equal(t, 2, res.Status())
 
-	mvh.Write(ap1, Version{0, 0, 2, 1}, valueFor(2, 1))
-	mvh.Write(ap1, Version{0, 0, 2, 2}, valueFor(2, 2))
+	mvh.Write(ap1, Version{0, 0, 2, 1}, valueFor(2, 1), true)
+	mvh.Write(ap1, Version{0, 0, 2, 2}, valueFor(2, 2), true)
 	res = mvh.Read(ap1, 2)
 	require.Equal(t, 0, res.DepIdx())
 	require.Equal(t, 2, res.Incarnation())
@@ -96,7 +96,7 @@ func TestFlushMVWrite(t *testing.T) {
 		Val:     valueFor(2, 2),
 	})
 
-	mvh.FlushVersionedWrites(wd)
+	mvh.FlushVersionedWrites(wd, true)
 
 	res = mvh.Read(ap1, 0)
 	require.Equal(t, -1, res.DepIdx())
@@ -124,11 +124,11 @@ func TestLowerIncarnation(t *testing.T) {
 
 	mvh := &VersionMap{}
 
-	mvh.Write(ap1, Version{0, 0, 0, 2}, valueFor(0, 2))
+	mvh.Write(ap1, Version{0, 0, 0, 2}, valueFor(0, 2), true)
 	mvh.Read(ap1, 0)
-	mvh.Write(ap1, Version{0, 0, 1, 2}, valueFor(1, 2))
-	mvh.Write(ap1, Version{0, 0, 0, 5}, valueFor(0, 5))
-	mvh.Write(ap1, Version{0, 0, 1, 5}, valueFor(1, 5))
+	mvh.Write(ap1, Version{0, 0, 1, 2}, valueFor(1, 2), true)
+	mvh.Write(ap1, Version{0, 0, 0, 5}, valueFor(0, 5), true)
+	mvh.Write(ap1, Version{0, 0, 1, 5}, valueFor(1, 5), true)
 }
 
 func TestMarkEstimate(t *testing.T) {
@@ -138,9 +138,9 @@ func TestMarkEstimate(t *testing.T) {
 
 	mvh := &VersionMap{}
 
-	mvh.Write(ap1, Version{0, 0, 7, 2}, valueFor(7, 2))
+	mvh.Write(ap1, Version{0, 0, 7, 2}, valueFor(7, 2), true)
 	mvh.MarkEstimate(ap1, 7)
-	mvh.Write(ap1, Version{0, 0, 7, 4}, valueFor(7, 4))
+	mvh.Write(ap1, Version{0, 0, 7, 4}, valueFor(7, 4), true)
 }
 
 func TestMVHashMapBasics(t *testing.T) {
@@ -156,7 +156,7 @@ func TestMVHashMapBasics(t *testing.T) {
 	res := mvh.Read(ap1, 5)
 	require.Equal(t, -1, res.depIdx)
 
-	mvh.Write(ap1, Version{0, 0, 10, 1}, valueFor(10, 1))
+	mvh.Write(ap1, Version{0, 0, 10, 1}, valueFor(10, 1), true)
 
 	res = mvh.Read(ap1, 9)
 	require.Equal(t, -1, res.depIdx, "reads that should go the the DB return dependency -1")
@@ -170,8 +170,8 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, valueFor(10, 1), res.value)
 
 	// More writes.
-	mvh.Write(ap1, Version{0, 0, 12, 0}, valueFor(12, 0))
-	mvh.Write(ap1, Version{0, 0, 8, 3}, valueFor(8, 3))
+	mvh.Write(ap1, Version{0, 0, 12, 0}, valueFor(12, 0), true)
+	mvh.Write(ap1, Version{0, 0, 8, 3}, valueFor(8, 3), true)
 
 	// Verify reads.
 	res = mvh.Read(ap1, 15)
@@ -198,7 +198,7 @@ func TestMVHashMapBasics(t *testing.T) {
 
 	// Delete the entry written by 10, write to a different ap.
 	mvh.Delete(ap1, 10, true)
-	mvh.Write(ap2, Version{0, 0, 10, 2}, valueFor(10, 2))
+	mvh.Write(ap2, Version{0, 0, 10, 2}, valueFor(10, 2), true)
 
 	// Read by txn 11 no longer observes entry from txn 10.
 	res = mvh.Read(ap1, 11)
@@ -207,8 +207,8 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, valueFor(8, 3), res.value)
 
 	// Reads, writes for ap2 and ap3.
-	mvh.Write(ap2, Version{0, 0, 5, 0}, valueFor(5, 0))
-	mvh.Write(ap3, Version{0, 0, 20, 4}, valueFor(20, 4))
+	mvh.Write(ap2, Version{0, 0, 5, 0}, valueFor(5, 0), true)
+	mvh.Write(ap3, Version{0, 0, 20, 4}, valueFor(20, 4), true)
 
 	res = mvh.Read(ap2, 10)
 	require.Equal(t, 5, res.depIdx)
@@ -254,7 +254,7 @@ func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		mvh2.Write(ap2, Version{0, 0, randInts[i], 1}, valueFor(randInts[i], 1))
+		mvh2.Write(ap2, Version{0, 0, randInts[i], 1}, valueFor(randInts[i], 1), true)
 	}
 }
 
@@ -266,7 +266,7 @@ func BenchmarkReadTimeSameLocationDifferentTxIdx(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		txIdx := rand.Intn(1000000000000000)
 		txIdxSlice = append(txIdxSlice, txIdx)
-		mvh2.Write(ap2, Version{0, 0, txIdx, 1}, valueFor(txIdx, 1))
+		mvh2.Write(ap2, Version{0, 0, txIdx, 1}, valueFor(txIdx, 1), true)
 	}
 
 	b.ResetTimer()
@@ -284,7 +284,7 @@ func TestTimeComplexity(t *testing.T) {
 
 	for i := 0; i < 1000000; i++ {
 		ap1 := AddressKey(getCommonAddress(i))
-		mvh1.Write(ap1, Version{0, 0, i, 1}, valueFor(i, 1))
+		mvh1.Write(ap1, Version{0, 0, i, 1}, valueFor(i, 1), true)
 		mvh1.Read(ap1, i)
 	}
 
@@ -293,7 +293,7 @@ func TestTimeComplexity(t *testing.T) {
 	ap2 := AddressKey(getCommonAddress(2))
 
 	for i := 0; i < 1000000; i++ {
-		mvh2.Write(ap2, Version{0, 0, i, 1}, valueFor(i, 1))
+		mvh2.Write(ap2, Version{0, 0, i, 1}, valueFor(i, 1), true)
 		mvh2.Read(ap2, i)
 	}
 }
@@ -305,7 +305,7 @@ func TestWriteTimeSameLocationDifferentTxnIdx(t *testing.T) {
 	ap1 := AddressKey(getCommonAddress(1))
 
 	for i := 0; i < 1000000; i++ {
-		mvh1.Write(ap1, Version{0, 0, i, 1}, valueFor(i, 1))
+		mvh1.Write(ap1, Version{0, 0, i, 1}, valueFor(i, 1), true)
 	}
 }
 
@@ -316,7 +316,7 @@ func TestWriteTimeSameLocationSameTxnIdx(t *testing.T) {
 	ap1 := AddressKey(getCommonAddress(1))
 
 	for i := 0; i < 1000000; i++ {
-		mvh1.Write(ap1, Version{0, 0, 1, i}, valueFor(i, 1))
+		mvh1.Write(ap1, Version{0, 0, 1, i}, valueFor(i, 1), true)
 	}
 }
 
@@ -327,7 +327,7 @@ func TestWriteTimeDifferentLocation(t *testing.T) {
 
 	for i := 0; i < 1000000; i++ {
 		ap1 := AddressKey(getCommonAddress(i))
-		mvh1.Write(ap1, Version{0, 0, i, 1}, valueFor(i, 1))
+		mvh1.Write(ap1, Version{0, 0, i, 1}, valueFor(i, 1), true)
 	}
 }
 
@@ -337,7 +337,7 @@ func TestReadTimeSameLocation(t *testing.T) {
 	mvh1 := &VersionMap{}
 	ap1 := AddressKey(getCommonAddress(1))
 
-	mvh1.Write(ap1, Version{0, 0, 1, 1}, valueFor(1, 1))
+	mvh1.Write(ap1, Version{0, 0, 1, 1}, valueFor(1, 1), true)
 
 	for i := 0; i < 1000000; i++ {
 		mvh1.Read(ap1, 2)

@@ -160,7 +160,7 @@ func (vm *VersionMap) getKeyCells(k VersionKey, fNoKey func(kenc VersionKey) *Tx
 	return
 }
 
-func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}) {
+func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}, complete bool) {
 	cells := vm.getKeyCells(k, func(kenc VersionKey) (cells *TxIndexCells) {
 		n := &TxIndexCells{
 			rw: sync.RWMutex{},
@@ -176,13 +176,19 @@ func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}) {
 	ci, ok := cells.tm.Get(v.TxIndex)
 	cells.rw.RUnlock()
 
+	var flag uint = FlagDone
+
+	if !complete {
+		flag = FlagEstimate
+	}
+
 	if ok {
 		if ci.incarnation > v.Incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %v, %v",
 				k, v.TxIndex))
 		}
 
-		ci.flag = FlagDone
+		ci.flag = flag
 		ci.incarnation = v.Incarnation
 		ci.data = data
 	} else {
@@ -191,12 +197,12 @@ func (vm *VersionMap) Write(k VersionKey, v Version, data interface{}) {
 			defer cells.rw.Unlock()
 			if ci, ok = cells.tm.Get(v.TxIndex); !ok {
 				cells.tm.Set(v.TxIndex, &WriteCell{
-					flag:        FlagDone,
+					flag:        flag,
 					incarnation: v.Incarnation,
 					data:        data,
 				})
 			} else {
-				ci.flag = FlagDone
+				ci.flag = flag
 				ci.incarnation = v.Incarnation
 				ci.data = data
 			}
@@ -225,6 +231,20 @@ func (vm *VersionMap) MarkEstimate(k VersionKey, txIdx int) {
 		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x, cells keys: %v", txIdx, k, cells.tm.Keys()))
 	} else {
 		ci.flag = FlagEstimate
+	}
+}
+
+func (vm *VersionMap) MarkComplete(k VersionKey, txIdx int) {
+	cells := vm.getKeyCells(k, func(_ VersionKey) *TxIndexCells {
+		panic(fmt.Errorf("path must already exist"))
+	})
+
+	cells.rw.RLock()
+	defer cells.rw.RUnlock()
+	if ci, ok := cells.tm.Get(txIdx); !ok {
+		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x, cells keys: %v", txIdx, k, cells.tm.Keys()))
+	} else {
+		ci.flag = FlagDone
 	}
 }
 
@@ -326,12 +346,12 @@ func (vm *VersionMap) Read(k VersionKey, txIdx int) (res ReadResult) {
 	return
 }
 
-func (vm *VersionMap) FlushVersionedWrites(writes []VersionedWrite) {
+func (vm *VersionMap) FlushVersionedWrites(writes []VersionedWrite, complete bool) {
 	for _, v := range writes {
 		if vm.trace {
 			fmt.Println("WRT", v.Path, v.Version)
 		}
-		vm.Write(v.Path, v.Version, v.Val)
+		vm.Write(v.Path, v.Version, v.Val, complete)
 	}
 }
 

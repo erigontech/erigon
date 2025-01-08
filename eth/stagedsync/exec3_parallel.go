@@ -142,6 +142,9 @@ func (result *execResult) finalize(prev *types.Receipt, engine consensus.Engine,
 		return nil, nil
 	}
 
+	fmt.Println("Finalize", txIndex)
+	defer fmt.Println("Finalize", txIndex, "Done")
+
 	versionedReader := state.NewVersionedStateReader(result.TxIn)
 	ibs := state.New(versionedReader)
 	ibs.SetTxContext(txIndex)
@@ -167,18 +170,11 @@ func (result *execResult) finalize(prev *types.Receipt, engine consensus.Engine,
 	}
 
 	if task.shouldDelayFeeCalc {
-		burntInitBalance, _ := ibs.GetBalance(result.ExecutionResult.BurntContractAddress)
-		burntInitBalance = burntInitBalance.Clone()
 		if txTask.Config.IsLondon(blockNum) {
 			ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
 		}
 
-		cbInitBalance, _ := ibs.GetBalance(result.Coinbase)
-		cbInitBalance = cbInitBalance.Clone()
 		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
-
-		//fmt.Println("Coinbase", hex.EncodeToString(result.Coinbase.Bytes()), result.ExecutionResult.FeeTipped, cbInitBalance)
-		//fmt.Println("Burnt", hex.EncodeToString(result.ExecutionResult.BurntContractAddress.Bytes()), result.ExecutionResult.FeeBurnt, burntInitBalance)
 
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
@@ -279,8 +275,6 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	if result.Err != nil {
 		return result
 	}
-
-	ev.versionMap.FlushVersionedWrites(result.TxOut)
 
 	if ev.profile {
 		ev.statsMutex.Lock()
@@ -437,7 +431,6 @@ type parallelExecutor struct {
 	waitWorkers              func()
 	in                       *exec.QueueWithRetry
 	rws                      *exec.ResultsQueue
-	rwsConsumed              chan struct{}
 	shouldGenerateChangesets bool
 	workerCount              int
 	pruneEvery               *time.Ticker
@@ -564,7 +557,9 @@ func (pe *parallelExecutor) applyLoop(ctx context.Context, applyResults chan app
 
 					blockStatus.cntExec++
 					execTask := blockStatus.tasks[nextTx]
-					fmt.Println("Start Block", blockResult.BlockNum+1, len(blockStatus.tasks))
+					if blockResult.BlockNum+1 == 14699834 {
+						fmt.Println("Start Block", blockResult.BlockNum+1, len(blockStatus.tasks))
+					}
 					pe.in.Add(ctx,
 						&taskVersion{
 							execTask:   execTask,
@@ -665,9 +660,6 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 							return errors.New("wrong trie root")
 						}
 						fmt.Println("BC DONE", applyResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(applyResult.StateRoot.Bytes())) //Temp Done
-						//if applyResult.BlockNum == 15030944 {
-						//	fmt.Println(applyResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(applyResult.StateRoot.Bytes()))
-						//}
 					}
 
 					if (applyResult.complete || applyResult.Err != nil) && pe.blockResults != nil {
@@ -721,11 +713,6 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 					t0 = time.Since(commitStart)
 					pe.Lock() // This is to prevent workers from starting work on any new txTask
 					defer pe.Unlock()
-
-					select {
-					case pe.rwsConsumed <- struct{}{}:
-					default:
-					}
 
 					// Drain results channel because read sets do not carry over
 					pe.rws.DropResults(ctx, func(result *exec.Result) {
@@ -918,13 +905,6 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyResults cha
 		if err != nil {
 			return blockResult, err
 		}
-
-		if pe.rwsConsumed != nil {
-			select {
-			case pe.rwsConsumed <- struct{}{}:
-			default:
-			}
-		}
 	}
 
 	return blockResult, nil
@@ -957,6 +937,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 	}
 
 	if execErr, ok := res.Err.(exec.ErrExecAbortError); ok {
+		fmt.Println("ABORT", res.Version().TxIndex)
 		if res.Version().Incarnation > len(blockStatus.tasks) {
 			err = fmt.Errorf("could not apply tx %d [%v]: %w: too many incarnations: %d", tx, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
 			return result, err
@@ -1051,18 +1032,14 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 		txTask := blockStatus.tasks[tx].Task.(*exec.TxTask)
 		txIndex := txTask.TxIndex
 
-		if blockNum == 14695297 && txIndex == 3 {
-			fmt.Println("VAL")
-		}
-
 		if blockStatus.skipCheck[tx] || state.ValidateVersion(txIndex, blockStatus.blockIO, blockStatus.versionMap) {
+			blockStatus.versionMap.FlushVersionedWrites(blockStatus.blockIO.WriteSet(txIndex), true)
 			blockStatus.validateTasks.markComplete(tx)
 		} else {
+			fmt.Println("VAL FAIL", txIndex)
 			blockStatus.cntValidationFail++
 			blockStatus.diagExecAbort[tx]++
-			for _, v := range blockStatus.blockIO.AllWriteSet(txIndex) {
-				blockStatus.versionMap.MarkEstimate(v.Path, txIndex)
-			}
+			blockStatus.versionMap.FlushVersionedWrites(blockStatus.blockIO.WriteSet(txIndex), false)
 			// 'create validation tasks for all transactions > tx ...'
 			blockStatus.validateTasks.pushPendingSet(blockStatus.execTasks.getRevalidationRange(tx + 1))
 			blockStatus.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
@@ -1224,7 +1201,6 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 
 func (pe *parallelExecutor) run(ctx context.Context) context.CancelFunc {
 	pe.slowDownLimit = time.NewTicker(time.Second)
-	pe.rwsConsumed = make(chan struct{}, 1)
 	pe.blockResults = make(chan *blockResult, 1000)
 	pe.execRequests = make(chan *execRequest, 10_000)
 	pe.in = exec.NewQueueWithRetry(100_000)
@@ -1257,7 +1233,7 @@ func (pe *parallelExecutor) run(ctx context.Context) context.CancelFunc {
 		pe.slowDownLimit.Stop()
 		pe.wait(ctx)
 		pe.stopWorkers()
-		close(pe.rwsConsumed)
+		close(pe.blockResults)
 		pe.in.Close()
 	}
 }
@@ -1286,16 +1262,15 @@ func (pe *parallelExecutor) processEvents(ctx context.Context, commitThreshold u
 
 	for pe.rws.Len() > pe.rws.Limit() || pe.rs.SizeEstimate() >= commitThreshold || len(applyChan) > 0 {
 		select {
-		case result := <-pe.blockResults:
+		case result, ok := <-pe.blockResults:
+			if !ok {
+				return nil
+			}
 			return result
 		case request := <-applyChan:
 			request.Apply()
 		case <-ctx.Done():
 			return &blockResult{Err: ctx.Err()}
-		case _, ok := <-pe.rwsConsumed:
-			if !ok {
-				return nil
-			}
 		case <-pe.slowDownLimit.C:
 			//logger.Warn("skip", "rws.Len()", rws.Len(), "rws.Limit()", rws.Limit(), "rws.ResultChLen()", rws.ResultChLen())
 			//if tt := rws.Dbg(); tt != nil {

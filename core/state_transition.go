@@ -537,11 +537,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 			effectiveTip = u256.Num0
 		}
 	}
-	amount := new(uint256.Int).SetUint64(st.gasUsed())
-	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
+
+	tipAmount := new(uint256.Int).SetUint64(st.gasUsed())
+	tipAmount.Mul(tipAmount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 	}
@@ -565,6 +566,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		}
 	}
 
+	if st.state.TraceAccount(st.msg.From()) {
+		fmt.Printf("(%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.TxIndex(), st.msg.From(), tipAmount, burnAmount, st.gasPrice, st.gasUsed)
+	}
+
 	result := &evmtypes.ExecutionResult{
 		UsedGas:             st.gasUsed(),
 		Err:                 vmerr,
@@ -572,7 +577,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		ReturnData:          ret,
 		SenderInitBalance:   senderInitBalance,
 		CoinbaseInitBalance: coinbaseInitBalance,
-		FeeTipped:           amount,
+		FeeTipped:           tipAmount,
 		FeeBurnt:            burnAmount,
 	}
 
@@ -593,10 +598,16 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
 	}
+
 	st.gasRemaining += refund
 
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
+	if st.state.TraceAccount(st.msg.From()) {
+		fmt.Printf("(%d) Refund %x: remaining: %d, refund %d (%d), price: %d val: %d\n", st.state.TxIndex(), st.msg.From(), st.gasRemaining-refund, refund,
+			st.gasRemaining, st.gasPrice, remaining)
+	}
+
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 
 	// Also return remaining gas to the block gas counter so it is
