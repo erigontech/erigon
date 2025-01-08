@@ -80,19 +80,10 @@ func (v DecryptionKeysValidator) Validate(msg *proto.DecryptionKeys) error {
 	}
 
 	//
-	// TODO add more tests
-	//
-
-	//
-	// TODO add DecryptionKeys.Validate() equivalent which checks the Key unmarshalling into shcrypto.EpochSecretKey
-	//
-
-	//
-	// TODO VerifyEpochSecretKey: check if we should be doing this validation
-	//
-
-	//
-	// TODO add validation for signers and signatures based on keyper set and eon infos
+	// TODO when we add the shcrypto library and smart contract state accessors:
+	//      - add validation for signers and signatures based on keyper set and eon infos
+	//      - add DecryptionKeys.Validate() equivalent which checks the Key unmarshalling into shcrypto.EpochSecretKey
+	//      - add validation forVerifyEpochSecretKey: check if we should be doing this validation
 	//
 	return nil
 }
