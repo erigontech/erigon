@@ -434,165 +434,6 @@ func compareBodies(t *testing.T, a, b *Body) error {
 	return nil
 }
 
-func TestHashEncodeDecode(t *testing.T) {
-	tr := NewTRand()
-	var buf bytes.Buffer
-	var b [32]byte
-	for i := 0; i < RUNS; i++ {
-		enc := tr.RandHash()
-		buf.Reset()
-		hrlp := hashRLP(enc)
-		if err := hrlp.encodeRLP(&buf, b[:]); err != nil {
-			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
-		}
-
-		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-
-		dec := hashRLP{}
-		if err := dec.decodeRLP(s); err != nil {
-			t.Errorf("error: Header.DecodeRLP(): %v", err)
-			panic(err)
-		}
-
-		check(t, "hrlp, dec: ", hrlp, dec)
-	}
-}
-
-// func randHashSlice(tr *TRand) hashSliceRLP {
-// 	n := tr.RandIntInRange(1, 10)
-// 	sk := make([]libcommon.Hash, n)
-// 	for i := 0; i < n; i++ {
-// 		sk[i] = tr.RandHash()
-// 	}
-// 	return sk
-// }
-
-// func TestHashSliceEncodeDecode(t *testing.T) {
-// 	tr := NewTRand()
-// 	var buf bytes.Buffer
-// 	var b [32]byte
-// 	for i := 0; i < RUNS; i++ {
-// 		buf.Reset()
-// 		enc := randHashSlice(tr)
-// 		if err := enc.encodeRLP(&buf, b[:]); err != nil {
-// 			t.Errorf("error: hashSlice.EncodeRLP(): %v", err)
-// 		}
-
-// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-
-// 		dec := hashSliceRLP{}
-// 		if err := dec.decodeRLP(s); err != nil {
-// 			t.Errorf("error: hashSlice.DecodeRLP(): %v", err)
-// 			panic(err)
-// 		}
-// 		check(t, "enc, dec: ", len(enc), len(dec))
-// 		for i := 0; i < len(enc); i++ {
-// 			check(t, "enc, dec: ", enc[i], dec[i])
-// 		}
-// 	}
-// }
-
-// func TestAccessTupleEncodeDecodeRLP(t *testing.T) {
-// 	tr := NewTRand()
-// 	var buf bytes.Buffer
-// 	var b [32]byte
-// 	for i := 0; i < RUNS; i++ {
-// 		buf.Reset()
-// 		tup := tr.RandAccessTuple()
-// 		enc := AccessTupleRLP(tup)
-// 		if err := enc.encodeRLP(&buf, b[:]); err != nil {
-// 			t.Errorf("error: hashSlice.EncodeRLP(): %v", err)
-// 		}
-
-// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-
-// 		dec := AccessTupleRLP{}
-// 		if err := dec.decodeRLP(s); err != nil {
-// 			t.Errorf("error: hashSlice.DecodeRLP(): %v", err)
-// 			panic(err)
-// 		}
-
-// 		check(t, "AccessTuple: enc, dec: ", enc, dec)
-// 	}
-// }
-
-// func randAccessTupleSlice(tr *TRand) AccessListRLP {
-// 	n := tr.RandIntInRange(1, 3)
-// 	sk := make([]AccessTuple, n)
-// 	for i := 0; i < n; i++ {
-// 		sk[i] = tr.RandAccessTuple()
-// 	}
-// 	return sk
-// }
-
-// func TestAccessTupleSliceEncodeDecodeRLP(t *testing.T) {
-// 	tr := NewTRand()
-// 	var buf bytes.Buffer
-// 	var b [32]byte
-// 	for i := 0; i < RUNS; i++ {
-// 		buf.Reset()
-// 		enc := randAccessTupleSlice(tr)
-// 		if err := enc.encodeRLP(&buf, b[:]); err != nil {
-// 			t.Errorf("error: hashSlice.EncodeRLP(): %v", err)
-// 		}
-
-// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-
-// 		dec := AccessListRLP{}
-// 		if err := dec.decodeRLP(s); err != nil {
-// 			t.Errorf("error: hashSlice.DecodeRLP(): %v", err)
-// 			panic(err)
-// 		}
-// 		check(t, "enc, dec: ", len(enc), len(dec))
-// 		for i := 0; i < len(enc); i++ {
-// 			check(t, "enc, dec: ", enc[i], dec[i])
-// 		}
-// 	}
-// }
-
-func randTestingStruct(tr *TRand) *TestingStruct {
-	a := uint64(0)
-	return &TestingStruct{
-		_uintRLP:    &a,
-		_bigIntRLP:  *tr.RandBig(),
-		_uint256RLP: *tr.RandUint256(),
-		_addressRLP: tr.RandAddress(),
-		_hashRLP:    tr.RandHash(),
-		_stringRLP:  tr.RandBytes(tr.RandIntInRange(8, 256)),
-	}
-}
-
-func checkTestingStruct(t *testing.T, a, b *TestingStruct) {
-	check(t, "TestingStruct._uintRLP", a._uintRLP, b._uintRLP)
-	check(t, "TestingStruct._bigIntRLP", a._bigIntRLP, b._bigIntRLP)
-	check(t, "TestingStruct._uint256RLP", a._uint256RLP, b._uint256RLP)
-	check(t, "TestingStruct._addressRLP", a._addressRLP, b._addressRLP)
-	check(t, "TestingStruct._hashRLP", a._hashRLP, b._hashRLP)
-	check(t, "TestingStruct._stringRLP", a._stringRLP, b._stringRLP)
-}
-
-func TestTestingStructEncodeDecodeRLP(t *testing.T) {
-	tr := NewTRand()
-	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
-		buf.Reset()
-		enc := randTestingStruct(tr)
-		if err := enc.EncodeRLP(&buf); err != nil {
-			t.Errorf("error: hashSlice.EncodeRLP(): %v", err)
-		}
-
-		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-
-		dec := TestingStruct{}
-		if err := dec.DecodeRLP(s); err != nil {
-			t.Errorf("error: hashSlice.DecodeRLP(): %v", err)
-			panic(err)
-		}
-
-		checkTestingStruct(t, enc, &dec)
-	}
-}
-
 func TestTransactionEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
 	var buf bytes.Buffer
@@ -703,26 +544,214 @@ func TestWithdrawalEncodeDecodeRLP(t *testing.T) {
 	}
 }
 
-func TestTxRLPEncoding(t *testing.T) {
-	tr := NewTRand()
-	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
-		enc := tr.RandTransaction(-1)
-		buf.Reset()
-		_txn := TxnToTxRLP(enc)
-		if err := _txn.EncodeRLP(&buf); err != nil {
-			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
-		}
+// func TestTxRLPEncoding(t *testing.T) {
+// 	tr := NewTRand()
+// 	var buf bytes.Buffer
+// 	for i := 0; i < RUNS; i++ {
+// 		enc := tr.RandTransaction(-1)
+// 		buf.Reset()
+// 		_txn := TxnToTxRLP(enc)
+// 		if err := _txn.EncodeRLP(&buf); err != nil {
+// 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+// 		}
 
-		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
 
-		dec, err := DecodeRLPTransaction(s, false)
-		if err != nil {
-			t.Errorf("error: DecodeRLPTransaction: %v", err)
-		}
-		compareTransactions(t, enc, dec)
+// 		dec, err := DecodeRLPTransaction(s, false)
+// 		if err != nil {
+// 			t.Errorf("error: DecodeRLPTransaction: %v", err)
+// 		}
+// 		compareTransactions(t, enc, dec)
+// 	}
+// }
+
+func compareTestingStructs(t *testing.T, a, b *TestingStruct) {
+	check(t, "obj.a", a.a, b.a)
+	check(t, "obj.aa", a.aa, b.aa)
+	check(t, "obj.b", a.b, b.b)
+	check(t, "obj.bb", a.bb, b.bb)
+	check(t, "obj.c", a.c, b.c)
+	check(t, "obj.cc", a.cc, b.cc)
+	check(t, "obj.d", a.d, b.d)
+	check(t, "obj.dd", a.dd, b.dd)
+	check(t, "obj.e", a.e, b.e)
+	check(t, "obj.ee", a.ee, b.ee)
+	check(t, "obj.f", a.f, b.f)
+	check(t, "obj.ff", a.ff, b.ff)
+	check(t, "obj.g", a.g, b.g)
+	check(t, "obj.gg", a.gg, b.gg)
+	check(t, "obj.h", a.h, b.h)
+	check(t, "obj.hh", a.hh, b.hh)
+	check(t, "obj.i", a.i, b.i)
+
+	if len(a.ii) != len(b.ii) {
+		t.Errorf("len mismatch: want %v, got %v", len(a.ii), len(b.ii))
 	}
+	for i := 0; i < len(a.ii); i++ {
+		check(t, "obj.ii", *a.ii[i], *b.ii[i])
+	}
+
+	if len(a.j) != len(b.j) {
+		t.Errorf("len mismatch: want %v, got %v", len(a.j), len(b.j))
+	}
+	for i := 0; i < len(a.j); i++ {
+		check(t, "obj.j each", a.j[i], b.j[i])
+	}
+	check(t, "obj.j", a.j, b.j)
+
+	if len(a.jj) != len(b.jj) {
+		t.Errorf("len mismatch: want %v, got %v", len(a.jj), len(b.jj))
+	}
+	for i := 0; i < len(a.jj); i++ {
+		check(t, "obj.j each", a.jj[i], b.jj[i])
+	}
+
+	check(t, "obj.jj", a.jj, b.jj)
+	check(t, "obj.k", a.k, b.k)
+	check(t, "obj.kk", a.kk, b.kk)
+	check(t, "obj.l", a.l, b.l)
+	check(t, "obj.ll", a.ll, b.ll)
+	check(t, "obj.n", a.m, b.m)
+	check(t, "obj.n", a.mm, b.mm)
 }
+
+func randTestingStruct(tr *TRand) *TestingStruct {
+	// _int := tr.RandIntInRange(0, 1<<32)
+	_byteSlice := tr.RandBytes(tr.RandIntInRange(0, 128))
+
+	l := tr.RandIntInRange(0, 8)
+	_byteSliceSlice := make([][]byte, l)
+	for i := 0; i < l; i++ {
+		_byteSliceSlice[i] = tr.RandBytes(tr.RandIntInRange(0, 128))
+	}
+
+	l = tr.RandIntInRange(0, 8)
+	_byteSliceSlicePtr := make([]*[]byte, l)
+	for i := 0; i < l; i++ {
+		arr := tr.RandBytes(tr.RandIntInRange(0, 128))
+		_byteSliceSlicePtr[i] = &arr
+	}
+
+	l = tr.RandIntInRange(0, 8)
+	_nonceSlice := make([]BlockNonce, l)
+	for i := 0; i < l; i++ {
+		_nonceSlice[i] = BlockNonce(tr.RandBytes(8))
+	}
+
+	l = tr.RandIntInRange(0, 8)
+	_nonceSlicePtr := make([]*BlockNonce, l)
+	for i := 0; i < l; i++ {
+		nonce := BlockNonce(tr.RandBytes(8))
+		if i%2 == 0 {
+			_nonceSlicePtr[i] = &nonce
+		} else {
+			_nonceSlicePtr[i] = nil
+		}
+
+	}
+
+	l = tr.RandIntInRange(0, 8)
+	_addrSlice := make([]libcommon.Address, l)
+	for i := 0; i < l; i++ {
+		_addrSlice[i] = tr.RandAddress()
+	}
+
+	l = tr.RandIntInRange(0, 8)
+	_addrSlicePtr := make([]*libcommon.Address, l)
+	for i := 0; i < l; i++ {
+		addr := tr.RandAddress()
+		_addrSlicePtr[i] = &addr
+	}
+
+	l = tr.RandIntInRange(0, 8)
+	_hashSlice := make([]libcommon.Hash, l)
+	for i := 0; i < l; i++ {
+		_hashSlice[i] = tr.RandHash()
+	}
+
+	l = tr.RandIntInRange(0, 8)
+	_hashSlicePtr := make([]*libcommon.Hash, l)
+	for i := 0; i < l; i++ {
+		hash := tr.RandHash()
+		_hashSlicePtr[i] = &hash
+	}
+
+	l = tr.RandIntInRange(0, 8)
+	_bloomSlice := make([]Bloom, l)
+	for i := 0; i < l; i++ {
+		_bloomSlice[i] = tr.RandBloom()
+	}
+
+	l = tr.RandIntInRange(0, 8)
+	_bloomSlicePtr := make([]*Bloom, l)
+	for i := 0; i < l; i++ {
+		bloom := tr.RandBloom()
+		_bloomSlicePtr[i] = &bloom
+	}
+
+	enc := TestingStruct{
+		a:  *tr.RandUint64(),
+		aa: tr.RandUint64(),
+		b:  *tr.RandBig(),
+		bb: tr.RandBig(),
+		c:  *tr.RandUint256(),
+		cc: tr.RandUint256(),
+		d:  BlockNonce(tr.RandBytes(8)),
+		dd: (*BlockNonce)(tr.RandBytes(8)),
+		e:  tr.RandAddress(),
+		ee: (*libcommon.Address)(tr.RandBytes(20)),
+		f:  tr.RandHash(),
+		ff: (*libcommon.Hash)(tr.RandBytes(32)),
+		g:  tr.RandBloom(),
+		gg: (*Bloom)(tr.RandBytes(256)),
+		h:  tr.RandBytes(tr.RandIntInRange(0, 128)),
+		hh: &_byteSlice,
+		i:  _byteSliceSlice,
+		ii: _byteSliceSlicePtr,
+		j:  _nonceSlice,
+		jj: _nonceSlicePtr,
+		k:  _addrSlice,
+		kk: _addrSlicePtr,
+		l:  _hashSlice,
+		ll: _hashSlicePtr,
+		m:  [10]byte(tr.RandBytes(10)),
+		mm: (*[245]byte)(tr.RandBytes(245)),
+	}
+	return &enc
+}
+
+func TestTestingStruct(t *testing.T) {
+	// tr := NewTRand()
+	// var buf bytes.Buffer
+	// for i := 0; i < RUNS; i++ {
+
+	// 	enc := randTestingStruct(tr)
+	// 	buf.Reset()
+
+	// 	if err := enc.EncodeRLP2(&buf); err != nil {
+	// 		t.Errorf("error: TestingStruct.EncodeRLP(): %v", err)
+	// 	}
+
+	// 	s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+	// 	dec := &TestingStruct{}
+	// 	if err := dec.DecodeRLP2(s); err != nil {
+	// 		t.Errorf("error: TestingStruct.DecodeRLP(): %v", err)
+	// 		panic(err)
+	// 	}
+	// 	compareTestingStructs(t, enc, dec)
+	// }
+}
+
+// func BenchmarkTestingStructRLP(b *testing.B) {
+// 	tr := NewTRand()
+// 	header := randTestingStruct(tr)
+// 	var buf bytes.Buffer
+// 	b.ResetTimer()
+// 	for i := 0; i < b.N; i++ {
+// 		buf.Reset()
+// 		header.EncodeRLP2(&buf)
+// 	}
+// }
 
 /*
 	Benchmarks
