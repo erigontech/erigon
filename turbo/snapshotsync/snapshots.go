@@ -29,6 +29,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tidwall/btree"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/chain/snapcfg"
 	common2 "github.com/erigontech/erigon-lib/common"
@@ -44,8 +47,6 @@ import (
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/ethconfig/estimate"
 	"github.com/erigontech/erigon/turbo/silkworm"
-	"github.com/tidwall/btree"
-	"golang.org/x/sync/errgroup"
 )
 
 type SortedRange interface {
@@ -274,6 +275,10 @@ type VisibleSegment struct {
 	Range
 	segType snaptype.Type
 	src     *DirtySegment
+}
+
+func (s *VisibleSegment) MakeGetter() *seg.Getter {
+	return s.src.MakeGetter()
 }
 
 func (s *VisibleSegment) Src() *DirtySegment {

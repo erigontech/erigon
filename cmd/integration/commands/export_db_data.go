@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/csv"
 	"encoding/json"
-	"errors"
 	"math/big"
 	"os"
 	"path"
@@ -19,12 +18,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/core/rawdb"
+	"github.com/erigontech/erigon/erigon-lib/rlp"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bor/snaptype"
+	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/debug"
 	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -35,7 +35,7 @@ var cmdExportHeaderTd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
 		label := kv.ChainDB
-		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
+		db, err := openDB(dbCfg(kv.Label(label), path.Join(datadirCli, label)), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -115,7 +115,7 @@ var cmdExportHeimdallEvents = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
 		label := kv.ChainDB
-		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
+		db, err := openDB(dbCfg(kv.Label(label), path.Join(datadirCli, label)), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -133,19 +133,23 @@ var cmdExportHeimdallEvents = &cobra.Command{
 		logger.Info("snapshot dir info", "dir", snapDir)
 
 		allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
-		if err := allSnapshots.ReopenFolder(); err != nil {
+		if err := allSnapshots.OpenFolder(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
 
-		allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
-		if err := allBorSnapshots.ReopenFolder(); err != nil {
+		allBorSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
+		if err := allBorSnapshots.OpenFolder(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
 
-		eventSegments := allBorSnapshots.ViewType(snaptype.BorEvents).VisibleSegments
-		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+		eventSegments := allBorSnapshots.ViewType(heimdall.Events).Segments
+		heimdallMdbxStore := heimdall.NewMdbxStore(logger, datadirCli, 32)
+		heimdallStore := heimdall.NewSnapshotStore(heimdallMdbxStore, allBorSnapshots)
+		bridgeMdbxStore := bridge.NewMdbxStore(datadirCli, logger, true, 32)
+		bridgeStore := bridge.NewSnapshotStore(bridgeMdbxStore, allBorSnapshots, params.AmoyChainConfig.Bor)
+		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		lastFrozenEventId := blockReader.LastFrozenEventId()
 		iterateSnapshots := lastFrozenEventId > 0 && fromNum <= lastFrozenEventId
 		iterateDb := true
@@ -251,7 +255,7 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
 		label := kv.ChainDB
-		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
+		db, err := openDB(dbCfg(kv.Label(label), path.Join(datadirCli, label)), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -283,18 +287,22 @@ var cmdExportHeimdallEventsPerBlock = &cobra.Command{
 
 		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 		allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
-		if err := allSnapshots.ReopenFolder(); err != nil {
+		if err := allSnapshots.OpenFolder(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
 
-		allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
-		if err := allBorSnapshots.ReopenFolder(); err != nil {
+		allBorSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
+		if err := allBorSnapshots.OpenFolder(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
 
-		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+		heimdallMdbxStore := heimdall.NewMdbxStore(logger, datadirCli, 32)
+		heimdallStore := heimdall.NewSnapshotStore(heimdallMdbxStore, allBorSnapshots)
+		bridgeMdbxStore := bridge.NewMdbxStore(datadirCli, logger, true, 32)
+		bridgeStore := bridge.NewSnapshotStore(bridgeMdbxStore, allBorSnapshots, params.AmoyChainConfig.Bor)
+		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
 
 		lastFrozenEventBlockNum := blockReader.LastFrozenEventBlockNum()
@@ -387,7 +395,7 @@ var cmdExportHeimdallSpans = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
 		label := kv.ChainDB
-		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
+		db, err := openDB(dbCfg(kv.Label(label), path.Join(datadirCli, label)), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
@@ -405,18 +413,22 @@ var cmdExportHeimdallSpans = &cobra.Command{
 		logger.Info("snapshot dir info", "dir", snapDir)
 
 		allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
-		if err := allSnapshots.ReopenFolder(); err != nil {
+		if err := allSnapshots.OpenFolder(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
 
-		allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
-		if err := allBorSnapshots.ReopenFolder(); err != nil {
+		allBorSnapshots := heimdall.NewRoSnapshots(ethconfig.BlocksFreezing{}, snapDir, 0, logger)
+		if err := allBorSnapshots.OpenFolder(); err != nil {
 			logger.Error(err.Error())
 			return
 		}
 
-		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+		heimdallMdbxStore := heimdall.NewMdbxStore(logger, datadirCli, 32)
+		heimdallStore := heimdall.NewSnapshotStore(heimdallMdbxStore, allBorSnapshots)
+		bridgeMdbxStore := bridge.NewMdbxStore(datadirCli, logger, true, 32)
+		bridgeStore := bridge.NewSnapshotStore(bridgeMdbxStore, allBorSnapshots, params.AmoyChainConfig.Bor)
+		blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots, heimdallStore, bridgeStore)
 		lastFrozenSpanId := blockReader.LastFrozenSpanId()
 
 		var to uint64
@@ -443,21 +455,14 @@ var cmdExportHeimdallSpans = &cobra.Command{
 		}
 
 		for spanId := fromNum; spanId < to; spanId++ {
-			spanBytes, err := blockReader.Span(cmd.Context(), tx, spanId)
+			span, ok, err := blockReader.Span(cmd.Context(), tx, spanId)
 			if err != nil {
-				if errors.Is(err, freezeblocks.ErrSpanNotFound) {
-					logger.Warn("span not found", "spanId", spanId)
-					continue
-				}
-
 				logger.Error(err.Error())
 				return
 			}
-
-			var span heimdall.Span
-			if err = json.Unmarshal(spanBytes, &span); err != nil {
-				logger.Error(err.Error())
-				return
+			if !ok {
+				logger.Warn("span not found", "spanId", spanId)
+				continue
 			}
 
 			var source string
@@ -501,7 +506,7 @@ var cmdExportHeimdallSpanBlockProducerSelections = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
 		label := kv.ChainDB
-		db, err := openDB(dbCfg(label, path.Join(datadirCli, label.String())), true, logger)
+		db, err := openDB(dbCfg(kv.Label(label), path.Join(datadirCli, label)), true, logger)
 		if err != nil {
 			logger.Error(err.Error())
 			return
