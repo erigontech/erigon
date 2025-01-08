@@ -59,7 +59,7 @@ func TestDecryptionKeysP2pValidatorEx(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
 			logger := testlog.Logger(t, log.LvlDebug)
-			logHandler := &collectingLogHandler{handler: logger.GetHandler()}
+			logHandler := &CollectingLogHandler{handler: logger.GetHandler()}
 			logger.SetHandler(logHandler)
 
 			validator := NewDecryptionKeysP2pValidatorEx(logger, MockInstanceId)
@@ -82,7 +82,7 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 	return []decryptionKeysValidationTestCase{
 		{
 			name: "instance id mismatch",
-			msg: MockDecryptionKeysMessage(t, DecryptionKeysMessageOptions{
+			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
 				InstanceIdOverride: 999999,
 			}),
 			wantErr:              ErrInstanceIdMismatch,
@@ -100,7 +100,7 @@ func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidat
 		[]decryptionKeysValidationTestCase{
 			{
 				name: "invalid envelope version",
-				msg: MockDecryptionKeysMessage(t, DecryptionKeysMessageOptions{
+				msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
 					VersionOverride: "XXX",
 				}),
 				wantErr:              shutterproto.ErrEnveloperVersionMismatch,
@@ -112,7 +112,7 @@ func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidat
 			},
 			{
 				name: "invalid message bytes",
-				msg: MockDecryptionKeysMessage(t, DecryptionKeysMessageOptions{
+				msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
 					EnvelopeBytesOverride: []byte("invalid"),
 				}),
 				wantValidationResult: pubsub.ValidationReject,
@@ -128,7 +128,7 @@ func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidat
 
 const MockInstanceId = 123
 
-type DecryptionKeysMessageOptions struct {
+type DecryptionKeysMsgOptions struct {
 	Eon                   uint64
 	Keys                  [][]byte
 	IdentityPreimages     [][]byte
@@ -143,7 +143,7 @@ type DecryptionKeysMessageOptions struct {
 	EnvelopeBytesOverride []byte
 }
 
-func MockDecryptionKeysMessage(t *testing.T, opts DecryptionKeysMessageOptions) *pubsub.Message {
+func MockDecryptionKeysMsg(t *testing.T, opts DecryptionKeysMsgOptions) *pubsub.Message {
 	var instanceId uint64
 	if opts.InstanceIdOverride != 0 {
 		instanceId = opts.InstanceIdOverride
@@ -193,11 +193,11 @@ func MockDecryptionKeysMessage(t *testing.T, opts DecryptionKeysMessageOptions) 
 	if opts.EnvelopeBytesOverride != nil {
 		data = opts.EnvelopeBytesOverride
 	} else {
-		decryptionKeysMessage, err := anypb.New(decryptionKeys)
+		decryptionKeysMsg, err := anypb.New(decryptionKeys)
 		require.NoError(t, err)
 		envelopeBytes, err := proto.Marshal(&shutterproto.Envelope{
 			Version: version,
-			Message: decryptionKeysMessage,
+			Message: decryptionKeysMsg,
 		})
 		require.NoError(t, err)
 		data = envelopeBytes
@@ -211,29 +211,27 @@ func MockDecryptionKeysMessage(t *testing.T, opts DecryptionKeysMessageOptions) 
 	}
 }
 
-var _ log.Handler = &collectingLogHandler{}
-
-type collectingLogHandler struct {
+type CollectingLogHandler struct {
 	records []*log.Record
 	handler log.Handler
 }
 
-func (c *collectingLogHandler) Log(r *log.Record) error {
-	c.records = append(c.records, r)
-	return c.handler.Log(r)
+func (clh *CollectingLogHandler) Log(r *log.Record) error {
+	clh.records = append(clh.records, r)
+	return clh.handler.Log(r)
 }
 
-func (c *collectingLogHandler) ContainsAll(subStrs []string) bool {
+func (clh *CollectingLogHandler) ContainsAll(subStrs []string) bool {
 	for _, subStr := range subStrs {
-		if !c.Contains(subStr) {
+		if !clh.Contains(subStr) {
 			return false
 		}
 	}
 	return true
 }
 
-func (c *collectingLogHandler) Contains(subStr string) bool {
-	for _, r := range c.records {
+func (clh *CollectingLogHandler) Contains(subStr string) bool {
+	for _, r := range clh.records {
 		msg := string(log.TerminalFormatNoColor().Format(r))
 		if strings.Contains(msg, subStr) {
 			return true
