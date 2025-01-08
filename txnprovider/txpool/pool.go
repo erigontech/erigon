@@ -917,6 +917,13 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.IntrinsicGas
 	}
+	if txn.Gas > p.blockGasLimit.Load() {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas > block gas limit idHash=%x gas=%d, block gas limit=%d", txn.IDHash, txn.Gas, p.blockGasLimit.Load()))
+		}
+		return txpoolcfg.GasLimitTooHigh
+	}
+
 	if !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
