@@ -41,9 +41,6 @@ var handlers = map[string]handle{
 
 func matchTypeToString(fieldType types.Type, in string) string {
 	if named, ok := fieldType.(*types.Named); ok {
-		if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-			_imports[named.Obj().Pkg().Path()] = true
-		}
 		return in + named.Obj().Pkg().Name() + "." + named.Obj().Name()
 	} else if ptr, ok := fieldType.(*types.Pointer); ok {
 		return matchTypeToString(ptr.Elem(), in+"*")

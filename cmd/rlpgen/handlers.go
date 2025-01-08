@@ -251,6 +251,9 @@ func _shortArrayPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldN
 		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
 	} else {
 		if named, ok := ptr.Elem().(*types.Named); !ok {
+			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
+				_imports[named.Obj().Pkg().Path()] = true
+			}
 			_exit("blockNoncePtrHandle: expected filedType to be Named")
 		} else {
 			if named.Obj().Pkg().Name() != pkgSrc.Name() {
@@ -536,6 +539,9 @@ func _shortArrayPtrSliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, f
 			_exit("_shortArrayPtrSliceHandle: expected filedType to be Slice Pointer")
 		} else {
 			if named, ok := ptr.Elem().(*types.Named); !ok {
+				if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
+					_imports[named.Obj().Pkg().Path()] = true
+				}
 				_exit("_shortArrayPtrSliceHandle: expected filedType to be Slice Pointer Named")
 			} else {
 				if named.Obj().Pkg().Name() != pkgSrc.Name() {

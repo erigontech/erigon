@@ -136,17 +136,17 @@ func process(typ *types.Named, b1, b2, b3 *bytes.Buffer) error {
 	typename := typ.Obj().Name()
 
 	// 1. start EncodingSize method on a struct
-	fmt.Fprintf(b1, "func (obj *%s) EncodingSize2() (size int) {\n", typename)
+	fmt.Fprintf(b1, "func (obj *%s) EncodingSize() (size int) {\n", typename)
 
 	// 2. start EncodeRLP
-	fmt.Fprintf(b2, "func (obj *%s) EncodeRLP2(w io.Writer) error {\n", typename)
+	fmt.Fprintf(b2, "func (obj *%s) EncodeRLP(w io.Writer) error {\n", typename)
 	fmt.Fprint(b2, "    var b [32]byte\n")
-	fmt.Fprint(b2, "    if err := rlp.EncodeStructSizePrefix(obj.EncodingSize2(), w, b[:]); err != nil {\n")
+	fmt.Fprint(b2, "    if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {\n")
 	fmt.Fprint(b2, "        return err\n")
 	fmt.Fprint(b2, "    }\n")
 
 	// 3. start DecodeRLP
-	fmt.Fprintf(b3, "func (obj *%s) DecodeRLP2(s *rlp.Stream) error {\n", typename)
+	fmt.Fprintf(b3, "func (obj *%s) DecodeRLP(s *rlp.Stream) error {\n", typename)
 	fmt.Fprint(b3, "    _, err := s.List()\n")
 	fmt.Fprint(b3, "    if err != nil {\n")
 	fmt.Fprint(b3, "        return err\n")
