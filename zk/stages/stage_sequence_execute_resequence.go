@@ -28,6 +28,10 @@ func resequence(
 		return err
 	}
 
+	if err = cfg.dataStreamServer.UnwindToBatchStart(lastBatch + 1); err != nil {
+		return err
+	}
+
 	log.Info(fmt.Sprintf("[%s] Resequence from batch %d to %d in data stream", s.LogPrefix(), lastBatch+1, highestBatchInDs))
 	for _, batch := range batches {
 		batchJob := NewResequenceBatchJob(batch)

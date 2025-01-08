@@ -120,8 +120,10 @@ kurtosis service exec cdk-v1 cdk-erigon-sequencer-001 "nohup cdk-erigon --pprof=
 # Wait for cdk-erigon to start
 sleep 30
 
+num_requests=2000
+
 echo "Running loadtest using polycli"
-/usr/local/bin/polycli loadtest --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" --private-key "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625" --verbosity 600 --requests 2000 --rate-limit 500  --mode uniswapv3 --legacy
+/usr/local/bin/polycli loadtest --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)" --private-key "0x12d7de8621a77640c9241b2595ba78ce443d05e94090365ab3bb5e19df82c625" --verbosity 600 --requests $num_requests --rate-limit 500  --mode uniswapv3 --legacy
 
 echo "Waiting for batch virtualization"
 if ! wait_for_l1_batch 600 "virtual"; then
@@ -190,6 +192,14 @@ if [ "$sequencer_hash" = "$node_hash" ]; then
     echo "The block hashes match for block number $comparison_block."
 else
     echo "The block hashes do not match for block number $comparison_block."
+    exit 1
+fi
+
+echo "Check the nonce of the account is > 2000"
+nonce=$(cast nonce "0xE34aaF64b29273B7D567FCFc40544c014EEe9970" --rpc-url "$(kurtosis port print cdk-v1 cdk-erigon-rpc-001 rpc)")
+echo "Nonce: $nonce"
+if [ "$nonce" -lt $num_requests ]; then
+    echo "Nonce $nonce is less than $num_requests, which means some txns were not resequenced successfully"
     exit 1
 fi
 
