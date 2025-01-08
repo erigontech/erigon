@@ -191,9 +191,8 @@ func (r DiscardReason) String() string {
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 // TODO: move input data to a struct
-func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai, isPrague bool) (uint64, uint64, DiscardReason) {
+func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai, isPrague bool) (gas uint64, floorGas7623 uint64, d DiscardReason) {
 	// Set the starting gas for the raw transaction
-	var gas, floorGas7623 uint64
 	if isContractCreation && isHomestead {
 		gas = fixedgas.TxGasContractCreation
 	} else {
