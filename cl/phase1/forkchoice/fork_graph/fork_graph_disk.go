@@ -26,6 +26,7 @@ import (
 	"github.com/spf13/afero"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -170,6 +171,9 @@ func (f *forkGraphDisk) AnchorSlot() uint64 {
 }
 
 func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot libcommon.Hash) bool {
+	if f.currentState == nil {
+		return false
+	}
 	blockRootState, _ := f.currentState.BlockRoot()
 	return blockRoot == blockRootState
 }
@@ -199,7 +203,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	} else {
 		newState, err = f.getState(block.ParentRoot, false, true)
 		if err != nil {
-			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
+			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot: %x", err, block.ParentRoot)
 		}
 	}
 
@@ -262,7 +266,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			// Add block to list of invalid blocks
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", blockRoot, "reason", invalidBlockErr)
 			f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
-			//f.currentState = nil
+			f.currentState = nil
 
 			return nil, InvalidBlock, invalidBlockErr
 		}
@@ -355,11 +359,11 @@ func (f *forkGraphDisk) getState(blockRoot libcommon.Hash, alwaysCopy bool, addC
 	currentIteratorRoot := blockRoot
 	var copyReferencedState, outState *state.CachingBeaconState
 	var err error
-	if addChainSegment {
+	if addChainSegment && dbg.CaplinEfficientReorg {
 		outState = f.currentState
 	}
 
-	// try and find the point of recconection
+	// try and find the point of recconnection
 	for copyReferencedState == nil {
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
 		if !isSegmentPresent {

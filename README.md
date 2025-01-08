@@ -1,6 +1,6 @@
 # Erigon
 
-Documentation: **[erigon.gitbook.io](https://erigon.gitbook.io)**
+Documentation: **[docs.erigon.tech](https://docs.erigon.tech)**
 Blog: **[erigon.substack.com](https://erigon.substack.com/)**
 Twitter: [x.com/ErigonEth](https://x.com/ErigonEth)
 
@@ -51,7 +51,7 @@ frontier.
     - [Run local devnet](#run-local-devnet)
     - [Docker permissions error](#docker-permissions-error)
     - [Public RPC](#public-rpc)
-    - [RaspberyPI](#raspberypi)
+    - [RaspberryPI](#raspberrypi)
     - [Run all components by docker-compose](#run-all-components-by-docker-compose)
         - [Optional: Setup dedicated user](#optional-setup-dedicated-user)
         - [Environment Variables](#environment-variables)
@@ -134,7 +134,7 @@ datadir
         domain    # Latest State
         history   # Historical values 
         idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
-        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+        accessor # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
     txpool        # pending transactions. safe to remove.
     nodes         # p2p peers. safe to remove.
     temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
@@ -155,11 +155,11 @@ datadir
         domain    # link to fast disk
         history   
         idx       
-        accessors 
+        accessor 
     temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly   
 
 # Example: how to speedup history access: 
-#   - go step-by-step - first try store `accessors` on fast disk
+#   - go step-by-step - first try store `accessor` on fast disk
 #   - if speed is not good enough: `idx`
 #   - if still not enough: `history` 
 ```
@@ -551,7 +551,7 @@ in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-files
 - `--http.corsdomain="*"` is bad-practice: set exact hostname or IP
 - protect from DOS by reducing: `--rpc.batch.concurrency`, `--rpc.batch.limit`
 
-### RaspberyPI
+### RaspberryPI
 
 https://github.com/mathMakesArt/Erigon-on-RPi-4
 
@@ -588,7 +588,7 @@ targets `make user_linux` or `make user_macos`.
 
 #### Run
 
-Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writeable by the user UID/GID in docker,
+Check permissions: In all cases, `XDG_DATA_HOME` (specified or default) must be writable by the user UID/GID in docker,
 which will be determined by the `DOCKER_UID` and `DOCKER_GID` at build time. If a build or service startup is failing
 due to permissions, check that all the directories, UID, and GID controlled by these environment variables are correct.
 
@@ -750,7 +750,7 @@ Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS page
 memory.
 
 **Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimisations: "reduce Disk random access".
+main Erigon optimizations: "reduce Disk random access".
 "Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
 running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
 same Disk.
@@ -768,7 +768,7 @@ What can do:
     - use latency-critical cloud-drives
     - or attached-NVMe (at least for initial sync)
 - increase RAM
-- if you throw anough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
+- if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 - Use `--db.pagesize=64kb` (less fragmentation, more IO)
 - Or buy/download synced archive node from some 3-rd party Erigon2 snapshots provider
 - Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)

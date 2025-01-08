@@ -93,6 +93,7 @@ type Sentinel struct {
 
 	blockReader freezeblocks.BeaconSnapshotReader
 	blobStorage blob_storage.BlobStorage
+	bwc         *metrics.BandwidthCounter
 
 	indiciesDB kv.RoDB
 
@@ -147,25 +148,20 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	)
 
 	ip := net.ParseIP(ipAddr)
-	if ip.To4() == nil {
-		return nil, fmt.Errorf("IPV4 address not provided instead %s was provided", ipAddr)
+	if ip == nil {
+		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
 	}
 
 	var bindIP net.IP
 	var networkVersion string
 
-	// check for our network version
-	switch {
-	// if we have 16 byte and 4 byte representation then we are in using udp6
-	case ip.To16() != nil && ip.To4() == nil:
-		bindIP = net.IPv6zero
-		networkVersion = "udp6"
-		// only 4 bytes then we are using udp4
-	case ip.To4() != nil:
+	// If the IP is an IPv4 address, bind to the correct zero address.
+	if ip.To4() != nil {
 		bindIP = net.IPv4zero
 		networkVersion = "udp4"
-	default:
-		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
+	} else {
+		bindIP = net.IPv6zero
+		networkVersion = "udp6"
 	}
 
 	udpAddr := &net.UDPAddr{
@@ -243,9 +239,9 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	bwc := metrics.NewBandwidthCounter()
+	s.bwc = metrics.NewBandwidthCounter()
 
-	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(bwc))
+	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(s.bwc))
 
 	host, err := libp2p.New(opts...)
 	signal.Reset(syscall.SIGINT)
@@ -253,7 +249,6 @@ func New(
 		return nil, err
 	}
 	s.host = host
-	go s.observeBandwidth(ctx, bwc)
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
@@ -272,7 +267,7 @@ func New(
 	return s, nil
 }
 
-func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthCounter) {
+func (s *Sentinel) observeBandwidth(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
 		countSubnetsSubscribed := func() int {
@@ -301,7 +296,7 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			totals := bwc.GetBandwidthTotals()
+			totals := s.bwc.GetBandwidthTotals()
 			monitor.ObserveTotalInBytes(totals.TotalIn)
 			monitor.ObserveTotalOutBytes(totals.TotalOut)
 			minBound := datasize.KB
@@ -320,7 +315,7 @@ func (s *Sentinel) observeBandwidth(ctx context.Context, bwc *metrics.BandwidthC
 			// Check which peers should be banned
 			for _, p := range peers {
 				// get peer bandwidth
-				peerBandwidth := bwc.GetBandwidthForPeer(p)
+				peerBandwidth := s.bwc.GetBandwidthForPeer(p)
 				// check if peer is over limit
 				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
 					peersToBan = append(peersToBan, p)
@@ -374,6 +369,7 @@ func (s *Sentinel) Start() error {
 
 	go s.listenForPeers()
 	go s.forkWatcher()
+	go s.observeBandwidth(s.ctx)
 
 	return nil
 }

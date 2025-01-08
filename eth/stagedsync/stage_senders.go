@@ -397,23 +397,3 @@ func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 	}
 	return nil
 }
-
-func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	// noop. in this case senders will be deleted by BlockRetire.PruneAncientBlocks after data-freezing.
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
-}

@@ -236,7 +236,8 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 	ac = agg.BeginFilesRo()
 	defer ac.Close()
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	wrwTx := WrapTxWithCtx(rwTx, ac)
+	domains, err := NewSharedDomains(wrwTx, log.New())
 	require.NoError(err)
 	defer domains.Close()
 
@@ -266,7 +267,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -274,7 +275,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete marker is in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -304,7 +305,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -319,13 +320,17 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 		ac = agg.BeginFilesRo()
 		defer ac.Close()
+		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains...)))
+
 		rwTx, err = db.BeginRw(ctx)
 		require.NoError(err)
 		defer rwTx.Rollback()
 
 		_, err := ac.Prune(ctx, rwTx, 0, nil)
 		require.NoError(err)
-		domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+
+		wrwTx = WrapTxWithCtx(rwTx, ac)
+		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -334,7 +339,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete/update more keys in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 
@@ -354,7 +359,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -364,7 +369,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+		domains, err = NewSharedDomains(wrwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		domains.SetTxNum(domains.TxNum() + 1)
@@ -390,14 +395,15 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	wtxRw := WrapTxWithCtx(rwTx, ac)
+	domains, err := NewSharedDomains(wtxRw, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	maxTx := 3*stepSize + 10
 	hashes := make([][]byte, maxTx)
 
-	domains, err = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err = NewSharedDomains(wtxRw, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -511,7 +517,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.Zero(t, missed)
 		require.Zero(t, notRemoved)
 	}
-	fmt.Printf("deleted\n")
 
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)

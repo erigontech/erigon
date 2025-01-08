@@ -260,7 +260,7 @@ func (sub *ClientSubscription) quitWithError(unsubscribeServer bool, err error) 
 			sub.requestUnsubscribe()
 		}
 		if err != nil {
-			if err == ErrClientQuit {
+			if errors.Is(err, ErrClientQuit) {
 				err = nil // Adhere to subscription semantics.
 			}
 			sub.err <- err
