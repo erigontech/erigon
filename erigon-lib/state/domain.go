@@ -1215,6 +1215,9 @@ func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, dat
 }
 
 func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
+	if d.IndexList&AccessorBTree == 0 {
+		return nil
+	}
 	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		return []string{
 			d.kvBtFilePath(fromStep, toStep),
@@ -1222,7 +1225,11 @@ func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
 		}
 	})
 }
+
 func (d *Domain) missedAccessors() (l []*filesItem) {
+	if d.IndexList&AccessorHashMap == 0 {
+		return nil
+	}
 	return fileItemsWithMissingAccessors(d.dirtyFiles, d.aggregationStep, func(fromStep uint64, toStep uint64) []string {
 		return []string{
 			d.kvAccessorFilePath(fromStep, toStep),
@@ -1234,9 +1241,6 @@ func (d *Domain) missedAccessors() (l []*filesItem) {
 func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedAccessors(ctx, g, ps)
 	for _, item := range d.missedBtreeAccessors() {
-		if d.IndexList&AccessorBTree == 0 {
-			continue
-		}
 		if item.decompressor == nil {
 			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
 		}
@@ -1252,9 +1256,6 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		})
 	}
 	for _, item := range d.missedAccessors() {
-		if d.IndexList&AccessorHashMap == 0 {
-			continue
-		}
 		if item.decompressor == nil {
 			log.Warn(fmt.Sprintf("[dbg] BuildMissedAccessors: item with nil decompressor %s %d-%d", d.filenameBase, item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep))
 		}
