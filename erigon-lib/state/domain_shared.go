@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -96,9 +97,8 @@ type SharedDomains struct {
 	domains [kv.DomainLen]map[string]dataWithPrevStep
 	storage *btree2.Map[string, dataWithPrevStep]
 
-	domainWriters    [kv.DomainLen]*domainBufferedWriter
-	iiWriters        [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
-	appendableWriter [kv.AppendableLen]*appendableBufferedWriter
+	domainWriters [kv.DomainLen]*domainBufferedWriter
+	iiWriters     [kv.StandaloneIdxLen]*invertedIndexBufferedWriter
 
 	currentChangesAccumulator *StateChangeSet
 	pastChangesAccumulator    map[string]*StateChangeSet
@@ -131,10 +131,6 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 		sd.domainWriters[id] = d.NewWriter()
 	}
 
-	for id, a := range sd.aggTx.appendable {
-		sd.appendableWriter[id] = a.NewWriter()
-	}
-
 	sd.SetTxNum(0)
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, commitment.VariantHexPatriciaTrie)
 
@@ -159,17 +155,17 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 	if sd.pastChangesAccumulator == nil {
 		sd.pastChangesAccumulator = make(map[string]*StateChangeSet)
 	}
-	var key [40]byte
+	key := make([]byte, 40)
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
-	sd.pastChangesAccumulator[string(key[:])] = acc
+	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
 }
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]DomainEntryDiff, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
-	if changeset, ok := sd.pastChangesAccumulator[string(key[:])]; ok {
+	if changeset, ok := sd.pastChangesAccumulator[toStringZeroCopy(key[:])]; ok {
 		return [kv.DomainLen][]DomainEntryDiff{
 			changeset.Diffs[kv.AccountsDomain].GetDiffSet(),
 			changeset.Diffs[kv.StorageDomain].GetDiffSet(),
@@ -181,10 +177,6 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 }
 
 func (sd *SharedDomains) AggTx() any { return sd.aggTx }
-func (sd *SharedDomains) CanonicalReader() CanonicalsReader {
-	return nil
-	//return sd.aggTx.appendable[kv.ReceiptsAppendable].ap.cfg.iters
-}
 
 // aggregator context should call aggTx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64, changeset *[kv.DomainLen][]DomainEntryDiff) error {
@@ -212,12 +204,6 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 		}
 	}
 
-	for _, ap := range sd.aggTx.appendable {
-		if err := ap.Unwind(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
-			return err
-		}
-	}
-
 	sd.ClearRam(true)
 	sd.SetTxNum(txUnwindTo)
 	sd.SetBlockNum(blockUnwindTo)
@@ -225,7 +211,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 }
 
 func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, blockNum uint64) ([]byte, error) {
-	it, err := sd.aggTx.HistoryRange(kv.AccountsHistory, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	it, err := sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +224,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 		sd.sdCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
 
-	it, err = sd.aggTx.HistoryRange(kv.StorageHistory, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
+	it, err = sd.aggTx.HistoryRange(kv.StorageDomain, int(sd.TxNum()), math.MaxInt64, order.Asc, -1, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +240,78 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 
 	sd.sdCtx.Reset()
 	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
+}
+
+// DiscardWrites disables updates collection for further flushing into db.
+// Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
+func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
+	if d >= kv.DomainLen {
+		return
+	}
+	sd.domainWriters[d].discard = true
+	sd.domainWriters[d].h.discard = true
+}
+
+func (sd *SharedDomains) RebuildCommitmentShard(ctx context.Context, next func() (bool, []byte), cfg *RebuiltCommitment) (*RebuiltCommitment, error) {
+	sd.DiscardWrites(kv.AccountsDomain)
+	sd.DiscardWrites(kv.StorageDomain)
+	sd.DiscardWrites(kv.CodeDomain)
+
+	visComFiles := sd.aggTx.d[kv.CommitmentDomain].Files()
+	sd.logger.Info("starting commitment", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
+		"totalKeys", common.PrettyCounter(cfg.Keys), "block", sd.BlockNum(),
+		"commitment files before dump step", cfg.StepTo,
+		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles))
+
+	sf := time.Now()
+	var processed uint64
+	for ok, key := next(); ; ok, key = next() {
+		sd.sdCtx.TouchKey(kv.AccountsDomain, string(key), nil)
+		processed++
+		if !ok {
+			break
+		}
+	}
+	collectionSpent := time.Since(sf)
+	rh, err := sd.sdCtx.ComputeCommitment(ctx, true, sd.BlockNum(), fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo))
+	if err != nil {
+		return nil, err
+	}
+	sd.logger.Info("sealing", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo),
+		"root", hex.EncodeToString(rh), "commitment", time.Since(sf).String(),
+		"collection", collectionSpent.String())
+
+	sb := time.Now()
+
+	// rng := MergeRange{from: cfg.TxnFrom, to: cfg.TxnTo}
+	// vt, err := sd.aggTx.d[kv.CommitmentDomain].commitmentValTransformDomain(rng, sd.aggTx.d[kv.AccountsDomain], sd.aggTx.d[kv.StorageDomain], nil, nil)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	err = sd.aggTx.d[kv.CommitmentDomain].d.DumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, cfg.TxnFrom, cfg.TxnTo, sd.domainWriters[kv.CommitmentDomain], nil)
+	if err != nil {
+		return nil, err
+	}
+
+	sd.logger.Info("shard built", "shard", fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), "root", hex.EncodeToString(rh), "ETA", time.Since(sf).String(), "file dump", time.Since(sb).String())
+
+	return &RebuiltCommitment{
+		RootHash: rh,
+		StepFrom: cfg.StepFrom,
+		StepTo:   cfg.StepTo,
+		TxnFrom:  cfg.TxnFrom,
+		TxnTo:    cfg.TxnTo,
+		Keys:     processed,
+	}, nil
+}
+
+type RebuiltCommitment struct {
+	RootHash []byte
+	StepFrom uint64
+	StepTo   uint64
+	TxnFrom  uint64
+	TxnTo    uint64
+	Keys     uint64
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
@@ -352,9 +410,8 @@ func (sd *SharedDomains) put(domain kv.Domain, key string, val []byte) {
 // get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, prevStep uint64, ok bool) {
 	//sd.muMaps.RLock()
-	keyS := *(*string)(unsafe.Pointer(&key))
+	keyS := toStringZeroCopy(key)
 	var dataWithPrevStep dataWithPrevStep
-	//keyS := string(key)
 	if table == kv.StorageDomain {
 		dataWithPrevStep, ok = sd.storage.Get(keyS)
 		return dataWithPrevStep.data, dataWithPrevStep.prevStep, ok
@@ -388,9 +445,9 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 		return v, step, nil
 	}
 
-	// GetfromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
+	// getFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
 	// of file where the value is stored (not exact step when kv has been set)
-	v, _, startTx, endTx, err := sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix)
+	v, _, startTx, endTx, err := sd.aggTx.d[kv.CommitmentDomain].getFromFiles(prefix, 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("commitment prefix %x read error: %w", prefix, err)
 	}
@@ -415,32 +472,46 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 	if !sd.aggTx.a.commitmentValuesTransform ||
 		len(branch) == 0 ||
-		sd.aggTx.minimaxTxNumInDomainFiles() == 0 ||
-		bytes.Equal(prefix, keyCommitmentState) || ((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 {
+		sd.aggTx.TxNumsInFiles(kv.StateDomains...) == 0 ||
+		bytes.Equal(prefix, keyCommitmentState) ||
+		((fEndTxNum-fStartTxNum)/sd.aggTx.a.StepSize())%2 != 0 { // this checks if file has even number of steps, singular files does not transform values.
 
 		return branch, nil // do not transform, return as is
 	}
 
 	sto := sd.aggTx.d[kv.StorageDomain]
 	acc := sd.aggTx.d[kv.AccountsDomain]
-	storageItem := sto.lookupFileByItsRange(fStartTxNum, fEndTxNum)
-	if storageItem == nil {
-		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-		return nil, errors.New("storage file not found")
+	storageItem, err := sto.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		sd.logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
 	}
-	accountItem := acc.lookupFileByItsRange(fStartTxNum, fEndTxNum)
-	if accountItem == nil {
-		sd.logger.Crit(fmt.Sprintf("storage file of steps %d-%d not found\n", fStartTxNum/sd.aggTx.a.aggregationStep, fEndTxNum/sd.aggTx.a.aggregationStep))
-		return nil, errors.New("account file not found")
+	accountItem, err := acc.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		sd.logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
 	}
 	storageGetter := seg.NewReader(storageItem.decompressor.MakeGetter(), sto.d.compression)
 	accountGetter := seg.NewReader(accountItem.decompressor.MakeGetter(), acc.d.compression)
+	metricI := 0
+	for i, f := range sd.aggTx.d[kv.CommitmentDomain].files {
+		if i > 5 {
+			metricI = 5
+			break
+		}
+		if f.startTxNum == fStartTxNum && f.endTxNum == fEndTxNum {
+			metricI = i
+		}
+	}
 
 	aux := make([]byte, 0, 256)
 	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
+			}
+			if dbg.KVReadLevelledMetrics {
+				defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
 			}
 			// Optimised key referencing a state file record (file number and offset within the file)
 			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
@@ -457,6 +528,9 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			return nil, nil // save account key as is
 		}
 
+		if dbg.KVReadLevelledMetrics {
+			defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
+		}
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
 			s0, s1 := fStartTxNum/sd.aggTx.a.StepSize(), fEndTxNum/sd.aggTx.a.StepSize()
@@ -537,9 +611,9 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte, prevStep
 	return sd.domainWriters[kv.CodeDomain].PutWithPrev(addr, nil, code, prevCode, prevStep)
 }
 
-func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte, prevStep uint64) error {
-	sd.put(kv.CommitmentDomain, string(prefix), data)
-	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(prefix, nil, data, prev, prevStep)
+func (sd *SharedDomains) updateCommitmentData(prefix string, data, prev []byte, prevStep uint64) error {
+	sd.put(kv.CommitmentDomain, prefix, data)
+	return sd.domainWriters[kv.CommitmentDomain].PutWithPrev(toBytesZeroCopy(prefix), nil, data, prev, prevStep)
 }
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
@@ -650,9 +724,7 @@ func (sd *SharedDomains) SetTrace(b bool) {
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	sd.aggTx.RestrictSubsetFileDeletions(true)
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
-	sd.aggTx.RestrictSubsetFileDeletions(false)
 	return
 }
 
@@ -682,17 +754,16 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 	iter := sd.storage.Iter()
 	if iter.Seek(string(prefix)) {
-		kx := iter.Key()
+		k := toBytesZeroCopy(iter.Key())
 		v = iter.Value().data
-		k = []byte(kx)
 
-		if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
+		if len(k) > 0 && bytes.HasPrefix(k, prefix) {
 			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: iter, endTxNum: sd.txNum, reverse: true})
 		}
 	}
 
 	roTx := sd.roTx
-	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valsTable)
+	valsCursor, err := roTx.CursorDupSort(sd.aggTx.a.d[kv.StorageDomain].valuesTable)
 	if err != nil {
 		return err
 	}
@@ -739,7 +810,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 			switch ci1.t {
 			case RAM_CURSOR:
 				if ci1.iter.Next() {
-					k = []byte(ci1.iter.Key())
+					k = toBytesZeroCopy(ci1.iter.Key())
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
 						ci1.val = common.Copy(ci1.iter.Value().data)
@@ -747,15 +818,19 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					}
 				}
 			case FILE_CURSOR:
-				if UseBtree || UseBpsTree {
+				indexList := sd.aggTx.d[kv.StorageDomain].d.IndexList
+				if indexList&AccessorBTree != 0 {
 					if ci1.btCursor.Next() {
 						ci1.key = ci1.btCursor.Key()
 						if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
 							ci1.val = ci1.btCursor.Value()
 							heap.Push(cpPtr, ci1)
 						}
+					} else {
+						ci1.btCursor.Close()
 					}
-				} else {
+				}
+				if indexList&AccessorHashMap != 0 {
 					ci1.dg.Reset(ci1.latestOffset)
 					if !ci1.dg.HasNext() {
 						break
@@ -765,6 +840,8 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 						ci1.key = key
 						ci1.val, ci1.latestOffset = ci1.dg.Next(nil)
 						heap.Push(cpPtr, ci1)
+					} else {
+						ci1.dg = nil
 					}
 				}
 			case DB_CURSOR:
@@ -778,12 +855,15 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					step := ^binary.BigEndian.Uint64(v[:8])
 					endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					if haveRamUpdates && endTxNum >= sd.txNum {
+						ci1.cDup.Close()
 						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 					}
 					ci1.endTxNum = endTxNum
 					ci1.val = common.Copy(v[8:])
 					ci1.step = step
 					heap.Push(cpPtr, ci1)
+				} else {
+					ci1.cDup.Close()
 				}
 			}
 		}
@@ -809,9 +889,6 @@ func (sd *SharedDomains) Close() {
 		for _, iiWriter := range sd.iiWriters {
 			iiWriter.close()
 		}
-		for _, a := range sd.appendableWriter {
-			a.close()
-		}
 	}
 
 	if sd.sdCtx != nil {
@@ -821,8 +898,8 @@ func (sd *SharedDomains) Close() {
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	for key, changeset := range sd.pastChangesAccumulator {
-		blockNum := binary.BigEndian.Uint64([]byte(key[:8]))
-		blockHash := common.BytesToHash([]byte(key[8:]))
+		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
+		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
 		if err := WriteDiffSet(tx, blockNum, blockHash, changeset); err != nil {
 			return err
 		}
@@ -838,23 +915,16 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		_, f, l, _ := runtime.Caller(1)
 		fmt.Printf("[SD aggTx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggTx.id, sd.TxNum(), fh, filepath.Base(f), l)
 	}
-	for _, w := range sd.domainWriters {
+	for di, w := range sd.domainWriters {
 		if w == nil {
 			continue
 		}
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
+		sd.aggTx.d[di].closeValsCursor()
 	}
 	for _, w := range sd.iiWriters {
-		if w == nil {
-			continue
-		}
-		if err := w.Flush(ctx, tx); err != nil {
-			return err
-		}
-	}
-	for _, w := range sd.appendableWriter {
 		if w == nil {
 			continue
 		}
@@ -881,37 +951,46 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 		w.close()
 	}
-	for _, w := range sd.appendableWriter {
-		if w == nil {
-			continue
-		}
-		w.close()
-	}
 	return nil
 }
 
 // TemporalDomain satisfaction
-func (sd *SharedDomains) DomainGet(domain kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+func (sd *SharedDomains) GetLatest(domain kv.Domain, k []byte) (v []byte, step uint64, err error) {
 	if domain == kv.CommitmentDomain {
 		return sd.LatestCommitment(k)
-	}
-
-	if k2 != nil {
-		k = append(k, k2...)
 	}
 	if v, prevStep, ok := sd.get(domain, k); ok {
 		return v, prevStep, nil
 	}
-	v, step, _, err = sd.aggTx.GetLatest(domain, k, nil, sd.roTx)
+	v, step, _, err = sd.aggTx.GetLatest(domain, k, sd.roTx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 	return v, step, nil
 }
 
+// GetAsOfFile returns value from domain with respect to limit ofMaxTxnum
+func (sd *SharedDomains) getAsOfFile(domain kv.Domain, k, k2 []byte, ofMaxTxnum uint64) (v []byte, step uint64, err error) {
+	if domain == kv.CommitmentDomain {
+		return sd.LatestCommitment(k)
+	}
+	if k2 != nil {
+		k = append(k, k2...)
+	}
+
+	v, ok, err := sd.aggTx.getAsOfFile(domain, k, ofMaxTxnum)
+	if err != nil {
+		return nil, 0, fmt.Errorf("domain '%s' %x txn=%d read error: %w", domain, k, ofMaxTxnum, err)
+	}
+	if !ok {
+		return nil, 0, nil
+	}
+	return v, step, nil
+}
+
 // DomainPut
 // Optimizations:
-//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
+//   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error {
@@ -920,7 +999,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.DomainGet(domain, k1, k2)
+		prevVal, prevStep, err = sd.GetLatest(domain, k1)
 		if err != nil {
 			return err
 		}
@@ -936,8 +1015,14 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 			return nil
 		}
 		return sd.updateAccountCode(k1, val, prevVal, prevStep)
+	case kv.CommitmentDomain:
+		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
+		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	default:
-		sd.put(domain, string(append(k1, k2...)), val)
+		if bytes.Equal(prevVal, val) {
+			return nil
+		}
+		sd.put(domain, toStringZeroCopy(append(k1, k2...)), val)
 		return sd.domainWriters[domain].PutWithPrev(k1, k2, val, prevVal, prevStep)
 	}
 }
@@ -950,7 +1035,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, k1, k2 []byte, val, prevVal
 func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error {
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.DomainGet(domain, k1, k2)
+		prevVal, prevStep, err = sd.GetLatest(domain, k1)
 		if err != nil {
 			return err
 		}
@@ -967,9 +1052,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, k1, k2 []byte, prevVal []by
 		}
 		return sd.updateAccountCode(k1, nil, prevVal, prevStep)
 	case kv.CommitmentDomain:
-		return sd.updateCommitmentData(k1, nil, prevVal, prevStep)
+		return sd.updateCommitmentData(toStringZeroCopy(k1), nil, prevVal, prevStep)
 	default:
-		sd.put(domain, string(append(k1, k2...)), nil)
+		sd.put(domain, toStringZeroCopy(append(k1, k2...)), nil)
 		return sd.domainWriters[domain].DeleteWithPrev(k1, k2, prevVal, prevStep)
 	}
 }
@@ -1012,24 +1097,24 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 }
 func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 
-func (sd *SharedDomains) AppendablePut(name kv.Appendable, ts kv.TxnId, v []byte) error {
-	return sd.appendableWriter[name].Append(ts, v)
-}
-
 type SharedDomainsCommitmentContext struct {
 	sharedDomains *SharedDomains
-	discard       bool // could be replaced with using ModeDisabled
 	branches      map[string]cachedBranch
 	keccak        cryptozerocopy.KeccakState
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
 	justRestored  atomic.Bool
+
+	limitReadAsOfTxNum uint64
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetLimitReadAsOfTxNum(txNum uint64) {
+	sdc.limitReadAsOfTxNum = txNum
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode commitment.Mode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
-		discard:       dbg.DiscardCommitment(),
 		branches:      make(map[string]cachedBranch),
 		keccak:        sha3.NewLegacyKeccak256().(cryptozerocopy.KeccakState),
 	}
@@ -1054,7 +1139,8 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, error) {
-	cached, ok := sdc.branches[string(pref)]
+	prefS := toStringZeroCopy(pref)
+	cached, ok := sdc.branches[prefS]
 	if ok {
 		// cached value is already transformed/clean to read.
 		// Cache should ResetBranchCache after each commitment computation
@@ -1063,14 +1149,14 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 
 	v, step, err := sdc.sharedDomains.LatestCommitment(pref)
 	if err != nil {
-		return nil, 0, fmt.Errorf("Branch failed: %w", err)
+		return nil, 0, fmt.Errorf("branch failed: %w", err)
 	}
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] Branch: %x: %x\n", pref, v)
 	}
 	// Trie reads prefix during unfold and after everything is ready reads it again to Merge update, if any, so
 	// cache branch until ResetBranchCache called
-	sdc.branches[string(pref)] = cachedBranch{data: v, step: step}
+	sdc.branches[prefS] = cachedBranch{data: v, step: step}
 
 	if len(v) == 0 {
 		return nil, 0, nil
@@ -1079,21 +1165,66 @@ func (sdc *SharedDomainsCommitmentContext) Branch(pref []byte) ([]byte, uint64, 
 }
 
 func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
+	prefixS := toStringZeroCopy(prefix)
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
-	sdc.branches[string(prefix)] = cachedBranch{data: data, step: prevStep}
+	sdc.branches[prefixS] = cachedBranch{data: data, step: prevStep}
 
-	return sdc.sharedDomains.updateCommitmentData(prefix, data, prevData, prevStep)
+	return sdc.sharedDomains.updateCommitmentData(prefixS, data, prevData, prevStep)
 }
 
-func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (*commitment.Update, error) {
-	encAccount, _, err := sdc.sharedDomains.DomainGet(kv.AccountsDomain, plainKey, nil)
+func (sdc *SharedDomainsCommitmentContext) readAccount(plainKey []byte) (encAccount []byte, err error) {
+	if sdc.limitReadAsOfTxNum > 0 {
+		encAccount, _, err = sdc.sharedDomains.getAsOfFile(kv.AccountsDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		if err != nil {
+			return nil, fmt.Errorf("GetAccount failed: %w", err)
+		}
+		return encAccount, nil
+	}
+	encAccount, _, err = sdc.sharedDomains.GetLatest(kv.AccountsDomain, plainKey)
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount failed: %w", err)
 	}
-	u := new(commitment.Update)
-	u.Reset()
+	return encAccount, nil
+}
+
+func (sdc *SharedDomainsCommitmentContext) readCode(plainKey []byte) (code []byte, err error) {
+	if sdc.limitReadAsOfTxNum > 0 {
+		code, _, err = sdc.sharedDomains.getAsOfFile(kv.CodeDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		if err != nil {
+			return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		}
+		return code, nil
+	}
+	code, _, err = sdc.sharedDomains.GetLatest(kv.CodeDomain, plainKey)
+	if err != nil {
+		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+	}
+	return code, nil
+}
+func (sdc *SharedDomainsCommitmentContext) readStorage(plainKey []byte) (enc []byte, err error) {
+	if sdc.limitReadAsOfTxNum > 0 {
+		enc, _, err = sdc.sharedDomains.getAsOfFile(kv.StorageDomain, plainKey, nil, sdc.limitReadAsOfTxNum)
+		if err != nil {
+			return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		}
+		return enc, nil
+	}
+	enc, _, err = sdc.sharedDomains.GetLatest(kv.StorageDomain, plainKey)
+	if err != nil {
+		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+	}
+	return enc, nil
+}
+
+func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (u *commitment.Update, err error) {
+	encAccount, err := sdc.readAccount(plainKey)
+	if err != nil {
+		return nil, err
+	}
+
+	u = &commitment.Update{CodeHash: commitment.EmptyCodeHashArray}
 
 	if len(encAccount) > 0 {
 		nonce, balance, chash := types.DecodeAccountBytesV3(encAccount)
@@ -1113,18 +1244,18 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (*commitment
 		return u, nil
 	}
 
-	code, _, err := sdc.sharedDomains.DomainGet(kv.CodeDomain, plainKey, nil)
+	code, err := sdc.readCode(plainKey)
 	if err != nil {
-		return nil, fmt.Errorf("GetAccount/Code: failed to read latest code: %w", err)
+		return nil, err
 	}
+
 	if len(code) > 0 {
 		sdc.keccak.Reset()
 		sdc.keccak.Write(code)
 		sdc.keccak.Read(u.CodeHash[:])
 		u.Flags |= commitment.CodeUpdate
-
 	} else {
-		copy(u.CodeHash[:], commitment.EmptyCodeHashArray[:])
+		u.CodeHash = commitment.EmptyCodeHashArray
 	}
 
 	if len(encAccount) == 0 && len(code) == 0 {
@@ -1133,13 +1264,13 @@ func (sdc *SharedDomainsCommitmentContext) Account(plainKey []byte) (*commitment
 	return u, nil
 }
 
-func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (*commitment.Update, error) {
+func (sdc *SharedDomainsCommitmentContext) Storage(plainKey []byte) (u *commitment.Update, err error) {
 	// Look in the summary table first
-	enc, _, err := sdc.sharedDomains.DomainGet(kv.StorageDomain, plainKey, nil)
+	enc, err := sdc.readStorage(plainKey)
 	if err != nil {
 		return nil, err
 	}
-	u := new(commitment.Update)
+	u = new(commitment.Update)
 	u.StorageLen = len(enc)
 	if len(enc) == 0 {
 		u.Flags = commitment.DeleteUpdate
@@ -1164,20 +1295,24 @@ func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
 
+func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
+	return sdc.patriciaTrie
+}
+
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
-	if sdc.discard {
+	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return
 	}
-	ks := []byte(key)
+
 	switch d {
 	case kv.AccountsDomain:
-		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchAccount)
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
 	case kv.CodeDomain:
-		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchCode)
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
 	case kv.StorageDomain:
-		sdc.updates.TouchPlainKey(ks, val, sdc.updates.TouchStorage)
+		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
 	default:
 		panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
@@ -1185,10 +1320,6 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 
 // Evaluates commitment for processed state.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
-	if dbg.DiscardCommitment() {
-		sdc.updates.Reset()
-		return nil, nil
-	}
 	sdc.ResetBranchCache()
 	defer sdc.ResetBranchCache()
 
@@ -1249,7 +1380,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sharedDomains.trace {
 		fmt.Printf("[commitment] store txn %d block %d rootHash %x\n", sdc.sharedDomains.txNum, blockNum, rootHash)
 	}
-	sdc.sharedDomains.put(kv.CommitmentDomain, string(keyCommitmentState), encodedState)
+	sdc.sharedDomains.put(kv.CommitmentDomain, keyCommitmentStateS, encodedState)
 	return sdc.sharedDomains.domainWriters[kv.CommitmentDomain].PutWithPrev(keyCommitmentState, nil, encodedState, prevState, prevStep)
 }
 
@@ -1276,7 +1407,9 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 }
 
 // by that key stored latest root hash and tree state
-var keyCommitmentState = []byte("state")
+const keyCommitmentStateS = "state"
+
+var keyCommitmentState = []byte(keyCommitmentStateS)
 
 func (sd *SharedDomains) LatestCommitmentState(tx kv.Tx, sinceTx, untilTx uint64) (blockNum, txNum uint64, state []byte, err error) {
 	return sd.sdCtx.LatestCommitmentState()
@@ -1289,9 +1422,6 @@ func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // LatestCommitmentState searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState() (blockNum, txNum uint64, state []byte, err error) {
-	if dbg.DiscardCommitment() {
-		return 0, 0, nil, nil
-	}
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
@@ -1346,3 +1476,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	}
 	return cs.blockNum, cs.txNum, nil
 }
+
+func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) }
+func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

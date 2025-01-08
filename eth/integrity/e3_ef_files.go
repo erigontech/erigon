@@ -34,7 +34,7 @@ func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator, fail
 		return err
 	}
 	g := &errgroup.Group{}
-	for _, idx := range []kv.InvertedIdx{kv.AccountsHistoryIdx, kv.StorageHistoryIdx, kv.CodeHistoryIdx, kv.CommitmentHistoryIdx, kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
+	for _, idx := range []kv.InvertedIdx{kv.AccountsHistoryIdx, kv.StorageHistoryIdx, kv.CodeHistoryIdx, kv.CommitmentHistoryIdx, kv.ReceiptHistoryIdx, kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
 		idx := idx
 		g.Go(func() error {
 			tx, err := db.BeginTemporalRo(ctx)
@@ -43,7 +43,7 @@ func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator, fail
 			}
 			defer tx.Rollback()
 
-			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugEFAllValuesAreInRange(ctx, idx, failFast, fromStep)
+			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).IntegrityInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
 			if err != nil {
 				return err
 			}

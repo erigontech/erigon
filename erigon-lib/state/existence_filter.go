@@ -17,15 +17,16 @@
 package state
 
 import (
+	"bufio"
 	"fmt"
 	"hash"
 	"os"
 	"path/filepath"
 
-	bloomfilter "github.com/holiman/bloomfilter/v2"
-
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/log/v3"
+	bloomfilter "github.com/holiman/bloomfilter/v2"
 )
 
 type ExistenceFilter struct {
@@ -122,14 +123,21 @@ func (b *ExistenceFilter) fsync(f *os.File) error {
 }
 
 func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error) {
+	var validationPassed = false
+	_, fileName := filepath.Split(filePath)
+	idx := &ExistenceFilter{FilePath: filePath, FileName: fileName}
 	defer func() {
-		if recover() != nil {
-			err = fmt.Errorf("OpenExistenceFilter: panic, %s", filePath)
+		// recover from panic if one occurred. Set err to nil if no panic
+		if rec := recover(); rec != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", filePath, rec, dbg.Stack())
+		}
+		if err != nil || !validationPassed {
+			idx.Close()
+			idx = nil
 		}
 	}()
 
-	_, fileName := filepath.Split(filePath)
-	f := &ExistenceFilter{FilePath: filePath, FileName: fileName}
 	exists, err := dir.FileExist(filePath)
 	if err != nil {
 		return nil, err
@@ -137,31 +145,33 @@ func OpenExistenceFilter(filePath string) (exFilder *ExistenceFilter, err error)
 	if !exists {
 		return nil, fmt.Errorf("file doesn't exists: %s", fileName)
 	}
-	{
-		ff, err := os.Open(filePath)
-		if err != nil {
-			return nil, err
-		}
-		defer ff.Close()
-		stat, err := ff.Stat()
-		if err != nil {
-			return nil, err
-		}
-		f.empty = stat.Size() == 0
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	stat, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	idx.empty = stat.Size() == 0
+	if idx.empty {
+		return idx, nil
 	}
 
-	if !f.empty {
-		var err error
-		f.filter, _, err = bloomfilter.ReadFile(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
-		}
+	filter := new(bloomfilter.Filter)
+	_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 1*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("OpenExistenceFilter: %w, %s", err, fileName)
 	}
-	return f, nil
+	idx.filter = filter
+	return idx, nil
 }
 func (b *ExistenceFilter) Close() {
-	if b.f != nil {
-		b.f.Close()
-		b.f = nil
+	if b == nil || b.f == nil {
+		return
 	}
+	b.f.Close()
+	b.f = nil
 }

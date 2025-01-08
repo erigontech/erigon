@@ -17,6 +17,7 @@
 package cltypes
 
 import (
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 )
@@ -49,11 +50,16 @@ type AttesterSlashing struct {
 	Attestation_2 *IndexedAttestation `json:"attestation_2"`
 }
 
-func NewAttesterSlashing() *AttesterSlashing {
+func NewAttesterSlashing(version clparams.StateVersion) *AttesterSlashing {
 	return &AttesterSlashing{
-		Attestation_1: NewIndexedAttestation(),
-		Attestation_2: NewIndexedAttestation(),
+		Attestation_1: NewIndexedAttestation(version),
+		Attestation_2: NewIndexedAttestation(version),
 	}
+}
+
+func (a *AttesterSlashing) SetVersion(v clparams.StateVersion) {
+	a.Attestation_1.SetVersion(v)
+	a.Attestation_2.SetVersion(v)
 }
 
 func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -61,8 +67,8 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *AttesterSlashing) DecodeSSZ(buf []byte, version int) error {
-	a.Attestation_1 = new(IndexedAttestation)
-	a.Attestation_2 = new(IndexedAttestation)
+	a.Attestation_1 = NewIndexedAttestation(clparams.StateVersion(version))
+	a.Attestation_2 = NewIndexedAttestation(clparams.StateVersion(version))
 	return ssz2.UnmarshalSSZ(buf, version, a.Attestation_1, a.Attestation_2)
 }
 

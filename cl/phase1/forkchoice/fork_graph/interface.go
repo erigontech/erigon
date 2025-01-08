@@ -35,7 +35,7 @@ import (
 * to analyze and manipulate the state of the blockchain.
  */
 type ForkGraph interface {
-	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation, shallowImport bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (solid.Checkpoint, bool)
@@ -45,14 +45,14 @@ type ForkGraph interface {
 	AnchorSlot() uint64
 	Prune(uint64) error
 	GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
-	LowestAvaiableSlot() uint64
+	LowestAvailableSlot() uint64
 	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
 	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
-	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
-	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
+	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	DumpBeaconStateOnDisk(blockRoot libcommon.Hash, state *state.CachingBeaconState, forced bool) error
 }

@@ -26,7 +26,6 @@ import (
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -42,7 +41,7 @@ type JsonStreamLogger struct {
 	hexEncodeBuf [128]byte
 	firstCapture bool
 
-	locations common.Hashes // For sorting
+	locations libcommon.Hashes // For sorting
 	storage   map[libcommon.Address]Storage
 	logs      []StructLog
 	output    []byte //nolint
@@ -144,9 +143,7 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 	if err != nil {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("error")
-		l.stream.WriteObjectStart()
-		l.stream.WriteObjectEnd()
-		//l.stream.WriteString(err.Error())
+		l.stream.WriteString(err.Error())
 	}
 	if !l.cfg.DisableStack {
 		l.stream.WriteMore()

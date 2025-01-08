@@ -20,34 +20,29 @@ import (
 	"context"
 	"sync"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
+	"github.com/erigontech/erigon/eth/protocols/eth"
 )
-
-type PeerTracker interface {
-	Run(ctx context.Context) error
-	ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId
-	BlockNumPresent(peerId *PeerId, blockNum uint64)
-	BlockNumMissing(peerId *PeerId, blockNum uint64)
-	PeerConnected(peerId *PeerId)
-	PeerDisconnected(peerId *PeerId)
-}
 
 func NewPeerTracker(
 	logger log.Logger,
 	peerProvider peerProvider,
 	peerEventRegistrar peerEventRegistrar,
 	opts ...PeerTrackerOption,
-) PeerTracker {
-	pt := &peerTracker{
-		logger:             logger,
-		peerProvider:       peerProvider,
-		peerEventRegistrar: peerEventRegistrar,
-		peerSyncProgresses: map[PeerId]*peerSyncProgress{},
-		peerShuffle:        RandPeerShuffle,
+) *PeerTracker {
+	pt := &PeerTracker{
+		logger:                  logger,
+		peerProvider:            peerProvider,
+		peerEventRegistrar:      peerEventRegistrar,
+		peerSyncProgresses:      map[PeerId]*peerSyncProgress{},
+		peerKnownBlockAnnounces: map[PeerId]simplelru.LRUCache[common.Hash, struct{}]{},
+		peerShuffle:             RandPeerShuffle,
 	}
 
 	for _, opt := range opts {
@@ -57,30 +52,31 @@ func NewPeerTracker(
 	return pt
 }
 
-type peerTracker struct {
-	logger             log.Logger
-	peerProvider       peerProvider
-	peerEventRegistrar peerEventRegistrar
-	mu                 sync.Mutex
-	peerSyncProgresses map[PeerId]*peerSyncProgress
-	peerShuffle        PeerShuffle
+type PeerTracker struct {
+	logger                  log.Logger
+	peerProvider            peerProvider
+	peerEventRegistrar      peerEventRegistrar
+	mu                      sync.Mutex
+	peerSyncProgresses      map[PeerId]*peerSyncProgress
+	peerKnownBlockAnnounces map[PeerId]simplelru.LRUCache[common.Hash, struct{}]
+	peerShuffle             PeerShuffle
 }
 
-func (pt *peerTracker) Run(ctx context.Context) error {
-	pt.logger.Debug(peerTrackerLogPrefix("running peer tracker component"))
+func (pt *PeerTracker) Run(ctx context.Context) error {
+	pt.logger.Info(peerTrackerLogPrefix("running peer tracker component"))
 
-	var unregister polygoncommon.UnregisterFunc
-	defer func() { unregister() }()
+	var peerEventUnreg event.UnregisterFunc
+	defer func() { peerEventUnreg() }()
 
 	err := func() error {
 		// we lock the pt for updates so that we:
-		//   1. register the observer but buffer the updates coming from it until we do 2.
+		//   1. register the peer connection observer but buffer the updates coming from it until we do 2.
 		//   2. replay the current state of connected peers
 		pt.mu.Lock()
 		defer pt.mu.Unlock()
 
 		// 1. register the observer
-		unregister = pt.peerEventRegistrar.RegisterPeerEventObserver(NewPeerEventObserver(pt))
+		peerEventUnreg = pt.peerEventRegistrar.RegisterPeerEventObserver(newPeerEventObserver(pt))
 
 		// 2. replay the current state of connected peers
 		reply, err := pt.peerProvider.Peers(ctx, &emptypb.Empty{})
@@ -104,11 +100,17 @@ func (pt *peerTracker) Run(ctx context.Context) error {
 		return err
 	}
 
+	hashAnnouncesUnreg := pt.peerEventRegistrar.RegisterNewBlockHashesObserver(newBlockHashAnnouncesObserver(pt))
+	defer hashAnnouncesUnreg()
+
+	blockAnnouncesUnreg := pt.peerEventRegistrar.RegisterNewBlockObserver(newBlockAnnouncesObserver(pt))
+	defer blockAnnouncesUnreg()
+
 	<-ctx.Done()
 	return ctx.Err()
 }
 
-func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
+func (pt *PeerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
@@ -124,34 +126,63 @@ func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
 	return peerIds
 }
 
-func (pt *peerTracker) BlockNumPresent(peerId *PeerId, blockNum uint64) {
+func (pt *PeerTracker) BlockNumPresent(peerId *PeerId, blockNum uint64) {
 	pt.updatePeerSyncProgress(peerId, func(psp *peerSyncProgress) {
 		psp.blockNumPresent(blockNum)
 	})
 }
 
-func (pt *peerTracker) BlockNumMissing(peerId *PeerId, blockNum uint64) {
+func (pt *PeerTracker) BlockNumMissing(peerId *PeerId, blockNum uint64) {
 	pt.updatePeerSyncProgress(peerId, func(psp *peerSyncProgress) {
 		psp.blockNumMissing(blockNum)
 	})
 }
 
-func (pt *peerTracker) PeerDisconnected(peerId *PeerId) {
+func (pt *PeerTracker) ListPeersMayMissBlockHash(blockHash common.Hash) []*PeerId {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+
+	var peerIds []*PeerId
+	for peerId, knownBlockAnnounces := range pt.peerKnownBlockAnnounces {
+		if !knownBlockAnnounces.Contains(blockHash) {
+			peerId := peerId
+			peerIds = append(peerIds, &peerId)
+		}
+	}
+
+	pt.peerShuffle(peerIds)
+	return peerIds
+}
+
+func (pt *PeerTracker) BlockHashPresent(peerId *PeerId, blockHash common.Hash) {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+
+	announcesLru, ok := pt.peerKnownBlockAnnounces[*peerId]
+	if !ok || announcesLru.Contains(blockHash) {
+		return
+	}
+
+	announcesLru.Add(blockHash, struct{}{})
+}
+
+func (pt *PeerTracker) PeerDisconnected(peerId *PeerId) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
 	pt.logger.Debug(peerTrackerLogPrefix("peer disconnected"), "peerId", peerId.String())
 	delete(pt.peerSyncProgresses, *peerId)
+	delete(pt.peerKnownBlockAnnounces, *peerId)
 }
 
-func (pt *peerTracker) PeerConnected(peerId *PeerId) {
+func (pt *PeerTracker) PeerConnected(peerId *PeerId) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
 	pt.peerConnected(peerId)
 }
 
-func (pt *peerTracker) peerConnected(peerId *PeerId) {
+func (pt *PeerTracker) peerConnected(peerId *PeerId) {
 	pt.logger.Debug(peerTrackerLogPrefix("peer connected"), "peerId", peerId.String())
 
 	peerIdVal := *peerId
@@ -160,9 +191,18 @@ func (pt *peerTracker) peerConnected(peerId *PeerId) {
 			peerId: peerId,
 		}
 	}
+
+	if _, ok := pt.peerKnownBlockAnnounces[peerIdVal]; !ok {
+		announcesLru, err := simplelru.NewLRU[common.Hash, struct{}](1024, nil)
+		if err != nil {
+			panic(err)
+		}
+
+		pt.peerKnownBlockAnnounces[peerIdVal] = announcesLru
+	}
 }
 
-func (pt *peerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *peerSyncProgress)) {
+func (pt *PeerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *peerSyncProgress)) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
@@ -174,15 +214,29 @@ func (pt *peerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *p
 	update(peerSyncProgress)
 }
 
-func NewPeerEventObserver(peerTracker PeerTracker) polygoncommon.Observer[*sentryproto.PeerEvent] {
+func newPeerEventObserver(pt *PeerTracker) event.Observer[*sentryproto.PeerEvent] {
 	return func(message *sentryproto.PeerEvent) {
 		peerId := PeerIdFromH512(message.PeerId)
 		switch message.EventId {
 		case sentryproto.PeerEvent_Connect:
-			peerTracker.PeerConnected(peerId)
+			pt.PeerConnected(peerId)
 		case sentryproto.PeerEvent_Disconnect:
-			peerTracker.PeerDisconnected(peerId)
+			pt.PeerDisconnected(peerId)
 		}
+	}
+}
+
+func newBlockHashAnnouncesObserver(pt *PeerTracker) event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]] {
+	return func(message *DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+		for _, hashOrNum := range *message.Decoded {
+			pt.BlockHashPresent(message.PeerId, hashOrNum.Hash)
+		}
+	}
+}
+
+func newBlockAnnouncesObserver(pt *PeerTracker) event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]] {
+	return func(message *DecodedInboundMessage[*eth.NewBlockPacket]) {
+		pt.BlockHashPresent(message.PeerId, message.Decoded.Block.Hash())
 	}
 }
 

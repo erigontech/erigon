@@ -29,29 +29,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/core/rawdb"
-
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
+	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/state"
 	types2 "github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon-lib/types/accounts"
 	"github.com/erigontech/erigon/core"
 	reset2 "github.com/erigontech/erigon/core/rawdb/rawdbreset"
 	state2 "github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/core/types/accounts"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -66,13 +63,10 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, aggStep uint64) (kv.RwDB,
 	dirs := datadir.New(path)
 
 	logger := log.New()
-	db := mdbx.NewMDBX(logger).Path(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.ChaindataTablesCfg
-	}).MustOpen()
+	db := mdbx.New(kv.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := state.NewAggregator(context.Background(), dirs, aggStep, db, cr, logger)
+	agg, err := state.NewAggregator2(context.Background(), dirs, aggStep, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	err = agg.OpenFolder()
@@ -247,7 +241,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -417,7 +411,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
+	err = reset2.ResetExec(ctx, db, agg, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 

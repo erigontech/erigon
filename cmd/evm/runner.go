@@ -32,6 +32,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon-lib/config3"
+	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/kv/temporal"
+
 	"github.com/erigontech/erigon-lib/common/datadir"
 
 	"github.com/holiman/uint256"
@@ -157,7 +161,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := memdb.New("")
+	db := memdb.New(os.TempDir(), kv.ChainDB)
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
@@ -167,7 +171,16 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	tx, err := db.BeginRw(context.Background())
+	agg, err := state2.NewAggregator2(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	tdb, err := temporal.New(db, agg)
+	if err != nil {
+		return err
+	}
+	tx, err := tdb.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}

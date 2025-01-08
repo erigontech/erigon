@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
@@ -68,7 +69,6 @@ func NewCommitteeSubscribeManagement(
 	netConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
 	sentinel sentinel.SentinelClient,
-	state *state.CachingBeaconState,
 	aggregationPool aggregation.AggregationPool,
 	syncedData *synced_data.SyncedDataManager,
 ) *CommitteeSubscribeMgmt {
@@ -78,7 +78,6 @@ func NewCommitteeSubscribeManagement(
 		netConfig:       netConfig,
 		ethClock:        ethClock,
 		sentinel:        sentinel,
-		state:           state,
 		aggregationPool: aggregationPool,
 		syncedData:      syncedData,
 		validatorSubs:   make(map[uint64]*validatorSub),
@@ -97,13 +96,13 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		slot   = p.Slot
 		cIndex = p.CommitteeIndex
 	)
-	headState := c.syncedData.HeadState()
-	if headState == nil {
+
+	if c.syncedData.Syncing() {
 		return errors.New("head state not available")
 	}
 
-	log.Debug("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
-	commiteePerSlot := headState.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
+	log.Trace("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
+	commiteePerSlot := c.syncedData.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 	// add validator to subscription
 	c.validatorSubsMutex.Lock()
@@ -135,8 +134,20 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	return nil
 }
 
-func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestation) error {
-	committeeIndex := att.AttestantionData().CommitteeIndex()
+func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) error {
+	var (
+		committeeIndex = att.Data.CommitteeIndex
+		slot           = att.Data.Slot
+		clVersion      = c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
+	)
+	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := att.GetCommitteeIndexFromBits()
+		if err != nil {
+			return err
+		}
+		committeeIndex = index
+	}
+
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
 	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
@@ -148,11 +159,34 @@ func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestatio
 	return nil
 }
 
-func (c *CommitteeSubscribeMgmt) NeedToAggregate(committeeIndex uint64) bool {
+func (c *CommitteeSubscribeMgmt) NeedToAggregate(att *solid.Attestation) bool {
+	var (
+		committeeIndex = att.Data.CommitteeIndex
+		slot           = att.Data.Slot
+	)
+	clVersion := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
+	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
+		index, err := att.GetCommitteeIndexFromBits()
+		if err != nil {
+			return false
+		}
+		committeeIndex = index
+	}
+
 	c.validatorSubsMutex.RLock()
 	defer c.validatorSubsMutex.RUnlock()
-	if sub, ok := c.validatorSubs[committeeIndex]; ok {
-		return sub.aggregate
+	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
+		root, err := att.Data.HashSSZ()
+		if err != nil {
+			log.Warn("failed to hash attestation data", "err", err)
+			return false
+		}
+		aggregation := c.aggregationPool.GetAggregatationByRoot(root)
+		if aggregation == nil ||
+			!utils.IsNonStrictSupersetBitlist(aggregation.AggregationBits.Bytes(), att.AggregationBits.Bytes()) {
+			// the on bit is not set. need to aggregate
+			return true
+		}
 	}
 	return false
 }

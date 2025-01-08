@@ -26,10 +26,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/erigontech/erigon/rlp"
-
 	"github.com/davecgh/go-spew/spew"
-	"github.com/erigontech/erigon/crypto"
+
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/p2p/simulations/pipes"
 )
 

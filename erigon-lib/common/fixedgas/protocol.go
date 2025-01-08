@@ -39,5 +39,5 @@ const (
 
 	// EIP-7702: set code tx
 	PerEmptyAccountCost = 25000
-	PerAuthBaseCost     = 2500
+	PerAuthBaseCost     = 12500
 )

@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon-lib/kv"
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
 
@@ -35,12 +36,10 @@ import (
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/config3"
 	"github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal"
 	"github.com/erigontech/erigon-lib/log/v3"
 	libstate "github.com/erigontech/erigon-lib/state"
 
-	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/tracers/logger"
@@ -135,17 +134,14 @@ func aggregateResultsFromStateTests(
 	//this DB is shared. means:
 	// - faster sequential tests: don't need create/delete db
 	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
-	_db := mdbx.NewMDBX(log.New()).
+	_db := mdbx.New(kv.ChainDB, log.New()).
 		Path(dirs.Chaindata).
-		Flags(func(u uint) uint {
-			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap
-		}).
+		AddFlags(mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.NoMemInit | mdbx2.WriteMap).
 		GrowthStep(1 * datasize.MB).
 		MustOpen()
 	defer _db.Close()
 
-	cr := rawdb.NewCanonicalReader(rawdbv3.TxNums)
-	agg, err := libstate.NewAggregator(context.Background(), dirs, config3.HistoryV3AggregationStep, _db, cr, log.New())
+	agg, err := libstate.NewAggregator2(context.Background(), dirs, config3.DefaultStepSize, _db, log.New())
 	if err != nil {
 		return nil, err
 	}

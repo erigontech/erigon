@@ -30,6 +30,11 @@ import (
 
 type ValueMerger func(prev, current []byte) (merged []byte, err error)
 
+// TODO revisit encoded commitmentState.
+//   - Add versioning
+//   - add trie variant marker
+//   - simplify decoding. Rn it's 3 embedded structure: RootNode encoded, Trie state encoded and commitmentState wrapper for search.
+//     | search through states seems mostly useless so probably commitmentState should become header of trie state.
 type commitmentState struct {
 	txNum     uint64
 	blockNum  uint64
@@ -105,7 +110,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	//	}
 	//}
 
-	if dt.d.indexList&withHashMap != 0 {
+	if dt.d.IndexList&AccessorHashMap != 0 {
 		reader := recsplit.NewIndexReader(item.index)
 		defer reader.Close()
 
@@ -130,7 +135,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		}
 		return encodeShorterKey(nil, offset), true
 	}
-	if dt.d.indexList&withBTree != 0 {
+	if dt.d.IndexList&AccessorBTree != 0 {
 		if item.bindex == nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement: file doesn't have index", "name", item.decompressor.FileName())
 		}
@@ -147,14 +152,24 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	return nil, false
 }
 
-func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
-	var item *filesItem
+// rawLookupFileByRange searches for a file that contains the given range of tx numbers.
+// Given range should exactly match the range of some file, so expected to be multiple of aggregationStep.
+// At first it checks range among visible files, then among dirty files.
+// If file is not found anywhere, returns nil
+func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*filesItem, error) {
 	for _, f := range dt.files {
-		if f.startTxNum == txFrom && f.endTxNum == txTo {
-			item = f.src
-			break
+		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil {
+			return f.src, nil // found in visible files
 		}
 	}
+	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
+		return dirty, nil
+	}
+	return nil, fmt.Errorf("file v1-%s.%d-%d.kv was not found", dt.d.filenameBase, txFrom/dt.d.aggregationStep, txFrom/dt.d.aggregationStep)
+}
+
+func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *filesItem {
+	var item *filesItem
 	if item == nil {
 		dt.d.dirtyFiles.Walk(func(files []*filesItem) bool {
 			for _, f := range files {
@@ -172,17 +187,12 @@ func (dt *DomainRoTx) lookupFileByItsRange(txFrom uint64, txTo uint64) *filesIte
 		for _, item := range dt.d.dirtyFiles.Items() {
 			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dt.d.aggregationStep, item.endTxNum/dt.d.aggregationStep)
 		}
-		visibleFiles := ""
-		for _, f := range dt.files {
-			visibleFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dt.d.aggregationStep, f.endTxNum/dt.d.aggregationStep)
-		}
-		dt.d.logger.Warn("[agg] lookupFileByItsRange: file not found",
+		dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file not found",
 			"stepFrom", txFrom/dt.d.aggregationStep, "stepTo", txTo/dt.d.aggregationStep,
-			"files", fileStepsss, "_visible", visibleFiles,
-			"visibleFilesCount", len(dt.files), "filesCount", dt.d.dirtyFiles.Len())
+			"files", fileStepsss, "filesCount", dt.d.dirtyFiles.Len())
 
 		if item != nil && item.bindex == nil {
-			dt.d.logger.Warn("[agg] lookupFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
+			dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
 		}
 
 		return nil
@@ -214,7 +224,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		return nil, false
 	}
 
-	fullKey, _ = getter.Next(nil)
+	fullKey, _ = getter.Next(fullKey[:0])
 	return fullKey, true
 }
 
@@ -222,19 +232,19 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *filesItem) (valueTransformer, error) {
+	var err error
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
-		mergedStorage = storage.lookupFileByItsRange(rng.from, rng.to)
-		if mergedStorage == nil {
+		if mergedStorage, err = storage.rawLookupFileByRange(rng.from, rng.to); err != nil {
 			// TODO may allow to merge, but storage keys will be stored as plainkeys
-			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
+			return nil, err
 		}
 	}
+
 	hadToLookupAccount := mergedAccount == nil
 	if mergedAccount == nil {
-		mergedAccount = accounts.lookupFileByItsRange(rng.from, rng.to)
-		if mergedAccount == nil {
-			return nil, fmt.Errorf("merged v1-account.%d-%d.kv file not found", rng.from/dt.d.aggregationStep, rng.to/dt.d.aggregationStep)
+		if mergedAccount, err = accounts.rawLookupFileByRange(rng.from, rng.to); err != nil {
+			return nil, err
 		}
 	}
 
@@ -271,7 +281,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 		sig, ok := storageFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			dirty := storage.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
+			dirty := storage.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}
@@ -284,7 +294,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 		aig, ok := accountFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			dirty := accounts.lookupFileByItsRange(keyFromTxNum, keyEndTxNum)
+			dirty := accounts.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
 			if dirty == nil {
 				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.aggregationStep, keyEndTxNum/dt.d.aggregationStep)
 			}

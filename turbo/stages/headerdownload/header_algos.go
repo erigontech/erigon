@@ -43,13 +43,12 @@ import (
 	"github.com/erigontech/erigon/dataflow"
 	"github.com/erigontech/erigon/turbo/services"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 const POSPandaBanner = `
@@ -176,6 +175,11 @@ func (hd *HeaderDownload) IsBadHeaderPoS(tipHash libcommon.Hash) (bad bool, last
 func (hd *HeaderDownload) removeUpwards(link *Link) {
 	if link == nil {
 		return
+	}
+	if link.header != nil {
+		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+			parentLink.RemoveChild(link)
+		}
 	}
 	var toRemove = []*Link{link}
 	for len(toRemove) > 0 {
@@ -329,6 +333,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 		if err != nil {
 			return err
 		}
+		defer c.Close()
 		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
 			return err
@@ -428,7 +433,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeout bool, request *HeaderRequest, penalties []PenaltyItem) {
 	anchor := hd.posAnchor
 	if anchor == nil {
-		dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderEmpty)
+		//dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderEmpty)
 		hd.logger.Debug("[downloader] No PoS anchor")
 		return
 	}
@@ -441,7 +446,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 	// TODO: [pos-downloader-tweaks] - we could reduce this number, or config it
 	timeout = anchor.timeouts >= 3
 	if timeout {
-		hd.logger.Warn("[downloader] Timeout", "requestId", hd.requestId, "peerID", common.Bytes2Hex(anchor.peerID[:]))
+		hd.logger.Warn("[downloader] Timeout", "requestId", hd.requestId, "peerID", libcommon.Bytes2Hex(anchor.peerID[:]))
 		penalties = []PenaltyItem{{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID}}
 		return
 	}
@@ -535,8 +540,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 		if bad {
 			// If the link or its parent is marked bad, throw it out
-			hd.moveLinkToQueue(link, NoQueue)
-			delete(hd.links, link.hash)
 			hd.removeUpwards(link)
 			dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderBad)
 			hd.stats.RejectedBadHeaders++
@@ -553,12 +556,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					return false, false, 0, lastTime, nil // prevent removal of the link from the hd.linkQueue
 				} else {
 					hd.logger.Debug("[downloader] Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
-					hd.moveLinkToQueue(link, NoQueue)
-					delete(hd.links, link.hash)
 					hd.removeUpwards(link)
-					if parentLink, ok := hd.links[link.header.ParentHash]; ok {
-						parentLink.RemoveChild(link)
-					}
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderEvicted)
 					hd.stats.InvalidHeaders++
 					return true, false, 0, lastTime, nil
@@ -716,7 +714,7 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 			*/
 
 			if hd.posAnchor.blockHeight == header.Number.Uint64()+1 {
-				hd.logger.Debug("[downloader] Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash, "peerID", common.Bytes2Hex(peerId[:]))
+				hd.logger.Debug("[downloader] Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash, "peerID", libcommon.Bytes2Hex(peerId[:]))
 			}
 
 			// Not penalise because we might have sent request twice
@@ -851,9 +849,13 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
 		ch = fromCache
 	} else {
-		if ch, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
+		if ch, ok, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
 			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
 		}
+		if !ok {
+			log.Warn("[dbg] HeaderInserter.ForkPoint0", "blockHeight", blockHeight)
+		}
+
 	}
 	if ch == header.ParentHash {
 		forkingPoint = blockHeight - 1
@@ -879,7 +881,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 		}
 		// Now look in the DB
 		for {
-			ch, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
+			ch, _, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
 			if err != nil {
 				return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
 			}
@@ -889,6 +891,9 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
 			if err != nil {
 				return 0, err
+			}
+			if ancestor == nil {
+				return 0, fmt.Errorf("[%s] not found header: %d, %x", hi.logPrefix, ancestorHeight, ancestorHash)
 			}
 			ancestorHash = ancestor.ParentHash
 			ancestorHeight--

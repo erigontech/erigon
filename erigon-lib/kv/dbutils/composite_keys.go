@@ -67,16 +67,6 @@ func LogKey(blockNumber uint64, txId uint32) []byte {
 	return newK
 }
 
-// bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
-func BloomBitsKey(bit uint, section uint64, hash libcommon.Hash) []byte {
-	key := append(make([]byte, 10), hash.Bytes()...)
-
-	binary.BigEndian.PutUint16(key[0:], uint16(bit))
-	binary.BigEndian.PutUint64(key[2:], section)
-
-	return key
-}
-
 // AddrHash + KeyHash
 // Only for trie
 func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash) []byte {
@@ -84,6 +74,14 @@ func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash)
 	compositeKey = append(compositeKey, addressHash[:]...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
+}
+
+// Address + storageLocationHash
+func GenerateStoragePlainKey(address libcommon.Address, storageKey libcommon.Hash) []byte {
+	storagePlainKey := make([]byte, 0, length.Addr+length.Hash)
+	storagePlainKey = append(storagePlainKey, address.Bytes()...)
+	storagePlainKey = append(storagePlainKey, storageKey.Bytes()...)
+	return storagePlainKey
 }
 
 // AddrHash + incarnation + KeyHash

@@ -25,8 +25,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/core/types"
 )
@@ -47,7 +47,7 @@ type difficultyTestMarshaling struct {
 	ParentDifficulty   *math.HexOrDecimal256
 	CurrentTimestamp   math.HexOrDecimal64
 	CurrentDifficulty  *math.HexOrDecimal256
-	ParentUncles       uint64
+	ParentUncles       math.HexOrDecimal64
 	CurrentBlockNumber math.HexOrDecimal64
 }
 

@@ -56,9 +56,9 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 		dst.previousEpochAttestations.Append(value)
 		return true
 	})
-	dst.finalizedCheckpoint = b.finalizedCheckpoint.Copy()
-	dst.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint.Copy()
-	dst.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint.Copy()
+	dst.finalizedCheckpoint = b.finalizedCheckpoint
+	dst.currentJustifiedCheckpoint = b.currentJustifiedCheckpoint
+	dst.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint
 	dst.justificationBits = b.justificationBits.Copy()
 	if b.version == clparams.Phase0Version {
 		dst.init()
@@ -78,6 +78,19 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 		dst.historicalSummaries.Append(value)
 		return true
 	})
+	if b.version >= clparams.ElectraVersion {
+		// Electra fields
+		dst.depositRequestsStartIndex = b.depositRequestsStartIndex
+		dst.depositBalanceToConsume = b.depositBalanceToConsume
+		dst.exitBalanceToConsume = b.exitBalanceToConsume
+		dst.earliestExitEpoch = b.earliestExitEpoch
+		dst.consolidationBalanceToConsume = b.consolidationBalanceToConsume
+		dst.earliestConsolidationEpoch = b.earliestConsolidationEpoch
+		dst.pendingDeposits = b.pendingDeposits.ShallowCopy()
+		dst.pendingPartialWithdrawals = b.pendingPartialWithdrawals.ShallowCopy()
+		dst.pendingConsolidations = b.pendingConsolidations.ShallowCopy()
+	}
+
 	dst.version = b.version
 	// Now sync internals
 	copy(dst.leaves, b.leaves)

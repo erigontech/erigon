@@ -8,8 +8,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
-	common0 "github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -18,7 +17,7 @@ var _ = (*stEnvMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (s stEnv) MarshalJSON() ([]byte, error) {
 	type stEnv struct {
-		Coinbase         common0.UnprefixedAddress           `json:"currentCoinbase"   gencodec:"required"`
+		Coinbase         common.UnprefixedAddress            `json:"currentCoinbase"   gencodec:"required"`
 		Difficulty       *math.HexOrDecimal256               `json:"currentDifficulty"`
 		Random           *math.HexOrDecimal256               `json:"currentRandom"`
 		MixDigest        common.Hash                         `json:"mixHash,omitempty"`
@@ -34,11 +33,10 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 		UncleHash        common.Hash                         `json:"uncleHash,omitempty"`
 		Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
 		WithdrawalsHash  *common.Hash                        `json:"withdrawalsRoot,omitempty"`
-		Requests         types.Requests                      `json:"requests,omitempty"`
-		RequestsRoot     *common.Hash                        `json:"requestsRoot,omitempty"`
+		RequestsHash     *common.Hash                        `json:"requestsHash,omitempty"`
 	}
 	var enc stEnv
-	enc.Coinbase = common0.UnprefixedAddress(s.Coinbase)
+	enc.Coinbase = common.UnprefixedAddress(s.Coinbase)
 	enc.Difficulty = (*math.HexOrDecimal256)(s.Difficulty)
 	enc.Random = (*math.HexOrDecimal256)(s.Random)
 	enc.MixDigest = s.MixDigest
@@ -54,15 +52,14 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 	enc.UncleHash = s.UncleHash
 	enc.Withdrawals = s.Withdrawals
 	enc.WithdrawalsHash = s.WithdrawalsHash
-	enc.Requests = s.Requests
-	enc.RequestsRoot = s.RequestsRoot
+	enc.RequestsHash = s.RequestsHash
 	return json.Marshal(&enc)
 }
 
 // UnmarshalJSON unmarshals from JSON.
 func (s *stEnv) UnmarshalJSON(input []byte) error {
 	type stEnv struct {
-		Coinbase         *common0.UnprefixedAddress          `json:"currentCoinbase"   gencodec:"required"`
+		Coinbase         *common.UnprefixedAddress           `json:"currentCoinbase"   gencodec:"required"`
 		Difficulty       *math.HexOrDecimal256               `json:"currentDifficulty"`
 		Random           *math.HexOrDecimal256               `json:"currentRandom"`
 		MixDigest        *common.Hash                        `json:"mixHash,omitempty"`
@@ -78,8 +75,7 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		UncleHash        *common.Hash                        `json:"uncleHash,omitempty"`
 		Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
 		WithdrawalsHash  *common.Hash                        `json:"withdrawalsRoot,omitempty"`
-		Requests         *types.Requests                     `json:"requests,omitempty"`
-		RequestsRoot     *common.Hash                        `json:"requestsRoot,omitempty"`
+		RequestsHash     *common.Hash                        `json:"requestsHash,omitempty"`
 	}
 	var dec stEnv
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -137,11 +133,8 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	if dec.WithdrawalsHash != nil {
 		s.WithdrawalsHash = dec.WithdrawalsHash
 	}
-	if dec.Requests != nil {
-		s.Requests = *dec.Requests
-	}
-	if dec.RequestsRoot != nil {
-		s.RequestsRoot = dec.RequestsRoot
+	if dec.RequestsHash != nil {
+		s.RequestsHash = dec.RequestsHash
 	}
 	return nil
 }

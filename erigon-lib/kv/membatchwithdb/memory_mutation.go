@@ -50,7 +50,7 @@ type MemoryMutation struct {
 // ... some calculations on `batch`
 // batch.Commit()
 func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation {
-	tmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
+	tmpDB := mdbx.New(kv.TemporaryDB, logger).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {
 		panic(err)
@@ -69,7 +69,7 @@ func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation 
 	}
 }
 
-func NewMemoryBatchWithCustomDB(tx kv.Tx, db kv.RwDB, uTx kv.RwTx, tmpDir string) *MemoryMutation {
+func NewMemoryBatchWithCustomDB(tx kv.Tx, db kv.RwDB, uTx kv.RwTx) *MemoryMutation {
 	return &MemoryMutation{
 		db:             tx,
 		memDb:          db,
@@ -121,6 +121,7 @@ func initSequences(db kv.Tx, memTx kv.RwTx) error {
 	if err != nil {
 		return err
 	}
+	defer cursor.Close()
 	for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
 		if err != nil {
 			return err
@@ -169,7 +170,7 @@ func (m *MemoryMutation) statelessCursor(table string) (kv.RwCursor, error) {
 	c, ok := m.statelessCursors[table]
 	if !ok {
 		var err error
-		c, err = m.RwCursor(table)
+		c, err = m.RwCursor(table) // nolint:gocritic
 		if err != nil {
 			return nil, err
 		}
@@ -242,9 +243,9 @@ func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k
 func (m *MemoryMutation) Prefix(table string, prefix []byte) (stream.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return m.Range(table, prefix, nil)
+		return m.Range(table, prefix, nil, order.Asc, kv.Unlim)
 	}
-	return m.Range(table, prefix, nextPrefix)
+	return m.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
 }
 func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	panic("please implement me")
@@ -255,31 +256,13 @@ func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte,
 func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	panic("please implement me")
 }
-func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	return m.RangeAscend(table, fromPrefix, toPrefix, -1)
-}
-func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
+func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: true, limit: int64(limit)}
 	var err error
-	if s.iterDb, err = m.db.RangeAscend(table, fromPrefix, toPrefix, limit); err != nil {
+	if s.iterDb, err = m.db.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
 		return s, err
 	}
-	if s.iterMem, err = m.memTx.RangeAscend(table, fromPrefix, toPrefix, limit); err != nil {
-		return s, err
-	}
-	if _, err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
-		return nil, err
-	}
-	return s, nil
-}
-func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	s := &rangeIter{orderAscend: false, limit: int64(limit)}
-	var err error
-	if s.iterDb, err = m.db.RangeDescend(table, fromPrefix, toPrefix, limit); err != nil {
-		return s, err
-	}
-	if s.iterMem, err = m.memTx.RangeDescend(table, fromPrefix, toPrefix, limit); err != nil {
+	if s.iterMem, err = m.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
 		return s, err
 	}
 	if _, err := s.init(); err != nil {
@@ -682,11 +665,11 @@ func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	c.table = bucket
 
 	var err error
-	c.cursor, err = m.db.CursorDupSort(bucket)
+	c.cursor, err = m.db.CursorDupSort(bucket) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
-	c.memCursor, err = m.memTx.RwCursorDupSort(bucket)
+	c.memCursor, err = m.memTx.RwCursorDupSort(bucket) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
@@ -730,36 +713,36 @@ func (m *MemoryMutation) AggTx() any {
 	return m.db.(hasAggCtx).AggTx()
 }
 
-func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
-	panic("not supported")
-	//return m.db.(kv.TemporalTx).DomainGet(name, k, k2)
+func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step uint64, err error) {
+	// panic("not supported")
+	return m.db.(kv.TemporalTx).GetLatest(name, k)
 }
 
-func (m *MemoryMutation) DomainGetAsOf(name kv.Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error) {
-	panic("not supported")
-	//return m.db.(kv.TemporalTx).DomainGetAsOf(name, k, k2, ts)
+func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	// panic("not supported")
+	return m.db.(kv.TemporalTx).GetAsOf(name, k, ts)
 }
-func (m *MemoryMutation) HistorySeek(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
+
+func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
+	// panic("not supported")
+	return m.db.(kv.TemporalTx).RangeAsOf(name, fromKey, toKey, ts, asc, limit)
+}
+
+func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	panic("not supported")
-	//return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
+	// return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
 }
 
 func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
-	panic("not supported")
-	//return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
+	// panic("not supported")
+	return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
 }
 
-func (m *MemoryMutation) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
+func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
 	panic("not supported")
-	//return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
+	// return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
-func (m *MemoryMutation) DomainRange(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
-	panic("not supported")
-	//return m.db.(kv.TemporalTx).DomainRange(name, fromKey, toKey, ts, asc, limit)
-}
-
-func (m *MemoryMutation) AppendableGet(name kv.Appendable, ts kv.TxnId) ([]byte, bool, error) {
-	panic("not supported")
-	//return m.db.(kv.TemporalTx).AppendableGet(name, ts)
+func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
+	return m.db.(kv.TemporalTx).HistoryStartFrom(name)
 }

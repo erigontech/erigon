@@ -52,6 +52,6 @@ var BorDevnetChainVals = []*valset.Validator{
 }
 
 func init() {
-	NetworkNameVals[networkname.BorE2ETestChain2ValName] = BorE2ETestChain2Valset
-	NetworkNameVals[networkname.BorDevnetChainName] = BorDevnetChainVals
+	NetworkNameVals[networkname.BorE2ETestChain2Val] = BorE2ETestChain2Valset
+	NetworkNameVals[networkname.BorDevnet] = BorDevnetChainVals
 }

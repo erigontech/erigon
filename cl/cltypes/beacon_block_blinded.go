@@ -47,10 +47,10 @@ type SignedBlindedBeaconBlock struct {
 	Block     *BlindedBeaconBlock `json:"message"`
 }
 
-func NewSignedBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *SignedBlindedBeaconBlock {
+func NewSignedBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *SignedBlindedBeaconBlock {
 	return &SignedBlindedBeaconBlock{
 		Signature: libcommon.Bytes96{},
-		Block:     NewBlindedBeaconBlock(beaconCfg),
+		Block:     NewBlindedBeaconBlock(beaconCfg, version),
 	}
 }
 
@@ -72,7 +72,7 @@ func (s *SignedBlindedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockH
 }
 
 func (b *SignedBlindedBeaconBlock) Clone() clonable.Clonable {
-	return NewSignedBlindedBeaconBlock(b.Block.Body.beaconCfg)
+	return NewSignedBlindedBeaconBlock(b.Block.Body.beaconCfg, b.Version())
 }
 
 func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeaconBlock, error) {
@@ -129,9 +129,9 @@ type BlindedBeaconBlock struct {
 	Body          *BlindedBeaconBody `json:"body"`
 }
 
-func NewBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BlindedBeaconBlock {
+func NewBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BlindedBeaconBlock {
 	return &BlindedBeaconBlock{
-		Body: NewBlindedBeaconBody(beaconCfg),
+		Body: NewBlindedBeaconBody(beaconCfg, version),
 	}
 }
 
@@ -174,7 +174,7 @@ func (*BlindedBeaconBlock) Static() bool {
 }
 
 func (b *BlindedBeaconBlock) Clone() clonable.Clonable {
-	return NewBlindedBeaconBlock(b.Body.beaconCfg)
+	return NewBlindedBeaconBlock(b.Body.beaconCfg, b.Version())
 }
 
 func (b *BlindedBeaconBlock) Version() clparams.StateVersion {
@@ -224,25 +224,39 @@ type BlindedBeaconBody struct {
 	// The commitments for beacon chain blobs
 	// With a max of 4 per block
 	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
+	ExecutionRequests  *ExecutionRequests             `json:"execution_requests,omitempty"`
+
 	// The version of the beacon chain
 	Version   clparams.StateVersion `json:"-"`
 	beaconCfg *clparams.BeaconChainConfig
 }
 
-func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BlindedBeaconBody {
+func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BlindedBeaconBody {
+	var (
+		maxAttSlashing    = MaxAttesterSlashings
+		maxAttestation    = MaxAttestations
+		executionRequests *ExecutionRequests
+	)
+	if version.AfterOrEqual(clparams.ElectraVersion) {
+		maxAttSlashing = MaxAttesterSlashingsElectra
+		maxAttestation = MaxAttestationsElectra
+		executionRequests = NewExecutionRequests(beaconCfg)
+	}
+
 	return &BlindedBeaconBody{
 		RandaoReveal:       libcommon.Bytes96{},
 		Eth1Data:           NewEth1Data(),
 		Graffiti:           libcommon.Hash{},
 		ProposerSlashings:  solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416),
-		AttesterSlashings:  solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings),
-		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations),
+		AttesterSlashings:  solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing),
+		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation),
 		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
 		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
 		SyncAggregate:      NewSyncAggregate(),
-		ExecutionPayload:   nil,
+		ExecutionPayload:   NewEth1Header(version),
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+		ExecutionRequests:  executionRequests,
 		Version:            0,
 		beaconCfg:          beaconCfg,
 	}
@@ -262,6 +276,14 @@ func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
+	var (
+		maxAttSlashing = MaxAttesterSlashings
+		maxAttestation = MaxAttestations
+	)
+	if b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		maxAttSlashing = MaxAttesterSlashingsElectra
+		maxAttestation = MaxAttestationsElectra
+	}
 
 	if b.Eth1Data == nil {
 		b.Eth1Data = &Eth1Data{}
@@ -276,10 +298,10 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 	}
 	if b.AttesterSlashings == nil {
-		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings)
+		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing)
 	}
 	if b.Attestations == nil {
-		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
+		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation)
 	}
 	if b.Deposits == nil {
 		b.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
@@ -311,7 +333,11 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 	if b.Version >= clparams.DenebVersion {
 		size += b.ExecutionChanges.EncodingSizeSSZ()
 	}
-
+	if b.Version >= clparams.ElectraVersion {
+		if b.ExecutionRequests != nil {
+			size += b.ExecutionRequests.EncodingSizeSSZ()
+		}
+	}
 	return
 }
 
@@ -345,6 +371,9 @@ func (b *BlindedBeaconBody) getSchema(storage bool) []interface{} {
 	}
 	if b.Version >= clparams.DenebVersion {
 		s = append(s, b.BlobKzgCommitments)
+	}
+	if b.Version >= clparams.ElectraVersion {
+		s = append(s, b.ExecutionRequests)
 	}
 	return s
 }
@@ -396,6 +425,7 @@ func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.
 		ExecutionPayload:   executionPayload,
 		ExecutionChanges:   b.ExecutionChanges,
 		BlobKzgCommitments: b.BlobKzgCommitments,
+		ExecutionRequests:  b.ExecutionRequests,
 		Version:            b.Version,
 		beaconCfg:          b.beaconCfg,
 	}
@@ -405,7 +435,7 @@ func (*BlindedBeaconBody) Static() bool {
 	return false
 }
 func (b *BlindedBeaconBody) Clone() clonable.Clonable {
-	return NewBlindedBeaconBody(b.beaconCfg)
+	return NewBlindedBeaconBody(b.beaconCfg, b.Version)
 }
 
 func (b *BlindedBeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
@@ -454,4 +484,8 @@ func (b *BlindedBeaconBody) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitmen
 
 func (b *BlindedBeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionChange] {
 	return b.ExecutionChanges
+}
+
+func (b *BlindedBeaconBody) GetExecutionRequests() *ExecutionRequests {
+	return b.ExecutionRequests
 }

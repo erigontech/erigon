@@ -31,7 +31,7 @@ import (
 )
 
 func TestPostEthV1ValidatorPreparation(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, vp := setupTestingHandler(t, clparams.BellatrixVersion, log.Root())
+	_, _, _, _, _, handler, _, _, _, vp := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	req := []ValidatorPreparationPayload{

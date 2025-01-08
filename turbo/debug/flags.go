@@ -38,7 +38,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 
-	"github.com/erigontech/erigon/common/fdlimit"
+	"github.com/erigontech/erigon-lib/common/fdlimit"
 	"github.com/erigontech/erigon/turbo/logging"
 )
 
@@ -62,7 +62,7 @@ var (
 	}
 	metricsPortFlag = cli.UintFlag{
 		Name:  "metrics.port",
-		Value: 6060,
+		Value: 6061,
 	}
 	pprofFlag = cli.BoolFlag{
 		Name:  "pprof",

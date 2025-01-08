@@ -8,7 +8,7 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/core/types"
 )
 
@@ -38,7 +38,7 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 		BlobGasUsed           *math.HexOrDecimal64
 		ExcessBlobGas         *math.HexOrDecimal64
 		ParentBeaconBlockRoot *common.Hash
-		RequestsRoot          *common.Hash
+		RequestsHash          *common.Hash
 	}
 	var enc btHeader
 	enc.Bloom = b.Bloom
@@ -62,7 +62,7 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 	enc.BlobGasUsed = (*math.HexOrDecimal64)(b.BlobGasUsed)
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(b.ExcessBlobGas)
 	enc.ParentBeaconBlockRoot = b.ParentBeaconBlockRoot
-	enc.RequestsRoot = b.RequestsRoot
+	enc.RequestsHash = b.RequestsHash
 	return json.Marshal(&enc)
 }
 
@@ -90,7 +90,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		BlobGasUsed           *math.HexOrDecimal64
 		ExcessBlobGas         *math.HexOrDecimal64
 		ParentBeaconBlockRoot *common.Hash
-		RequestsRoot          *common.Hash
+		RequestsHash          *common.Hash
 	}
 	var dec btHeader
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -159,8 +159,8 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 	if dec.ParentBeaconBlockRoot != nil {
 		b.ParentBeaconBlockRoot = dec.ParentBeaconBlockRoot
 	}
-	if dec.RequestsRoot != nil {
-		b.RequestsRoot = dec.RequestsRoot
+	if dec.RequestsHash != nil {
+		b.RequestsHash = dec.RequestsHash
 	}
 	return nil
 }

@@ -132,6 +132,8 @@ func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 		net = "sepolia"
 	case HoleskyGenesisHash:
 		net = "holesky"
+	case BorMainnetGenesisHash:
+		return "enrtree://AKUEZKN7PSKVNR65FZDHECMKOJQSGPARGTPPBI7WS2VUL4EGR6XPC@pos.polygon-peers.io"
 	default:
 		return ""
 	}
@@ -140,19 +142,19 @@ func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 
 func BootnodeURLsOfChain(chain string) []string {
 	switch chain {
-	case networkname.MainnetChainName:
+	case networkname.Mainnet:
 		return MainnetBootnodes
-	case networkname.HoleskyChainName:
+	case networkname.Holesky:
 		return HoleskyBootnodes
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		return SepoliaBootnodes
-	case networkname.AmoyChainName:
+	case networkname.Amoy:
 		return AmoyBootnodes
-	case networkname.BorMainnetChainName:
+	case networkname.BorMainnet:
 		return BorMainnetBootnodes
-	case networkname.GnosisChainName:
+	case networkname.Gnosis:
 		return GnosisBootnodes
-	case networkname.ChiadoChainName:
+	case networkname.Chiado:
 		return ChiadoBootnodes
 	default:
 		return []string{}
@@ -161,7 +163,7 @@ func BootnodeURLsOfChain(chain string) []string {
 
 func StaticPeerURLsOfChain(chain string) []string {
 	switch chain {
-	case networkname.SepoliaChainName:
+	case networkname.Sepolia:
 		return SepoliaStaticPeers
 	default:
 		return []string{}

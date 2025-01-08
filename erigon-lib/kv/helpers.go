@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
@@ -32,7 +33,25 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 )
 
-func DefaultPageSize() uint64 {
+// Adapts an RoDB to the RwDB interface (invoking write operations results in error)
+type RwWrapper struct {
+	RoDB
+}
+
+func (w RwWrapper) Update(ctx context.Context, f func(tx RwTx) error) error {
+	return errors.New("Update not implemented")
+}
+func (w RwWrapper) UpdateNosync(ctx context.Context, f func(tx RwTx) error) error {
+	return errors.New("UpdateNosync not implemented")
+}
+func (w RwWrapper) BeginRw(ctx context.Context) (RwTx, error) {
+	return nil, errors.New("BeginRw not implemented")
+}
+func (w RwWrapper) BeginRwNosync(ctx context.Context) (RwTx, error) {
+	return nil, errors.New("BeginRwNosync not implemented")
+}
+
+func DefaultPageSize() datasize.ByteSize {
 	osPageSize := os.Getpagesize()
 	if osPageSize < 4096 { // reduce further may lead to errors (because some data is just big)
 		osPageSize = 4096
@@ -40,7 +59,7 @@ func DefaultPageSize() uint64 {
 		osPageSize = mdbx.MaxPageSize
 	}
 	osPageSize = osPageSize / 4096 * 4096 // ensure it's rounded
-	return uint64(osPageSize)
+	return datasize.ByteSize(osPageSize)
 }
 
 // BigChunks - read `table` by big chunks - restart read transaction after each 1 minutes

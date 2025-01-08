@@ -49,7 +49,7 @@ type Snapshot struct {
 func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	// init chain db
 	ctx := context.Background()
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,19 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 		return nil, errUnknownBlock
 	}
 
-	if api.spanProducersReader != nil {
+	// init consensus db
+	borEngine, err := api.bor()
+	if err != nil {
+		return nil, err
+	}
+
+	borTx, err := borEngine.DB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer borTx.Rollback()
+
+	if api.useSpanProducersReader {
 		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
@@ -82,18 +94,6 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 		return snap, nil
 	}
 
-	// init consensus db
-	borEngine, err := api.bor()
-	if err != nil {
-		return nil, err
-	}
-
-	borTx, err := borEngine.DB.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer borTx.Rollback()
-
 	return snapshot(ctx, api, tx, borTx, header)
 }
 
@@ -107,7 +107,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 	}
 
 	ctx := context.Background()
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (*common.Add
 func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 	// init chain db
 	ctx := context.Background()
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +172,22 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 		return nil, err
 	}
 	defer borTx.Rollback()
+
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
+
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap, nil
+	}
+
 	return snapshot(ctx, api, tx, borTx, header)
 }
 
@@ -179,7 +195,7 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
 	// init chain db
 	ctx := context.Background()
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +225,21 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 		return nil, err
 	}
 	defer borTx.Rollback()
+
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
+
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap.signers(), nil
+	}
 
 	snap, err := snapshot(ctx, api, tx, borTx, header)
 	if err != nil {
@@ -248,6 +279,21 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 		return nil, err
 	}
 	defer borTx.Rollback()
+
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return nil, err
+		}
+
+		snap := &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+
+		return snap.signers(), nil
+	}
 
 	snap, err := snapshot(ctx, api, tx, borTx, header)
 	if err != nil {
@@ -353,11 +399,11 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 			if blockNr == rpc.LatestBlockNumber {
 				header = rawdb.ReadCurrentHeader(tx)
 			} else {
-				header = rawdb.ReadHeaderByNumber(tx, uint64(blockNr))
+				header, err = getHeaderByNumber(ctx, blockNr, api, tx)
 			}
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+				header, err = getHeaderByHash(ctx, api, tx, blockHash)
 			}
 		}
 	}
@@ -366,11 +412,39 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 		return common.Address{}, errUnknownBlock
 	}
 
-	snapNumber := rpc.BlockNumber(header.Number.Int64() - 1)
-	snap, err := api.GetSnapshot(&snapNumber)
-
+	borEngine, err := api.bor()
 	if err != nil {
 		return common.Address{}, err
+	}
+
+	borTx, err := borEngine.DB.BeginRo(ctx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	defer borTx.Rollback()
+
+	var snap *Snapshot
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return common.Address{}, err
+		}
+
+		snap = &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+	} else {
+		parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
+		if parent == nil || err != nil {
+			return common.Address{}, errUnknownBlock
+		}
+
+		snap, err = snapshot(ctx, api, tx, borTx, parent)
+		if err != nil {
+			return common.Address{}, err
+		}
 	}
 
 	return snap.ValidatorSet.GetProposer().Address, nil
@@ -421,17 +495,31 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	}
 	defer borTx.Rollback()
 
-	parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
-	if parent == nil || err != nil {
-		return BlockSigners{}, errUnknownBlock
+	var snap *Snapshot
+	if api.useSpanProducersReader {
+		validatorSet, err := api.spanProducersReader.Producers(ctx, header.Number.Uint64())
+		if err != nil {
+			return BlockSigners{}, err
+		}
+
+		snap = &Snapshot{
+			Number:       header.Number.Uint64(),
+			Hash:         header.Hash(),
+			ValidatorSet: validatorSet,
+		}
+	} else {
+		parent, err := getHeaderByNumber(ctx, rpc.BlockNumber(int64(header.Number.Uint64()-1)), api, tx)
+		if parent == nil || err != nil {
+			return BlockSigners{}, errUnknownBlock
+		}
+
+		snap, err = snapshot(ctx, api, tx, borTx, parent)
+		if err != nil {
+			return BlockSigners{}, err
+		}
 	}
-	snap, err := snapshot(ctx, api, tx, borTx, parent)
 
 	var difficulties = make(map[common.Address]uint64)
-
-	if err != nil {
-		return BlockSigners{}, err
-	}
 
 	proposer := snap.ValidatorSet.GetProposer().Address
 	proposerIndex, _ := snap.ValidatorSet.GetByAddress(proposer)
@@ -541,7 +629,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			if err := bor.ValidateHeaderExtraLength(header.Extra); err != nil {
 				return nil, err
 			}
-			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
+			validatorBytes := bor.GetValidatorBytes(header, s.config)
 
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
@@ -568,7 +656,7 @@ func snapshot(ctx context.Context, api *BorImpl, db kv.Tx, borDb kv.Tx, header *
 	number := header.Number.Uint64()
 	hash := header.Hash()
 
-	for snap == nil {
+	for snap == nil { //nolint:govet
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
 			if s, err := loadSnapshot(api, db, borDb, hash); err == nil {

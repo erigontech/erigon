@@ -29,5 +29,5 @@ var DefaultConfig = Config{
 	Enabled:          false,
 	EnabledExpensive: false,
 	HTTP:             "127.0.0.1",
-	Port:             6060,
+	Port:             6061,
 }

@@ -21,8 +21,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon/turbo/shards"
 	jsoniter "github.com/json-iterator/go"
+
+	"github.com/erigontech/erigon/turbo/shards"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -55,7 +56,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
-	tx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	}
 
 	var isBorStateSyncTxn bool
-	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNumber, _, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +77,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		}
 
 		// otherwise this may be a bor state sync transaction - check
-		if api.bridgeReader != nil {
+		if api.useBridgeReader {
 			blockNumber, ok, err = api.bridgeReader.EventTxnLookup(ctx, txHash)
 		} else {
 			blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
@@ -186,7 +187,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
-	tx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +311,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		//nolint
 		gasBailOut = new(bool) // false by default
 	}
-	dbtx, err1 := api.kv.BeginRo(ctx)
+	dbtx, err1 := api.kv.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
 	}
@@ -337,7 +338,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
-	return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
+	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
@@ -712,7 +713,7 @@ func filterTrace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toA
 
 func (api *TraceAPIImpl) callManyTransactions(
 	ctx context.Context,
-	dbtx kv.Tx,
+	dbtx kv.TemporalTx,
 	block *types.Block,
 	traceTypes []string,
 	txIndex int,
@@ -741,7 +742,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 		var ok bool
 		var err error
 
-		if api.bridgeReader != nil {
+		if api.useBridgeReader {
 			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
 
 		} else {
@@ -757,22 +758,33 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	callParams := make([]TraceCallParam, 0, len(txs))
-	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, txNumsReader, blockNumber, txIndex, cfg.ChainName)
-	if err != nil {
-		return nil, nil, err
+
+	parentHash := block.ParentHash()
+	parentNrOrHash := rpc.BlockNumberOrHash{
+		BlockNumber:      &parentNo,
+		BlockHash:        &parentHash,
+		RequireCanonical: true,
 	}
 
-	initialState := state.New(reader)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, cfg.ChainName)
 	if err != nil {
 		return nil, nil, err
 	}
+	stateCache := shards.NewStateCache(
+		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+	cachedReader := state.NewCachedReader(stateReader, stateCache)
+	noop := state.NewNoopWriter()
+	cachedWriter := state.NewCachedWriter(noop, stateCache)
+	ibs := state.New(cachedReader)
 
 	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger, nil)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -795,7 +807,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 			// gnosis might have a fee free account here
 			if msg.FeeCap().IsZero() && engine != nil {
 				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */)
+					return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
 				}
 				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 			}
@@ -810,20 +822,15 @@ func (api *TraceAPIImpl) callManyTransactions(
 		msgs[i] = msg
 	}
 
-	parentHash := block.ParentHash()
-
-	traces, lastState, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
-		BlockNumber:      &parentNo,
-		BlockHash:        &parentHash,
-		RequireCanonical: true,
-	}, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
+	traces, cmErr := api.doCallMany(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msgs, callParams,
+		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
 		return nil, nil, cmErr
 	}
 
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg, lastState, header, engine, false /* constCall */)
+		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */)
 	}
 
 	return traces, syscall, nil

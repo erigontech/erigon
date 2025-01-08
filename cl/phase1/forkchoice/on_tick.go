@@ -45,6 +45,6 @@ func (f *ForkChoiceStore) onTickPerSlot(time uint64) {
 	// If this is a new slot, reset store.proposer_boost_root
 	f.proposerBoostRoot.Store(libcommon.Hash{})
 	if f.computeSlotsSinceEpochStart(currentSlot) == 0 {
-		f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint).Copy(), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint).Copy())
+		f.updateCheckpoints(f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint), f.unrealizedFinalizedCheckpoint.Load().(solid.Checkpoint))
 	}
 }

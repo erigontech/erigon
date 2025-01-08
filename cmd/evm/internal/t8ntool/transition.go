@@ -33,28 +33,27 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/chain"
+	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
+	"github.com/erigontech/erigon-lib/common/hexutility"
+	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/consensuschain"
-
-	"github.com/erigontech/erigon-lib/chain"
-	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/crypto"
+	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/tests"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
@@ -245,10 +244,6 @@ func Main(ctx *cli.Context) error {
 		return NewError(ErrorVMConfig, errors.New("shanghai config but missing 'withdrawals' in env section"))
 	}
 
-	if chainConfig.IsPrague(prestate.Env.Timestamp) && prestate.Env.Requests == nil {
-		return NewError(ErrorVMConfig, errors.New("prague config but missing 'requests' in env section"))
-	}
-
 	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
 	env := prestate.Env
 	if isMerged {
@@ -287,7 +282,7 @@ func Main(ctx *cli.Context) error {
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
 		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
 	}
-	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals, prestate.Env.Requests)
+	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
 	var hashError error
 	getHash := func(num uint64) libcommon.Hash {
@@ -306,7 +301,7 @@ func Main(ctx *cli.Context) error {
 	defer db.Close()
 	defer agg.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -477,7 +472,11 @@ func getTransaction(txJson jsonrpc.RPCTransaction) (types.Transaction, error) {
 
 		auths := make([]types.Authorization, 0)
 		for _, auth := range *txJson.Authorizations {
-			auths = append(auths, auth.ToAuthorization())
+			a, err := auth.ToAuthorization()
+			if err != nil {
+				return nil, err
+			}
+			auths = append(auths, a)
 		}
 
 		return &types.SetCodeTransaction{
@@ -617,7 +616,7 @@ func NewHeader(env stEnv) *types.Header {
 
 	header.UncleHash = env.UncleHash
 	header.WithdrawalsHash = env.WithdrawalsHash
-	header.RequestsRoot = env.RequestsRoot
+	header.RequestsHash = env.RequestsHash
 
 	return &header
 }
@@ -628,6 +627,7 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer c.Close()
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
 	domains, err := libstate.NewSharedDomains(tx, log.New())
@@ -658,11 +658,11 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 			h.Sha.Write(k[length.Addr+length.Incarnation:])
 			//nolint:errcheck
 			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedStorageDeprecated, newK, libcommon.CopyBytes(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedAccountsDeprecated, newK, libcommon.CopyBytes(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}

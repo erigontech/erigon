@@ -35,14 +35,13 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/eth/tracers"
 	_ "github.com/erigontech/erigon/eth/tracers/js"
 	_ "github.com/erigontech/erigon/eth/tracers/native"
@@ -131,7 +130,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			} else if err := json.Unmarshal(blob, test); err != nil {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
-			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
+			tx, err := types.UnmarshalTransactionFromBinary(libcommon.FromHex(test.Input), false /* blobTxnsAreWrappedWithBlobs */)
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
@@ -235,7 +234,7 @@ func BenchmarkTracers(b *testing.B) {
 
 func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	// Configure a blockchain with the given prestate
-	tx, err := types.DecodeTransaction(common.FromHex(test.Input))
+	tx, err := types.DecodeTransaction(libcommon.FromHex(test.Input))
 	if err != nil {
 		b.Fatalf("failed to parse testcase input: %v", err)
 	}

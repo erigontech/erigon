@@ -24,7 +24,6 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
 	"time"
 
@@ -33,10 +32,12 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
-	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/common/u256"
+
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/tracing"
@@ -45,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/eth/ethutils"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	"github.com/erigontech/erigon/rlp"
 )
 
 var (
@@ -103,14 +103,14 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
 	// TODO: send the new tracer once we switch to the tracing.Hook
-	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger, nil); err != nil {
+	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, stateWriter, logger, nil); err != nil {
 		return nil, err
 	}
 
 	var rejectedTxs []*RejectedTx
 	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
 	receipts := make(types.Receipts, 0, block.Transactions().Len())
-	noop := state.NewNoopWriter()
+	// noop := state.NewNoopWriter()
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(i)
 		writeTrace := false
@@ -122,7 +122,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, txn, usedGas, usedBlobGas, *vmConfig)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(txn)
@@ -167,15 +167,19 @@ func ExecuteBlockEphemerally(
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
-
+	var newBlock *types.Block
+	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), block.Requests(), chainReader, false, logger); err != nil {
+		newBlock, _, _, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
+		if err != nil {
 			return nil, err
 		}
 	}
 	blockLogs := ibs.Logs()
+	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
+		StateRoot:   newRoot,
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
@@ -322,48 +326,46 @@ func FinalizeBlockExecution(
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
-	withdrawals []*types.Withdrawal, requests types.Requests, chainReader consensus.ChainReader,
+	withdrawals []*types.Withdrawal, chainReader consensus.ChainReader,
 	isMining bool,
 	logger log.Logger,
-) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, err error) {
+) (newBlock *types.Block, newTxs types.Transactions, newReceipt types.Receipts, retRequests types.FlatRequests, err error) {
 	syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */)
 	}
 
 	if isMining {
-		newBlock, newTxs, newReceipt, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, nil, logger)
+		newBlock, newTxs, newReceipt, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {
-		var rss types.Requests
-		newTxs, newReceipt, rss, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, requests, chainReader, syscall, logger)
-
-		if !reflect.DeepEqual(rss, requests) {
-			return nil, nil, nil, fmt.Errorf("invalid requests for block %d", header.Number.Uint64())
-		}
+		// var rss types.Requests
+		newTxs, newReceipt, retRequests, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, logger)
 	}
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64(), header.Time), stateWriter); err != nil {
-		return nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+		return nil, nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
 	if casted, ok := stateWriter.(state.WriterWithChangeSets); ok {
 		if err := casted.WriteChangeSets(); err != nil {
-			return nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
+			return nil, nil, nil, nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
 		}
 	}
-	return newBlock, newTxs, newReceipt, nil
+	return newBlock, newTxs, newReceipt, retRequests, nil
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
-	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, tracer *tracing.Hooks,
+	cc *chain.Config, ibs *state.IntraBlockState, stateWriter state.StateWriter, logger log.Logger, tracer *tracing.Hooks,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)
 	}, logger, tracer)
-	noop := state.NewNoopWriter()
-	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)
+	if stateWriter == nil {
+		stateWriter = state.NewNoopWriter()
+	}
+	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), stateWriter)
 	return nil
 }
 

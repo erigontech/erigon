@@ -26,6 +26,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 
+	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -41,8 +43,19 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
+// SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
+// asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
+// will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
+// that's why we are passing sentinel.SentinelClient and *sentinel.GossipData to enable the service
+// to do all of that by itself.
+type SignedAggregateAndProofForGossip struct {
+	SignedAggregateAndProof *cltypes.SignedAggregateAndProof
+	Receiver                *sentinel.Peer
+	ImmediateProcess        bool
+}
+
 type aggregateJob struct {
-	aggregate    *cltypes.SignedAggregateAndProofData
+	aggregate    *SignedAggregateAndProofForGossip
 	creationTime time.Time
 }
 
@@ -95,125 +108,143 @@ func NewAggregateAndProofService(
 func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	ctx context.Context,
 	subnet *uint64,
-	aggregateAndProof *cltypes.SignedAggregateAndProofData,
+	aggregateAndProof *SignedAggregateAndProofForGossip,
 ) error {
-	headState := a.syncedDataManager.HeadState()
-	if headState == nil {
-		return ErrIgnore
-	}
 	selectionProof := aggregateAndProof.SignedAggregateAndProof.Message.SelectionProof
-	aggregateData := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AttestantionData()
-	target := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AttestantionData().Target()
-	slot := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AttestantionData().Slot()
-	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AttestantionData().CommitteeIndex()
+	aggregateData := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data
+	aggregate := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate
+	target := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Target
+	slot := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Slot
+	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex
 
-	if aggregateData.Slot() > headState.Slot() {
-		a.scheduleAggregateForLaterProcessing(aggregateAndProof)
+	if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
+		//a.scheduleAggregateForLaterProcessing(aggregateAndProof)
 		return ErrIgnore
 	}
+
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
-	// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
-	if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
-		return ErrIgnore
-	}
-	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
-	finalizedSlot := finalizedCheckpoint.Epoch() * a.beaconCfg.SlotsPerEpoch
-	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
-	if a.forkchoiceStore.Ancestor(
-		aggregateData.BeaconBlockRoot(),
-		finalizedSlot,
-	) != finalizedCheckpoint.BlockRoot() {
-		return ErrIgnore
-	}
-
-	// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
-	if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot()); !ok {
-		return ErrIgnore
+	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
+	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		// [REJECT] len(committee_indices) == 1, where committee_indices = get_committee_indices(aggregate).
+		indices := aggregate.CommitteeBits.GetOnIndices()
+		if len(indices) != 1 {
+			return fmt.Errorf("invalid committee_bits length in aggregate and proof: %v", len(indices))
+		}
+		// [REJECT] aggregate.data.index == 0
+		if aggregate.Data.CommitteeIndex != 0 {
+			return errors.New("invalid committee_index in aggregate and proof")
+		}
+		committeeIndex = uint64(indices[0])
 	}
 
-	// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
-	seenIndex := seenAggregateIndex{
-		epoch: target.Epoch(),
-		index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
-	}
-	if a.seenAggreatorIndexes.Contains(seenIndex) {
-		return ErrIgnore
-	}
+	var (
+		aggregateVerificationData *AggregateVerificationData
+		attestingIndices          []uint64
+		seenIndex                 seenAggregateIndex
+	)
+	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
+		if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
+			return ErrIgnore
+		}
 
-	// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
-	committeeCountPerSlot := headState.CommitteeCount(target.Epoch())
-	if aggregateData.CommitteeIndex() >= committeeCountPerSlot {
-		return errors.New("invalid committee index in aggregate and proof")
-	}
-	// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
-	if aggregateData.Target().Epoch() != epoch {
-		return errors.New("invalid target epoch in aggregate and proof")
-	}
-	committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
-	if err != nil {
+		// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
+		committeeCountPerSlot := headState.CommitteeCount(target.Epoch)
+		if committeeIndex >= committeeCountPerSlot {
+			return errors.New("invalid committee index in aggregate and proof")
+		}
+		// [REJECT] The aggregate attestation's epoch matches its target -- i.e. aggregate.data.target.epoch == compute_epoch_at_slot(aggregate.data.slot)
+		if aggregateData.Target.Epoch != epoch {
+			return errors.New("invalid target epoch in aggregate and proof")
+		}
+		finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
+		finalizedSlot := finalizedCheckpoint.Epoch * a.beaconCfg.SlotsPerEpoch
+		// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by aggregate.data.beacon_block_root -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, finalized_checkpoint.epoch) == store.finalized_checkpoint.root
+		if a.forkchoiceStore.Ancestor(
+			aggregateData.BeaconBlockRoot,
+			finalizedSlot,
+		) != finalizedCheckpoint.Root {
+			return ErrIgnore
+		}
+
+		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
+		if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot); !ok {
+			return ErrIgnore
+		}
+
+		// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
+		seenIndex = seenAggregateIndex{
+			epoch: target.Epoch,
+			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
+		}
+		if a.seenAggreatorIndexes.Contains(seenIndex) {
+			return ErrIgnore
+		}
+
+		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
+		if err != nil {
+			return err
+		}
+		// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
+		attestingIndices, err = headState.GetAttestingIndicies(aggregate, false)
+		if err != nil {
+			return err
+		}
+		if len(attestingIndices) == 0 {
+			return errors.New("no attesting indicies")
+		}
+
+		// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
+		if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {
+			return errors.New("committee index not in committee")
+		}
+		// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
+		if a.forkchoiceStore.Ancestor(
+			aggregateData.BeaconBlockRoot,
+			target.Epoch*a.beaconCfg.SlotsPerEpoch,
+		) != target.Root {
+			return errors.New("invalid target block")
+		}
+		if a.test {
+			return nil
+		}
+
+		// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
+		if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
+			log.Warn("receveived aggregate and proof from invalid aggregator")
+			return errors.New("invalid aggregate and proof")
+		}
+
+		// aggregate signatures for later verification
+		aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
+		if err != nil {
+			return err
+		}
+
+		monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
+		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
+		monitor.ObserveCommitteeSize(float64(len(committee)))
+		return nil
+	}); err != nil {
 		return err
-	}
-	// [REJECT] The attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1
-	attestingIndices, err := headState.GetAttestingIndicies(aggregateData, aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits(), false)
-	if err != nil {
-		return err
-	}
-	if len(attestingIndices) == 0 {
-		return errors.New("no attesting indicies")
-	}
-
-	// [REJECT] The aggregator's validator index is within the committee -- i.e. aggregate_and_proof.aggregator_index in get_beacon_committee(state, aggregate.data.slot, index).
-	if !slices.Contains(committee, aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex) {
-		return errors.New("committee index not in committee")
-	}
-	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
-	if a.forkchoiceStore.Ancestor(
-		aggregateData.BeaconBlockRoot(),
-		target.Epoch()*a.beaconCfg.SlotsPerEpoch,
-	) != target.BlockRoot() {
-		return errors.New("invalid target block")
 	}
 	if a.test {
 		return nil
 	}
-
-	// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
-	if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
-		log.Warn("receveived aggregate and proof from invalid aggregator")
-		return errors.New("invalid aggregate and proof")
-	}
-	attestingIndicies, err := headState.GetAttestingIndicies(
-		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AttestantionData(),
-		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits(),
-		true,
-	)
-	if err != nil {
-		return err
-	}
-	if len(attestingIndicies) == 0 {
-		return errors.New("no attesting indicies")
-	}
-
-	// aggregate signatures for later verification
-	aggregateVerificationData, err := GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndicies)
-	if err != nil {
-		return err
-	}
-
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
 		a.opPool.AttestationsPool.Insert(
-			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature(),
+			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 		)
 		a.forkchoiceStore.ProcessAttestingIndicies(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
-			attestingIndicies,
+			attestingIndices,
 		)
 		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
-	aggregateVerificationData.GossipData = aggregateAndProof.GossipData
+	aggregateVerificationData.SendingPeer = aggregateAndProof.Receiver
 
 	if aggregateAndProof.ImmediateProcess {
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
@@ -222,11 +253,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	// push the signatures to verify asynchronously and run final functions after that.
 	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
 
-	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in BatchVerification function. After validating signatures, if they are valid we will publish the
-	// gossip ourselves or ban the peer which sent that particular invalid signature.
 	return ErrIgnore
+
 }
 
 func GetSignaturesOnAggregate(
@@ -263,7 +291,7 @@ func AggregateAndProofSignature(
 	state *state.CachingBeaconState,
 	aggregate *cltypes.AggregateAndProof,
 ) ([]byte, []byte, []byte, error) {
-	slot := aggregate.Aggregate.AttestantionData().Slot()
+	slot := aggregate.Aggregate.Data.Slot
 	publicKey, err := state.ValidatorPublicKey(int(aggregate.AggregatorIndex))
 	if err != nil {
 		return nil, nil, nil, err
@@ -326,7 +354,7 @@ func AggregateMessageSignature(
 		return nil, nil, nil, err
 	}
 
-	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target().Epoch())
+	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target.Epoch)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -345,7 +373,7 @@ func AggregateMessageSignature(
 }
 
 func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
-	aggregateAndProof *cltypes.SignedAggregateAndProofData,
+	aggregateAndProof *SignedAggregateAndProofForGossip,
 ) {
 	key, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
 	if err != nil {
@@ -361,34 +389,39 @@ func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
 func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 	ticker := time.NewTicker(attestationJobsIntervalTick)
 	defer ticker.Stop()
+	keysToDel := make([][32]byte, 0)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
-		headState := a.syncedDataManager.HeadState()
-		if headState == nil {
-			continue
-		}
+		keysToDel = keysToDel[:0]
 		a.aggregatesScheduledForLaterExecution.Range(func(key, value any) bool {
+			if a.syncedDataManager.Syncing() {
+				// Discard the job if we can't get the head state
+				keysToDel = append(keysToDel, key.([32]byte))
+				return false
+			}
 			job := value.(*aggregateJob)
 			// check if it has expired
 			if time.Since(job.creationTime) > attestationJobExpiry {
-				a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
+				keysToDel = append(keysToDel, key.([32]byte))
 				return true
 			}
-			aggregateData := job.aggregate.SignedAggregateAndProof.Message.Aggregate.AttestantionData()
-			if aggregateData.Slot() > headState.Slot() {
+			aggregateData := job.aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+			if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
+				return true
+			}
+			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
 				return true
 			}
 
-			if err := a.ProcessMessage(ctx, nil, job.aggregate); err != nil {
-				log.Trace("blob sidecar verification failed", "err", err)
-				return true
-			}
-			a.aggregatesScheduledForLaterExecution.Delete(key.([32]byte))
+			keysToDel = append(keysToDel, key.([32]byte))
 			return true
 		})
+		for _, key := range keysToDel {
+			a.aggregatesScheduledForLaterExecution.Delete(key)
+		}
 	}
 }

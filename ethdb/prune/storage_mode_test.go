@@ -20,9 +20,10 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon-lib/kv/memdb"
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {

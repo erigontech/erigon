@@ -67,7 +67,7 @@ func DefaultReadTxNumFunc(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint
 		return 0, false, nil
 	}
 	if len(v) != 8 {
-		return 0, false, fmt.Errorf("seems broken TxNum value: %x", v)
+		return 0, false, fmt.Errorf("DefaultReadTxNumFunc: seems broken TxNum value: %x", v)
 	}
 	return binary.BigEndian.Uint64(v), true, nil
 }
@@ -158,12 +158,7 @@ func (t TxNumsReader) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) 
 	}
 	return nil
 }
-func (TxNumsReader) ForcedWrite(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
-	var k, v [8]byte
-	binary.BigEndian.PutUint64(k[:], blockNum)
-	binary.BigEndian.PutUint64(v[:], maxTxNum)
-	return tx.Put(kv.MaxTxNum, k[:], v[:])
-}
+
 func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 	var seek [8]byte
 	binary.BigEndian.PutUint64(seek[:], blockNum)
@@ -172,13 +167,20 @@ func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 		return err
 	}
 	defer c.Close()
+	prevBlockNum := blockNum
 	for k, _, err := c.Seek(seek[:]); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
+		currentBlockNum := binary.BigEndian.Uint64(k)
+		if currentBlockNum != prevBlockNum+1 /*no gaps, only growing*/ &&
+			currentBlockNum != blockNum /*to prevent first item error*/ {
+			return fmt.Errorf("bad block num: current num is %d but previous is %d", currentBlockNum, prevBlockNum)
+		}
 		if err = tx.Delete(kv.MaxTxNum, k); err != nil {
 			return err
 		}
+		prevBlockNum = currentBlockNum
 		//if err = c.DeleteCurrent(); err != nil {
 		//	return err
 		//}
@@ -201,7 +203,7 @@ func (t TxNumsReader) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, b
 		return false, 0, nil
 	}
 	if len(lastK) != 8 {
-		return false, 0, fmt.Errorf("seems broken TxNum value: %x", lastK)
+		return false, 0, fmt.Errorf("FindBlockNum: seems broken TxNum value: %x", lastK)
 	}
 	lastBlockNum := binary.BigEndian.Uint64(lastK)
 
@@ -215,8 +217,9 @@ func (t TxNumsReader) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, b
 			return true
 		}
 		if !ok {
+			_fb, _ft, _ := t.First(tx)
 			_lb, _lt, _ := t.Last(tx)
-			err = fmt.Errorf("FindBlockNum(%d): seems broken TxNum value: %x -> (%x, %x); last in db: (%d, %d)", endTxNumMinimax, seek, i, maxTxNum, _lb, _lt)
+			err = fmt.Errorf("FindBlockNum(%d): seems broken TxNum value: %x -> (%d, %d); db has: (%d-%d, %d-%d)", endTxNumMinimax, seek, i, maxTxNum, _fb, _lb, _ft, _lt)
 			return true
 		}
 		return maxTxNum >= endTxNumMinimax

@@ -7,60 +7,60 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bor/valset"
 )
 
 type Reader struct {
 	logger                    log.Logger
-	store                     ServiceStore
+	store                     Store
 	spanBlockProducersTracker *spanBlockProducersTracker
 }
 
 type ReaderConfig struct {
-	Ctx                     context.Context
-	CalculateSprintNumberFn CalculateSprintNumberFunc
-	DataDir                 string
-	TempDir                 string
-	Logger                  log.Logger
-	RoTxLimit               int64
+	Store     Store
+	BorConfig *borcfg.BorConfig
+	DataDir   string
+	Logger    log.Logger
 }
 
 // AssembleReader creates and opens the MDBX store. For use cases where the store is only being read from. Must call Close.
-func AssembleReader(config ReaderConfig) (*Reader, error) {
-	store := NewMdbxServiceStore(config.Logger, config.DataDir, config.TempDir, config.RoTxLimit)
+func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
+	reader := NewReader(config.BorConfig, config.Store, config.Logger)
 
-	err := store.Prepare(config.Ctx)
+	err := reader.Prepare(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewReader(config.CalculateSprintNumberFn, store, config.Logger), nil
+	return reader, nil
 }
 
-func NewReader(calculateSprintNumber CalculateSprintNumberFunc, store ServiceStore, logger log.Logger) *Reader {
+func NewReader(borConfig *borcfg.BorConfig, store Store, logger log.Logger) *Reader {
 	return &Reader{
 		logger:                    logger,
 		store:                     store,
-		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, calculateSprintNumber, store.SpanBlockProducerSelections()),
+		spanBlockProducersTracker: newSpanBlockProducersTracker(logger, borConfig, store.SpanBlockProducerSelections()),
 	}
+}
+
+func (r *Reader) Prepare(ctx context.Context) error {
+	return r.store.Prepare(ctx)
 }
 
 func (r *Reader) Span(ctx context.Context, id uint64) (*Span, bool, error) {
 	return r.store.Spans().Entity(ctx, id)
 }
 
-func (r *Reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	entities, err := r.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint[*Checkpoint]), err
+func (r *Reader) CheckpointsFromBlock(ctx context.Context, startBlock uint64) ([]*Checkpoint, error) {
+	return r.store.Checkpoints().RangeFromBlockNum(ctx, startBlock)
 }
 
-func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) (Waypoints, error) {
-	entities, err := r.store.Milestones().RangeFromBlockNum(ctx, startBlock)
-	return libcommon.SliceMap(entities, castEntityToWaypoint[*Milestone]), err
+func (r *Reader) MilestonesFromBlock(ctx context.Context, startBlock uint64) ([]*Milestone, error) {
+	return r.store.Milestones().RangeFromBlockNum(ctx, startBlock)
 }
 
 func (r *Reader) Producers(ctx context.Context, blockNum uint64) (*valset.ValidatorSet, error) {
@@ -112,7 +112,6 @@ func (r *RemoteReader) Producers(ctx context.Context, blockNum uint64) (*valset.
 
 // Close implements bridge.ReaderService. It's a noop as there is no attached store.
 func (r *RemoteReader) Close() {
-	return
 }
 
 func (r *RemoteReader) EnsureVersionCompatibility() bool {

@@ -19,6 +19,7 @@ package ssz2
 import (
 	"encoding/binary"
 	"fmt"
+	"runtime/debug"
 
 	"github.com/erigontech/erigon-lib/types/ssz"
 )
@@ -70,6 +71,7 @@ It handles both static (fixed size) and dynamic (variable size) objects, includi
 func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 	defer func() {
 		if err2 := recover(); err2 != nil {
+			debug.PrintStack()
 			err = fmt.Errorf("panic while encoding: %v", err2)
 		}
 	}()
@@ -99,9 +101,11 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			startSize := len(dst)
 			if obj.Static() {
 				// If the object is static (fixed size), encode it using SSZ and update the dst
-				if dst, err = obj.EncodeSSZ(dst); err != nil {
+				encodedBytes, err := obj.EncodeSSZ(nil)
+				if err != nil {
 					return nil, err
 				}
+				dst = append(dst, encodedBytes...)
 			} else {
 				// If the object is dynamic (variable size), store the start offset and the object in separate slices
 				offsetsStarts = append(offsetsStarts, startSize)

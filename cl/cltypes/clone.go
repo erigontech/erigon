@@ -18,21 +18,32 @@ package cltypes
 
 import (
 	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 func (s *SignedBeaconBlock) Clone() clonable.Clonable {
-	other := NewSignedBeaconBlock(s.Block.Body.beaconCfg)
+	other := NewSignedBeaconBlock(s.Block.Body.beaconCfg, s.Version())
 	other.Block.Body.Version = s.Block.Body.Version
 	return other
 }
 
-func (*IndexedAttestation) Clone() clonable.Clonable {
-	return &IndexedAttestation{}
+func (i *IndexedAttestation) Clone() clonable.Clonable {
+	/*
+	   var attestingIndices *solid.RawUint64List
+
+	   	if i.AttestingIndices != nil {
+	   		attestingIndices = solid.NewRawUint64List(i.AttestingIndices.Cap(), []uint64{})
+	   	}
+
+	*/
+	return &IndexedAttestation{
+		//AttestingIndices: attestingIndices,
+		Data: &solid.AttestationData{},
+	}
 }
 
 func (b *BeaconBody) Clone() clonable.Clonable {
-	other := NewBeaconBody(b.beaconCfg)
-	other.Version = b.Version
+	other := NewBeaconBody(b.beaconCfg, b.Version)
 	return other
 }
 
@@ -93,7 +104,7 @@ func (*Deposit) Clone() clonable.Clonable {
 }
 
 func (b *BeaconBlock) Clone() clonable.Clonable {
-	other := NewBeaconBlock(b.Body.beaconCfg)
+	other := NewBeaconBlock(b.Body.beaconCfg, b.Version())
 	other.Body.Version = b.Body.Version
 	return other
 }

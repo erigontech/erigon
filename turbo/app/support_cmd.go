@@ -63,7 +63,7 @@ var (
 		Name:     "debug.addrs",
 		Usage:    "Comma separated list of URLs to the debug endpoints thats are being diagnosed",
 		Required: false,
-		Value:    cli.NewStringSlice("localhost:6060"),
+		Value:    cli.NewStringSlice("localhost:6062"),
 	}
 
 	sessionsFlag = cli.StringSliceFlag{
@@ -410,7 +410,7 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 						})
 					}
 
-				case "aplication/profile":
+				case "application/profile":
 					if _, err := io.Copy(buffer, debugResponse.Body); err != nil {
 						return codec.WriteJSON(ctx1, &nodeResponse{
 							Id: requestId,

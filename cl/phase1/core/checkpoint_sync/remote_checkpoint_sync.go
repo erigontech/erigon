@@ -58,11 +58,12 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 			return nil, fmt.Errorf("checkpoint sync read failed %s", err)
 		}
 
-		epoch, err := utils.ExtractSlotFromSerializedBeaconState(marshaled)
+		slot, err := utils.ExtractSlotFromSerializedBeaconState(marshaled)
 		if err != nil {
 			return nil, fmt.Errorf("checkpoint sync read failed %s", err)
 		}
 
+		epoch := slot / r.beaconConfig.SlotsPerEpoch
 		beaconState := state.New(r.beaconConfig)
 		err = beaconState.DecodeSSZ(marshaled, int(r.beaconConfig.GetCurrentStateVersion(epoch)))
 		if err != nil {

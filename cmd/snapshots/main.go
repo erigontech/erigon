@@ -87,7 +87,7 @@ func main() {
 
 			var cancel context.CancelFunc
 
-			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger))
+			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger)) //nolint
 
 			// setup periodic logging and prometheus updates
 			go mem.LogMemStats(ctx.Context, logger)

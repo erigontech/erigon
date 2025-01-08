@@ -21,19 +21,23 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"slices"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon-lib/common/hexutility"
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
-// go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go
+//(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
+
+var errShortTypedReceipt = errors.New("typed receipt too short")
 
 var (
 	receiptStatusFailedRLP     = []byte{}
@@ -71,7 +75,7 @@ type Receipt struct {
 	BlockNumber      *big.Int       `json:"blockNumber,omitempty"`
 	TransactionIndex uint           `json:"transactionIndex"`
 
-	FirstLogIndex uint32 `json:"-"` // field which used to store in db and re-calc
+	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
 }
 
 type receiptMarshaling struct {
@@ -121,12 +125,71 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := new(bytes.Buffer)
-	buf.WriteByte(r.Type)
-	if err := rlp.Encode(buf, data); err != nil {
+	buf := encodeBufferPool.Get().(*bytes.Buffer)
+	defer encodeBufferPool.Put(buf)
+	buf.Reset()
+	if err := r.encodeTyped(data, buf); err != nil {
 		return err
 	}
 	return rlp.Encode(w, buf.Bytes())
+}
+
+// encodeTyped writes the canonical encoding of a typed receipt to w.
+func (r *Receipt) encodeTyped(data *receiptRLP, w *bytes.Buffer) error {
+	w.WriteByte(r.Type)
+	return rlp.Encode(w, data)
+}
+
+// MarshalBinary returns the consensus encoding of the receipt.
+func (r *Receipt) MarshalBinary() ([]byte, error) {
+	if r.Type == LegacyTxType {
+		return rlp.EncodeToBytes(r)
+	}
+	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
+	var buf bytes.Buffer
+	err := r.encodeTyped(data, &buf)
+	return buf.Bytes(), err
+}
+
+// UnmarshalBinary decodes the consensus encoding of receipts.
+// It supports legacy RLP receipts and EIP-2718 typed receipts.
+func (r *Receipt) UnmarshalBinary(b []byte) error {
+	if len(b) > 0 && b[0] > 0x7f {
+		// It's a legacy receipt decode the RLP
+		var data receiptRLP
+		err := rlp.DecodeBytes(b, &data)
+		if err != nil {
+			return err
+		}
+		r.Type = LegacyTxType
+		return r.setFromRLP(data)
+	}
+	// It's an EIP2718 typed transaction envelope.
+	return r.decodeTyped(b)
+}
+
+func (r *Receipt) setFromRLP(data receiptRLP) error {
+	r.CumulativeGasUsed, r.Bloom, r.Logs = data.CumulativeGasUsed, data.Bloom, data.Logs
+	return r.setStatus(data.PostStateOrStatus)
+}
+
+// decodeTyped decodes a typed receipt from the canonical format.
+func (r *Receipt) decodeTyped(b []byte) error {
+	if len(b) <= 1 {
+		return errShortTypedReceipt
+	}
+	switch b[0] {
+	case DynamicFeeTxType, AccessListTxType, BlobTxType:
+		var data receiptRLP
+		err := rlp.DecodeBytes(b[1:], &data)
+		if err != nil {
+			return err
+		}
+		r.Type = b[0]
+		return r.setFromRLP(data)
+	default:
+		return ErrTxTypeNotSupported
+	}
 }
 
 func (r *Receipt) decodePayload(s *rlp.Stream) error {
@@ -271,33 +334,21 @@ func (r *Receipt) statusEncoding() []byte {
 
 // Copy creates a deep copy of the Receipt.
 func (r *Receipt) Copy() *Receipt {
-	postState := make([]byte, len(r.PostState))
-	copy(postState, r.PostState)
-
-	bloom := BytesToBloom(r.Bloom.Bytes())
-
-	logs := make(Logs, 0, len(r.Logs))
-	for _, log := range r.Logs {
-		logs = append(logs, log.Copy())
+	if r == nil {
+		return nil
 	}
-
-	txHash := libcommon.BytesToHash(r.TxHash.Bytes())
-	contractAddress := libcommon.BytesToAddress(r.ContractAddress.Bytes())
-	blockHash := libcommon.BytesToHash(r.BlockHash.Bytes())
-	blockNumber := big.NewInt(0).Set(r.BlockNumber)
-
 	return &Receipt{
 		Type:              r.Type,
-		PostState:         postState,
+		PostState:         slices.Clone(r.PostState),
 		Status:            r.Status,
 		CumulativeGasUsed: r.CumulativeGasUsed,
-		Bloom:             bloom,
-		Logs:              logs,
-		TxHash:            txHash,
-		ContractAddress:   contractAddress,
+		Bloom:             BytesToBloom(r.Bloom.Bytes()),
+		Logs:              r.Logs.Copy(),
+		TxHash:            libcommon.BytesToHash(r.TxHash.Bytes()),
+		ContractAddress:   libcommon.BytesToAddress(r.ContractAddress.Bytes()),
 		GasUsed:           r.GasUsed,
-		BlockHash:         blockHash,
-		BlockNumber:       blockNumber,
+		BlockHash:         libcommon.BytesToHash(r.BlockHash.Bytes()),
+		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,
 	}
 }
@@ -333,7 +384,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.FirstLogIndex = stored.FirstLogIndex
+	r.FirstLogIndexWithinBlock = stored.FirstLogIndex
 
 	//r.Logs = make([]*Log, len(stored.Logs))
 	//for i, log := range stored.Logs {
@@ -350,6 +401,17 @@ type Receipts []*Receipt
 
 // Len returns the number of receipts in this list.
 func (rs Receipts) Len() int { return len(rs) }
+
+func (rs Receipts) Copy() Receipts {
+	if rs == nil {
+		return nil
+	}
+	rsCopy := make(Receipts, rs.Len())
+	for i, r := range rs {
+		rsCopy[i] = r.Copy()
+	}
+	return rsCopy
+}
 
 // EncodeIndex encodes the i'th receipt to w.
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
@@ -438,21 +500,8 @@ func (r Receipts) DeriveFields(hash libcommon.Hash, number uint64, txs Transacti
 
 // DeriveFields fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func (rl Receipts) DeriveFieldsV3ForSingleReceipt(i int, blockHash libcommon.Hash, blockNum uint64, txn Transaction) (*Receipt, error) {
-	r := rl[i]
-	var prevReceipt *Receipt
-	if i > 0 {
-		prevReceipt = rl[i-1]
-	}
-	err := r.DeriveFieldsV3ForSingleReceipt(i, blockHash, blockNum, txn, prevReceipt)
-	if err != nil {
-		return nil, err
-	}
-	return r, nil
-}
-
-func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevReceipt *Receipt) error {
-	logIndex := r.FirstLogIndex // logIdx is unique within the block and starts from 0
+func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
+	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	sender, ok := txn.cachedSender()
 	if !ok {
@@ -480,7 +529,7 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 	if txnIdx == 0 {
 		r.GasUsed = r.CumulativeGasUsed
 	} else {
-		r.GasUsed = r.CumulativeGasUsed - prevReceipt.CumulativeGasUsed
+		r.GasUsed = r.CumulativeGasUsed - prevCumulativeGasUsed
 	}
 
 	// The derived log fields can simply be set from the block and transaction
@@ -497,6 +546,9 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 
 // TODO: maybe make it more prettier (only for debug purposes)
 func (r *Receipt) String() string {
-	str := fmt.Sprintf("Receipt of tx %+v", *r)
-	return str
+	j, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Sprintf("Error during JSON marshalling, receipt: %+v, error: %s", *r, err)
+	}
+	return string(j)
 }

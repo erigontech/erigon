@@ -22,15 +22,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"reflect"
 
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto/cryptopool"
-)
-
-var (
-	addressT = reflect.TypeOf(Address{})
 )
 
 // Address represents the 20 byte address of an Ethereum account.
@@ -81,11 +76,11 @@ func (a *Address) checksumHex() []byte {
 	buf := a.hex()
 
 	// compute checksum
-	sha := cryptopool.GetLegacyKeccak256()
+	sha := cryptopool.NewLegacyKeccak256()
 	//nolint:errcheck
 	sha.Write(buf[2:])
 	hash := sha.Sum(nil)
-	cryptopool.ReturnLegacyKeccak256(sha)
+	cryptopool.ReturnToPoolKeccak256(sha)
 
 	for i := 2; i < len(buf); i++ {
 		hashByte := hash[(i-2)/2]

@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	services "github.com/erigontech/erigon/cl/phase1/network/services"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -41,7 +41,7 @@ func (m *MockVoluntaryExitService) EXPECT() *MockVoluntaryExitServiceMockRecorde
 }
 
 // ProcessMessage mocks base method.
-func (m *MockVoluntaryExitService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *cltypes.SignedVoluntaryExit) error {
+func (m *MockVoluntaryExitService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *services.SignedVoluntaryExitForGossip) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
 	ret0, _ := ret[0].(error)
@@ -67,13 +67,13 @@ func (c *MockVoluntaryExitServiceProcessMessageCall) Return(arg0 error) *MockVol
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockVoluntaryExitServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SignedVoluntaryExit) error) *MockVoluntaryExitServiceProcessMessageCall {
+func (c *MockVoluntaryExitServiceProcessMessageCall) Do(f func(context.Context, *uint64, *services.SignedVoluntaryExitForGossip) error) *MockVoluntaryExitServiceProcessMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockVoluntaryExitServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedVoluntaryExit) error) *MockVoluntaryExitServiceProcessMessageCall {
+func (c *MockVoluntaryExitServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *services.SignedVoluntaryExitForGossip) error) *MockVoluntaryExitServiceProcessMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

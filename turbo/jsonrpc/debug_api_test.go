@@ -79,6 +79,12 @@ func TestTraceBlockByNumber(t *testing.T) {
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
+		if tx == nil {
+			t.Errorf("nil tx")
+		}
+		if tx.BlockHash == nil {
+			t.Errorf("nil block hash")
+		}
 		txcount, err := ethApi.GetBlockTransactionCountByHash(m.Ctx, *tx.BlockHash)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -419,10 +425,9 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		}
 	}
 	t.Run("descend", func(t *testing.T) {
-		dbtx, err := m.DB.BeginRo(m.Ctx)
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
-		defer dbtx.Rollback()
-		tx := dbtx.(kv.TemporalTx)
+		defer tx.Rollback()
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
@@ -432,10 +437,9 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend", func(t *testing.T) {
-		dbtx, err := m.DB.BeginRo(m.Ctx)
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
-		defer dbtx.Rollback()
-		tx := dbtx.(kv.TemporalTx)
+		defer tx.Rollback()
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
@@ -445,10 +449,9 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 	t.Run("ascend limit", func(t *testing.T) {
-		dbtx, err := m.DB.BeginRo(m.Ctx)
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
-		defer dbtx.Rollback()
-		tx := dbtx.(kv.TemporalTx)
+		defer tx.Rollback()
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
@@ -465,11 +468,11 @@ func TestAccountAt(t *testing.T) {
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		blockHash0, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
-		blockHash1, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
-		blockHash3, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
-		blockHash10, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
-		blockHash12, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
+		blockHash0, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
+		blockHash1, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
+		blockHash3, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
+		blockHash10, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
+		blockHash12, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
 		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash12
 		return nil
 	})

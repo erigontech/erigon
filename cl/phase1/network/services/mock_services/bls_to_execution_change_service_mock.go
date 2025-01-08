@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	services "github.com/erigontech/erigon/cl/phase1/network/services"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -41,7 +41,7 @@ func (m *MockBLSToExecutionChangeService) EXPECT() *MockBLSToExecutionChangeServ
 }
 
 // ProcessMessage mocks base method.
-func (m *MockBLSToExecutionChangeService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *cltypes.SignedBLSToExecutionChange) error {
+func (m *MockBLSToExecutionChangeService) ProcessMessage(arg0 context.Context, arg1 *uint64, arg2 *services.SignedBLSToExecutionChangeForGossip) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ProcessMessage", arg0, arg1, arg2)
 	ret0, _ := ret[0].(error)
@@ -67,13 +67,13 @@ func (c *MockBLSToExecutionChangeServiceProcessMessageCall) Return(arg0 error) *
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBLSToExecutionChangeServiceProcessMessageCall) Do(f func(context.Context, *uint64, *cltypes.SignedBLSToExecutionChange) error) *MockBLSToExecutionChangeServiceProcessMessageCall {
+func (c *MockBLSToExecutionChangeServiceProcessMessageCall) Do(f func(context.Context, *uint64, *services.SignedBLSToExecutionChangeForGossip) error) *MockBLSToExecutionChangeServiceProcessMessageCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBLSToExecutionChangeServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedBLSToExecutionChange) error) *MockBLSToExecutionChangeServiceProcessMessageCall {
+func (c *MockBLSToExecutionChangeServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *services.SignedBLSToExecutionChangeForGossip) error) *MockBLSToExecutionChangeServiceProcessMessageCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

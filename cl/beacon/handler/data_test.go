@@ -61,7 +61,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 			logger.SetHandler(log.DiscardHandler())
 		}
 	}
-	_, blocks, _, _, postState, handler, _, sm, fcu, _ := setupTestingHandler(c.t, c.v, logger)
+	_, blocks, _, _, postState, handler, _, sm, fcu, _ := setupTestingHandler(c.t, c.v, logger, true)
 
 	var err error
 
@@ -87,12 +87,12 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		require.NoError(c.t, err)
 		fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-		fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+		fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 		if c.finalized {
-			fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+			fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 			fcu.FinalizedSlotVal = math.MaxUint64
 		} else {
-			fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+			fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
 			fcu.FinalizedSlotVal = 0
 			fcu.StateAtBlockRootVal[fcu.HeadVal] = postState
 			require.NoError(c.t, sm.OnHeadState(postState))
@@ -103,7 +103,10 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		sm.OnHeadState(postState)
 		var s *state.CachingBeaconState
 		for s == nil {
-			s = sm.HeadState()
+			sm.ViewHeadState(func(headState *state.CachingBeaconState) error {
+				s = headState
+				return nil
+			})
 		}
 		s.SetSlot(789274827847783)
 
@@ -125,8 +128,8 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 			},
 		}
 
-		fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(common.Hash{1, 2, 3}, 1)
-		fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(common.Hash{1, 2, 3}, 2)
+		fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 1, Root: common.Hash{1, 2, 3}}
+		fcu.JustifiedCheckpointVal = solid.Checkpoint{Epoch: 2, Root: common.Hash{1, 2, 3}}
 	}
 	sm.OnHeadState(postState)
 

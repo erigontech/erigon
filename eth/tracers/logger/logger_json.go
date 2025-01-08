@@ -27,9 +27,8 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/math"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/core/vm"
 )
 
@@ -105,7 +104,7 @@ func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 	if err != nil {
 		errMsg = err.Error()
 	}
-	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(usedGas), errMsg})
+	_ = l.encoder.Encode(endLog{libcommon.Bytes2Hex(output), math.HexOrDecimal64(usedGas), errMsg})
 }
 
 func (l *JSONLogger) CaptureExit(output []byte, usedGas uint64, err error) {

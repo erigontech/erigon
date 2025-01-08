@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/downloadercfg"
+	"github.com/erigontech/erigon-lib/downloader/downloaderrawdb"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	prototypes "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon-lib/kv"
@@ -174,7 +174,7 @@ func insertCloudflareHeaders(req *http.Request) {
 // It also tries to parse Retry-After response header when a http.StatusTooManyRequests
 // (HTTP Code 429) is found in the resp parameter. Hence it will return the number of
 // seconds the server states it may be ready to process more requests from this client.
-func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) time.Duration {
+func calcBackoff(_min, _max time.Duration, attemptNum int, resp *http.Response) time.Duration {
 	if resp != nil {
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 			if s, ok := resp.Header["Retry-After"]; ok {
@@ -185,10 +185,10 @@ func calcBackoff(min, max time.Duration, attemptNum int, resp *http.Response) ti
 		}
 	}
 
-	mult := math.Pow(2, float64(attemptNum)) * float64(min)
+	mult := math.Pow(2, float64(attemptNum)) * float64(_min)
 	sleep := time.Duration(mult)
-	if float64(sleep) != mult || sleep > max {
-		sleep = max
+	if float64(sleep) != mult || sleep > _max {
+		sleep = _max
 	}
 
 	return sleep
@@ -725,23 +725,10 @@ func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB,
 
 	if db != nil {
 		err := db.View(ctx, func(tx kv.Tx) (err error) {
-			infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileInfo.Name()))
-
+			hashBytes, err = downloaderrawdb.ReadTorrentInfoHash(tx, fileInfo.Name())
 			if err != nil {
 				return err
 			}
-
-			if len(infoBytes) == 20 {
-				hashBytes = infoBytes
-				return nil
-			}
-
-			var info torrentInfo
-
-			if err = json.Unmarshal(infoBytes, &info); err == nil {
-				hashBytes = info.Hash
-			}
-
 			return nil
 		})
 
@@ -861,7 +848,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 					}
-
 					t.AddWebSeeds(urls)
 				}
 			}
@@ -1499,22 +1485,18 @@ func logSeedHashMismatches(torrentHash infohash.T, name string, seedHashMismatch
 			webseeds += strings.TrimSuffix(entry.url.String(), "/") + "#" + entry.hash.HexString()
 		}
 
-		logger.Warn("Webseed hash mismatch for torrent", "name", name, "hash", torrentHash.HexString(), "webseeds", webseeds)
+		logger.Debug("Webseed hash mismatch for torrent", "name", name, "hash", torrentHash.HexString(), "webseeds", webseeds)
 	}
 }
 
-func (d *Downloader) checkComplete(name string) (bool, int64, *time.Time) {
-	if info, err := d.torrentInfo(name); err == nil {
-		if info.Completed != nil && info.Completed.Before(time.Now()) {
-			if info.Length != nil {
-				if fi, err := os.Stat(filepath.Join(d.SnapDir(), name)); err == nil {
-					return fi.Size() == *info.Length && fi.ModTime().Equal(*info.Completed), *info.Length, info.Completed
-				}
-			}
-		}
+func (d *Downloader) checkComplete(name string) (complete bool, fileLen int64, completedAt *time.Time) {
+	if err := d.db.View(d.ctx, func(tx kv.Tx) error {
+		complete, fileLen, completedAt = downloaderrawdb.CheckFileComplete(tx, name, d.SnapDir())
+		return nil
+	}); err != nil {
+		return false, 0, nil
 	}
-
-	return false, 0, nil
+	return
 }
 
 func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []*seedHash, error) {
@@ -1934,28 +1916,19 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, download
 
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
-func (d *Downloader) torrentInfo(name string) (*torrentInfo, error) {
-	var info torrentInfo
-
+func (d *Downloader) torrentInfo(name string) (*downloaderrawdb.TorrentInfo, error) {
+	var info *downloaderrawdb.TorrentInfo
 	err := d.db.View(d.ctx, func(tx kv.Tx) (err error) {
-		infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(name))
-
+		info, err = downloaderrawdb.ReadTorrentInfo(tx, name)
 		if err != nil {
 			return err
 		}
-
-		if err = json.Unmarshal(infoBytes, &info); err != nil {
-			return err
-		}
-
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
-
-	return &info, nil
+	return info, nil
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
@@ -1999,6 +1972,15 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesFlushed = uint64(connStats.BytesFlushed.Int64())
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
 	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64())
+
+	// if we have no previous stats, it means that node was restarted and need to set initial values
+	if prevStats.BytesDownload == 0 {
+		prevStats.BytesDownload = stats.BytesCompleted
+	}
+
+	if prevStats.BytesCompleted == 0 {
+		prevStats.BytesCompleted = stats.BytesCompleted
+	}
 
 	lastMetadataReady := stats.MetadataReady
 
@@ -2500,7 +2482,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		}()
 	}
 
-	g, ctx := errgroup.WithContext(ctx)
+	g, context := errgroup.WithContext(ctx)
 	// torrent lib internally limiting amount of hashers per file
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
@@ -2509,13 +2491,13 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		g.Go(func() error {
 			defer completedFiles.Add(1)
 			if failFast {
-				return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
+				return VerifyFileFailFast(context, t, d.SnapDir(), completedPieces)
 			}
 
-			err := ScheduleVerifyFile(ctx, t, completedPieces)
+			err := ScheduleVerifyFile(context, t, completedPieces)
 
 			if err != nil || !t.Complete.Bool() {
-				if err := d.db.Update(ctx, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
+				if err := d.db.Update(context, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
 					return fmt.Errorf("verify data: %s: reset failed: %w", t.Name(), err)
 				}
 			}
@@ -2527,6 +2509,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	if err := g.Wait(); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -2602,7 +2585,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if err != nil {
 		return err
 	}
-
 	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
 		return err
@@ -2671,14 +2653,21 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	var l4 []string
+	var l4, l5 []string
 	if all {
 		l4, err = seedableStateFilesBySubDir(dirs.Snap, "accessor", all)
 		if err != nil {
 			return nil, err
 		}
 	}
-	files = append(append(append(append(files, l1...), l2...), l3...), l4...)
+	// check if dirs.SnapCaplin exists
+	if _, err := os.Stat(dirs.SnapCaplin); !os.IsNotExist(err) {
+		l5, err = seedableSegmentFiles(dirs.SnapCaplin, chainName, all)
+		if err != nil {
+			return nil, err
+		}
+	}
+	files = append(append(append(append(append(files, l1...), l2...), l3...), l4...), l5...)
 	return files, nil
 }
 
@@ -2816,12 +2805,11 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
 func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientConfig, writeMap bool, logger log.Logger) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
-	dbCfg := mdbx.NewMDBX(log.New()).
-		Label(kv.DownloaderDB).
+	dbCfg := mdbx.New(kv.DownloaderDB, log.New()).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
-		PageSize(uint64(4 * datasize.KB)).
+		PageSize(4 * datasize.KB).
 		RoTxsLimiter(semaphore.NewWeighted(9_000)).
 		Path(dbDir).
 		WriteMap(writeMap)
@@ -2956,6 +2944,8 @@ func calculateTime(amountLeft, rate uint64) string {
 }
 
 func (d *Downloader) Completed() bool {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
 	return d.stats.Completed
 }
 
@@ -2981,7 +2971,7 @@ func (d *Downloader) notifyCompleted(tName string, tHash *prototypes.H160) {
 	d.onTorrentComplete(tName, tHash)
 }
 
-func (d *Downloader) getCompletedTorrents() map[string]completedTorrentInfo {
+func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
 

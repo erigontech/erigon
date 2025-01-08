@@ -73,7 +73,7 @@ type TransformArgs struct {
 	ExtractEndKey   []byte
 	BufferType      int
 	BufferSize      int
-	EmptyVals       bool
+	EmptyVals       bool // `v=nil` case: `false` means `Del(k)`, `true` means `Put(k, nil)`
 }
 
 func Transform(

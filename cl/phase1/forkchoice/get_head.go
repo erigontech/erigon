@@ -19,11 +19,14 @@ package forkchoice
 import (
 	"bytes"
 	"errors"
+	"math/rand"
 	"sort"
+	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
 // accountWeights updates the weights of the validators, given the vote and given an head leaf.
@@ -43,52 +46,97 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 	return
 }
 
-func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
+const (
+	sampleFactor = 100
+	sampleBasis  = 80
+)
+
+func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, checkpointState *checkpointState, auxilliaryState *state.CachingBeaconState) map[libcommon.Hash]uint64 {
+	votes := make(map[libcommon.Hash]uint64)
+	// make an rng generator
+	gen := rand.New(rand.NewSource(time.Now().UnixNano()))
+	if auxilliaryState != nil {
+		startIdx := 0
+		step := 1
+		if f.probabilisticHeadGetter {
+			startIdx = gen.Intn(sampleBasis)
+			step = sampleBasis + gen.Intn(sampleFactor)
+		}
+		for validatorIndex := startIdx; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex += step {
+			message, _ := f.latestMessages.get(validatorIndex)
+			v := auxilliaryState.ValidatorSet().Get(validatorIndex)
+			if !v.Active(justifiedCheckpoint.Epoch) || v.Slashed() {
+				continue
+			}
+			if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage || f.isUnequivocating(uint64(validatorIndex)) {
+				continue
+			}
+			votes[message.Root] += v.EffectiveBalance()
+		}
+		boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
+		if boostRoot != (libcommon.Hash{}) {
+			boost := auxilliaryState.GetTotalActiveBalance() / auxilliaryState.BeaconConfig().SlotsPerEpoch
+			votes[boostRoot] += (boost * auxilliaryState.BeaconConfig().ProposerScoreBoost) / 100
+		}
+	} else {
+		for validatorIndex := 0; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex++ {
+			message, _ := f.latestMessages.get(validatorIndex)
+			if message == (LatestMessage{}) {
+				continue
+			}
+			if !readFromBitset(checkpointState.actives, validatorIndex) || readFromBitset(checkpointState.slasheds, validatorIndex) {
+				continue
+			}
+			if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
+				continue
+			}
+			if f.isUnequivocating(uint64(validatorIndex)) {
+				continue
+			}
+			votes[message.Root] += checkpointState.balances[validatorIndex]
+		}
+		boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
+		if boostRoot != (libcommon.Hash{}) {
+			boost := checkpointState.activeBalance / checkpointState.beaconConfig.SlotsPerEpoch
+			votes[boostRoot] += (boost * checkpointState.beaconConfig.ProposerScoreBoost) / 100
+		}
+	}
+
+	return votes
+}
+
+// GetHead returns the head of the fork choice store.
+// it can take an optional auxilliary state to determine the current weights instead of computing the justified state.
+func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (libcommon.Hash, uint64, error) {
 	f.mu.RLock()
 	if f.headHash != (libcommon.Hash{}) {
 		f.mu.RUnlock()
 		return f.headHash, f.headSlot, nil
 	}
 	f.mu.RUnlock()
-	// Take write lock here
-
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-	// See which validators can be used for attestation score
-	justificationState, err := f.getCheckpointState(justifiedCheckpoint)
-	if err != nil {
-		return libcommon.Hash{}, 0, err
-	}
+	var justificationState *checkpointState
+	var err error
+	// Take write lock here
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if auxilliaryState == nil {
+		// See which validators can be used for attestation score
+		justificationState, err = f.getCheckpointState(justifiedCheckpoint)
+		if err != nil {
+			return libcommon.Hash{}, 0, err
+		}
+	}
+
 	// Retrieve att
-	f.headHash = justifiedCheckpoint.BlockRoot()
+	f.headHash = justifiedCheckpoint.Root
 	blocks := f.getFilteredBlockTree(f.headHash)
 	// Do a simple scan to determine the fork votes.
-	votes := make(map[libcommon.Hash]uint64)
-	for validatorIndex, message := range f.latestMessages {
-		if message == (LatestMessage{}) {
-			continue
-		}
-		if !readFromBitset(justificationState.actives, validatorIndex) || readFromBitset(justificationState.slasheds, validatorIndex) {
-			continue
-		}
-		if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
-			continue
-		}
-		if f.isUnequivocating(uint64(validatorIndex)) {
-			continue
-		}
-		votes[message.Root] += justificationState.balances[validatorIndex]
-	}
-	boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
-	if boostRoot != (libcommon.Hash{}) {
-		boost := justificationState.activeBalance / justificationState.beaconConfig.SlotsPerEpoch
-		votes[boostRoot] += (boost * justificationState.beaconConfig.ProposerScoreBoost) / 100
-	}
+	votes := f.computeVotes(justifiedCheckpoint, justificationState, auxilliaryState)
 	// Account for weights on each head fork
 	f.weights = make(map[libcommon.Hash]uint64)
 	for head := range f.headSet {
-		f.accountWeights(votes, f.weights, justifiedCheckpoint.BlockRoot(), head)
+		f.accountWeights(votes, f.weights, justifiedCheckpoint.Root, head)
 	}
 
 	for {
@@ -153,34 +201,6 @@ func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(c *checkpointSt
 	return filtered
 }
 
-// getWeight computes weight in head decision of canonical chain.
-func (f *ForkChoiceStore) getWeight(root libcommon.Hash, indicies []uint64, state *checkpointState) uint64 {
-	header, has := f.forkGraph.GetHeader(root)
-	if !has {
-		return 0
-	}
-	// Compute attestation score
-	var attestationScore uint64
-	for _, validatorIndex := range indicies {
-		if f.Ancestor(f.latestMessages[validatorIndex].Root, header.Slot) != root {
-			continue
-		}
-		attestationScore += state.balances[validatorIndex]
-	}
-
-	boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
-	if boostRoot == (libcommon.Hash{}) {
-		return attestationScore
-	}
-
-	// Boost is applied if root is an ancestor of proposer_boost_root
-	if f.Ancestor(boostRoot, header.Slot) == root {
-		committeeWeight := state.activeBalance / state.beaconConfig.SlotsPerEpoch
-		attestationScore += (committeeWeight * state.beaconConfig.ProposerScoreBoost) / 100
-	}
-	return attestationScore
-}
-
 // getFilteredBlockTree filters out dumb blocks.
 func (f *ForkChoiceStore) getFilteredBlockTree(base libcommon.Hash) map[libcommon.Hash]*cltypes.BeaconBlockHeader {
 	blocks := make(map[libcommon.Hash]*cltypes.BeaconBlockHeader)
@@ -222,8 +242,8 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
-	if (justifiedCheckpoint.Epoch() == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)) &&
-		(finalizedCheckpoint.Epoch() == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)) {
+	if (justifiedCheckpoint.Epoch == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)) &&
+		(finalizedCheckpoint.Epoch == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)) {
 		blocks[blockRoot] = header
 		return true
 	}

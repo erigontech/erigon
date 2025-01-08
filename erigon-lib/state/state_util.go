@@ -17,61 +17,10 @@
 package state
 
 import (
-	"context"
 	"encoding/binary"
-	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/recsplit"
-	"github.com/erigontech/erigon-lib/seg"
 )
-
-func buildSimpleMapAccessor(ctx context.Context, d *seg.Decompressor, compression seg.FileCompression, cfg recsplit.RecSplitArgs, logger log.Logger, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
-	count := d.Count()
-
-	defer d.EnableReadAhead().DisableReadAhead()
-
-	var rs *recsplit.RecSplit
-	var err error
-	cfg.KeyCount = count
-	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
-		return fmt.Errorf("create recsplit: %w", err)
-	}
-	defer rs.Close()
-	rs.LogLvl(log.LvlTrace)
-
-	for {
-		g := seg.NewReader(d.MakeGetter(), compression)
-		var i, offset, nextPos uint64
-		word := make([]byte, 0, 256)
-		for g.HasNext() {
-			word, nextPos = g.Next(word[:0])
-			if err := walker(rs, i, offset, word); err != nil {
-				return err
-			}
-			i++
-			offset = nextPos
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
-		if err = rs.Build(ctx); err != nil {
-			if rs.Collision() {
-				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-				rs.ResetNextSalt()
-			} else {
-				return fmt.Errorf("build idx: %w", err)
-			}
-		} else {
-			break
-		}
-	}
-	return nil
-}
 
 // SaveExecV3PruneProgress saves latest pruned key in given table to the database.
 // nil key also allowed and means that latest pruning run has been finished.

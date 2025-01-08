@@ -27,14 +27,9 @@ import (
 const maxLightClientsPerRequest = 100
 
 func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "light_client", rateLimits.lightClientLimit, 1); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		return err
-	}
 	lc := c.forkChoiceReader.NewestLightClientUpdate()
 	if lc == nil {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 	version := lc.AttestedHeader.Version()
 	// Read the fork digest
@@ -52,14 +47,9 @@ func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream)
 }
 
 func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "light_client", rateLimits.lightClientLimit, 1); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		return err
-	}
 	lc := c.forkChoiceReader.NewestLightClientUpdate()
 	if lc == nil {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
 	forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(lc.AttestedHeader.Version())))
@@ -82,15 +72,9 @@ func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error 
 		return err
 	}
 
-	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "light_client", rateLimits.lightClientLimit, 1); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		return err
-	}
-
 	lc, has := c.forkChoiceReader.GetLightClientBootstrap(root.Root)
 	if !has {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
 	forkDigest, err := c.ethClock.ComputeForkDigestForVersion(utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(lc.Header.Version())))
@@ -105,12 +89,6 @@ func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error 
 func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) error {
 	req := &cltypes.LightClientUpdatesByRangeRequest{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
-		return err
-	}
-
-	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "light_client", rateLimits.lightClientLimit, int(req.Count)); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
 

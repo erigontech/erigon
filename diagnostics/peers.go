@@ -80,7 +80,7 @@ func peers(diag *diaglib.DiagnosticClient) []*PeerResponse {
 			ENR:   "", //TODO: find a way how to get missing data
 			Enode: "",
 			ID:    key,
-			Name:  "",
+			Name:  value.PeerName,
 			Type:  value.PeerType,
 			Caps:  []string{},
 			Network: PeerNetworkInfo{

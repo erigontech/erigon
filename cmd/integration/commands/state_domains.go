@@ -105,7 +105,7 @@ var readDomains = &cobra.Command{
 		}
 		defer chainDb.Close()
 
-		stateDb, err := kv2.NewMDBX(log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
+		stateDb, err := kv2.New(kv.ChainDB, log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap(true).Open(ctx)
 		if err != nil {
 			return
 		}
@@ -121,7 +121,7 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	sn, bsn, agg, _ := allSnapshots(ctx, chainDb, logger)
+	sn, bsn, agg, _, _, _ := allSnapshots(ctx, chainDb, logger)
 	defer sn.Close()
 	defer bsn.Close()
 	defer agg.Close()
@@ -139,7 +139,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	defer agg.Close()
 
 	r := state.NewReaderV3(domains)
-	if err != nil && startTxNum != 0 {
+	if startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)
 	}
 	latestTx := domains.TxNum()
@@ -171,7 +171,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case "code":
 		for _, addr := range addrs {
-			code, err := r.ReadAccountCode(libcommon.BytesToAddress(addr), 0, libcommon.Hash{})
+			code, err := r.ReadAccountCode(libcommon.BytesToAddress(addr), 0)
 			if err != nil {
 				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue

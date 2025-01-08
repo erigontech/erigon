@@ -35,14 +35,13 @@ import (
 
 	ethereum "github.com/erigontech/erigon"
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/accounts/abi/bind"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -70,7 +69,7 @@ func TestSimulatedBackend(t *testing.T) {
 	code := `6060604052600a8060106000396000f360606040526008565b00`
 	var gas uint64 = 3000000
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var txn types.Transaction = types.NewContractCreation(0, u256.Num0, gas, u256.Num1, common.FromHex(code))
+	var txn types.Transaction = types.NewContractCreation(0, u256.Num0, gas, u256.Num1, libcommon.FromHex(code))
 	txn, _ = types.SignTx(txn, *signer, key)
 
 	err = sim.SendTransaction(context.Background(), txn)
@@ -90,7 +89,7 @@ func TestSimulatedBackend(t *testing.T) {
 	sim.Commit()
 	_, isPending, err = sim.TransactionByHash(context.Background(), txHash)
 	if err != nil {
-		t.Fatalf("error getting transaction with hash: %v", txHash.String())
+		t.Fatalf("error getting transaction with hash: %v %v", txHash.String(), err.Error())
 	}
 	if isPending {
 		t.Fatal("transaction should not have pending status")
@@ -138,7 +137,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 	if sim.m.ChainConfig != params.TestChainConfig {
 		t.Errorf("expected sim blockchain config to equal params.TestChainConfig, got %v", sim.m.ChainConfig)
 	}
-	tx, err1 := sim.DB().BeginRo(context.Background())
+	tx, err1 := sim.DB().BeginTemporalRo(context.Background())
 	if err1 != nil {
 		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)
 	}
@@ -153,7 +152,10 @@ func TestNewSimulatedBackend(t *testing.T) {
 	}
 
 	statedb := sim.stateByBlockNumber(tx, new(big.Int).SetUint64(num+1))
-	bal := statedb.GetBalance(testAddr)
+	bal, err := statedb.GetBalance(testAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
 	}
@@ -439,7 +441,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 	sim := NewSimulatedBackend(t, types.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether)}}, 10000000)
 
 	parsed, _ := abi.JSON(strings.NewReader(contractAbi))
-	contractAddr, _, _, _ := bind.DeployContract(opts, parsed, common.FromHex(contractBin), sim)
+	contractAddr, _, _, _ := bind.DeployContract(opts, parsed, libcommon.FromHex(contractBin), sim)
 	sim.Commit()
 
 	var cases = []struct {
@@ -905,7 +907,7 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
+	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
 	}
@@ -918,8 +920,8 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 		t.Errorf("did not get code for account that has contract code")
 	}
 	// ensure code received equals code deployed
-	if !bytes.Equal(code, common.FromHex(deployedCode)) {
-		t.Errorf("code received did not match expected deployed code:\n expected %v\n actual %v", common.FromHex(deployedCode), code)
+	if !bytes.Equal(code, libcommon.FromHex(deployedCode)) {
+		t.Errorf("code received did not match expected deployed code:\n expected %v\n actual %v", libcommon.FromHex(deployedCode), code)
 	}
 }
 
@@ -940,7 +942,7 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
+	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, libcommon.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
 	}
@@ -954,8 +956,8 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 		t.Errorf("did not get code for account that has contract code")
 	}
 	// ensure code received equals code deployed
-	if !bytes.Equal(code, common.FromHex(deployedCode)) {
-		t.Errorf("code received did not match expected deployed code:\n expected %v\n actual %v", common.FromHex(deployedCode), code)
+	if !bytes.Equal(code, libcommon.FromHex(deployedCode)) {
+		t.Errorf("code received did not match expected deployed code:\n expected %v\n actual %v", libcommon.FromHex(deployedCode), code)
 	}
 }
 
@@ -972,7 +974,7 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(abiBin), sim)
+	addr, _, _, err := bind.DeployContract(contractAuth, parsed, libcommon.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v", err)
 	}
@@ -1058,7 +1060,7 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
 	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
-	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(reverterBin), sim)
+	addr, _, _, err := bind.DeployContract(contractAuth, parsed, libcommon.FromHex(reverterBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v", err)
 	}

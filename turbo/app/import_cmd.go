@@ -37,15 +37,15 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/wrap"
 	"github.com/erigontech/erigon/consensus/merge"
-	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/erigontech/erigon/turbo/execution/eth1/eth1_chain_reader"
 	"github.com/erigontech/erigon/turbo/services"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/debug"
 	turboNode "github.com/erigontech/erigon/turbo/node"
 	"github.com/erigontech/erigon/turbo/stages"
@@ -82,7 +82,10 @@ func importChain(cliCtx *cli.Context) error {
 		return err
 	}
 
-	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx, logger)
+	nodeCfg, err := turboNode.NewNodConfigUrfave(cliCtx, logger)
+	if err != nil {
+		return err
+	}
 	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)

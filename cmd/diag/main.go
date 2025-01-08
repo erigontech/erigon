@@ -83,7 +83,7 @@ func main() {
 
 			var cancel context.CancelFunc
 
-			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger))
+			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger)) //nolint
 
 			go handleTerminationSignals(cancel, logger)
 

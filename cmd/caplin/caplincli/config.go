@@ -25,13 +25,13 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/common"
 )
 
 type CaplinCliCfg struct {
@@ -51,6 +51,7 @@ type CaplinCliCfg struct {
 	MevRelayUrl           string        `json:"mev_relay_url"`
 	CustomConfig          string        `json:"custom_config"`
 	CustomGenesisState    string        `json:"custom_genesis_state"`
+	MaxPeerCount          uint64        `json:"max_peer_count"`
 	JwtSecret             []byte
 
 	AllowedMethods   []string `json:"allowed_methods"`
@@ -73,6 +74,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
 	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
+	cfg.MaxPeerCount = ctx.Uint64(utils.CaplinMaxPeerCount.Name)
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Int(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
 	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)

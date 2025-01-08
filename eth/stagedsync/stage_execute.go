@@ -20,11 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/cmd/state/exec3"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/cmd/state/exec3"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -62,6 +64,7 @@ const (
 
 type headerDownloader interface {
 	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
+	POSSync() bool
 }
 
 type ExecuteBlockCfg struct {
@@ -84,9 +87,8 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm          *silkworm.Silkworm
-	blockProduction   bool
-	keepAllChangesets bool
+	silkworm        *silkworm.Silkworm
+	blockProduction bool
 
 	applyWorker, applyWorkerMining *exec3.Worker
 }
@@ -101,7 +103,6 @@ func StageExecuteBlocksCfg(
 	notifications *shards.Notifications,
 	stateStream bool,
 	badBlockHalt bool,
-	keepAllChangesets bool,
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
@@ -133,7 +134,6 @@ func StageExecuteBlocksCfg(
 		silkworm:          silkworm,
 		applyWorker:       exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, false),
 		applyWorkerMining: exec3.NewWorker(nil, log.Root(), context.Background(), false, db, nil, blockReader, chainConfig, genesis, nil, engine, dirs, true),
-		keepAllChangesets: keepAllChangesets,
 	}
 }
 
@@ -145,7 +145,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		workersCount = 1
 	}
 
-	prevStageProgress, err := senderStageProgress(txc.Tx, cfg.db)
+	prevStageProgress, err := stageProgress(txc.Tx, cfg.db, stages.Senders)
 	if err != nil {
 		return err
 	}
@@ -191,11 +191,13 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	t := time.Now()
 	var changeset *[kv.DomainLen][]libstate.DomainEntryDiff
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
-		currentHash, err := br.CanonicalHash(ctx, txc.Tx, currentBlock)
+		currentHash, ok, err := br.CanonicalHash(ctx, txc.Tx, currentBlock)
 		if err != nil {
 			return err
 		}
-		var ok bool
+		if !ok {
+			return fmt.Errorf("canonical hash not found %d", currentBlock)
+		}
 		var currentKeys [kv.DomainLen][]libstate.DomainEntryDiff
 		currentKeys, ok, err = domains.GetDiffset(txc.Tx, currentHash, currentBlock)
 		if !ok {
@@ -215,24 +217,21 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator, changeset); err != nil {
 		return fmt.Errorf("StateV3.Unwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
-	if err := rawdb.TruncateBorReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("truncate bor receipts: %w", err)
-	}
 	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
 	return nil
 }
 
-func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err error) {
+func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgress uint64, err error) {
 	if tx != nil {
-		prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+		prevStageProgress, err = stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return prevStageProgress, err
 		}
 	} else {
 		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			prevStageProgress, err = stages.GetStageProgress(tx, stages.Senders)
+			prevStageProgress, err = stages.GetStageProgress(tx, stage)
 			if err != nil {
 				return err
 			}
@@ -242,6 +241,10 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 		}
 	}
 	return prevStageProgress, nil
+}
+
+func BorHeimdallStageProgress(tx kv.Tx, cfg BorHeimdallCfg) (prevStageProgress uint64, err error) {
+	return stageProgress(tx, cfg.db, stages.BorHeimdall)
 }
 
 // ================ Erigon3 End ================
@@ -362,9 +365,12 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.notifications.Accumulator
 
-		hash, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, u.UnwindPoint)
+		hash, ok, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash not found %d", u.UnwindPoint)
 		}
 		txs, err := cfg.blockReader.RawTransactions(ctx, txc.Tx, u.UnwindPoint, s.BlockNumber)
 		if err != nil {
@@ -376,7 +382,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	return unwindExec3(u, s, txc, ctx, cfg.blockReader, accumulator, logger)
 }
 
-func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context) (err error) {
+func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -385,22 +391,30 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 		defer tx.Rollback()
 	}
-	if s.ForwardProgress > config3.MaxReorgDepthV3 && !cfg.keepAllChangesets {
+	if s.ForwardProgress > config3.MaxReorgDepthV3 && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000
+		pruneTimeout := 250 * time.Millisecond
 		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip *= 10
+			pruneDiffsLimitOnChainTip = math.MaxInt
+			pruneTimeout = time.Hour
 		}
-		if err := rawdb.PruneTable(tx, kv.ChangeSets3, s.ForwardProgress-config3.MaxReorgDepthV3, ctx, pruneDiffsLimitOnChainTip); err != nil {
+		if err := rawdb.PruneTable(
+			tx,
+			kv.ChangeSets3,
+			s.ForwardProgress-config3.MaxReorgDepthV3,
+			ctx,
+			pruneDiffsLimitOnChainTip,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
 			return err
 		}
 	}
 
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx) * 100)
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
 
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)

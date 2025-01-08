@@ -28,12 +28,11 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/u256"
+	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/accounts/abi/bind"
 	"github.com/erigontech/erigon/accounts/abi/bind/backends"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -79,7 +78,7 @@ func TestWaitDeployed(t *testing.T) {
 
 			// Create the transaction.
 			// Create the transaction.
-			var txn types.Transaction = types.NewContractCreation(0, u256.Num0, test.gas, u256.Num1, common.FromHex(test.code))
+			var txn types.Transaction = types.NewContractCreation(0, u256.Num0, test.gas, u256.Num1, libcommon.FromHex(test.code))
 			signer := types.MakeSigner(params.TestChainConfig, 1, 0)
 			txn, _ = types.SignTx(txn, *signer, testKey)
 
@@ -131,7 +130,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	// Create a transaction to an account.
 	code := "6060604052600a8060106000396000f360606040526008565b00"
 	signer := types.MakeSigner(params.TestChainConfig, 1, 0)
-	var txn types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("0x01"), u256.Num0, 3000000, u256.Num1, common.FromHex(code))
+	var txn types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("0x01"), u256.Num0, 3000000, u256.Num1, libcommon.FromHex(code))
 	txn, _ = types.SignTx(txn, *signer, testKey)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -145,7 +144,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	}
 
 	// Create a transaction that is not mined.
-	txn = types.NewContractCreation(1, u256.Num0, 3000000, u256.Num1, common.FromHex(code))
+	txn = types.NewContractCreation(1, u256.Num0, 3000000, u256.Num1, libcommon.FromHex(code))
 	txn, _ = types.SignTx(txn, *signer, testKey)
 
 	if err := backend.SendTransaction(ctx, txn); err != nil {

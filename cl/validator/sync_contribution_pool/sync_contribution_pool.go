@@ -37,7 +37,7 @@ type syncContributionKey struct {
 }
 
 type syncContributionPoolImpl struct {
-	// syncContributionPool is a map of sync contributions, indexed by slot, subcommittee index and block root.
+	// syncContributionPoolForBlocks is a map of sync contributions, indexed by slot, subcommittee index and block root.
 	syncContributionPoolForBlocks     map[syncContributionKey]*cltypes.Contribution // Used for block publishing.
 	syncContributionPoolForAggregates map[syncContributionKey]*cltypes.Contribution // Used for sync committee messages aggregation.
 	beaconCfg                         *clparams.BeaconChainConfig
@@ -227,8 +227,8 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 		for i := range contribution.AggregationBits {
 			for j := 0; j < 8; j++ {
 				bitIndex := i*8 + j
-				partecipated := utils.IsBitOn(contribution.AggregationBits, bitIndex)
-				if partecipated {
+				participated := utils.IsBitOn(contribution.AggregationBits, bitIndex)
+				if participated {
 					participantIndex := syncSubCommitteeSize*contribution.SubcommitteeIndex + uint64(bitIndex)
 					utils.FlipBitOn(aggregate.SyncCommiteeBits[:], int(participantIndex))
 				}

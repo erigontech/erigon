@@ -31,6 +31,7 @@ var (
 	BlockConsumerPreExecutionDelay   = metrics.NewSummary(`block_consumer_delay{type="pre_execution"}`)
 	BlockConsumerPostExecutionDelay  = metrics.NewSummary(`block_consumer_delay{type="post_execution"}`)
 	BlockProducerProductionDelay     = metrics.NewSummary(`block_producer_delay{type="production"}`)
+	ChainTipMgasPerSec               = metrics.NewGauge(`chain_tip_mgas_per_sec`)
 )
 
 func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {

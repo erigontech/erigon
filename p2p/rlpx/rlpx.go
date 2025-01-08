@@ -40,9 +40,9 @@ import (
 	"github.com/golang/snappy"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon/crypto"
-	"github.com/erigontech/erigon/crypto/ecies"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon-lib/crypto/ecies"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 // Conn is an RLPx network connection. It wraps a low-level network connection. The

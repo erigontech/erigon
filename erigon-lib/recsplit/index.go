@@ -30,6 +30,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -110,20 +111,26 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFilePath string) (id *Index, err error) {
-	defer func() {
-		// recover from panic if one occurred. Set err to nil if no panic
-		if r := recover(); r != nil {
-			// do r with only the stack trace
-			err = fmt.Errorf("incomplete file %s %v", indexFilePath, dbg.Stack())
-		}
-	}()
-
+func OpenIndex(indexFilePath string) (idx *Index, err error) {
+	var validationPassed = false
 	_, fName := filepath.Split(indexFilePath)
-	idx := &Index{
+	idx = &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
+
+	defer func() {
+		// recover from panic if one occurred. Set err to nil if no panic
+		if rec := recover(); rec != nil {
+			// do r with only the stack trace
+			err = fmt.Errorf("incomplete file: %s, %+v, trace: %s", indexFilePath, rec, dbg.Stack())
+		}
+		if err != nil || !validationPassed {
+			idx.Close()
+			idx = nil
+		}
+	}()
+
 	idx.f, err = os.Open(indexFilePath)
 	if err != nil {
 		return nil, err
@@ -224,6 +231,7 @@ func OpenIndex(indexFilePath string) (id *Index, err error) {
 			return NewIndexReader(idx)
 		},
 	}
+	validationPassed = true
 	return idx, nil
 }
 
@@ -241,7 +249,19 @@ func (idx *Index) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&idx.data[0])
 }
 
-func (idx *Index) Size() int64        { return idx.size }
+func (idx *Index) Size() int64 { return idx.size }
+func (idx *Index) Enums() bool { return idx.enums }
+func (idx *Index) Sizes() (total, offsets, ef, golombRice, existence, layer1 datasize.ByteSize) {
+	total = datasize.ByteSize(idx.size)
+	if idx.offsetEf != nil {
+		offsets = idx.offsetEf.Size()
+	}
+	ef = idx.ef.Size()
+	golombRice = datasize.ByteSize(len(idx.grData) * 8)
+	existence = datasize.ByteSize(len(idx.existence))
+	layer1 = total - offsets - golombRice - existence
+	return
+}
 func (idx *Index) ModTime() time.Time { return idx.modTime }
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
 func (idx *Index) FilePath() string   { return idx.filePath }
@@ -249,18 +269,16 @@ func (idx *Index) FileName() string   { return idx.fileName }
 func (idx *Index) IsOpen() bool       { return idx != nil && idx.f != nil }
 
 func (idx *Index) Close() {
-	if idx == nil {
+	if idx == nil || idx.f == nil {
 		return
 	}
-	if idx.f != nil {
-		if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
-		}
-		if err := idx.f.Close(); err != nil {
-			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
-		}
-		idx.f = nil
+	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
 	}
+	if err := idx.f.Close(); err != nil {
+		log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
+	}
+	idx.f = nil
 }
 
 func (idx *Index) skipBits(m uint16) int {
@@ -282,9 +300,9 @@ func (idx *Index) Empty() bool {
 	return idx.keyCount == 0
 }
 
-func (idx *Index) KeyCount() uint64 {
-	return idx.keyCount
-}
+func (idx *Index) KeyCount() uint64 { return idx.keyCount }
+func (idx *Index) LeafSize() uint16 { return idx.leafSize }
+func (idx *Index) BucketSize() int  { return idx.bucketSize }
 
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
@@ -348,6 +366,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	}
 	b := gr.ReadNext(idx.golombParam(m))
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
+
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask

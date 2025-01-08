@@ -16,6 +16,7 @@
 
 package funcmap
 
+/*
 import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
@@ -42,6 +43,11 @@ type Impl struct {
 	FnProcessDeposit              func(s abstract.BeaconState, deposit *cltypes.Deposit) error
 	FnProcessVoluntaryExit        func(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error
 	FnProcessBlsToExecutionChange func(state abstract.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error
+	FnFullValidate                func() bool
+}
+
+func (i Impl) FullValidate() bool {
+	return i.FnFullValidate()
 }
 
 func (i Impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
@@ -103,3 +109,4 @@ func (i Impl) ProcessBlsToExecutionChange(state abstract.BeaconState, signedChan
 func (i Impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 	return i.FnProcessSlots(s, slot)
 }
+*/

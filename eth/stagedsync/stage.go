@@ -70,7 +70,8 @@ type StageState struct {
 	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
-func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
+func (s *StageState) LogPrefix() string     { return s.state.LogPrefix() }
+func (s *StageState) SyncMode() stages.Mode { return s.state.mode }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
@@ -87,7 +88,7 @@ func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 }
 
 type UnwindReason struct {
-	// If we;re unwinding due to a fork - we want to unlink blocks but not mark
+	// If we're unwinding due to a fork - we want to unlink blocks but not mark
 	// them as bad - as they may get replayed then deselected
 	Block *libcommon.Hash
 	// If unwind is caused by a bad block, this error is not empty

@@ -29,7 +29,6 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -241,9 +240,7 @@ func (c *Compressor) Compress() error {
 		c.superstrings <- c.superstring
 	}
 	close(c.superstrings)
-	runtime.GC()
 	c.wg.Wait()
-	runtime.GC()
 
 	if c.lvl < log.LvlTrace {
 		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
@@ -910,7 +907,7 @@ func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) err
 			return err
 		}
 	}
-	if e != nil && !errors.Is(e, io.EOF) {
+	if !errors.Is(e, io.EOF) {
 		return e
 	}
 	return nil

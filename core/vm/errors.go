@@ -36,6 +36,7 @@ var (
 	ErrContractAddressCollision = errors.New("contract address collision")
 	ErrExecutionReverted        = errors.New("execution reverted")
 	ErrMaxCodeSizeExceeded      = errors.New("max code size exceeded")
+	ErrMaxInitCodeSizeExceeded  = errors.New("max initcode size exceeded")
 	ErrInvalidJump              = errors.New("invalid jump destination")
 	ErrWriteProtection          = errors.New("write protection")
 	ErrReturnDataOutOfBounds    = errors.New("return data out of bounds")
@@ -48,6 +49,10 @@ var (
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
 	errStopToken = errors.New("stop token")
+	//
+	// ErrIntraBlockStateFailed indicates a fatal error when processing IBS
+	// requests
+	ErrIntraBlockStateFailed = errors.New("ibs fatal error")
 )
 
 // ErrStackUnderflow wraps an evm error when the items on the stack less

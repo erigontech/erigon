@@ -427,6 +427,7 @@ func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap str
 	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
 		diagnostics.Send(diagnostics.PeerStatisticMsgUpdate{
+			PeerName: "TODO",
 			PeerType: "Sentinel",
 			PeerID:   peerID,
 			Inbound:  inbound,
