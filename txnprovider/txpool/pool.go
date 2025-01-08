@@ -1444,6 +1444,16 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		}
 	}
 
+	// Do not allow transaction from reserved authority
+	addr, ok := p.senders.getAddr(mt.TxnSlot.SenderID)
+	if !ok {
+		p.logger.Info("senderID not registered, discarding transaction for safety")
+		return txpoolcfg.InvalidSender
+	}
+	if _, ok := p.auths[addr]; ok {
+		return txpoolcfg.ErrAuthorityReserved
+	}
+
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
 
@@ -1479,6 +1489,18 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	if mt.TxnSlot.Type == BlobTxnType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t - uint64(len(mt.TxnSlot.BlobHashes)))
+	}
+	if mt.TxnSlot.Type == SetCodeTxnType {
+		numAuths := len(mt.TxnSlot.AuthRaw)
+		for i := range numAuths {
+			signature := mt.TxnSlot.Authorizations[i]
+			signer, err := types.RecoverSignerFromRLP(mt.TxnSlot.AuthRaw[i], uint8(signature.V.Uint64()), signature.R, signature.S)
+			if err != nil {
+				continue
+			}
+
+			delete(p.auths, *signer)
+		}
 	}
 }
 

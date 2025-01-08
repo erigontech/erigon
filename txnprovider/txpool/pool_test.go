@@ -197,6 +197,11 @@ func TestMultipleAuthorizations(t *testing.T) {
 		},
 	}
 
+	chainID := uint64(7078815900)
+	privateKey, err := crypto.GenerateKey()
+	assert.NoError(t, err)
+	authAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
+
 	var addr1, addr2 [20]byte
 	addr2[0] = 1
 	v := types2.EncodeAccountBytesV3(0, uint256.NewInt(1*common.Ether), make([]byte, 32), 1)
@@ -210,16 +215,16 @@ func TestMultipleAuthorizations(t *testing.T) {
 		Address: gointerfaces.ConvertAddressToH160(addr2),
 		Data:    v,
 	})
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(authAddress),
+		Data:    v,
+	})
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(t, err)
-
-	chainID := uint64(7078815900)
-	privateKey, err := crypto.GenerateKey()
-	assert.NoError(t, err)
-	authAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
 
 	// Generate auth data for transactions
 	var b [33]byte
@@ -251,6 +256,9 @@ func TestMultipleAuthorizations(t *testing.T) {
 	auth.R.Set(r)
 	auth.S.Set(s)
 
+	logger := log.New()
+
+	// txn with existing authorization should not be accepted
 	{
 		var txnSlots TxnSlots
 		txnSlot1 := &TxnSlot{
@@ -277,8 +285,6 @@ func TestMultipleAuthorizations(t *testing.T) {
 		txnSlot2.IDHash[0] = 2
 		txnSlots.Append(txnSlot2, addr2[:], true)
 
-		logger := log.New()
-
 		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
 
 		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
@@ -293,6 +299,85 @@ func TestMultipleAuthorizations(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Len(t, pool.auths, 0) // auth address should not be there after block has been mined
+	}
+
+	// fee bump
+	{
+		var txnSlots TxnSlots
+		txnSlot1 := &TxnSlot{
+			Tip:            *uint256.NewInt(300000),
+			FeeCap:         *uint256.NewInt(300000),
+			Gas:            100000,
+			Nonce:          1,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot1.IDHash[0] = 3
+		txnSlots.Append(txnSlot1, addr1[:], true)
+
+		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
+
+		txnSlots = TxnSlots{}
+		txnSlot2 := &TxnSlot{
+			Tip:            *uint256.NewInt(900000),
+			FeeCap:         *uint256.NewInt(900000),
+			Gas:            100000,
+			Nonce:          1,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot2.IDHash[0] = 4
+		txnSlots.Append(txnSlot2, addr1[:], true)
+
+		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
+		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
+		assert.Equal(t, pool.queued.Best().TxnSlot, txnSlot2)
+
+		err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{[]*TxnSlot{txnSlot1}, Addresses{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, []bool{true}})
+		assert.NoError(t, err)
+	}
+
+	// do not allow transactions from delegated addresses
+	{
+		var txnSlots TxnSlots
+		txnSlot1 := &TxnSlot{
+			Tip:            *uint256.NewInt(300000),
+			FeeCap:         *uint256.NewInt(300000),
+			Gas:            100000,
+			Nonce:          1,
+			Authorizations: []Signature{auth},
+			AuthRaw:        [][]byte{data.Bytes()},
+			Type:           SetCodeTxnType,
+		}
+		txnSlot1.IDHash[0] = 5
+		txnSlots.Append(txnSlot1, addr1[:], true)
+
+		assert.NoError(t, pool.senders.registerNewSenders(&txnSlots, logger))
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.Success})
+
+		txnSlots = TxnSlots{}
+		txnSlot2 := &TxnSlot{
+			Tip:    *uint256.NewInt(300000),
+			FeeCap: *uint256.NewInt(300000),
+			Gas:    100000,
+			Nonce:  1,
+			Type:   DynamicFeeTxnType,
+		}
+		txnSlot2.IDHash[0] = 6
+
+		txnSlots.Append(txnSlot2, authAddress.Bytes(), true)
+		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
+		assert.NoError(t, err)
+		assert.Equal(t, reasons, []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved})
 	}
 }
 
