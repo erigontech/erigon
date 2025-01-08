@@ -3,18 +3,19 @@ package appendables
 import (
 	"context"
 
+	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/kv"
 )
 
-type ValueProcessor interface {
-	Process(sourceKey VKType, value VVType) (data VVType, shouldSkip bool, err error)
+type ValueTransformer interface {
+	Transform(sourceKey VKType, value VVType) (data VVType, shouldSkip bool, err error)
 }
 
 type BaseFreezer struct {
-	gen SourceKeyGenerator
-	//fet  ValueFetcher
-	proc ValueProcessor
-	coll Collector
+	gen     SourceKeyGenerator
+	proc    ValueTransformer
+	coll    Collector
+	valsTbl string
 }
 
 // what does this do?
@@ -26,15 +27,13 @@ func (sf *BaseFreezer) Freeze(ctx context.Context, stepKeyFrom, stepKeyTo uint64
 			return 0, err
 		}
 
-		value, shouldSkip, _, err := sf.fet.GetValues(key, tx)
+		key_bytes := hexutility.EncodeTs(uint64(key)) // check assumption: key_bytes is always big endian of uint64 key
+		value, err := tx.GetOne(sf.valsTbl, key_bytes)
 		if err != nil {
 			return 0, err
 		}
-		if shouldSkip {
-			continue
-		}
 
-		data, shouldSkip, err := sf.proc.Process(key, value)
+		data, shouldSkip, err := sf.proc.Transform(key, value)
 
 		if err != nil {
 			return 0, err
@@ -58,10 +57,6 @@ func (sf *BaseFreezer) SetSourceKeyGenerator(gen SourceKeyGenerator) {
 	sf.gen = gen
 }
 
-// func (sf *BaseFreezer) SetValueFetcher(fet ValueFetcher) {
-// 	sf.fet = fet
-// }
-
-func (sf *BaseFreezer) SetValueProcessor(proc ValueProcessor) {
+func (sf *BaseFreezer) SetValueProcessor(proc ValueTransformer) {
 	sf.proc = proc
 }

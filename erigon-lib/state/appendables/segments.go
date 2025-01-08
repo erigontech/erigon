@@ -23,3 +23,25 @@ type VisibleSegment struct {
 }
 
 type VisibleSegments []VisibleSegment
+
+func (v *VisibleSegment) Get(tsNum uint64) ([]byte, error) {
+	idxSlot := v.indexes[0]
+
+	if idxSlot == nil {
+		return nil, nil
+	}
+	offset := idxSlot.OrdinalLookup(tsNum - idxSlot.BaseDataID())
+
+	gg := v.Decompressor.MakeGetter()
+	gg.Reset(offset)
+	if !gg.HasNext() {
+		return nil, nil
+	}
+	var buf []byte
+	buf, _ = gg.Next(buf)
+	if len(buf) == 0 {
+		return nil, nil
+	}
+
+	return buf, nil
+}

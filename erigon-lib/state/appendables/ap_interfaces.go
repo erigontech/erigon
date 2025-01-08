@@ -14,18 +14,18 @@ type CanFreeze interface {
 	Evaluate(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (bool, error)
 }
 
-type VKType []byte // value table key type
+type VKType uint64 // value table key type
 type VVType []byte // value table value type
 
+// we now think of appendable as simply a mapping from incremental tsIds to entity-value.
+// no forkId.
+// also unwind does remove data, so valsTbl only stores canonical values.
+// this means blocks/headers/txs; caplin blocks/blobs are not supported
 type Appendable interface {
-	// SetSourceKeyGenerator(gen SourceKeyGenerator[SKey])
-	// SetValueFetcher(fet ValueFetcher[SKey, SVal])
-	// SetValuePutter(put ValuePutter[SVal])
-
+	SetSourceKeyGenerator(gen SourceKeyGenerator)
 	SetFreezer(freezer Freezer)
 	SetIndexBuilders(ib []AccessorIndexBuilder)
 	SetCanFreeze(canFreeze CanFreeze)
-	// GetRoSnapshots() *RoSnapshots
 
 	// freeze
 	BuildFiles(ctx context.Context, stepKeyFrom, stepKeyTo uint64, db kv.RoDB, ps *background.ProgressSet) error
@@ -34,14 +34,13 @@ type Appendable interface {
 	// BuildFiles(ctx context.Context, step uint64, coll AppendableCollation, ps *background.ProgressSet) (AppendableFiles, error)
 	BuildMissedIndexes(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet)
 
-	Prune(ctx context.Context, limit uint64, rwTx kv.RwTx) error
-	Unwind(ctx context.Context, stepKeyFrom uint64, rwTx kv.RwTx) // stepKey or tsId/tsNum
+	Prune(ctx context.Context, stepKeyTo, limit uint64, rwTx kv.RwTx) error // prune 0 to stepKeyTo
+	Unwind(ctx context.Context, stepKeyFrom uint64, rwTx kv.RwTx) error     // stepKey or tsId/tsNum -- stepKey with SourceKeyGenerator is fine.
 
 	// queries and put
 	Get(tsNum uint64, roTx kv.Tx) (VVType, error)
-	NCGet(tsId uint64, forkId []byte, roTx kv.Tx) (VVType, error)
-
-	Put(tsId uint64, forkId []byte, value VVType, rwTx kv.RwTx) error
+	//NCGet(tsId uint64, forkId []byte, roTx kv.Tx) (VVType, error)
+	Put(tsNum uint64, value VVType, rwTx kv.RwTx) error
 }
 
 type Collector func(values []byte) error
@@ -55,12 +54,4 @@ type Freezer interface {
 	// to ensure this.
 	Freeze(ctx context.Context, stepKeyFrom uint64, stepKeyTo uint64, tx kv.Tx) (lastKeyValue uint64, err error)
 	SetCollector(coll Collector)
-}
-
-type SnapshotConfig struct {
-	StepSize         uint64 // range width (#stepKeys) of snapshot file i.e. #stepKeys per step
-	LeaveStepKeyInDb uint64 // number of element to leave in db
-	// note that both of these are in terms of the "step key" rather than tsNum.
-	// e.g. for txs, we decide to leave x number of blocks in db, and as a result,
-	// the transactions of those x blocks will also be left in db.
 }

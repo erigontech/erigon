@@ -13,6 +13,10 @@ import (
 	"github.com/erigontech/erigon-lib/seg"
 )
 
+// interfaces defined here (with the exception of IndexBuilder) are not required to be implemented by
+// appendables. These are just helpers when SimpleAccessorBuilder is used or provides some structure
+// to build more custom indexes.
+
 type IndexInputDataQuery interface {
 	GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] // (word/value, index, offset)
 	GetBaseDataId() uint64
@@ -26,10 +30,6 @@ type IndexKeyFactory interface {
 
 type IndexBuilder[IndexType any] interface {
 	Build(ctx context.Context, stepKeyFrom, stepKeyTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (IndexType, error)
-	// GetIdentifier() string // unique identifier for this index
-	// GetInputDataQuery(stepKeyFrom, stepKeyTo uint64) IndexInputDataQuery
-	// GetIndexKeyFactory() IndexKeyFactory
-	// GetIndexPath(stepKeyFrom, stepKeyTo uint64) string // can be removed if not in Build()
 }
 
 type AccessorIndexBuilder interface {
@@ -54,7 +54,10 @@ func NewAccessorArgs(enums, lessFalsePositives, nofsync bool, salt uint32) *Acce
 }
 
 // simple accessor index
-
+// goes through all (value, index) in decompressor
+// creates a recsplit index with
+// index.key = kf(value, index)
+// and index.value = offset
 type SimpleAccessorBuilder struct {
 	args        *AccessorArgs
 	idxBaseName string
@@ -77,10 +80,9 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 
 func (s *SimpleAccessorBuilder) GetInputDataQuery(stepKeyFrom, stepKeyTo uint64) *DecompressorIndexInputDataQuery {
 	// just segname?
-
 	sgname := AppeSegName(s.enum, 1, stepKeyFrom, stepKeyTo)
 	decomp, _ := seg.NewDecompressor(sgname)
-	return &DecompressorIndexInputDataQuery{decomp: decomp, from: stepKeyFrom}
+	return &DecompressorIndexInputDataQuery{decomp: decomp}
 }
 
 func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
@@ -90,12 +92,6 @@ func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
 func (s *SimpleAccessorBuilder) Build(ctx context.Context, stepFrom, stepTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
 	iidq := s.GetInputDataQuery(stepFrom, stepTo)
 	idxFile := AppeIdxName(1, stepFrom, stepTo, s.idxBaseName)
-
-	// enums              bool
-	// lessFalsePositives bool
-	// salt               bool
-	// nofsync            bool
-
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:           int(iidq.GetCount()),
 		Enums:              true,
@@ -144,18 +140,22 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, stepFrom, stepTo uint
 
 }
 
+// taken from silkworm...
 type DecompressorIndexInputDataQuery struct {
 	decomp *seg.Decompressor
-	from   uint64
 }
 
+// return trio: word, index, offset,
 func (d *DecompressorIndexInputDataQuery) GetStream(ctx context.Context) stream.Trio[[]byte, uint64, uint64] {
 	// open seg if not yet
 	return &seg_stream{ctx: ctx, g: d.decomp.MakeGetter(), word: make([]byte, 0, 4096)}
 }
 
 func (d *DecompressorIndexInputDataQuery) GetBaseDataId() uint64 {
-	return d.from
+	// discuss with alex: adding base data id to snapshotfile?
+	// or might need to add callback to get first basedataid...
+	return 0
+	//return d.from
 }
 
 func (d *DecompressorIndexInputDataQuery) GetCount() uint64 {
@@ -169,7 +169,7 @@ type seg_stream struct {
 	word      []byte
 }
 
-func (s *seg_stream) Next() ([]byte, uint64, uint64, error) {
+func (s *seg_stream) Next() (word []byte, index uint64, offset uint64, err error) {
 	// check if ctx is done...
 	if s.g.HasNext() {
 		word, nextPos := s.g.Next(s.word[:0])
@@ -198,7 +198,7 @@ func NewNoopIndexKeyFactory() IndexKeyFactory {
 	return &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
 }
 
-func (n *SimpleIndexKeyFactory) Make(value []byte, index uint64) []byte {
+func (n *SimpleIndexKeyFactory) Make(_ []byte, index uint64) []byte {
 	nm := binary.PutUvarint(n.num, index)
 	return n.num[:nm]
 }

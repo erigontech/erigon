@@ -2,6 +2,7 @@ package appendables
 
 import (
 	"context"
+	"encoding/binary"
 
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/kv"
@@ -15,14 +16,9 @@ import (
 
 // this generates keys for valsTable.
 type SourceKeyGenerator interface {
-	// this is needed in freezing, for which the input is stepKey
+	// this is needed in unwind, for which the input is stepKey
+	// this can also be used by Freezer
 	FromStepKey(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) stream.Uno[VKType]
-
-	// for canonical get
-	FromTsNum(tsNum uint64, tx kv.Tx) VKType
-
-	// for non-canonical get
-	FromTsId(tsId uint64, forkId []byte, tx kv.Tx) VKType
 }
 
 // type ValueFetcher interface {
@@ -56,8 +52,10 @@ type BaseAppendable struct {
 	_visible   []VisibleSegment
 
 	// config stuff
-	doesUnwind bool
-	stepSize   uint64
+	doesUnwind             bool
+	stepSize               uint64
+	stepKeySameAsTsNum     bool
+	hasCustomIndexBuilders bool // use
 }
 
 func NewBaseAppendable(enum ApEnum, valsTbl string) *BaseAppendable {
@@ -70,41 +68,36 @@ func NewBaseAppendable(enum ApEnum, valsTbl string) *BaseAppendable {
 
 // setters
 
+func (ap *BaseAppendable) getLastTsNumInSnapshot() uint64 {
+	last := ap._visible[len(ap._visible)-1].indexes[0]
+	return last.BaseDataID() + last.KeyCount() - 1
+}
+
 func (ap *BaseAppendable) Get(tsNum uint64, tx kv.Tx) (VVType, error) {
-	vkey := ap.gen.FromTsNum(tsNum, tx)
-	return tx.GetOne(ap.valsTbl, vkey)
-	// val, _, found, err := ap.fet.GetValues(vkey, tx)
-
-	// // var ba2 Appendable
-	// // ba2 = &BaseAppendable{}
-
-	// //_, _ = ba.UnbuiltStepsTill(tsNum)
-	// return val, found, err
-}
-
-// ideally only db search
-func (ap *BaseAppendable) NCGet(tsId uint64, forkId []byte, tx kv.Tx) (VVType, error) {
-	vkey := ap.gen.FromTsId(tsId, forkId, tx)
-	return tx.GetOne(ap.valsTbl, vkey)
-}
-
-func (ap *BaseAppendable) Put(tsId uint64, forkId []byte, value VVType, tx kv.RwTx) error {
-	vkey := ap.gen.FromTsId(tsId, forkId, tx)
-	if len(forkId) == 0 { // incremental assumed
-		return tx.Append(ap.valsTbl, vkey, value)
+	// first look into snapshots..
+	lastTsNum := ap.getLastTsNumInSnapshot()
+	if tsNum <= lastTsNum {
+		if ap.stepKeySameAsTsNum {
+			// can do binary search or loop over visible segments and find which segment contains tsNum
+			// and then get from there
+			var v *VisibleSegment
+			return v.Get(tsNum)
+		} else {
+			// loop over all visible segments and find which segment contains tsNum
+		}
 	}
-	return tx.Put(ap.valsTbl, vkey, value)
+
+	// then db
+	key := make([]byte, 8)
+	binary.BigEndian.PutUint64(key, tsNum)
+	return tx.GetOne(ap.valsTbl, key)
 }
 
-// func (ap *BaseAppendable) UnbuiltStepsTill(stepKeyTo uint64) (startStep, endStep uint64) {
-// 	// this method should actually reside in rosnapshots
-// 	// with the caveat that stepKeyTo sent has considered the leaveInDb info
-// 	startStep, _ = ap.rosnapshot.LastStepInSnapshot(ap.enum)
-// 	startStep++
-// 	config := ap.rosnapshot.GetSnapshotConfig(ap.enum)
-// 	endStep = startStep + (1+stepKeyTo-startStep*config.StepSize)/config.StepSize
-// 	return
-// }
+func (ap *BaseAppendable) Put(tsNum uint64, value VVType, tx kv.RwTx) error {
+	key := make([]byte, 8)
+	binary.BigEndian.PutUint64(key, tsNum)
+	return tx.Append(ap.valsTbl, key, value)
+}
 
 // it takes `stepKeyFrom` because "snapshots retire" command takes arbitrary stepKeyFrom...
 // If we don't want this command...stepKeyFrom can be removed, and assumed to be lastFrozen stepKey in func.
@@ -188,8 +181,33 @@ func (ap *BaseAppendable) BuildFiles(ctx context.Context, stepKeyFrom, stepKeyTo
 	return nil
 }
 
-func (ap *BaseAppendable) BuildMissedIndexes(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+func (ap *BaseAppendable) getBaseDataId(stepKeyFrom uint64, tx kv.Tx) (VKType, error) {
+	// can_stream := ap.gen.FromStepKey(stepKeyFrom, stepKeyFrom+1, tx)
+	// if !can_stream.HasNext() {
+	// 	return 0, nil
+	// }
+	// key, err := can_stream.Next()
+	// if err != nil {
+	// 	return 0, err
+	// }
+	// return key, nil
 
+	// the above doesn't work because:
+	// 1. freezing might skip certain keys, so first key in stream might not be the first key in the snapshot
+	// 2. gen.FromStepKey() might rely on db, which might be pruned.
+
+	// Discuss with Alex:
+	// the best option is to have baseDataId stored in the snapshot (change in snapshot format); and be retrievable from there.
+	// this is fine. Because the freezer knows the first key to go in snapshot (see BaseFreezer.Freeze()), and so
+	// can report that.
+	// snapshot store firstKey as []byte (can't be uint64 generally, because snapshots like blocks have key as blockNum+hash, so 
+	// it can't be uint64 generally in compressor/decompressor/getter interfaces. So byte is fine.).
+	return 0, nil
+}
+
+func (ap *BaseAppendable) BuildMissedIndexes(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+	// use indexbuilders
+	// caller must "refresh" like OpenFolder to refresh the dirty files
 }
 
 func (ap *BaseAppendable) Prune(ctx context.Context, stepKeyTo, limit uint64, rwTx kv.RwTx) error {
@@ -248,14 +266,6 @@ func (ap *BaseAppendable) SetFreezer(freezer Freezer) {
 func (ap *BaseAppendable) SetSourceKeyGenerator(gen SourceKeyGenerator) {
 	ap.gen = gen
 }
-
-// func (ap *BaseAppendable) SetValueFetcher(fet ValueFetcher) {
-// 	ap.fet = fet
-// }
-
-// func (ap *BaseAppendable) SetValuePutter(put ValuePutter) {
-// 	ap.put = put
-// }
 
 func (ap *BaseAppendable) SetCanFreeze(canFreeze CanFreeze) {
 	ap.canFreeze = canFreeze
