@@ -32,7 +32,7 @@ func TestExecutionSpec(t *testing.T) {
 	bt := new(testMatcher)
 	bt.skipLoad(`^`)
 
-	dir := filepath.Join(".", "execution-spec-tests",)
+	dir := filepath.Join(".", "execution-spec-tests")
 	bt.skipLoad(`^prague/eip2935_historical_block_hashes_from_state/block_hashes/block_hashes_history.json`)
 	// bt.skipLoad(`^cancun`)
 	checkStateRoot := true

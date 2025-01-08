@@ -68,7 +68,7 @@ type txJSON struct {
 }
 
 type JsonAuthorization struct {
-	ChainID hexutil.Big    `json:"chainId"`
+	ChainID hexutil.Big       `json:"chainId"`
 	Address libcommon.Address `json:"address"`
 	Nonce   hexutil.Uint64    `json:"nonce"`
 	V       hexutil.Uint64    `json:"v"`

@@ -380,7 +380,7 @@ func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if codeSize == types.DelegateDesignationCodeSize  {
+	if codeSize == types.DelegateDesignationCodeSize {
 		_, ok, err := interpreter.evm.IntraBlockState().GetDelegatedDesignation(addr)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
