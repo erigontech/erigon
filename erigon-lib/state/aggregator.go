@@ -126,141 +126,14 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 	}
 }
 
-var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
-
-func init() {
-	if dbgCommBtIndex {
-		cfg := Schema[kv.CommitmentDomain]
-		cfg.IndexList = AccessorBTree | AccessorExistence
-		Schema[kv.CommitmentDomain] = cfg
-	}
-}
-
-var Schema = map[kv.Domain]domainCfg{
-	kv.AccountsDomain: {
-		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
-
-		IndexList:            AccessorBTree | AccessorExistence,
-		crossDomainIntegrity: domainIntegrityCheck,
-		compression:          seg.CompressNone,
-		compressCfg:          DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblAccountHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-			filenameBase:       kv.AccountsDomain.String(), //TODO: looks redundant
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.AccountsDomain.String(), //TODO: looks redundant
-			},
-		},
-	},
-	kv.StorageDomain: {
-		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
-
-		IndexList:   AccessorBTree | AccessorExistence,
-		compression: seg.CompressKeys,
-		compressCfg: DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblStorageHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-			filenameBase:       kv.StorageDomain.String(),
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.StorageDomain.String(),
-			},
-		},
-	},
-	kv.CodeDomain: {
-		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-
-		IndexList:   AccessorBTree | AccessorExistence,
-		compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
-		compressCfg: DomainCompressCfg,
-		largeValues: true,
-
-		hist: histCfg{
-			valuesTable: kv.TblCodeHistoryVals,
-			compression: seg.CompressKeys | seg.CompressVals,
-
-			historyLargeValues: true,
-			filenameBase:       kv.CodeDomain.String(),
-
-			iiCfg: iiCfg{
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
-				filenameBase: kv.CodeDomain.String(),
-			},
-		},
-	},
-	kv.CommitmentDomain: {
-		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
-
-		IndexList:   AccessorHashMap,
-		compression: seg.CompressKeys,
-		compressCfg: DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone,
-
-			snapshotsDisabled:  true,
-			historyLargeValues: false,
-			filenameBase:       kv.CommitmentDomain.String(),
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.CommitmentDomain.String(),
-			},
-		},
-	},
-	kv.ReceiptDomain: {
-		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
-
-		IndexList:   AccessorBTree | AccessorExistence,
-		compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		compressCfg: DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblReceiptHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-			filenameBase:       kv.ReceiptDomain.String(),
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.ReceiptDomain.String(),
-			},
-		},
-	},
-}
-
 func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	tmpdir := dirs.Tmp
-	salt, err := getStateIndicesSalt(dirs.Snap)
-	if err != nil {
-		return nil, err
-	}
-
 	ctx, ctxCancel := context.WithCancel(ctx)
-	a := &Aggregator{
+	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
 		onFreeze:               func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		tmpdir:                 tmpdir,
+		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -272,39 +145,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 
 		produce: true,
-	}
-
-	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.StorageDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.CodeDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
-		return nil, err
-	}
-	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
-	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
-
-	return a, nil
+	}, nil
 }
 
 // getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
