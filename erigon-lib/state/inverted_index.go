@@ -77,7 +77,6 @@ type InvertedIndex struct {
 type iiCfg struct {
 	salt *uint32
 	dirs datadir.Dirs
-	db   kv.RoDB // global db pointer. mostly for background warmup.
 
 	filenameBase    string // filename base for all files of this inverted index
 	aggregationStep uint64 // amount of transactions inside single aggregation step
@@ -90,7 +89,7 @@ type iiCfg struct {
 
 	// external checker for integrity of inverted index ranges
 	integrity rangeIntegrityChecker
-	indexList idxList
+	indexList Accessors
 }
 
 type iiVisible struct {
@@ -101,12 +100,18 @@ type iiVisible struct {
 
 func NewInvertedIndex(cfg iiCfg, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
-		panic("empty `dirs` varialbe")
+		panic("assert: empty `dirs`")
+	}
+	if cfg.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if cfg.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
 	}
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.compressorCfg = seg.DefaultCfg
 	if cfg.indexList == 0 {
-		cfg.indexList = withHashMap
+		cfg.indexList = AccessorHashMap
 	}
 
 	ii := InvertedIndex{
@@ -177,6 +182,12 @@ func (ii *InvertedIndex) openFolder() error {
 }
 
 func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
+	if ii.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if ii.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
+	}
 	for _, dirtyFile := range scanDirtyFiles(fileNames, ii.aggregationStep, ii.filenameBase, "ef", ii.logger) {
 		startStep, endStep := dirtyFile.startTxNum/ii.aggregationStep, dirtyFile.endTxNum/ii.aggregationStep
 		if ii.integrity != nil && !ii.integrity(startStep, endStep) {
@@ -189,12 +200,14 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 }
 
-type idxList int
+type Accessors int
 
-var (
-	withBTree     idxList = 0b1
-	withHashMap   idxList = 0b10
-	withExistence idxList = 0b100
+func (l Accessors) Has(target Accessors) bool { return l&target != 0 }
+
+const (
+	AccessorBTree     Accessors = 0b1
+	AccessorHashMap   Accessors = 0b10
+	AccessorExistence Accessors = 0b100
 )
 
 func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
@@ -1189,8 +1202,8 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Enums:              true,
 		LessFalsePositives: true,
 
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     ii.dirs.Tmp,
 		IndexFile:  idxPath,
 		Salt:       ii.salt,

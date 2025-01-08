@@ -300,11 +300,16 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 
-	// make a simple copy to the current head state
-	baseState, err := a.forkchoiceStore.GetStateAtBlockRoot(
-		baseBlockRoot,
-		true,
-	) // we start the block production from this state
+	var baseState *state.CachingBeaconState
+	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		baseState, err = headState.Copy()
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	if err != nil {
 		return nil, err
@@ -1177,7 +1182,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 
-	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, true, false); err != nil {
 		return err
 	}
 	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().Root

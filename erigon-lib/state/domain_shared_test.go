@@ -320,6 +320,8 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 		ac = agg.BeginFilesRo()
 		defer ac.Close()
+		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains...)))
+
 		rwTx, err = db.BeginRw(ctx)
 		require.NoError(err)
 		defer rwTx.Rollback()
@@ -459,11 +461,10 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	ac.Close()
 	ac = agg.BeginFilesRo()
 
-	//err = db.Update(ctx, func(tx kv.RwTx) error {
-	//	_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
-	//	return err
-	//})
-	_, err = ac.PruneSmallBatchesDb(ctx, 1*time.Minute, db)
+	err = db.Update(ctx, func(tx kv.RwTx) error {
+		_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
+		return err
+	})
 	require.NoError(t, err)
 
 	ac.Close()
