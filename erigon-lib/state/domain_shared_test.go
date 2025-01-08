@@ -461,11 +461,10 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	ac.Close()
 	ac = agg.BeginFilesRo()
 
-	//err = db.Update(ctx, func(tx kv.RwTx) error {
-	//	_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
-	//	return err
-	//})
-	_, err = ac.PruneSmallBatchesDb(ctx, 1*time.Minute, db)
+	err = db.Update(ctx, func(tx kv.RwTx) error {
+		_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
+		return err
+	})
 	require.NoError(t, err)
 
 	ac.Close()
