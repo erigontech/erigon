@@ -42,7 +42,7 @@ func TestDecryptionKeysValidator(t *testing.T) {
 			msg, err := shutterproto.UnmarshallDecryptionKeys(tc.msg.Data)
 			require.NoError(t, err)
 
-			validator := NewDecryptionKeysValidator(testInstanceId)
+			validator := NewDecryptionKeysValidator(MockInstanceId)
 			haveErr := validator.Validate(msg)
 			require.ErrorIs(t, haveErr, tc.wantErr)
 		})
@@ -62,94 +62,152 @@ func TestDecryptionKeysP2pValidatorEx(t *testing.T) {
 			logHandler := &collectingLogHandler{handler: logger.GetHandler()}
 			logger.SetHandler(logHandler)
 
-			validator := NewDecryptionKeysP2pValidatorEx(logger, testInstanceId)
+			validator := NewDecryptionKeysP2pValidatorEx(logger, MockInstanceId)
 			haveValidationResult := validator(ctx, "peer1", tc.msg)
 			require.Equal(t, tc.wantValidationResult, haveValidationResult)
-			require.True(t, logHandler.Contains(tc.wantValidationLogMsg))
+			require.True(t, logHandler.ContainsAll(tc.wantValidationLogMsgs))
 		})
 	}
 }
 
-const testInstanceId = 123
-
 type decryptionKeysValidationTestCase struct {
-	name                 string
-	msg                  *pubsub.Message
-	wantErr              error
-	wantValidationResult pubsub.ValidationResult
-	wantValidationLogMsg string
+	name                  string
+	msg                   *pubsub.Message
+	wantErr               error
+	wantValidationResult  pubsub.ValidationResult
+	wantValidationLogMsgs []string
 }
 
 func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTestCase {
 	return []decryptionKeysValidationTestCase{
-		instanceIdMismatchTestCase(t),
+		{
+			name: "instance id mismatch",
+			msg: MockDecryptionKeysMessage(t, DecryptionKeysMessageOptions{
+				InstanceIdOverride: 999999,
+			}),
+			wantErr:              ErrInstanceIdMismatch,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to data validation error",
+				"instance id mismatch: 999999",
+			},
+		},
 	}
 }
 
 func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidationTestCase {
-	tcs := decryptionKeysValidatorTestCases(t)
-	tcs = append(tcs, invalidEnvelopeVersionTestCase(t))
-	tcs = append(tcs, invalidMsgBytesTestCase())
-	return tcs
-}
-
-func instanceIdMismatchTestCase(t *testing.T) decryptionKeysValidationTestCase {
-	decryptionKeys, err := anypb.New(&shutterproto.DecryptionKeys{InstanceId: 999999})
-	require.NoError(t, err)
-	envelopeBytes, err := proto.Marshal(&shutterproto.Envelope{
-		Version: shutterproto.EnvelopeVersion,
-		Message: decryptionKeys,
-	})
-	require.NoError(t, err)
-	topic := DecryptionKeysTopic
-	return decryptionKeysValidationTestCase{
-		name: "instance id mismatch",
-		msg: &pubsub.Message{
-			Message: &pb.Message{
-				Data:  envelopeBytes,
-				Topic: &topic,
+	return append(
+		[]decryptionKeysValidationTestCase{
+			{
+				name: "invalid envelope version",
+				msg: MockDecryptionKeysMessage(t, DecryptionKeysMessageOptions{
+					VersionOverride: "XXX",
+				}),
+				wantErr:              shutterproto.ErrEnveloperVersionMismatch,
+				wantValidationResult: pubsub.ValidationReject,
+				wantValidationLogMsgs: []string{
+					"rejecting decryption keys msg due to unmarshalling error",
+					"envelope version mismatch: XXX",
+				},
+			},
+			{
+				name: "invalid message bytes",
+				msg: MockDecryptionKeysMessage(t, DecryptionKeysMessageOptions{
+					EnvelopeBytesOverride: []byte("invalid"),
+				}),
+				wantValidationResult: pubsub.ValidationReject,
+				wantValidationLogMsgs: []string{
+					"rejecting decryption keys msg due to unmarshalling error",
+					"cannot parse invalid wire-format data",
+				},
 			},
 		},
-		wantErr:              ErrInstanceIdMismatch,
-		wantValidationResult: pubsub.ValidationReject,
-		wantValidationLogMsg: "rejecting decryption keys msg due to data validation error err=\"instance id mismatch: 999999\"",
+		decryptionKeysValidatorTestCases(t)...,
+	)
+}
+
+const MockInstanceId = 123
+
+type DecryptionKeysMessageOptions struct {
+	Eon                   uint64
+	Keys                  [][]byte
+	IdentityPreimages     [][]byte
+	NilExtra              bool
+	Slot                  uint64
+	TxPointer             uint64
+	SignerIndices         []uint64
+	Signatures            [][]byte
+	InstanceIdOverride    uint64
+	VersionOverride       string
+	TopicOverride         string
+	EnvelopeBytesOverride []byte
+}
+
+func MockDecryptionKeysMessage(t *testing.T, opts DecryptionKeysMessageOptions) *pubsub.Message {
+	var instanceId uint64
+	if opts.InstanceIdOverride != 0 {
+		instanceId = opts.InstanceIdOverride
+	} else {
+		instanceId = MockInstanceId
 	}
-}
 
-func invalidEnvelopeVersionTestCase(t *testing.T) decryptionKeysValidationTestCase {
-	decryptionKeys, err := anypb.New(&shutterproto.DecryptionKeys{InstanceId: testInstanceId})
-	require.NoError(t, err)
-	envelopeBytes, err := proto.Marshal(&shutterproto.Envelope{
-		Version: "invalid envelope version",
-		Message: decryptionKeys,
-	})
-	require.NoError(t, err)
-	topic := DecryptionKeysTopic
-	return decryptionKeysValidationTestCase{
-		name: "invalid envelope version",
-		msg: &pubsub.Message{
-			Message: &pb.Message{
-				Data:  envelopeBytes,
-				Topic: &topic,
-			},
-		},
-		wantValidationResult: pubsub.ValidationReject,
-		wantValidationLogMsg: "rejecting decryption keys msg due to unmarshalling error err=\"envelope version mismatch: invalid envelope version\"",
+	decryptionKeys := &shutterproto.DecryptionKeys{
+		InstanceId: instanceId,
+		Eon:        opts.Eon,
 	}
-}
 
-func invalidMsgBytesTestCase() decryptionKeysValidationTestCase {
-	topic := DecryptionKeysTopic
-	return decryptionKeysValidationTestCase{
-		name: "invalid message bytes",
-		msg: &pubsub.Message{
-			Message: &pb.Message{
-				Data:  []byte("invalid"),
-				Topic: &topic,
+	require.Equal(t, len(opts.Keys), len(opts.IdentityPreimages))
+	for i := range opts.Keys {
+		decryptionKeys.Keys = append(decryptionKeys.Keys, &shutterproto.Key{
+			Key:              opts.Keys[i],
+			IdentityPreimage: opts.IdentityPreimages[i],
+		})
+	}
+
+	if !opts.NilExtra {
+		decryptionKeys.Extra = &shutterproto.DecryptionKeys_Gnosis{
+			Gnosis: &shutterproto.GnosisDecryptionKeysExtra{
+				Slot:          opts.Slot,
+				TxPointer:     opts.TxPointer,
+				SignerIndices: opts.SignerIndices,
+				Signatures:    opts.Signatures,
 			},
+		}
+	}
+
+	var topic string
+	if opts.TopicOverride != "" {
+		topic = opts.TopicOverride
+	} else {
+		topic = DecryptionKeysTopic
+	}
+
+	var version string
+	if opts.VersionOverride != "" {
+		version = opts.VersionOverride
+	} else {
+		version = shutterproto.EnvelopeVersion
+	}
+
+	var data []byte
+	if opts.EnvelopeBytesOverride != nil {
+		data = opts.EnvelopeBytesOverride
+	} else {
+		decryptionKeysMessage, err := anypb.New(decryptionKeys)
+		require.NoError(t, err)
+		envelopeBytes, err := proto.Marshal(&shutterproto.Envelope{
+			Version: version,
+			Message: decryptionKeysMessage,
+		})
+		require.NoError(t, err)
+		data = envelopeBytes
+	}
+
+	return &pubsub.Message{
+		Message: &pb.Message{
+			Data:  data,
+			Topic: &topic,
 		},
-		wantValidationResult: pubsub.ValidationReject,
-		wantValidationLogMsg: "rejecting decryption keys msg due to unmarshalling error err=\"proto: cannot parse invalid wire-format data\"",
 	}
 }
 
@@ -163,6 +221,15 @@ type collectingLogHandler struct {
 func (c *collectingLogHandler) Log(r *log.Record) error {
 	c.records = append(c.records, r)
 	return c.handler.Log(r)
+}
+
+func (c *collectingLogHandler) ContainsAll(subStrs []string) bool {
+	for _, subStr := range subStrs {
+		if !c.Contains(subStr) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *collectingLogHandler) Contains(subStr string) bool {
