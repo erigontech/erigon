@@ -429,7 +429,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
-
 	diagUpdate := diagnostics.DiagBlockTxnUpdate{}
 	for _, txn := range minedTxns.Txns {
 		diagUpdate.Txns = append(diagUpdate.Txns, diagnostics.DiagTxn{Hash: txn.IDHash[:]})
