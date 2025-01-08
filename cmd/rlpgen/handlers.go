@@ -146,7 +146,14 @@ func uintPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	fmt.Fprintf(b3, "    }\n")
 }
 
-func bigIntHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
+func bigIntHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	if named, ok := fieldType.(*types.Named); !ok {
+		_exit("blockNoncePtrHandle: expected filedType to be Named")
+	} else {
+		if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
+			_imports[named.Obj().Pkg().Path()] = true
+		}
+	}
 	// size
 	fmt.Fprintf(b1, "    size += rlp.BigIntLenExcludingHead(&obj.%s) + 1\n", fieldName)
 
@@ -163,7 +170,18 @@ func bigIntHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
 	fmt.Fprintf(b3, "    obj.%s = *(new(big.Int).SetBytes(b))\n", fieldName)
 }
 
-func bigIntPtrHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
+func bigIntPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	if ptr, ok := fieldType.(*types.Pointer); !ok {
+		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
+	} else {
+		if named, ok := ptr.Elem().(*types.Named); !ok {
+			_exit("blockNoncePtrHandle: expected filedType to be Named")
+		} else {
+			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
+				_imports[named.Obj().Pkg().Path()] = true
+			}
+		}
+	}
 	// size
 	fmt.Fprintf(b1, "    size += 1\n")
 	fmt.Fprintf(b1, "    if obj.%s != nil {\n", fieldName)
@@ -183,7 +201,14 @@ func bigIntPtrHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
 	fmt.Fprintf(b3, "    obj.%s = new(big.Int).SetBytes(b)\n", fieldName)
 }
 
-func uint256Handle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
+func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	if named, ok := fieldType.(*types.Named); !ok {
+		_exit("blockNoncePtrHandle: expected filedType to be Named")
+	} else {
+		if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
+			_imports[named.Obj().Pkg().Path()] = true
+		}
+	}
 	// size
 	fmt.Fprintf(b1, "    size += rlp.Uint256LenExcludingHead(&obj.%s) + 1\n", fieldName)
 
@@ -200,7 +225,19 @@ func uint256Handle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
 	fmt.Fprintf(b3, "    obj.%s = *(new(uint256.Int).SetBytes(b))\n", fieldName)
 }
 
-func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
+func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	if ptr, ok := fieldType.(*types.Pointer); !ok {
+		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
+	} else {
+		if named, ok := ptr.Elem().(*types.Named); !ok {
+			_exit("blockNoncePtrHandle: expected filedType to be Named")
+		} else {
+			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
+				_imports[named.Obj().Pkg().Path()] = true
+			}
+		}
+	}
+
 	// size
 	fmt.Fprintf(b1, "    size += rlp.Uint256LenExcludingHead(obj.%s) + 1\n", fieldName)
 
@@ -251,12 +288,10 @@ func _shortArrayPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldN
 		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
 	} else {
 		if named, ok := ptr.Elem().(*types.Named); !ok {
-			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-				_imports[named.Obj().Pkg().Path()] = true
-			}
 			_exit("blockNoncePtrHandle: expected filedType to be Named")
 		} else {
-			if named.Obj().Pkg().Name() != pkgSrc.Name() {
+			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
+				_imports[named.Obj().Pkg().Path()] = true
 				typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
 			} else {
 				typ = named.Obj().Name()
@@ -539,12 +574,10 @@ func _shortArrayPtrSliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, f
 			_exit("_shortArrayPtrSliceHandle: expected filedType to be Slice Pointer")
 		} else {
 			if named, ok := ptr.Elem().(*types.Named); !ok {
-				if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-					_imports[named.Obj().Pkg().Path()] = true
-				}
 				_exit("_shortArrayPtrSliceHandle: expected filedType to be Slice Pointer Named")
 			} else {
-				if named.Obj().Pkg().Name() != pkgSrc.Name() {
+				if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
+					_imports[named.Obj().Pkg().Path()] = true
 					typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
 				} else {
 					typ = named.Obj().Name()
