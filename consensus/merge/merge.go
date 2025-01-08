@@ -52,7 +52,7 @@ var (
 	// errInvalidNonce is returned if the nonce is non-zero.
 	errInvalidNonce = errors.New("invalid nonce")
 
-	// errInvalidUncleHash is returned if a block contains an non-empty uncle list.
+	// errInvalidUncleHash is returned if a block contains a non-empty uncle list.
 	errInvalidUncleHash = errors.New("non empty uncle hash")
 
 	errOlderBlockTime = errors.New("timestamp older than parent")

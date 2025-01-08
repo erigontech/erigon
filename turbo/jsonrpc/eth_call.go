@@ -348,6 +348,8 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
+	} else if requestedBlockNr == 0 {
+		return nil, errors.New("block not found")
 	}
 
 	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
@@ -369,15 +371,8 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 	}
 	defer roTx.Rollback()
 
-	blockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
-	if err != nil {
-		return nil, err
-	} else if blockNr == 0 {
-		return nil, errors.New("block not found")
-	}
-
 	// get the root hash from header to validate proofs along the way
-	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNr)
+	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -398,14 +393,9 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 	sdCtx.TouchKey(kv.AccountsDomain, string(address.Bytes()), nil)
 
 	// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-	proofTrie, proofRootHash, err := sdCtx.GenerateTouchedKeyTrie(ctx, header.Root[:], "eth_getProof")
+	proofTrie, _, err := sdCtx.Witness(ctx, header.Root[:], "eth_getProof")
 	if err != nil {
 		return nil, err
-	}
-
-	// verify hash
-	if !bytes.Equal(proofRootHash, header.Root[:]) {
-		return nil, fmt.Errorf("proof root hash mismatch actual(%x)!=expected(%x)", proofRootHash, header.Root[:])
 	}
 
 	a := new(big.Int).SetInt64(0)
@@ -445,7 +435,6 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 	proof.StorageHash = acc.Root
 
 	// if storage is not empty touch keys and build trie
-	fmt.Println("shota", proof.StorageHash.String())
 	if proof.StorageHash.Cmp(libcommon.BytesToHash(commitment.EmptyRootHash)) != 0 && len(storageKeys) != 0 {
 		// touch storage keys
 		for _, storageKey := range storageKeys {
@@ -453,14 +442,9 @@ func (api *APIImpl) getProof(ctx context.Context, address libcommon.Address, sto
 		}
 
 		// generate the trie for proofs, this works by loading the merkle paths to the touched keys
-		proofTrie, proofRootHash, err = sdCtx.GenerateTouchedKeyTrie(ctx, header.Root[:], "eth_getProof")
+		proofTrie, _, err = sdCtx.Witness(ctx, header.Root[:], "eth_getProof")
 		if err != nil {
 			return nil, err
-		}
-
-		// verify hash
-		if !bytes.Equal(proofRootHash, header.Root[:]) {
-			return nil, fmt.Errorf("proof root hash mismatch actual(%x)!=expected(%x)", proofRootHash, header.Root[:])
 		}
 	}
 
