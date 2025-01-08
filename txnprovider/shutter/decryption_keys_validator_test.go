@@ -18,6 +18,7 @@ package shutter
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 
@@ -96,6 +97,80 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to data validation error",
 				"instance id mismatch: 999999",
+			},
+		},
+		{
+			name: "missing gnosis extra data",
+			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+				NilExtra: true,
+			}),
+			wantErr:              ErrMissingGnosisExtraData,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to data validation error",
+				"missing gnosis extra data",
+			},
+		},
+		{
+			name: "slot too large",
+			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+				Slot: math.MaxInt64 + 1,
+			}),
+			wantErr:              ErrSlotTooLarge,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to data validation error",
+				"slot too large: 9223372036854775808",
+			},
+		},
+		{
+			name: "tx pointer too large",
+			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+				TxPointer: math.MaxInt32 + 1,
+			}),
+			wantErr:              ErrTxPointerTooLarge,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to data validation error",
+				"tx pointer too large: 2147483648",
+			},
+		},
+		{
+			name: "eon too large",
+			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+				Eon: math.MaxInt64 + 1,
+			}),
+			wantErr:              ErrEonTooLarge,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to data validation error",
+				"eon too large: 9223372036854775808",
+			},
+		},
+		{
+			name: "empty keys",
+			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+				Keys:              [][]byte{},
+				IdentityPreimages: [][]byte{},
+			}),
+			wantErr:              ErrEmptyKeys,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to data validation error",
+				"empty keys",
+			},
+		},
+		{
+			name: "too many keys",
+			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+				Keys:              [][]byte{[]byte("key1"), []byte("key2"), []byte("key3"), []byte("key4")},
+				IdentityPreimages: [][]byte{[]byte("id1"), []byte("id2"), []byte("id3"), []byte("id4")},
+			}),
+			wantErr:              ErrTooManyKeys,
+			wantValidationResult: pubsub.ValidationReject,
+			wantValidationLogMsgs: []string{
+				"rejecting decryption keys msg due to data validation error",
+				"too many keys: 4",
 			},
 		},
 	}
