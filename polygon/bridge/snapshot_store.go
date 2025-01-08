@@ -267,7 +267,7 @@ func (s *SnapshotStore) BlockEventIdsRange(ctx context.Context, blockNum uint64)
 
 func (s *SnapshotStore) Events(ctx context.Context, start, end uint64) ([][]byte, error) {
 	lastFrozenEventId := s.LastFrozenEventId()
-	if start > lastFrozenEventId || lastFrozenEventId == 0 /* because start may be 0 */ {
+	if start > lastFrozenEventId || lastFrozenEventId == 0 {
 		return s.Store.Events(ctx, start, end)
 	}
 
