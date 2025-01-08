@@ -112,7 +112,6 @@ func TestGetProof(t *testing.T) {
 	m, bankAddr, contractAddr := chainWithDeployedContract(t)
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, 1e18, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
 
-	_ = bankAddr
 	key := func(b byte) libcommon.Hash {
 		result := libcommon.Hash{}
 		result[31] = b
