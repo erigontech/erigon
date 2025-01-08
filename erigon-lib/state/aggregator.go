@@ -126,141 +126,14 @@ func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep ui
 	}
 }
 
-var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
-
-func init() {
-	if dbgCommBtIndex {
-		cfg := Schema[kv.CommitmentDomain]
-		cfg.IndexList = AccessorBTree | AccessorExistence
-		Schema[kv.CommitmentDomain] = cfg
-	}
-}
-
-var Schema = map[kv.Domain]domainCfg{
-	kv.AccountsDomain: {
-		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
-
-		IndexList:            AccessorBTree | AccessorExistence,
-		crossDomainIntegrity: domainIntegrityCheck,
-		Compression:          seg.CompressNone,
-		CompressCfg:          DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblAccountHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-			filenameBase:       kv.AccountsDomain.String(), //TODO: looks redundant
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.AccountsDomain.String(), //TODO: looks redundant
-			},
-		},
-	},
-	kv.StorageDomain: {
-		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
-
-		IndexList:   AccessorBTree | AccessorExistence,
-		Compression: seg.CompressKeys,
-		CompressCfg: DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblStorageHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-			filenameBase:       kv.StorageDomain.String(),
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.StorageDomain.String(),
-			},
-		},
-	},
-	kv.CodeDomain: {
-		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-
-		IndexList:   AccessorBTree | AccessorExistence,
-		Compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
-		CompressCfg: DomainCompressCfg,
-		largeValues: true,
-
-		hist: histCfg{
-			valuesTable: kv.TblCodeHistoryVals,
-			compression: seg.CompressKeys | seg.CompressVals,
-
-			historyLargeValues: true,
-			filenameBase:       kv.CodeDomain.String(),
-
-			iiCfg: iiCfg{
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx,
-				filenameBase: kv.CodeDomain.String(),
-			},
-		},
-	},
-	kv.CommitmentDomain: {
-		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
-
-		IndexList:   AccessorHashMap,
-		Compression: seg.CompressKeys,
-		CompressCfg: DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone,
-
-			snapshotsDisabled:  true,
-			historyLargeValues: false,
-			filenameBase:       kv.CommitmentDomain.String(),
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.CommitmentDomain.String(),
-			},
-		},
-	},
-	kv.ReceiptDomain: {
-		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
-
-		IndexList:   AccessorBTree | AccessorExistence,
-		Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		CompressCfg: DomainCompressCfg,
-
-		hist: histCfg{
-			valuesTable: kv.TblReceiptHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-			filenameBase:       kv.ReceiptDomain.String(),
-
-			iiCfg: iiCfg{
-				keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx,
-				withExistence: false, compressorCfg: seg.DefaultCfg,
-				filenameBase: kv.ReceiptDomain.String(),
-			},
-		},
-	},
-}
-
 func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	tmpdir := dirs.Tmp
-	salt, err := getStateIndicesSalt(dirs.Snap)
-	if err != nil {
-		return nil, err
-	}
-
 	ctx, ctxCancel := context.WithCancel(ctx)
-	a := &Aggregator{
+	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
 		onFreeze:               func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		tmpdir:                 tmpdir,
+		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -272,39 +145,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 
 		produce: true,
-	}
-
-	if err := a.registerDomain(kv.AccountsDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.StorageDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.CodeDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.CommitmentDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerDomain(kv.ReceiptDomain, salt, dirs, aggregationStep, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
-		return nil, err
-	}
-	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
-	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
-
-	return a, nil
+	}, nil
 }
 
 // getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -998,96 +839,6 @@ func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (un
 		return _minUnwindableBlockNum, false, nil
 	}
 	return blockNum, true, nil
-}
-
-func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.Duration, db kv.RwDB) (haveMore bool, err error) {
-	// On tip-of-chain timeout is about `3sec`
-	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
-	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
-
-	furiousPrune := timeout > 5*time.Hour
-	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
-
-	var pruneLimit uint64 = 1_000
-	if furiousPrune {
-		pruneLimit = 10_000_000
-		/* disabling this feature for now - seems it doesn't cancel even after prune finished
-		// start from a bit high limit to give time for warmup
-		// will disable warmup after first iteration and will adjust pruneLimit based on `time`
-		withWarmup = true
-		*/
-	}
-
-	started := time.Now()
-	localTimeout := time.NewTicker(timeout)
-	defer localTimeout.Stop()
-	logPeriod := 30 * time.Second
-	logEvery := time.NewTicker(logPeriod)
-	defer logEvery.Stop()
-	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
-	defer aggLogEvery.Stop()
-
-	fullStat := newAggregatorPruneStat()
-	innerCtx := context.Background()
-	goExit := false
-
-	for {
-		err = db.Update(innerCtx, func(tx kv.RwTx) error {
-			iterationStarted := time.Now()
-			// `context.Background()` is important here!
-			//     it allows keep DB consistent - prune all keys-related data or noting
-			//     can't interrupt by ctrl+c and leave dirt in DB
-			stat, err := ac.Prune(innerCtx, tx, pruneLimit, aggLogEvery)
-			if err != nil {
-				ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
-				return err
-			}
-			if stat == nil {
-				if fstat := fullStat.String(); fstat != "" {
-					ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
-				}
-				goExit = true
-				return nil
-			}
-			fullStat.Accumulate(stat)
-
-			if aggressivePrune {
-				took := time.Since(iterationStarted)
-				if took < 2*time.Second {
-					pruneLimit *= 10
-				}
-				if took > logPeriod {
-					pruneLimit /= 10
-				}
-			}
-
-			select {
-			case <-logEvery.C:
-				ac.a.logger.Info("[snapshots] pruning state",
-					"until commit", time.Until(started.Add(timeout)).String(),
-					"pruneLimit", pruneLimit,
-					"aggregatedStep", ac.StepsInFiles(kv.StateDomains...),
-					"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
-					"pruned", fullStat.String(),
-				)
-			default:
-			}
-			return nil
-		})
-		if err != nil {
-			return false, err
-		}
-		select {
-		case <-localTimeout.C: //must be first to improve responsivness
-			return true, nil
-		case <-ctx.Done():
-			return false, ctx.Err()
-		default:
-		}
-		if goExit {
-			return false, nil
-		}
-	}
 }
 
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
