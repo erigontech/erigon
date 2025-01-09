@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon-lib/gointerfaces"
 	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
 	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/kvcache"
@@ -55,6 +56,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -87,6 +89,7 @@ type Pool interface {
 }
 
 var _ Pool = (*TxPool)(nil) // compile-time interface check
+var _ txnprovider.TxnProvider = (*TxPool)(nil)
 
 // TxPool - holds all pool-related data structures and lock-based tiny methods
 // most of logic implemented by pure tests-friendly functions
@@ -142,6 +145,10 @@ type TxPool struct {
 	isPostPrague            atomic.Bool
 	maxBlobsPerBlock        uint64
 	feeCalculator           FeeCalculator
+	p2pFetcher              *Fetch
+	p2pSender               *Send
+	newSlotsStreams         *NewSlotsStreams
+	builderNotifyNewTxns    func()
 	logger                  log.Logger
 	auths                   map[common.Address]*metaTxn // All accounts with a pooled authorization
 }
@@ -151,6 +158,7 @@ type FeeCalculator interface {
 }
 
 func New(
+	ctx context.Context,
 	newTxns chan Announcements,
 	poolDB kv.RwDB,
 	coreDB kv.RoDB,
@@ -162,9 +170,14 @@ func New(
 	cancunTime *big.Int,
 	pragueTime *big.Int,
 	maxBlobsPerBlock uint64,
-	feeCalculator FeeCalculator,
+	sentryClients []sentryproto.SentryClient,
+	stateChangesClient StateChangesClient,
+	builderNotifyNewTxns func(),
+	newSlotsStreams *NewSlotsStreams,
 	logger log.Logger,
+	opts ...Option,
 ) (*TxPool, error) {
+	options := applyOpts(opts...)
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
 		return nil, err
@@ -210,7 +223,9 @@ func New(
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		maxBlobsPerBlock:        maxBlobsPerBlock,
-		feeCalculator:           feeCalculator,
+		feeCalculator:           options.feeCalculator,
+		builderNotifyNewTxns:    builderNotifyNewTxns,
+		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
 		auths:                   map[common.Address]*metaTxn{},
 	}
@@ -244,10 +259,12 @@ func New(
 		res.pragueTime = &pragueTimeU64
 	}
 
+	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, chainID, logger, opts...)
+	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
 	return res, nil
 }
 
-func (p *TxPool) Start(ctx context.Context) error {
+func (p *TxPool) start(ctx context.Context) error {
 	if p.started.Load() {
 		return nil
 	}
@@ -748,16 +765,18 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	return true, count, nil
 }
 
-func (p *TxPool) YieldBestTxns(
-	ctx context.Context,
-	amount int,
-	parentBlockNum uint64,
-	gasTarget uint64,
-	blobGasTarget uint64,
-	txnIdsFilter mapset.Set[[32]byte],
-) ([]types.Transaction, error) {
+func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	provideOptions := txnprovider.ApplyProvideOptions(opts...)
 	var txnsRlp TxnsRlp
-	_, _, err := p.YieldBest(ctx, amount, &txnsRlp, parentBlockNum, gasTarget, blobGasTarget, txnIdsFilter)
+	_, _, err := p.YieldBest(
+		ctx,
+		provideOptions.Amount,
+		&txnsRlp,
+		provideOptions.ParentBlockNum,
+		provideOptions.GasTarget,
+		provideOptions.BlobGasTarget,
+		provideOptions.TxnIdsFilter,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1792,7 +1811,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	}
 }
 
-// MainLoop - does:
+// Run - does:
 // send pending byHash to p2p:
 //   - new byHash
 //   - all pooled byHash to recently connected peers
@@ -1800,7 +1819,11 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 //
 // promote/demote transactions
 // reorgs
-func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *Send, newSlotsStreams *NewSlotsStreams, notifyMiningAboutNewSlots func()) {
+func (p *TxPool) Run(ctx context.Context) error {
+	defer p.poolDB.Close()
+	p.p2pFetcher.ConnectCore()
+	p.p2pFetcher.ConnectSentries()
+
 	syncToNewPeersEvery := time.NewTicker(p.cfg.SyncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
 	processRemoteTxnsEvery := time.NewTicker(p.cfg.ProcessRemoteTxnsEvery)
@@ -1810,16 +1833,20 @@ func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
 
-	if err := p.Start(ctx); err != nil {
+	if err := p.start(ctx); err != nil {
 		p.logger.Error("[txpool] Failed to start", "err", err)
-		return
+		return err
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			_, _ = p.flush(ctx)
-			return
+			err := ctx.Err()
+			_, flushErr := p.flush(context.Background()) // need background ctx since the other one is cancelled
+			if flushErr != nil {
+				err = fmt.Errorf("%w: %w", flushErr, err)
+			}
+			return err
 		case <-logEvery.C:
 			p.logStats()
 		case <-processRemoteTxnsEvery.C:
@@ -1846,11 +1873,11 @@ func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *
 				writeToDBBytesCounter.SetUint64(written)
 				p.logger.Debug("[txpool] Commit", "written_kb", written/1024, "in", time.Since(t))
 			}
-		case announcements := <-newTxns:
+		case announcements := <-p.newPendingTxns:
 			go func() {
 				for i := 0; i < 16; i++ { // drain more events from channel, then merge and dedup them
 					select {
-					case a := <-newTxns:
+					case a := <-p.newPendingTxns:
 						announcements.AppendOther(a)
 						continue
 					default:
@@ -1864,7 +1891,7 @@ func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *
 
 				announcements = announcements.DedupCopy()
 
-				notifyMiningAboutNewSlots()
+				p.builderNotifyNewTxns()
 
 				if p.cfg.NoGossip {
 					// drain newTxns for emptying newTxn channel
@@ -1929,17 +1956,17 @@ func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *
 					p.logger.Error("[txpool] collect info to propagate", "err", err)
 					return
 				}
-				if newSlotsStreams != nil {
-					newSlotsStreams.Broadcast(&txpoolproto.OnAddReply{RplTxs: slotsRlp}, p.logger)
+				if p.newSlotsStreams != nil {
+					p.newSlotsStreams.Broadcast(&txpoolproto.OnAddReply{RplTxs: slotsRlp}, p.logger)
 				}
 
 				// broadcast local transactions
 				const localTxnsBroadcastMaxPeers uint64 = 10
-				txnSentTo := send.BroadcastPooledTxns(localTxnRlps, localTxnsBroadcastMaxPeers)
+				txnSentTo := p.p2pSender.BroadcastPooledTxns(localTxnRlps, localTxnsBroadcastMaxPeers)
 				for i, peer := range txnSentTo {
 					p.logger.Trace("Local txn broadcast", "txHash", hex.EncodeToString(broadcastHashes.At(i)), "to peer", peer)
 				}
-				hashSentTo := send.AnnouncePooledTxns(localTxnTypes, localTxnSizes, localTxnHashes, localTxnsBroadcastMaxPeers*2)
+				hashSentTo := p.p2pSender.AnnouncePooledTxns(localTxnTypes, localTxnSizes, localTxnHashes, localTxnsBroadcastMaxPeers*2)
 				for i := 0; i < localTxnHashes.Len(); i++ {
 					hash := localTxnHashes.At(i)
 					p.logger.Trace("Local txn announced", "txHash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
@@ -1947,8 +1974,8 @@ func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *
 
 				// broadcast remote transactions
 				const remoteTxnsBroadcastMaxPeers uint64 = 3
-				send.BroadcastPooledTxns(remoteTxnRlps, remoteTxnsBroadcastMaxPeers)
-				send.AnnouncePooledTxns(remoteTxnTypes, remoteTxnSizes, remoteTxnHashes, remoteTxnsBroadcastMaxPeers*2)
+				p.p2pSender.BroadcastPooledTxns(remoteTxnRlps, remoteTxnsBroadcastMaxPeers)
+				p.p2pSender.AnnouncePooledTxns(remoteTxnTypes, remoteTxnSizes, remoteTxnHashes, remoteTxnsBroadcastMaxPeers*2)
 			}()
 		case <-syncToNewPeersEvery.C: // new peer
 			newPeers := p.recentlyConnectedPeers.GetAndClean()
@@ -1965,7 +1992,7 @@ func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *
 			var types []byte
 			var sizes []uint32
 			types, sizes, hashes = p.AppendAllAnnouncements(types, sizes, hashes[:0])
-			go send.PropagatePooledTxnsToPeersList(newPeers, types, sizes, hashes)
+			go p.p2pSender.PropagatePooledTxnsToPeersList(newPeers, types, sizes, hashes)
 			propagateToNewPeerTimer.ObserveDuration(t)
 		}
 	}

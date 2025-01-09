@@ -224,7 +224,12 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	if dbg.AssertEnabled {
-		if block.GasUsed() != usedGas {
+		var refunds = true
+		if config.NoRefunds != nil && *config.NoRefunds {
+			refunds = false
+		}
+
+		if refunds == true && block.GasUsed() != usedGas {
 			panic(fmt.Errorf("assert: block.GasUsed() %d != usedGas %d. blockNum=%d", block.GasUsed(), usedGas, blockNumber))
 		}
 	}
@@ -412,7 +417,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 
 	var baseFee *uint256.Int
-	if header != nil && header.BaseFee != nil {
+	if header.BaseFee != nil {
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {

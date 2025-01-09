@@ -53,16 +53,15 @@ import (
 func TestNonceFromAddress(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
-
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
-
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
-	ctx := context.Background()
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -428,13 +427,13 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	ch := make(chan Announcements, 100)
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
-
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.NotEqual(nil, pool)
-	ctx := context.Background()
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -545,13 +544,13 @@ func TestReverseNonces(t *testing.T) {
 	ch := make(chan Announcements, 100)
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
-
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
-	ctx := context.Background()
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(1_000_000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -669,13 +668,13 @@ func TestTxnPoke(t *testing.T) {
 	ch := make(chan Announcements, 100)
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
-
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
-	ctx := context.Background()
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
@@ -959,10 +958,11 @@ func TestShanghaiValidateTxn(t *testing.T) {
 				shanghaiTime = big.NewInt(0)
 			}
 
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
 			cache := &kvcache.DummyCache{}
-			pool, err := New(ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, logger)
+			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, *u256.N1, shanghaiTime, nil /* agraBlock */, nil /* cancunTime */, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
-			ctx := context.Background()
 			tx, err := coreDB.BeginRw(ctx)
 			defer tx.Rollback()
 			asrt.NoError(err)
@@ -1001,17 +1001,17 @@ func TestShanghaiValidateTxn(t *testing.T) {
 
 func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	maxUint256 := new(uint256.Int).SetAllOne()
-
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	ch := make(chan Announcements, 1)
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 	chainID := *maxUint256
 	cache := &kvcache.DummyCache{}
 	logger := log.New()
-	pool, err := New(ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
-		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, logger)
+	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
+		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 	assert.NoError(t, err)
-	ctx := context.Background()
 	tx, err := coreDB.BeginRw(ctx)
 	defer tx.Rollback()
 	assert.NoError(t, err)
@@ -1053,13 +1053,13 @@ func TestBlobTxnReplacement(t *testing.T) {
 	ch := make(chan Announcements, 5)
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
-
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
-	ctx := context.Background()
 	var stateVersionID uint64 = 0
 
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
@@ -1233,13 +1233,13 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	logger := log.New()
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
-	txnPool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	txnPool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, big.NewInt(0), big.NewInt(0), nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(txnPool != nil)
 
-	ctx := context.Background()
-
-	err = txnPool.Start(ctx)
+	err = txnPool.start(ctx)
 	assert.NoError(err)
 
 	var stateVersionID uint64 = 0
@@ -1334,15 +1334,15 @@ func TestBlobSlots(t *testing.T) {
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
-
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	//Setting limits for blobs in the pool
 	cfg.TotalBlobPoolLimit = 20
 
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
-	ctx := context.Background()
 	var stateVersionID uint64 = 0
 
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
@@ -1408,15 +1408,15 @@ func TestBlobSlots(t *testing.T) {
 func TestGasLimitChanged(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
-
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	coreDB, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
 	require.True(pool != nil)
-	ctx := context.Background()
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this

@@ -228,12 +228,12 @@ func (a *ApiHandler) init() {
 			if a.routerCfg.Node {
 				r.Route("/node", func(r chi.Router) {
 					r.Get("/health", a.GetEthV1NodeHealth)
-					r.Get("/version", a.GetEthV1NodeVersion)
-					r.Get("/peer_count", a.GetEthV1NodePeerCount)
-					r.Get("/peers", a.GetEthV1NodePeersInfos)
-					r.Get("/peers/{peer_id}", a.GetEthV1NodePeerInfos)
-					r.Get("/identity", a.GetEthV1NodeIdentity)
-					r.Get("/syncing", a.GetEthV1NodeSyncing)
+					r.Get("/version", beaconhttp.HandleEndpointFunc(a.GetEthV1NodeVersion))
+					r.Get("/peer_count", beaconhttp.HandleEndpointFunc(a.GetEthV1NodePeerCount))
+					r.Get("/peers", beaconhttp.HandleEndpointFunc(a.GetEthV1NodePeersInfos))
+					r.Get("/peers/{peer_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1NodePeerInfos))
+					r.Get("/identity", beaconhttp.HandleEndpointFunc(a.GetEthV1NodeIdentity))
+					r.Get("/syncing", beaconhttp.HandleEndpointFunc(a.GetEthV1NodeSyncing))
 				})
 			}
 

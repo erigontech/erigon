@@ -227,7 +227,7 @@ func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, 
 	}
 }
 
-// RawTransaction implements core/types.DerivableList interface for hashing
+// RawTransactions implements core/types.DerivableList interface for hashing
 type RawTransactions [][]byte
 
 func (rt RawTransactions) Len() int {

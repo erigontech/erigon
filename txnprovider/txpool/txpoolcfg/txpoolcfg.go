@@ -34,6 +34,7 @@ import (
 const BorDefaultTxPoolPriceLimit = 25 * common.GWei
 
 type Config struct {
+	Disable             bool
 	DBDir               string
 	TracedSenders       []string // List of senders for which txn pool should print out debugging info
 	PendingSubPoolLimit int
@@ -69,11 +70,11 @@ var DefaultConfig = Config{
 	LogEvery:               30 * time.Second,
 
 	PendingSubPoolLimit: 10_000,
-	BaseFeeSubPoolLimit: 10_000,
-	QueuedSubPoolLimit:  10_000,
+	BaseFeeSubPoolLimit: 30_000,
+	QueuedSubPoolLimit:  30_000,
 
 	MinFeeCap:          1,
-	AccountSlots:       16,  //TODO: to choose right value (16 to be compatible with Geth)
+	AccountSlots:       16,  // TODO: to choose right value (16 to be compatible with Geth)
 	BlobSlots:          48,  // Default for a total of 8 txns for 6 blobs each - for hive tests
 	TotalBlobPoolLimit: 480, // Default for a total of 10 different accounts hitting the above limit
 	PriceBump:          10,  // Price bump percentage to replace an already existing transaction

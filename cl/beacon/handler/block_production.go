@@ -212,7 +212,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 			*committeeIndex,
 		)
 
-		if err == attestation_producer.ErrHeadStateBehind {
+		if errors.Is(err, attestation_producer.ErrHeadStateBehind) {
 			return beaconhttp.NewEndpointError(
 				http.StatusServiceUnavailable,
 				synced_data.ErrNotSynced,
@@ -300,11 +300,16 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		)
 	}
 
-	// make a simple copy to the current head state
-	baseState, err := a.forkchoiceStore.GetStateAtBlockRoot(
-		baseBlockRoot,
-		true,
-	) // we start the block production from this state
+	var baseState *state.CachingBeaconState
+	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		baseState, err = headState.Copy()
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	if err != nil {
 		return nil, err
@@ -546,7 +551,7 @@ func (a *ApiHandler) getBuilderPayload(
 		ethHeader.SetVersion(baseState.Version())
 	}
 	// check kzg commitments
-	if header != nil && baseState.Version() >= clparams.DenebVersion {
+	if baseState.Version() >= clparams.DenebVersion {
 		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
 			return nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
 		}
@@ -1177,7 +1182,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 
-	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, true, false); err != nil {
 		return err
 	}
 	finalizedBlockRoot := a.forkchoiceStore.FinalizedCheckpoint().Root
