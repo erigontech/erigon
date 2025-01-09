@@ -37,8 +37,8 @@ on:
 jobs:
 
   build-release:
-    runs-on: ubuntu-latest
-    #runs-on: ubuntu-latest-devops-xxlarge
+    #runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-devops-xxlarge
     timeout-minutes: 75
     name: Create git tag, build and publish Release Artifacts
     outputs:
@@ -128,6 +128,13 @@ jobs:
 
       - name: Compare checksums for erigon on linux/arm64
         run: |
+          echo "Content of ${GITHUB_WORKSPACE}/build-arm64/"
+          ls -lao ${GITHUB_WORKSPACE}/build-arm64/
+          echo "End of content"
+          echo "Content of ${GITHUB_WORKSPACE}/build-arm64-check/"
+          ls -lao ${GITHUB_WORKSPACE}/build-arm64-check/
+          echo "End of content"
+
           sha256sum ${GITHUB_WORKSPACE}/build-arm64/erigon | awk '{print $1}' > erigon-1-arm64.sha256
           sha256sum ${GITHUB_WORKSPACE}/build-arm64-check/erigon | awk '{print $1}' > erigon-2-arm64.sha256
           if ! cmp -s erigon-1-arm64.sha256 erigon-2-arm64.sha256; then
