@@ -554,7 +554,7 @@ type ResultsQueue struct {
 	//tick
 	ticker *time.Ticker
 
-	sync.Mutex
+	sync.RWMutex
 	results *TxTaskQueue
 }
 
@@ -571,14 +571,23 @@ func NewResultsQueue(resultChannelLimit, heapLimit int) *ResultsQueue {
 
 // Add result of execution. May block when internal channel is full
 func (q *ResultsQueue) Add(ctx context.Context, task *Result) error {
+
+	q.RLock()
+	resultCh := q.resultCh
+	defer q.RUnlock()
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case q.resultCh <- task: // Needs to have outside of the lock
+
+	if resultCh != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case resultCh <- task: // Needs to have outside of the lock
+		}
 	}
+
 	return nil
 }
 
@@ -619,14 +628,14 @@ type ResultsQueueIter struct {
 }
 
 func (q *ResultsQueueIter) HasNext() bool {
-	q.q.Lock()
-	defer q.q.Unlock()
+	q.q.RLock()
+	defer q.q.RUnlock()
 	return len(*q.q.results) > 0
 }
 
 func (q *ResultsQueueIter) Has(outputTxNum uint64) bool {
-	q.q.Lock()
-	defer q.q.Unlock()
+	q.q.RLock()
+	defer q.q.RUnlock()
 	return len(*q.q.results) > 0 && (*q.q.results)[0].Version().TxNum == outputTxNum
 }
 
@@ -671,7 +680,12 @@ func (q *ResultsQueue) Close() {
 		return
 	}
 	q.closed = true
+
+	q.Lock()
 	close(q.resultCh)
+	q.resultCh = nil
+	q.Unlock()
+
 	q.ticker.Stop()
 }
 func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
