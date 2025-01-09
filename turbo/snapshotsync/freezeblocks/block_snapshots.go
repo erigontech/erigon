@@ -901,12 +901,12 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	for _, sn := range view.Headers() {
 		if err := sn.Src().WithReadAhead(func() error {
 			g := sn.Src().MakeGetter()
-			for g.HasNext() {
+			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
 				var header types.Header
 				r.Reset(word[1:])
 				if err := rlp.Decode(r, &header); err != nil {
-					return err
+					return fmt.Errorf("%w, file=%s, record=%d", err, sn.Src().FileName(), i)
 				}
 				if err := walker(&header); err != nil {
 					return err

@@ -152,6 +152,13 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 	return tx.Commit()
 }
 
+func (db *DB) Close() {
+	db.RwDB.Close()
+	db.agg.Close()
+}
+
+func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
+
 type Tx struct {
 	*mdbx.MdbxTx
 	db               *DB

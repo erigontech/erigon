@@ -24,12 +24,12 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/event"
 	"github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/p2p/sentry"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/protocols/eth"
-	"github.com/erigontech/erigon/polygon/polygoncommon"
 )
 
 func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf sentry.StatusDataFactory) *Service {
@@ -124,10 +124,10 @@ func (s *Service) Penalize(ctx context.Context, peerId *PeerId) error {
 	return s.peerPenalizer.Penalize(ctx, peerId)
 }
 
-func (s *Service) RegisterNewBlockObserver(o polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) polygoncommon.UnregisterFunc {
+func (s *Service) RegisterNewBlockObserver(o event.Observer[*DecodedInboundMessage[*eth.NewBlockPacket]]) event.UnregisterFunc {
 	return s.messageListener.RegisterNewBlockObserver(o)
 }
 
-func (s *Service) RegisterNewBlockHashesObserver(o polygoncommon.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) polygoncommon.UnregisterFunc {
+func (s *Service) RegisterNewBlockHashesObserver(o event.Observer[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) event.UnregisterFunc {
 	return s.messageListener.RegisterNewBlockHashesObserver(o)
 }

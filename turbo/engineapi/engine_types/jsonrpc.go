@@ -109,10 +109,10 @@ type GetPayloadResponse struct {
 }
 
 type ClientVersionV1 struct {
-	Code    string  `json:"code" gencodec:"required"`
-	Name    string  `json:"name" gencodec:"required"`
-	Version string  `json:"version" gencodec:"required"`
-	Commit  [4]byte `json:"commit" gencodec:"required"`
+	Code    string `json:"code" gencodec:"required"`
+	Name    string `json:"name" gencodec:"required"`
+	Version string `json:"version" gencodec:"required"`
+	Commit  string `json:"commit" gencodec:"required"`
 }
 
 func (c ClientVersionV1) String() string {
