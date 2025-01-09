@@ -114,6 +114,31 @@ jobs:
           make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
 
+      - name: Build only erigon binary for linux/arm64
+        run: >
+          docker run --platform linux/arm64
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-arm64-check:/erigon-build
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=arm64 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          erigon"
+
+      - name: Compare checksums for erigon on linux/arm64
+        run: |
+          sha256sum ${GITHUB_WORKSPACE}/build-arm64/erigon | awk '{print $1}' > erigon-1-arm64.sha256
+          sha256sum ${GITHUB_WORKSPACE}/build-arm64-check/erigon | awk '{print $1}' > erigon-2-arm64.sha256
+          if ! cmp -s erigon-1-arm64.sha256 erigon-2-arm64.sha256; then
+            echo >&2 "ERROR: Reproducible build broken on linux/arm64";
+            cat erigon-1-arm64.sha256;
+            cat erigon-2-arm64.sha256;
+            exit 1
+          fi
+          echo "SHA256 check passed on linux/arm64: 2nd build dir will be removed."
+          rm -drfv ${GITHUB_WORKSPACE}/build-arm64-check erigon-1-arm64.sha256 erigon-2-arm64.sha256
+
         ## temporary disable silkworm in 3.x.x
       - name: Build for linux/amd64 (with nosilkworm tag)
         run: >
@@ -130,6 +155,31 @@ jobs:
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
           if [ ${WITH_SILKWORM} ]; then find / -name libsilkworm_capi.so -exec install {} /erigon-build \; ; fi;"
 
+      - name: Build only erigon binary for linux/amd64
+        run: >
+          docker run --platform linux/amd64
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-amd64-check:/erigon-build
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=amd64 GOAMD64=v1 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          erigon"
+
+      - name: Compare checksums for erigon on linux/amd64
+        run: |
+          sha256sum ${GITHUB_WORKSPACE}/build-amd64/erigon | awk '{print $1}' > erigon-1-amd64.sha256
+          sha256sum ${GITHUB_WORKSPACE}/build-amd64-check/erigon | awk '{print $1}' > erigon-2-amd64.sha256
+          if ! cmp -s erigon-1-amd64.sha256 erigon-2-amd64.sha256; then
+            echo >&2 "ERROR: Reproducible build broken on linux/amd64";
+            cat erigon-1-amd64.sha256;
+            cat erigon-2-amd64.sha256;
+            exit 1
+          fi
+          echo "SHA256 check passed: 2nd build dir will be removed."
+          rm -drfv ${GITHUB_WORKSPACE}/build-amd64-check erigon-2-amd64.sha256 erigon-1-amd64.sha256
+
         ## temporary disable silkworm in 3.x.x
       - name: Build for linux/amd64/v2 (with nosilkworm tag)
         run: >
@@ -145,6 +195,31 @@ jobs:
           make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
           erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool;
           if [ ${WITH_SILKWORM} ]; then find / -name libsilkworm_capi.so -exec install {} /erigon-build \; ; fi;"
+
+      - name: Build only erigon binary for linux/amd64/v2
+        run: >
+          docker run --platform linux/amd64/v2
+          --rm
+          -v $(pwd)/erigon:/erigon:ro
+          -v ${GITHUB_WORKSPACE}/build-amd64v2-check:/erigon-build
+          -w /erigon --entrypoint /bin/bash
+          ${{ env.BUILDER_IMAGE }}
+          -c "git config --global --add safe.directory /erigon;
+          make GOARCH=amd64 GOAMD64=v2 GOBIN=/erigon-build BUILD_TAGS=nosqlite,noboltdb,nosilkworm 
+          erigon"
+
+      - name: Compare checksums for erigon on linux/amd64/v2
+        run: |
+          sha256sum ${GITHUB_WORKSPACE}/build-amd64v2/erigon | awk '{print $1}' > erigon-1-amd64v2.sha256
+          sha256sum ${GITHUB_WORKSPACE}/build-amd64v2-check/erigon | awk '{print $1}' > erigon-2-amd64v2.sha256
+          if ! cmp -s erigon-1-amd64v2.sha256 erigon-2-amd64v2.sha256; then
+            echo >&2 "ERROR: Reproducible build broken on linux/amd64/v2";
+            cat erigon-1-amd64v2.sha256;
+            cat erigon-2-amd64v2.sha256;
+            exit 1
+          fi
+          echo "SHA256 check passed on linux/amd64/v2: 2nd build dir will be removed."
+          rm -drfv ${GITHUB_WORKSPACE}/build-amd64v2-check erigon-1-amd64v2.sha256 erigon-2-amd64v2.sha256
 
       - name: Create archives and checksums
         env:
