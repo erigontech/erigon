@@ -1340,6 +1340,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 
 		_aggSingleton, err = libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, db, logger)
 		if err != nil {
+			err = fmt.Errorf("aggregator init: %w", err)
 			return
 		}
 
