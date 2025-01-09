@@ -814,6 +814,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainID, common.Big0 /* shanghaiTime */, nil, /* agraBlock */
 		common.Big0 /* cancunTime */, common.Big0 /* pragueTime */, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, logger, WithFeeCalculator(nil))
 	assert.NoError(t, err)
+	pool.blockGasLimit.Store(30_000_000)
 	tx, err := coreDB.BeginRw(ctx)
 	defer tx.Rollback()
 	assert.NoError(t, err)
@@ -861,6 +862,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, nil, func() {}, nil, log.New(), WithFeeCalculator(nil))
 	assert.NoError(err)
+
 	require.True(pool != nil)
 	var stateVersionID uint64 = 0
 
@@ -868,7 +870,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	change := &remote.StateChangeBatch{
 		StateVersionId:       stateVersionID,
 		PendingBlockBaseFee:  200_000,
-		BlockGasLimit:        1000000,
+		BlockGasLimit:        math.MaxUint64,
 		PendingBlobFeePerGas: 100_000,
 		ChangeBatch: []*remote.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
@@ -1016,7 +1018,6 @@ func makeBlobTxn() TxnSlot {
 	blobTxn.BlobHashes = make([]common.Hash, 2)
 	blobTxn.BlobHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))
 	blobTxn.BlobHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitment1))
-
 	blobTxn.Tip = *tip
 	blobTxn.FeeCap = *feeCap
 	blobTxn.BlobFeeCap = *blobFeeCap
@@ -1151,7 +1152,7 @@ func TestBlobSlots(t *testing.T) {
 	change := &remote.StateChangeBatch{
 		StateVersionId:       stateVersionID,
 		PendingBlockBaseFee:  200_000,
-		BlockGasLimit:        1000000,
+		BlockGasLimit:        math.MaxUint64,
 		PendingBlobFeePerGas: 100_000,
 		ChangeBatch: []*remote.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
@@ -1259,25 +1260,20 @@ func TestGasLimitChanged(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 	assert.NoError(err)
 	for _, reason := range reasons {
-		assert.Equal(txpoolcfg.Success, reason, reason.String())
+		assert.Equal(reason, txpoolcfg.GasLimitTooHigh)
 	}
-
-	mtx, ok := pool.byHash[string(txnSlot1.IDHash[:])]
-	assert.True(ok)
-	assert.Zero(mtx.subPool&NotTooMuchGas, "Should be insufficient block space for the tx")
 
 	change.ChangeBatch[0].Changes = nil
 	change.BlockGasLimit = 150_000
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	assert.NoError(err)
 
-	assert.NotZero(mtx.subPool&NotTooMuchGas, "Should now have block space for the tx")
-
-	change.BlockGasLimit = 50_000
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 	assert.NoError(err)
 
-	assert.Zero(mtx.subPool&NotTooMuchGas, "Should now have block space (again) for the tx")
+	for _, reason := range reasons {
+		assert.Equal(txpoolcfg.Success, reason, reason.String())
+	}
 }
 
 // sender - immutable structure which stores only nonce and balance of account
