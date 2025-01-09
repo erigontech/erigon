@@ -1323,6 +1323,7 @@ var _bridgeStoreSingleton bridge.Store
 var _heimdallStoreSingleton heimdall.Store
 
 func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezeblocks.RoSnapshots, *heimdall.RoSnapshots, *libstate.Aggregator, *freezeblocks.CaplinSnapshots, bridge.Store, heimdall.Store) {
+	var err error
 
 	openSnapshotOnce.Do(func() {
 		dirs := datadir.New(datadirCli)
@@ -1334,13 +1335,12 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_allBorSnapshotsSingleton = heimdall.NewRoSnapshots(snapCfg, dirs.Snap, 0, logger)
 		_bridgeStoreSingleton = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
 		_heimdallStoreSingleton = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
-		var err error
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton, _heimdallStoreSingleton, _bridgeStoreSingleton)
-
 		txNums := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, blockReader))
+
 		_aggSingleton, err = libstate.NewAggregator2(ctx, dirs, config3.DefaultStepSize, db, logger)
 		if err != nil {
-			panic(err)
+			return
 		}
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
@@ -1354,7 +1354,13 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			_allBorSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
-		g.Go(func() error { return _aggSingleton.OpenFolder() })
+		g.Go(func() error {
+			err := _aggSingleton.OpenFolder()
+			if err != nil {
+				return fmt.Errorf("aggregator opening: %w", err)
+			}
+			return nil
+		})
 		g.Go(func() error {
 			chainConfig := fromdb.ChainConfig(db)
 			var beaconConfig *clparams.BeaconChainConfig
@@ -1362,7 +1368,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			if err == nil {
 				_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
 				if err = _allCaplinSnapshotsSingleton.OpenFolder(); err != nil {
-					return err
+					return fmt.Errorf("caplin snapshots: %w", err)
 				}
 				_allCaplinSnapshotsSingleton.LogStat("caplin")
 			}
@@ -1378,9 +1384,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			logger.Info("[downloads]", "locked", er == nil, "at", mtime.Format("02 Jan 06 15:04 2006"))
 			return nil
 		})
-		err = g.Wait()
-		if err != nil {
-			panic(err)
+		if err = g.Wait(); err != nil {
+			return
 		}
 
 		_allSnapshotsSingleton.LogStat("blocks")
@@ -1390,11 +1395,15 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			defer ac.Close()
 			ac.LogStats(tx, func(endTxNumMinimax uint64) (uint64, error) {
 				_, histBlockNumProgress, err := txNums.FindBlockNum(tx, endTxNumMinimax)
-				return histBlockNumProgress, err
+				return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
 			})
 			return nil
 		})
 	})
+
+	if err != nil {
+		log.Error("[snapshots] failed to open", "err", err)
+	}
 	return _allSnapshotsSingleton, _allBorSnapshotsSingleton, _aggSingleton, _allCaplinSnapshotsSingleton, _bridgeStoreSingleton, _heimdallStoreSingleton
 }
 
