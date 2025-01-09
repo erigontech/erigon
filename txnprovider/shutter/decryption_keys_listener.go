@@ -77,6 +77,11 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	}
 
 	//
+	// TODO play around with go-libp2p-kad-dht for routing and discovery analogous to rolling-shutter
+	//      check if it improves number of peers for topic
+	//
+
+	//
 	// TODO persist connected nodes to be able to re-use on restart
 	//
 
