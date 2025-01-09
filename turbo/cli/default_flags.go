@@ -246,6 +246,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DebugStepAfter,
 	&utils.OtsSearchMaxCapFlag,
 	&utils.PanicOnReorg,
+	&utils.ShadowSequencer,
 
 	&utils.SilkwormExecutionFlag,
 	&utils.SilkwormRpcDaemonFlag,

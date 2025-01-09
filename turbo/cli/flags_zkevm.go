@@ -257,6 +257,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		RejectLowGasPriceTolerance:             ctx.Float64(utils.RejectLowGasPriceTolerance.Name),
 		LogLevel:                               logLevel,
 		PanicOnReorg:                           ctx.Bool(utils.PanicOnReorg.Name),
+		ShadowSequencer:                        ctx.Bool(utils.ShadowSequencer.Name),
 	}
 
 	utils2.EnableTimer(cfg.DebugTimers)

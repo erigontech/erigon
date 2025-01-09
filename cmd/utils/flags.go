@@ -828,6 +828,11 @@ var (
 		Usage: "Crash on reorg instead of attempting to recover",
 		Value: false,
 	}
+	ShadowSequencer = cli.BoolFlag{
+		Name:  "zkevm.shadow-sequencer",
+		Usage: "Shadow the main sequencer when run in sequencer mode. Used for local testing",
+		Value: false,
+	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
 		Usage: "Number of entries to print from the ACL history on node start up",

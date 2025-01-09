@@ -49,7 +49,9 @@ func SpawnSequencingStage(
 	}
 
 	if lastSequence != nil && lastBatch < lastSequence.BatchNo && !(cfg.zk.IsL1Recovery() || cfg.zk.SequencerResequence) {
-		panic(fmt.Sprintf("lastBatch %d < lastSequence.BatchNo %d", lastBatch, lastSequence.BatchNo))
+		if !cfg.zk.ShadowSequencer {
+			panic(fmt.Sprintf("lastBatch %d < lastSequence.BatchNo %d", lastBatch, lastSequence.BatchNo))
+		}
 	}
 
 	highestBatchInDs, err := cfg.dataStreamServer.GetHighestBatchNumber()
