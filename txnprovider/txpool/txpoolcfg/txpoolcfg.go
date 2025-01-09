@@ -120,7 +120,8 @@ const (
 	BlobTxReplace        DiscardReason = 30 // Cannot replace type-3 blob txn with another type of txn
 	BlobPoolOverflow     DiscardReason = 31 // The total number of blobs (through blob txns) in the pool has reached its limit
 	NoAuthorizations     DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
-	ErrAuthorityReserved DiscardReason = 33 // EIP-7702 transaction with authority already reserved
+	GasLimitTooHigh      DiscardReason = 33 // Gas limit is too high
+	ErrAuthorityReserved DiscardReason = 34 // EIP-7702 transaction with authority already reserved
 )
 
 func (r DiscardReason) String() string {
@@ -185,8 +186,6 @@ func (r DiscardReason) String() string {
 		return "blobs limit in txpool is full"
 	case NoAuthorizations:
 		return "EIP-7702 transactions with an empty authorization list are invalid"
-	case ErrAuthorityReserved:
-		return "EIP-7702 authority already reserved"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
