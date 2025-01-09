@@ -119,7 +119,7 @@ type trieDbState interface {
 	ResolveSMTRetainList(inclusion map[common.Address][]common.Hash) (*trie.RetainList, error)
 }
 
-func BuildWitnessFromTrieDbState(ctx context.Context, tx kv.Tx, tds trieDbState, reader *corestate.PlainState, forcedContracts []common.Address, witnessFull bool) (witness *trie.Witness, err error) {
+func BuildWitnessFromTrieDbState(ctx context.Context, tx kv.Tx, tds trieDbState, reader *corestate.PlainState, forcedContracts []common.Address, forcedInfoTreeUpdates []common.Hash, witnessFull bool) (witness *trie.Witness, err error) {
 	var rl trie.RetainDecider
 	// if full is true, we will send all the nodes to the witness
 	rl = &trie.AlwaysTrueRetainDecider{}
@@ -133,6 +133,27 @@ func BuildWitnessFromTrieDbState(ctx context.Context, tx kv.Tx, tds trieDbState,
 			}, math.MaxInt64)
 			if err != nil {
 				return nil, err
+			}
+		}
+
+		// ensure that the ger manager is in the inclusion list if there are forced info tree updates
+		if len(forcedInfoTreeUpdates) > 0 {
+			if _, ok := inclusion[coreState.GER_MANAGER_ADDRESS]; !ok {
+				inclusion[coreState.GER_MANAGER_ADDRESS] = []common.Hash{}
+			}
+		}
+
+		// add any forced info tree updates to the inclusion list that aren't already there
+		for _, forced := range forcedInfoTreeUpdates {
+			skip := false
+			for _, hash := range inclusion[coreState.GER_MANAGER_ADDRESS] {
+				if hash == forced {
+					skip = true
+					break
+				}
+			}
+			if !skip {
+				inclusion[coreState.GER_MANAGER_ADDRESS] = append(inclusion[coreState.GER_MANAGER_ADDRESS], forced)
 			}
 		}
 

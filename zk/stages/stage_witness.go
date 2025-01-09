@@ -161,6 +161,11 @@ func SpawnStageWitness(
 	log.Info(fmt.Sprintf("[%s] Executing blocks and collecting witnesses", logPrefix), "from", startBlock, "to", stageInterhashesProgressBlockNo)
 
 	now := time.Now()
+
+	// used to ensure that any info tree updates for this batch are included in the witness - re-use of an index for example
+	// won't write to storage so will be missing from the witness but the prover needs it
+	forcedInfoTreeUpdates := make([]common.Hash, 0)
+
 	for _, block := range blocks {
 		reader.SetBlockNr(block.NumberU64())
 		tds := state.NewTrieDbState(prevHeader.Root, tx, startBlock-1, nil)
@@ -182,9 +187,17 @@ func SpawnStageWitness(
 			return fmt.Errorf("ExecuteBlockEphemerallyZk: %w", err)
 		}
 
+		forcedInfoTreeUpdate, err := witness.CheckForForcedInfoTreeUpdate(memHermezDb, block.NumberU64())
+		if err != nil {
+			return fmt.Errorf("CheckForForcedInfoTreeUpdate: %w", err)
+		}
+		if forcedInfoTreeUpdate != nil {
+			forcedInfoTreeUpdates = append(forcedInfoTreeUpdates, *forcedInfoTreeUpdate)
+		}
+
 		prevStateRoot = block.Root()
 
-		w, err := witness.BuildWitnessFromTrieDbState(ctx, memTx, tds, reader, cfg.forcedContracs, false)
+		w, err := witness.BuildWitnessFromTrieDbState(ctx, memTx, tds, reader, cfg.forcedContracs, forcedInfoTreeUpdates, false)
 		if err != nil {
 			return fmt.Errorf("BuildWitnessFromTrieDbState: %w", err)
 		}

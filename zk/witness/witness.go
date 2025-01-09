@@ -7,12 +7,13 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-
+	"github.com/iden3/go-iden3-crypto/keccak256"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -48,7 +49,7 @@ type Generator struct {
 	chainCfg        *chain.Config
 	zkConfig        *ethconfig.Zk
 	engine          consensus.EngineReader
-	forcedContracts []common.Address
+	forcedContracts []libcommon.Address
 }
 
 func NewGenerator(
@@ -59,7 +60,7 @@ func NewGenerator(
 	chainCfg *chain.Config,
 	zkConfig *ethconfig.Zk,
 	engine consensus.EngineReader,
-	forcedContracs []common.Address,
+	forcedContracs []libcommon.Address,
 ) *Generator {
 	return &Generator{
 		dirs:            dirs,
@@ -217,7 +218,7 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 	tds.StartNewBuffer()
 	trieStateWriter := tds.NewTrieStateWriter()
 
-	getHeader := func(hash common.Hash, number uint64) *eritypes.Header {
+	getHeader := func(hash libcommon.Hash, number uint64) *eritypes.Header {
 		h, e := g.blockReader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
@@ -229,6 +230,10 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 
 	reader := state.NewPlainState(tx, blocks[0].NumberU64(), systemcontracts.SystemContractCodeLookup[g.chainCfg.ChainName])
 	defer reader.Close()
+
+	// used to ensure that any info tree updates for this batch are included in the witness - re-use of an index for example
+	// won't write to storage so will be missing from the witness but the prover needs it
+	forcedInfoTreeUpdates := make([]libcommon.Hash, 0)
 
 	for _, block := range blocks {
 		blockNum := block.NumberU64()
@@ -259,10 +264,18 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 			return nil, fmt.Errorf("ExecuteBlockEphemerallyZk: %w", err)
 		}
 
+		forcedInfoTreeUpdate, err := CheckForForcedInfoTreeUpdate(hermezDb, blockNum)
+		if err != nil {
+			return nil, fmt.Errorf("CheckForForcedInfoTreeUpdate: %w", err)
+		}
+		if forcedInfoTreeUpdate != nil {
+			forcedInfoTreeUpdates = append(forcedInfoTreeUpdates, *forcedInfoTreeUpdate)
+		}
+
 		prevStateRoot = block.Root()
 	}
 
-	witness, err := BuildWitnessFromTrieDbState(ctx, rwtx, tds, reader, g.forcedContracts, witnessFull)
+	witness, err := BuildWitnessFromTrieDbState(ctx, rwtx, tds, reader, g.forcedContracts, forcedInfoTreeUpdates, witnessFull)
 	if err != nil {
 		return nil, fmt.Errorf("BuildWitnessFromTrieDbState: %w", err)
 	}
@@ -286,4 +299,27 @@ func (g *Generator) generateMockWitness(batchNum uint64, blocks []*eritypes.Bloc
 	}
 
 	return mockWitness, nil
+}
+
+func CheckForForcedInfoTreeUpdate(reader *hermez_db.HermezDbReader, blockNum uint64) (*libcommon.Hash, error) {
+	// check if there were any info tree index updates for this block number
+	index, err := reader.GetBlockL1InfoTreeIndex(blockNum)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for block info tree index: %w", err)
+	}
+	var result *libcommon.Hash
+	if index != 0 {
+		// we need to load this info tree index to get the storage slot address to force witness inclusion
+		infoTreeIndex, err := reader.GetL1InfoTreeUpdate(index)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get info tree index: %w", err)
+		}
+		d1 := common.LeftPadBytes(infoTreeIndex.GER.Bytes(), 32)
+		d2 := common.LeftPadBytes(state.GLOBAL_EXIT_ROOT_STORAGE_POS.Bytes(), 32)
+		mapKey := keccak256.Hash(d1, d2)
+		mkh := libcommon.BytesToHash(mapKey)
+		result = &mkh
+	}
+
+	return result, nil
 }
