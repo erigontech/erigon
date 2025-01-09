@@ -1420,7 +1420,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 		cfg.MetricsEnabled = ctx.Bool(MetricsEnabledFlag.Name)
 	}
 
-	logger.Info("Maximum peer count", cfg.MaxPeers)
+	logger.Info("Maximum peer count", "total", cfg.MaxPeers)
 
 	if netrestrict := ctx.String(NetrestrictFlag.Name); netrestrict != "" {
 		list, err := netutil.ParseNetlist(netrestrict)
@@ -1691,7 +1691,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 		// https://forum.polygon.technology/t/introducing-our-new-dns-discovery-for-polygon-pos-faster-smarter-more-connected/19871
 		// which encourages high peer count
 		nodeConfig.P2P.MaxPeers = 100
-		logger.Info("Maximum peer count default sanitizing for bor", nodeConfig.P2P.MaxPeers)
+		logger.Info("Maximum peer count default sanitizing for bor", "total", nodeConfig.P2P.MaxPeers)
 	}
 }
 
