@@ -53,6 +53,7 @@ type Zk struct {
 	ExecutorRequestTimeout                 time.Duration
 	DatastreamNewBlockTimeout              time.Duration
 	WitnessMemdbSize                       datasize.ByteSize
+	WitnessUnwindLimit                     uint64
 	ExecutorMaxConcurrentRequests          int
 	Limbo                                  bool
 	AllowFreeTransactions                  bool

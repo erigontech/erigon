@@ -622,6 +622,12 @@ var (
 		Usage: "A size of the memdb used on witness generation in format \"2GB\". Might fail generation for older batches if not enough for the unwind.",
 		Value: datasizeFlagValue(2 * datasize.GB),
 	}
+	WitnessUnwindLimit = cli.Uint64Flag{
+		Name:  "zkevm.witness-unwind-limit",
+		Usage: "The maximum number of blocks the witness generation can unwind",
+		Value: 500_000,
+	}
+
 	ExecutorMaxConcurrentRequests = cli.IntFlag{
 		Name:  "zkevm.executor-max-concurrent-requests",
 		Usage: "The maximum number of concurrent requests to the executor",

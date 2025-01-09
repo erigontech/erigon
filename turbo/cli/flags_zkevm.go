@@ -126,6 +126,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	witnessMemSize := utils.DatasizeFlagValue(ctx, utils.WitnessMemdbSize.Name)
+	witnessUnwindLimit := ctx.Uint64(utils.WitnessUnwindLimit.Name)
 
 	badBatchStrings := strings.Split(ctx.String(utils.BadBatches.Name), ",")
 	badBatches := make([]uint64, 0)
@@ -214,6 +215,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		ExecutorRequestTimeout:                 ctx.Duration(utils.ExecutorRequestTimeout.Name),
 		DatastreamNewBlockTimeout:              ctx.Duration(utils.DatastreamNewBlockTimeout.Name),
 		WitnessMemdbSize:                       *witnessMemSize,
+		WitnessUnwindLimit:                     witnessUnwindLimit,
 		ExecutorMaxConcurrentRequests:          ctx.Int(utils.ExecutorMaxConcurrentRequests.Name),
 		Limbo:                                  ctx.Bool(utils.Limbo.Name),
 		AllowFreeTransactions:                  ctx.Bool(utils.AllowFreeTransactions.Name),

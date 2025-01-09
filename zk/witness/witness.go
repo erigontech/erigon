@@ -35,21 +35,20 @@ import (
 )
 
 var (
-	maxGetProofRewindBlockCount uint64 = 500_000
-
 	ErrEndBeforeStart = errors.New("end block must be higher than start block")
 )
 
 type Generator struct {
-	tx              kv.Tx
-	dirs            datadir.Dirs
-	historyV3       bool
-	agg             *libstate.Aggregator
-	blockReader     services.FullBlockReader
-	chainCfg        *chain.Config
-	zkConfig        *ethconfig.Zk
-	engine          consensus.EngineReader
-	forcedContracts []libcommon.Address
+	tx                 kv.Tx
+	dirs               datadir.Dirs
+	historyV3          bool
+	agg                *libstate.Aggregator
+	blockReader        services.FullBlockReader
+	chainCfg           *chain.Config
+	zkConfig           *ethconfig.Zk
+	engine             consensus.EngineReader
+	forcedContracts    []libcommon.Address
+	witnessUnwindLimit uint64
 }
 
 func NewGenerator(
@@ -61,16 +60,18 @@ func NewGenerator(
 	zkConfig *ethconfig.Zk,
 	engine consensus.EngineReader,
 	forcedContracs []libcommon.Address,
+	witnessUnwindLimit uint64,
 ) *Generator {
 	return &Generator{
-		dirs:            dirs,
-		historyV3:       historyV3,
-		agg:             agg,
-		blockReader:     blockReader,
-		chainCfg:        chainCfg,
-		zkConfig:        zkConfig,
-		engine:          engine,
-		forcedContracts: forcedContracs,
+		dirs:               dirs,
+		historyV3:          historyV3,
+		agg:                agg,
+		blockReader:        blockReader,
+		chainCfg:           chainCfg,
+		zkConfig:           zkConfig,
+		engine:             engine,
+		forcedContracts:    forcedContracs,
+		witnessUnwindLimit: witnessUnwindLimit,
 	}
 }
 
@@ -197,8 +198,8 @@ func (g *Generator) generateWitness(tx kv.Tx, ctx context.Context, batchNum uint
 	}
 
 	if startBlock-1 < latestBlock {
-		if latestBlock-startBlock > maxGetProofRewindBlockCount {
-			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)
+		if latestBlock-startBlock > g.witnessUnwindLimit {
+			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", g.witnessUnwindLimit, latestBlock)
 		}
 
 		if err := UnwindForWitness(ctx, rwtx, startBlock, latestBlock, g.dirs, g.historyV3, g.agg); err != nil {

@@ -1042,6 +1042,7 @@ func (api *ZkEvmAPIImpl) buildGenerator(ctx context.Context, tx kv.Tx, witnessMo
 		api.config.Zk,
 		api.ethApi._engine,
 		api.config.WitnessContractInclusion,
+		api.config.WitnessUnwindLimit,
 	)
 
 	fullWitness := false

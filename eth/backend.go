@@ -1132,6 +1132,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.config.Zk,
 				backend.engine,
 				backend.config.WitnessContractInclusion,
+				backend.config.WitnessUnwindLimit,
 			)
 
 			var legacyExecutors []*legacy_executor_verifier.Executor = make([]*legacy_executor_verifier.Executor, 0, len(cfg.ExecutorUrls))
