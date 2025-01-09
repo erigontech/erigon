@@ -120,6 +120,7 @@ const (
 	BlobTxReplace       DiscardReason = 30 // Cannot replace type-3 blob txn with another type of txn
 	BlobPoolOverflow    DiscardReason = 31 // The total number of blobs (through blob txns) in the pool has reached its limit
 	NoAuthorizations    DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
+	GasLimitTooHigh     DiscardReason = 33 // Gas limit is too high
 )
 
 func (r DiscardReason) String() string {
