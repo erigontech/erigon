@@ -400,3 +400,55 @@ func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receip
 	}
 	return nil
 }
+
+// WriteStatus status of write
+type WriteStatus byte
+
+const (
+	NonStatTy WriteStatus = iota
+	CanonStatTy
+	SideStatTy
+)
+
+// // WriteBlockAndSetHeadWithTime also counts processTime, which will cause intermittent TrieDirty cache writes
+// func (bc *BlockChain) WriteBlockAndSetHeadWithTime(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, emitHeadEvent bool, processTime time.Duration) (status WriteStatus, err error) {
+// 	if !bc.chainmu.TryLock() {
+// 		return NonStatTy, errChainStopped
+// 	}
+// 	defer bc.chainmu.Unlock()
+// 	bc.gcproc += processTime
+// 	return bc.writeBlockAndSetHead(block, receipts, logs, state, emitHeadEvent)
+// }
+
+// func (bc *BlockChain) ReorgToOldBlock(newHead *types.Block) error {
+// 	bc.wg.Add(1)
+// 	defer bc.wg.Done()
+// 	if _, err := bc.SetCanonical(newHead); err != nil {
+// 		return fmt.Errorf("error reorging to old block: %w", err)
+// 	}
+// 	return nil
+// }
+
+// func (bc *BlockChain) ClipToPostNitroGenesis(blockNum rpc.BlockNumber) (rpc.BlockNumber, rpc.BlockNumber) {
+// 	currentBlock := rpc.BlockNumber(bc.CurrentBlock().Number.Uint64())
+// 	nitroGenesis := rpc.BlockNumber(bc.Config().ArbitrumChainParams.GenesisBlockNum)
+// 	if blockNum == rpc.LatestBlockNumber || blockNum == rpc.PendingBlockNumber {
+// 		blockNum = currentBlock
+// 	}
+// 	if blockNum > currentBlock {
+// 		blockNum = currentBlock
+// 	}
+// 	if blockNum < nitroGenesis {
+// 		blockNum = nitroGenesis
+// 	}
+// 	return blockNum, currentBlock
+// }
+
+// func (bc *BlockChain) RecoverState(block *types.Block) error {
+// 	if bc.HasState(block.Root()) {
+// 		return nil
+// 	}
+// 	log.Warn("recovering block state", "num", block.Number(), "hash", block.Hash(), "root", block.Root())
+// 	_, err := bc.recoverAncestors(block)
+// 	return err
+// }
