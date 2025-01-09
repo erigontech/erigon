@@ -2221,7 +2221,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 	}
 
-	calculateRates(&stats, &prevStats, interval)
+	stats.DownloadRate = calculateRate(stats.BytesDownload, prevStats.BytesDownload, prevStats.DownloadRate, interval)
+	stats.HashRate = calculateRate(stats.BytesHashed, prevStats.BytesHashed, prevStats.HashRate, interval)
+	stats.FlushRate = calculateRate(stats.BytesFlushed, prevStats.BytesFlushed, prevStats.FlushRate, interval)
+	stats.UploadRate = calculateRate(stats.BytesUpload, prevStats.BytesUpload, prevStats.UploadRate, interval)
+	stats.CompletionRate = calculateRate(stats.BytesCompleted, prevStats.BytesCompleted, prevStats.CompletionRate, interval)
 
 	if stats.BytesTotal == 0 {
 		stats.Progress = 0
@@ -2270,33 +2274,22 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 }
 
-// Calculating rates with decay in order to avoid rate jumps
-func calculateRates(stats, prevStats *AggStats, interval time.Duration) {
-	decay := func(prev uint64) uint64 {
-		switch {
-		case prev < 1000:
-			return prev / 16
-		case prev < 10000:
-			return prev / 8
-		case prev < 100000:
-			return prev / 4
-		default:
-			return prev / 2
-		}
+// Calculating rate with decay in order to avoid rate spikes
+func calculateRate(current, previous uint64, prevRate uint64, interval time.Duration) uint64 {
+	if current > previous {
+		return (current - previous) / uint64(interval.Seconds())
 	}
 
-	calculateRate := func(current, previous uint64, prevRate uint64) uint64 {
-		if current > previous {
-			return (current - previous) / uint64(interval.Seconds())
-		}
-		return decay(prevRate)
+	switch {
+	case prevRate < 1000:
+		return prevRate / 16
+	case prevRate < 10000:
+		return prevRate / 8
+	case prevRate < 100000:
+		return prevRate / 4
+	default:
+		return prevRate / 2
 	}
-
-	stats.DownloadRate = calculateRate(stats.BytesDownload, prevStats.BytesDownload, prevStats.DownloadRate)
-	stats.HashRate = calculateRate(stats.BytesHashed, prevStats.BytesHashed, prevStats.HashRate)
-	stats.FlushRate = calculateRate(stats.BytesFlushed, prevStats.BytesFlushed, prevStats.FlushRate)
-	stats.UploadRate = calculateRate(stats.BytesUpload, prevStats.BytesUpload, prevStats.UploadRate)
-	stats.CompletionRate = calculateRate(stats.BytesCompleted, prevStats.BytesCompleted, prevStats.CompletionRate)
 }
 
 type filterWriter struct {
