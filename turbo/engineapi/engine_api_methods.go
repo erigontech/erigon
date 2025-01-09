@@ -151,7 +151,7 @@ func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *en
 		Code:    params.ClientCode,
 		Name:    params.ClientName,
 		Version: params.Version,
-		Commit:  commit[:8],
+		Commit:  "0x" + commit[:8],
 	}
 	return result, nil
 }
