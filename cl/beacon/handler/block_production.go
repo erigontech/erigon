@@ -1144,8 +1144,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		Name: gossip.TopicNameBeaconBlock,
 		Data: blkSSZ,
 	}); err != nil {
-		log.Error("Failed to publish block", "err", err)
-		return err
+		a.logger.Error("Failed to publish block", "err", err)
 	}
 	for idx, blob := range blobsSidecarsBytes {
 		idx64 := uint64(idx)
@@ -1154,8 +1153,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			Data:     blob,
 			SubnetId: &idx64,
 		}); err != nil {
-			log.Error("Failed to publish blob sidecar", "err", err)
-			return err
+			a.logger.Error("Failed to publish blob sidecar", "err", err)
 		}
 	}
 	return nil
