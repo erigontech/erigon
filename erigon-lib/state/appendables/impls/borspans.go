@@ -4,7 +4,9 @@ import (
 	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon-lib/kv/stream"
 	ca "github.com/erigontech/erigon-lib/state/appendables"
+	"github.com/erigontech/erigon/core/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
+	"github.com/erigontech/erigon/turbo/snapshotsync"
 )
 
 const (
@@ -21,7 +23,7 @@ const (
 // 	*ca.BaseAppendable
 // }
 
-func NewSpanAppendable(valsTable string) ca.Appendable {
+func NewSpanAppendable(valsTable string, blockSnapshot *snapshotsync.RoSnapshots) ca.Appendable {
 	ap := ca.NewBaseAppendable(BorSpans, kv.BorSpans)
 
 	gen := &SpanSourceKeyGenerator{}
@@ -33,7 +35,7 @@ func NewSpanAppendable(valsTable string) ca.Appendable {
 	indexb := ca.NewSimpleAccessorBuilder(ca.NewAccessorArgs(true, false, false, salt), BorSpans, string(BorSpans))
 	ap.SetIndexBuilders([]ca.AccessorIndexBuilder{indexb})
 
-	// TODO: canFreeze...
+	ap.SetCanFreeze(&followBlock{blockSnapshot})
 	return ap
 }
 
@@ -43,4 +45,12 @@ func (s *SpanSourceKeyGenerator) FromStepKey(stepKeyFrom, stepKeyTo uint64, tx k
 	spanFrom := heimdall.SpanIdAt(stepKeyFrom)
 	spanTo := heimdall.SpanIdAt(stepKeyTo)
 	return ca.NewSequentialStream(uint64(spanFrom), uint64(spanTo))
+}
+
+type followBlock struct {
+	blockSnapshot *snapshotsync.RoSnapshots
+}
+
+func (f *followBlock) Evaluate(stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (bool, error) {
+	return f.blockSnapshot.DirtyBlocksAvailable(snaptype.Enums.Bodies) > stepKeyTo, nil
 }

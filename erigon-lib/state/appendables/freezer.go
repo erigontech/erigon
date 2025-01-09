@@ -18,7 +18,6 @@ type BaseFreezer struct {
 	valsTbl string
 }
 
-// what does this do?
 func (sf *BaseFreezer) Freeze(ctx context.Context, stepKeyFrom, stepKeyTo uint64, tx kv.Tx) (lastKeyValue uint64, err error) {
 	can_stream := sf.gen.FromStepKey(stepKeyFrom, stepKeyTo, tx)
 	for can_stream.HasNext() {

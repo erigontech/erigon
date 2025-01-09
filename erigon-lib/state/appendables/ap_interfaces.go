@@ -46,8 +46,7 @@ type Appendable interface {
 type Collector func(values []byte) error
 
 // NOTE: Freezer should be agnostic of any appendable stuff
-// pattern is SetCollector, (maybe) CompressorWorkers; and then call Freeze
-// TODO: can Freeze accept step? Depends on if it's only used to create the minimal snapshot...
+// pattern is SetCollector ; and then call Freeze
 type Freezer interface {
 	// stepKeyFrom/To represent tsNum which the snapshot should range
 	// this doesn't check if the snapshot can be created or not. It's the responsibilty of the caller
