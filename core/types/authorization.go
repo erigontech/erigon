@@ -37,7 +37,7 @@ func (ath *Authorization) copy() *Authorization {
 }
 
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommon.Address, error) {
-	if ath.Nonce >= math.MaxUint64 {
+	if ath.Nonce == math.MaxUint64 {
 		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
 	}
 
