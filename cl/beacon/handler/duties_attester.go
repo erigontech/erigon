@@ -47,6 +47,7 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (libcommon.Ha
 		if attester {
 			fmt.Println("attester", epoch, dependentRoot)
 		}
+	}()
 	return dependentRoot, a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
 		dependentRootSlot := (epoch * a.beaconChainCfg.SlotsPerEpoch) - 1
 		if attester {
