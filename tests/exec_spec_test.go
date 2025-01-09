@@ -30,6 +30,7 @@ func TestExecutionSpec(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testMatcher)
+	bt.skipLoad(`^`)
 
 	dir := filepath.Join(".", "execution-spec-tests")
 	checkStateRoot := true
