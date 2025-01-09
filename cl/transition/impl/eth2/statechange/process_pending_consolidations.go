@@ -25,14 +25,13 @@ func ProcessPendingConsolidations(s abstract.BeaconState) {
 			return false // stop processing
 		}
 		// Calculate the consolidated balance
-		maxEffectiveBalance := state.GetMaxEffectiveBalanceByVersion(sourceValidator, s.BeaconConfig(), s.Version())
 		vBalance, err := s.ValidatorBalance(int(c.SourceIndex))
 		if err != nil {
 			log.Warn("Failed to get validator balance for consolidation", "index", c.SourceIndex)
 			nextConsolidationIndex++
 			return true
 		}
-		sourceEffectiveBalance := min(vBalance, maxEffectiveBalance)
+		sourceEffectiveBalance := min(vBalance, sourceValidator.EffectiveBalance())
 		// Move active balance to target. Excess balance is withdrawable.
 		state.DecreaseBalance(s, c.SourceIndex, sourceEffectiveBalance)
 		state.IncreaseBalance(s, c.TargetIndex, sourceEffectiveBalance)

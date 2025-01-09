@@ -555,9 +555,9 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutility.Bytes {
 			return nil
 		}
 		// type + ssz
-		// ret = append(ret, append(hexutility.Bytes{requestType}, ssz...))
-		// in Mekong devnet-4, we don't need to add type
-		ret = append(ret, ssz)
+		if len(ssz) > 0 {
+			ret = append(ret, append(hexutility.Bytes{r.typ}, ssz...))
+		}
 	}
 	return ret
 }

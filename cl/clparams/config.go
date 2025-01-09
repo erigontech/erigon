@@ -576,6 +576,7 @@ type BeaconChainConfig struct {
 	PendingDepositLimit                   uint64 `yaml:"PENDING_DEPOSIT_LIMIT" spec:"true" json:"PENDING_DEPOSIT_LIMIT,string"`                                           // PendingDepositLimit defines the maximum number of pending deposits.
 	PendingPartialWithdrawalsLimit        uint64 `yaml:"PENDING_PARTIAL_WITHDRAWALS_LIMIT" spec:"true" json:"PENDING_PARTIAL_WITHDRAWALS_LIMIT,string"`                   // PendingPartialWithdrawalsLimit defines the maximum number of pending partial withdrawals.
 	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`                             // PendingConsolidationsLimit defines the maximum number of pending consolidations.
+	MaxBlobsPerBlockElectra               uint64 `yaml:"MAX_BLOBS_PER_BLOCK_ELECTRA" spec:"true" json:"MAX_BLOBS_PER_BLOCK_ELECTRA,string"`                               // MaxBlobsPerBlockElectra defines the maximum number of blobs per block for Electra.
 	// Constants for the Electra fork.
 	UnsetDepositRequestsStartIndex uint64 `yaml:"UNSET_DEPOSIT_REQUESTS_START_INDEX" spec:"true" json:"UNSET_DEPOSIT_REQUESTS_START_INDEX,string"` // UnsetDepositRequestsStartIndex defines the start index for unset deposit requests.
 	FullExitRequestAmount          uint64 `yaml:"FULL_EXIT_REQUEST_AMOUNT" spec:"true" json:"FULL_EXIT_REQUEST_AMOUNT,string"`                     // FullExitRequestAmount defines the amount for a full exit request.
@@ -844,7 +845,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxPerEpochActivationExitChurnLimit:   256_000_000_000,
 	MaxDepositRequestsPerPayload:          8192,
 	MaxWithdrawalRequestsPerPayload:       16,
-	MaxConsolidationRequestsPerPayload:    1,
+	MaxConsolidationRequestsPerPayload:    2,
 	MinSlashingPenaltyQuotientElectra:     4096,
 	WhistleBlowerRewardQuotientElectra:    4096,
 	MaxPendingPartialsPerWithdrawalsSweep: 8,
@@ -852,6 +853,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	PendingDepositLimit:                   1 << 27,
 	PendingPartialWithdrawalsLimit:        1 << 27,
 	PendingConsolidationsLimit:            1 << 18,
+	MaxBlobsPerBlockElectra:               9,
 	// Electra constants.
 	UnsetDepositRequestsStartIndex: ^uint64(0), // 2**64 - 1
 	FullExitRequestAmount:          0,
@@ -1112,6 +1114,16 @@ func (b *BeaconChainConfig) MaxEffectiveBalanceForVersion(version StateVersion) 
 	default:
 		panic("invalid version")
 	}
+}
+
+func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
+	switch v {
+	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
+		return b.MaxBlobsPerBlock
+	case ElectraVersion:
+		return b.MaxBlobsPerBlockElectra
+	}
+	panic("invalid version")
 }
 
 func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
