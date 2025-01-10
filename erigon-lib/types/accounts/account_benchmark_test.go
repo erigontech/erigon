@@ -313,7 +313,7 @@ func BenchmarkDecodingAccount(b *testing.B) { //TODO: it just stucks
 	}
 }
 
-func BenchmarkDecodingIncarnation(b *testing.B) {
+func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a panic one
 	accountCases := []struct {
 		name string
 		acc  *Account
@@ -353,25 +353,23 @@ func BenchmarkDecodingIncarnation(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		test := test
-		encodedAccount := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 
 				test.acc.Nonce = uint64(i)
 				test.acc.Balance.SetUint64(uint64(i))
-				test.acc.EncodeForStorage(encodedAccount)
+				encodedAccount := SerialiseV3(test.acc)
 
 				b.StartTimer()
 
-				if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+				decodedAcc := Account{}
+				if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
 					b.Fatal("can't decode the incarnation", err, encodedAccount)
 				}
 
-				decodedIncarnation, _ := DecodeIncarnationFromStorage(encodedAccount)
-
 				b.StopTimer()
-				decodedIncarnations = append(decodedIncarnations, decodedIncarnation)
+				decodedIncarnations = append(decodedIncarnations, decodedAcc.Incarnation)
 
 				b.StartTimer()
 			}
