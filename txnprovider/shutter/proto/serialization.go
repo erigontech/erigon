@@ -19,14 +19,21 @@ package proto
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-const EnvelopeVersion = "0.0.1"
+const (
+	EnvelopeVersion = "0.0.1"
+)
 
-var ErrEnveloperVersionMismatch = errors.New("envelope version mismatch")
+var (
+	ErrEmptyEnvelope            = errors.New("empty envelope")
+	ErrEnveloperVersionMismatch = errors.New("envelope version mismatch")
+	ErrProtoUnmarshall          = errors.New("issue unmarshalling proto bytes")
+)
 
 func UnmarshallDecryptionKeys(envelopeBytes []byte) (*DecryptionKeys, error) {
 	envelope, err := UnmarshallEnvelope(envelopeBytes)
@@ -34,10 +41,16 @@ func UnmarshallDecryptionKeys(envelopeBytes []byte) (*DecryptionKeys, error) {
 		return nil, err
 	}
 
+	if envelope.Message == nil {
+		return nil, fmt.Errorf("%w", ErrEmptyEnvelope)
+	}
+
+	// needed to avoid marshalling error, gist is that keypers use p2pmsg package name instead of proto
+	envelope.Message.TypeUrl = strings.Replace(envelope.Message.TypeUrl, "p2pmsg", "proto", 1)
 	decryptionKeys := DecryptionKeys{}
 	err = anypb.UnmarshalTo(envelope.Message, &decryptionKeys, proto.UnmarshalOptions{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrProtoUnmarshall, err)
 	}
 
 	return &decryptionKeys, nil
@@ -47,7 +60,7 @@ func UnmarshallEnvelope(envelopeBytes []byte) (*Envelope, error) {
 	envelope := Envelope{}
 	err := proto.Unmarshal(envelopeBytes, &envelope)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrProtoUnmarshall, err)
 	}
 
 	if envelope.Version != EnvelopeVersion {

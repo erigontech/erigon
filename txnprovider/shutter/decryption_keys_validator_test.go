@@ -14,22 +14,20 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package shutter
+package shutter_test
 
 import (
 	"context"
 	"math"
-	"strings"
 	"testing"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/turbo/testlog"
+	"github.com/erigontech/erigon/txnprovider/shutter"
+	"github.com/erigontech/erigon/txnprovider/shutter/internal/testhelpers"
 	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/proto"
 )
 
@@ -43,9 +41,9 @@ func TestDecryptionKeysValidator(t *testing.T) {
 			msg, err := shutterproto.UnmarshallDecryptionKeys(tc.msg.Data)
 			require.NoError(t, err)
 
-			validator := NewDecryptionKeysValidator(Config{
-				InstanceId:           TestInstanceId,
-				MaxNumKeysPerMessage: TestMaxNumKeysPerMessage,
+			validator := shutter.NewDecryptionKeysValidator(shutter.Config{
+				InstanceId:           testhelpers.TestInstanceId,
+				MaxNumKeysPerMessage: testhelpers.TestMaxNumKeysPerMessage,
 			})
 			haveErr := validator.Validate(msg)
 			require.ErrorIs(t, haveErr, tc.wantErr)
@@ -63,12 +61,12 @@ func TestDecryptionKeysP2pValidatorEx(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
 			logger := testlog.Logger(t, log.LvlCrit)
-			logHandler := &CollectingLogHandler{handler: logger.GetHandler()}
+			logHandler := testhelpers.NewCollectingLogHandler(logger.GetHandler())
 			logger.SetHandler(logHandler)
 
-			validator := NewDecryptionKeysP2pValidatorEx(logger, Config{
-				InstanceId:           TestInstanceId,
-				MaxNumKeysPerMessage: TestMaxNumKeysPerMessage,
+			validator := shutter.NewDecryptionKeysP2pValidatorEx(logger, shutter.Config{
+				InstanceId:           testhelpers.TestInstanceId,
+				MaxNumKeysPerMessage: testhelpers.TestMaxNumKeysPerMessage,
 			})
 			haveValidationResult := validator(ctx, "peer1", tc.msg)
 			require.Equal(t, tc.wantValidationResult, haveValidationResult)
@@ -95,10 +93,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 	return []decryptionKeysValidationTestCase{
 		{
 			name: "instance id mismatch",
-			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				InstanceIdOverride: 999999,
 			}),
-			wantErr:              ErrInstanceIdMismatch,
+			wantErr:              shutter.ErrInstanceIdMismatch,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to data validation error",
@@ -107,10 +105,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		},
 		{
 			name: "missing gnosis extra data",
-			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				NilExtra: true,
 			}),
-			wantErr:              ErrMissingGnosisExtraData,
+			wantErr:              shutter.ErrMissingGnosisExtraData,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to data validation error",
@@ -119,10 +117,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		},
 		{
 			name: "slot too large",
-			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				Slot: math.MaxInt64 + 1,
 			}),
-			wantErr:              ErrSlotTooLarge,
+			wantErr:              shutter.ErrSlotTooLarge,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to data validation error",
@@ -131,10 +129,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		},
 		{
 			name: "tx pointer too large",
-			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				TxPointer: math.MaxInt32 + 1,
 			}),
-			wantErr:              ErrTxPointerTooLarge,
+			wantErr:              shutter.ErrTxPointerTooLarge,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to data validation error",
@@ -143,10 +141,10 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		},
 		{
 			name: "eon too large",
-			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				Eon: math.MaxInt64 + 1,
 			}),
-			wantErr:              ErrEonTooLarge,
+			wantErr:              shutter.ErrEonTooLarge,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to data validation error",
@@ -155,11 +153,11 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		},
 		{
 			name: "empty keys",
-			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				Keys:              [][]byte{},
 				IdentityPreimages: [][]byte{},
 			}),
-			wantErr:              ErrEmptyKeys,
+			wantErr:              shutter.ErrEmptyKeys,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to data validation error",
@@ -168,11 +166,11 @@ func decryptionKeysValidatorTestCases(t *testing.T) []decryptionKeysValidationTe
 		},
 		{
 			name: "too many keys",
-			msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
+			msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
 				Keys:              [][]byte{[]byte("key1"), []byte("key2"), []byte("key3"), []byte("key4")},
 				IdentityPreimages: [][]byte{[]byte("id1"), []byte("id2"), []byte("id3"), []byte("id4")},
 			}),
-			wantErr:              ErrTooManyKeys,
+			wantErr:              shutter.ErrTooManyKeys,
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to data validation error",
@@ -186,21 +184,9 @@ func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidat
 	return append(
 		[]decryptionKeysValidationTestCase{
 			{
-				name: "invalid envelope version",
-				msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
-					VersionOverride: "XXX",
-				}),
-				wantErr:              shutterproto.ErrEnveloperVersionMismatch,
-				wantValidationResult: pubsub.ValidationReject,
-				wantValidationLogMsgs: []string{
-					"rejecting decryption keys msg due to unmarshalling error",
-					"envelope version mismatch: XXX",
-				},
-			},
-			{
-				name: "invalid message bytes",
-				msg: MockDecryptionKeysMsg(t, DecryptionKeysMsgOptions{
-					EnvelopeBytesOverride: []byte("invalid"),
+				name: "unmarshalling error",
+				msg: testhelpers.MockDecryptionKeysMsg(t, testhelpers.MockDecryptionKeysMsgOptions{
+					EnvelopeDataOverride: []byte("invalid"),
 				}),
 				wantValidationResult: pubsub.ValidationReject,
 				wantValidationLogMsgs: []string{
@@ -211,129 +197,4 @@ func decryptionKeysP2pValidatorExTestCases(t *testing.T) []decryptionKeysValidat
 		},
 		decryptionKeysValidatorTestCases(t)...,
 	)
-}
-
-const (
-	TestInstanceId           = 123
-	TestMaxNumKeysPerMessage = 3
-)
-
-type DecryptionKeysMsgOptions struct {
-	Eon                   uint64
-	Keys                  [][]byte
-	IdentityPreimages     [][]byte
-	NilExtra              bool
-	Slot                  uint64
-	TxPointer             uint64
-	SignerIndices         []uint64
-	Signatures            [][]byte
-	InstanceIdOverride    uint64
-	VersionOverride       string
-	TopicOverride         string
-	EnvelopeBytesOverride []byte
-}
-
-func MockDecryptionKeysMsg(t *testing.T, opts DecryptionKeysMsgOptions) *pubsub.Message {
-	var instanceId uint64
-	if opts.InstanceIdOverride != 0 {
-		instanceId = opts.InstanceIdOverride
-	} else {
-		instanceId = TestInstanceId
-	}
-
-	decryptionKeys := &shutterproto.DecryptionKeys{
-		InstanceId: instanceId,
-		Eon:        opts.Eon,
-	}
-
-	require.Equal(t, len(opts.Keys), len(opts.IdentityPreimages))
-	for i := range opts.Keys {
-		decryptionKeys.Keys = append(decryptionKeys.Keys, &shutterproto.Key{
-			Key:              opts.Keys[i],
-			IdentityPreimage: opts.IdentityPreimages[i],
-		})
-	}
-
-	if !opts.NilExtra {
-		decryptionKeys.Extra = &shutterproto.DecryptionKeys_Gnosis{
-			Gnosis: &shutterproto.GnosisDecryptionKeysExtra{
-				Slot:          opts.Slot,
-				TxPointer:     opts.TxPointer,
-				SignerIndices: opts.SignerIndices,
-				Signatures:    opts.Signatures,
-			},
-		}
-	}
-
-	var topic string
-	if opts.TopicOverride != "" {
-		topic = opts.TopicOverride
-	} else {
-		topic = DecryptionKeysTopic
-	}
-
-	var version string
-	if opts.VersionOverride != "" {
-		version = opts.VersionOverride
-	} else {
-		version = shutterproto.EnvelopeVersion
-	}
-
-	var data []byte
-	if opts.EnvelopeBytesOverride != nil {
-		data = opts.EnvelopeBytesOverride
-	} else {
-		decryptionKeysMsg, err := anypb.New(decryptionKeys)
-		require.NoError(t, err)
-		envelopeBytes, err := proto.Marshal(&shutterproto.Envelope{
-			Version: version,
-			Message: decryptionKeysMsg,
-		})
-		require.NoError(t, err)
-		data = envelopeBytes
-	}
-
-	return &pubsub.Message{
-		Message: &pb.Message{
-			Data:  data,
-			Topic: &topic,
-		},
-	}
-}
-
-type CollectingLogHandler struct {
-	records []*log.Record
-	handler log.Handler
-}
-
-func (clh *CollectingLogHandler) Log(r *log.Record) error {
-	clh.records = append(clh.records, r)
-	return clh.handler.Log(r)
-}
-
-func (clh *CollectingLogHandler) ContainsAll(subStrs []string) bool {
-	for _, subStr := range subStrs {
-		if !clh.Contains(subStr) {
-			return false
-		}
-	}
-	return true
-}
-
-func (clh *CollectingLogHandler) Contains(subStr string) bool {
-	for _, r := range clh.records {
-		msg := string(log.TerminalFormatNoColor().Format(r))
-		if strings.Contains(msg, subStr) {
-			return true
-		}
-	}
-	return false
-}
-
-func (clh *CollectingLogHandler) FormattedRecords() []string {
-	formattedRecords := make([]string, len(clh.records))
-	for i, record := range clh.records {
-		formattedRecords[i] = strings.TrimSuffix(string(log.TerminalFormatNoColor().Format(record)), "\n")
-	}
-	return formattedRecords
 }

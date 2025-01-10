@@ -61,17 +61,17 @@ func (dkl DecryptionKeysListener) RegisterObserver(observer event.Observer[*prot
 func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	dkl.logger.Info("running decryption keys listener")
 
-	host, err := dkl.initHost()
+	p2pHost, err := dkl.initP2pHost()
 	if err != nil {
 		return err
 	}
 
-	pubSub, err := dkl.initGossipSub(ctx, host)
+	pubSub, err := dkl.initGossipSub(ctx, p2pHost)
 	if err != nil {
 		return err
 	}
 
-	err = dkl.connectBootstrapNodes(ctx, host)
+	err = dkl.connectBootstrapNodes(ctx, p2pHost)
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 	return eg.Wait()
 }
 
-func (dkl DecryptionKeysListener) initHost() (host.Host, error) {
+func (dkl DecryptionKeysListener) initP2pHost() (host.Host, error) {
 	listenAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", dkl.config.ListenPort))
 	if err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func (dkl DecryptionKeysListener) initHost() (host.Host, error) {
 		return nil, err
 	}
 
-	host, err := libp2p.New(
+	p2pHost, err := libp2p.New(
 		libp2p.Identity(privKey),
 		libp2p.ListenAddrs(listenAddr),
 		libp2p.UserAgent(fmt.Sprintf("erigon/shutter/%s", params.VersionWithCommit(params.GitCommit))),
@@ -112,8 +112,8 @@ func (dkl DecryptionKeysListener) initHost() (host.Host, error) {
 		return nil, err
 	}
 
-	dkl.logger.Info("shutter libp2p host initialised", "addr", listenAddr, "id", host.ID())
-	return host, nil
+	dkl.logger.Info("shutter p2p host initialised", "addr", listenAddr, "id", p2pHost.ID())
+	return p2pHost, nil
 }
 
 func (dkl DecryptionKeysListener) initGossipSub(ctx context.Context, host host.Host) (*pubsub.PubSub, error) {
