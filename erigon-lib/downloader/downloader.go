@@ -1569,7 +1569,7 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 				return
 			case <-t.Complete.On():
 				downloadTime := time.Since(downloadStarted)
-				downloaded := t.Stats().BytesReadUsefulData
+				downloaded := t.Stats().BytesCompleted
 
 				diagnostics.Send(diagnostics.FileDownloadedStatisticsUpdate{
 					FileName:    t.Name(),
@@ -2261,7 +2261,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.lock.Unlock()
 
 	if !stats.Completed {
-		logger.Debug("[snapshots] downloading",
+		log.Debug("[snapshots] downloading",
 			"len", len(torrents),
 			"webTransfers", webTransfers,
 			"torrent", torrentInfo,
@@ -2273,6 +2273,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
 			"flushed", common.ByteCount(stats.BytesFlushed),
 			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+			"downloaded", common.ByteCount(stats.BytesDownload),
+			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)),
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -2360,10 +2362,16 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 		if peerUrl, err := webPeerUrl(peer); err == nil {
 			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
 				rate := uint64(peer.DownloadRate())
+				upRate := uint64(peer.UploadRate())
 				if !finished {
 					seed := diagnostics.SegmentPeer{
 						Url:          peerUrl.Host,
 						DownloadRate: rate,
+						UploadRate:   upRate,
+						RemoteAddr:   peer.RemoteAddr.String(),
+						PeerId:       [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+						PiecesCount:  0,
+						TorrentName:  fName,
 					}
 					seeds = append(seeds, seed)
 				}
@@ -2387,11 +2395,17 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 
 	for _, peer := range peersOfThisFile {
 		dr := uint64(peer.DownloadRate())
+		ur := uint64(peer.UploadRate())
 		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
 
 		segPeer := diagnostics.SegmentPeer{
 			Url:          url,
 			DownloadRate: dr,
+			UploadRate:   ur,
+			PiecesCount:  peer.PeerPieces().GetCardinality(),
+			RemoteAddr:   peer.RemoteAddr.String(),
+			PeerId:       peer.PeerID,
+			TorrentName:  fName,
 		}
 		peers = append(peers, segPeer)
 		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(dr)))
@@ -2890,22 +2904,22 @@ func (d *Downloader) logProgress() {
 			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.CompletionRate)),
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys))
-
-		diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
-			Downloaded:           bytesDone,
-			Total:                d.stats.BytesTotal,
-			TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
-			DownloadRate:         d.stats.DownloadRate,
-			UploadRate:           d.stats.UploadRate,
-			Peers:                d.stats.PeersUnique,
-			Files:                d.stats.FilesTotal,
-			Connections:          d.stats.ConnectionsTotal,
-			Alloc:                m.Alloc,
-			Sys:                  m.Sys,
-			DownloadFinished:     d.stats.Completed,
-			TorrentMetadataReady: d.stats.MetadataReady,
-		})
 	}
+
+	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
+		Downloaded:           bytesDone,
+		Total:                d.stats.BytesTotal,
+		TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
+		DownloadRate:         d.stats.DownloadRate,
+		UploadRate:           d.stats.UploadRate,
+		Peers:                d.stats.PeersUnique,
+		Files:                d.stats.FilesTotal,
+		Connections:          d.stats.ConnectionsTotal,
+		Alloc:                m.Alloc,
+		Sys:                  m.Sys,
+		DownloadFinished:     d.stats.Completed,
+		TorrentMetadataReady: d.stats.MetadataReady,
+	})
 }
 
 func calculateTime(amountLeft, rate uint64) string {
