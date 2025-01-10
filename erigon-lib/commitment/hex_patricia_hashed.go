@@ -1640,7 +1640,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			row, updatedNibs(hph.touchMap[row]&hph.afterMap[row]), depth, hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
 	}
 
-	updateKind, nibblesUpdated := afterMapUpdateKind(hph.afterMap[row])
+	updateKind, nibblesLeftAfterUpdate := afterMapUpdateKind(hph.afterMap[row])
 	switch updateKind {
 	case updateKindDelete: // Everything deleted
 		if hph.touchMap[row] != 0 {
@@ -1719,7 +1719,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 
 		// Calculate total length of all hashes
-		totalBranchLen := 17 - nibblesUpdated // For every empty cell, one byte
+		totalBranchLen := 17 - nibblesLeftAfterUpdate // For every empty cell, one byte
 		for bitset, j := hph.afterMap[row], 0; bitset != 0; j++ {
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
