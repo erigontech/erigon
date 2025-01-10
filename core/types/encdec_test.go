@@ -544,27 +544,6 @@ func TestWithdrawalEncodeDecodeRLP(t *testing.T) {
 	}
 }
 
-// func TestTxRLPEncoding(t *testing.T) {
-// 	tr := NewTRand()
-// 	var buf bytes.Buffer
-// 	for i := 0; i < RUNS; i++ {
-// 		enc := tr.RandTransaction(-1)
-// 		buf.Reset()
-// 		_txn := TxnToTxRLP(enc)
-// 		if err := _txn.EncodeRLP(&buf); err != nil {
-// 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
-// 		}
-
-// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-
-// 		dec, err := DecodeRLPTransaction(s, false)
-// 		if err != nil {
-// 			t.Errorf("error: DecodeRLPTransaction: %v", err)
-// 		}
-// 		compareTransactions(t, enc, dec)
-// 	}
-// }
-
 func compareTestingStructs(t *testing.T, a, b *TestingStruct) {
 	check(t, "obj.a", a.a, b.a)
 	check(t, "obj.aa", a.aa, b.aa)
