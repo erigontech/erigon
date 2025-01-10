@@ -71,17 +71,25 @@ const (
 	changesetSafeRange = 32 // Safety net for long-sync, keep last 32 changesets
 )
 
-func NewProgress(prevExecutedBlockNum, prevCommitedBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
-	return &Progress{prevTime: time.Now(), prevExecutedBlockNum: prevExecutedBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
+func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
+	return &Progress{
+		prevTime:              time.Now(),
+		initialTxNum:          initialTxNum,
+		prevExecutedBlockNum:  initialBlockNum,
+		prevCommittedBlockNum: initialBlockNum,
+		commitThreshold:       commitThreshold,
+		logPrefix:             logPrefix,
+		logger:                logger}
 }
 
 type Progress struct {
+	initialTxNum          uint64
 	prevTime              time.Time
 	prevExecutedBlockNum  uint64
-	prevExecutedTxCount   uint64
+	prevExecutedTxNum     uint64
 	prevExecutedGas       uint64
 	prevCommittedBlockNum uint64
-	prevCommittedTxCount  uint64
+	prevCommittedTxNum    uint64
 	prevCommittedGas      uint64
 	prevRepeatCount       uint64
 	commitThreshold       uint64
@@ -91,10 +99,10 @@ type Progress struct {
 	logger       log.Logger
 }
 
-func (p *Progress) Log(suffix string, rs *state.StateV3, in *exec.QueueWithRetry, rws *exec.ResultsQueue,
-	executedBlockNum uint64, executedTxCount uint64, executedGas uint64,
-	committedBlockNum uint64, committedTxCount uint64, committedGas, outTxNum uint64,
-	repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
+func (p *Progress) Log(suffix string, rs *state.StateV3,
+	executedBlockNum uint64, executedTxNum uint64, executedGas uint64,
+	committedBlockNum uint64, committedTxNum uint64, committedGas uint64,
+	idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
 
 	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
@@ -116,44 +124,40 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *exec.QueueWithRetry
 	}
 
 	executedGasSec := uint64(float64(executedGas-p.prevExecutedGas) / interval.Seconds())
-	executedTxSec := uint64(float64(executedTxCount-p.prevExecutedTxCount) / interval.Seconds())
+	executedTxSec := uint64(float64(executedTxNum-p.prevExecutedTxNum) / interval.Seconds())
 	executedDiffBlocks := max(int(executedBlockNum)-int(p.prevExecutedBlockNum)+1, 0)
 
 	committedGasSec := uint64(float64(committedGas-p.prevCommittedGas) / interval.Seconds())
-	committedTxSec := uint64(float64(committedTxCount-p.prevCommittedTxCount) / interval.Seconds())
+	committedTxSec := uint64(float64(committedTxNum-p.prevCommittedTxNum) / interval.Seconds())
 	committedDiffBlocks := max(int(committedBlockNum)-int(p.prevCommittedBlockNum)+1, 0)
 
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
 		"exec blk", executedBlockNum,
 		"exec blks", executedDiffBlocks,
 		"exec blk/s", fmt.Sprintf("%.1f", float64(executedDiffBlocks)/interval.Seconds()),
-		"exec txs", executedTxCount-p.prevExecutedTxCount,
+		"exec txs", executedTxNum-p.prevExecutedTxNum,
 		"exec tx/s", common.PrettyCounter(executedTxSec),
 		"exec gas/s", common.PrettyCounter(executedGasSec),
 		"com blk", committedBlockNum,
 		"com blks", committedDiffBlocks,
 		"com blk/s", fmt.Sprintf("%.1f", float64(committedDiffBlocks)/interval.Seconds()),
-		"com txs", committedTxCount-p.prevCommittedTxCount,
+		"com txs", committedTxNum-p.prevCommittedTxNum,
 		"com tx/s", common.PrettyCounter(committedTxSec),
 		"com gas/s", common.PrettyCounter(committedGasSec),
-		//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
-		//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
-		//"workers", p.workersCount,
 		"buf", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
-		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.DefaultStepSize)),
+		"step", fmt.Sprintf("%.1f", float64(committedTxNum)/float64(config3.DefaultStepSize)),
 		"inMem", inMemExec,
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 
 	p.prevTime = currentTime
-	p.prevExecutedTxCount = executedTxCount
+	p.prevExecutedTxNum = executedTxNum
 	p.prevExecutedGas = executedGas
 	p.prevExecutedBlockNum = executedBlockNum
-	p.prevCommittedTxCount = committedTxCount
+	p.prevCommittedTxNum = committedTxNum
 	p.prevCommittedGas = committedGas
 	p.prevCommittedBlockNum = committedBlockNum
-	p.prevRepeatCount = repeatCount
 }
 
 // Cases:
@@ -355,17 +359,12 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := cfg.batchSize.Bytes()
 
-	// TODO are these dups ?
-	processed := NewProgress(blockNum, commitThreshold, workerCount, true, execStage.LogPrefix(), logger)
-	progress := NewProgress(blockNum, commitThreshold, workerCount, false, execStage.LogPrefix(), logger)
-
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	pruneEvery := time.NewTicker(2 * time.Second)
 	defer pruneEvery.Stop()
 
 	var logGas uint64
-	var stepsInDB float64
 	var executor executor
 
 	if parallel {
@@ -381,30 +380,26 @@ func ExecV3(ctx context.Context,
 
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
-				cfg:         cfg,
-				execStage:   execStage,
-				rs:          rs,
-				doms:        doms,
-				agg:         agg,
-				accumulator: accumulator,
-				isMining:    isMining,
-				inMemExec:   inMemExec,
-				applyTx:     applyTx,
-				logger:      logger,
+				cfg:                      cfg,
+				execStage:                execStage,
+				rs:                       rs,
+				doms:                     doms,
+				agg:                      agg,
+				accumulator:              accumulator,
+				shouldGenerateChangesets: shouldGenerateChangesets,
+				isMining:                 isMining,
+				inMemExec:                inMemExec,
+				applyTx:                  applyTx,
+				logger:                   logger,
+				progress:                 NewProgress(blockNum, outputTxNum.Load(), commitThreshold, false, execStage.LogPrefix(), logger),
 			},
-			shouldGenerateChangesets: shouldGenerateChangesets,
-			workerCount:              workerCount,
-			pruneEvery:               pruneEvery,
-			logEvery:                 logEvery,
-			progress:                 progress,
+			workerCount: workerCount,
+			pruneEvery:  pruneEvery,
+			logEvery:    logEvery,
 		}
 
 		executorCancel := pe.run(ctx)
 		defer executorCancel()
-
-		defer func() {
-			processed.Log("Done", executor.readState().StateV3, nil, pe.rws, 0 /*txCount - TODO*/, logGas, stages.SyncMetrics[stages.Execution].GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
-		}()
 
 		executor = pe
 	} else {
@@ -413,26 +408,28 @@ func ExecV3(ctx context.Context,
 
 		se := &serialExecutor{
 			txExecutor: txExecutor{
-				cfg:       cfg,
-				execStage: execStage,
-				rs:        rs,
-				doms:      doms,
-				agg:       agg,
-				u:         u,
-				isMining:  isMining,
-				inMemExec: inMemExec,
-				applyTx:   applyTx,
-				logger:    logger,
+				cfg:                      cfg,
+				execStage:                execStage,
+				rs:                       rs,
+				doms:                     doms,
+				agg:                      agg,
+				u:                        u,
+				isMining:                 isMining,
+				inMemExec:                inMemExec,
+				shouldGenerateChangesets: shouldGenerateChangesets,
+				applyTx:                  applyTx,
+				logger:                   logger,
+				progress:                 NewProgress(blockNum, outputTxNum.Load(), commitThreshold, false, execStage.LogPrefix(), logger),
 			},
 			applyWorker: applyWorker,
 		}
 
-		defer func() {
-			processed.Log("Done", executor.readState().StateV3, nil, nil, se.txCount, logGas, stages.SyncMetrics[stages.Execution].GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
-		}()
-
 		executor = se
 	}
+
+	defer func() {
+		executor.Log("Done", rawdbhelpers.IdxStepsCountV3(executor.tx()))
+	}()
 
 	blockComplete.Store(true)
 
@@ -679,8 +676,7 @@ Loop:
 					break
 				}
 
-				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState().StateV3, nil, nil, count, logGas, stages.SyncMetrics[stages.Execution].GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+				executor.Log("Serial Exec", rawdbhelpers.IdxStepsCountV3(executor.tx()))
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(state2.HasAggTx).AggTx().(*state2.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {

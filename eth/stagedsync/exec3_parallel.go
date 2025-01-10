@@ -90,6 +90,8 @@ type executor interface {
 	tx() kv.RwTx
 	readState() *state.StateV3Buffered
 	domains() *libstate.SharedDomains
+
+	Log(label string, stepsInDb float64)
 }
 
 type applyResult interface {
@@ -312,17 +314,26 @@ func (ev *taskVersion) Version() state.Version {
 
 type txExecutor struct {
 	sync.RWMutex
-	cfg         ExecuteBlockCfg
-	execStage   *StageState
-	agg         *libstate.Aggregator
-	rs          *state.StateV3Buffered
-	doms        *libstate.SharedDomains
-	accumulator *shards.Accumulator
-	u           Unwinder
-	isMining    bool
-	inMemExec   bool
-	applyTx     kv.RwTx
-	logger      log.Logger
+	cfg                      ExecuteBlockCfg
+	execStage                *StageState
+	agg                      *libstate.Aggregator
+	rs                       *state.StateV3Buffered
+	doms                     *libstate.SharedDomains
+	accumulator              *shards.Accumulator
+	u                        Unwinder
+	isMining                 bool
+	inMemExec                bool
+	applyTx                  kv.RwTx
+	logger                   log.Logger
+	progress                 *Progress
+	shouldGenerateChangesets bool
+
+	lastExecutedBlockNum  uint64
+	lastExecutedTxNum     uint64
+	executedGas           uint64
+	lastCommittedBlockNum uint64
+	lastCommittedTxNum    uint64
+	committedGas          uint64
 }
 
 func (te *txExecutor) tx() kv.RwTx {
@@ -358,6 +369,12 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 	}
 
 	return h
+}
+
+func (te *txExecutor) Log(label string, stepsInDb float64) {
+	te.progress.Log("Parallel Exec", te.rs.StateV3,
+		te.lastExecutedBlockNum, te.lastExecutedTxNum, te.executedGas,
+		te.lastCommittedBlockNum, te.lastCommittedTxNum, te.committedGas, stepsInDb, te.shouldGenerateChangesets, te.inMemExec)
 }
 
 type execRequest struct {
@@ -431,21 +448,19 @@ func newBlockStatus(profile bool) *blockExecStatus {
 
 type parallelExecutor struct {
 	txExecutor
-	blockResults             chan *blockResult
-	rwLoopG                  *errgroup.Group
-	applyLoopWg              sync.WaitGroup
-	execWorkers              []*exec3.Worker
-	stopWorkers              func()
-	waitWorkers              func()
-	in                       *exec.QueueWithRetry
-	rws                      *exec.ResultsQueue
-	shouldGenerateChangesets bool
-	workerCount              int
-	pruneEvery               *time.Ticker
-	logEvery                 *time.Ticker
-	slowDownLimit            *time.Ticker
-	progress                 *Progress
-	stateReader              state.ResettableStateReader
+	blockResults  chan *blockResult
+	rwLoopG       *errgroup.Group
+	applyLoopWg   sync.WaitGroup
+	execWorkers   []*exec3.Worker
+	stopWorkers   func()
+	waitWorkers   func()
+	in            *exec.QueueWithRetry
+	rws           *exec.ResultsQueue
+	workerCount   int
+	pruneEvery    *time.Ticker
+	logEvery      *time.Ticker
+	slowDownLimit *time.Ticker
+	stateReader   state.ResettableStateReader
 
 	blockStatus map[uint64]*blockExecStatus
 
@@ -630,21 +645,17 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 	}
 
 	var lastBlockResult blockResult
-	var executedGas uint64
-	var uncommitedGas uint64
-	var commitedGas uint64
+	var uncommittedGas uint64
 
 	err := func() error {
-		var lastTxNum uint64
-		var lastCommitedBlockNum uint64
-
 		for {
 			select {
 			case applyResult := <-applyResults:
 				switch applyResult := applyResult.(type) {
 				case *txResult:
 					blockComplete = false
-					executedGas += applyResult.gasUsed
+					pe.executedGas += applyResult.gasUsed
+					pe.lastExecutedTxNum = applyResult.txNum
 
 					pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
 					if err := pe.rs.ApplyState4(ctx,
@@ -660,8 +671,8 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 						pe.doms.SetTxNum(applyResult.lastTxNum)
 						pe.doms.SetBlockNum(applyResult.BlockNum)
 						lastBlockResult = *applyResult
-						lastTxNum = applyResult.lastTxNum
-						uncommitedGas += applyResult.GasUsed
+						pe.lastExecutedBlockNum = applyResult.BlockNum
+						uncommittedGas += applyResult.GasUsed
 					}
 
 					if (applyResult.complete || applyResult.Err != nil) && pe.blockResults != nil {
@@ -673,12 +684,12 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 				return ctx.Err()
 			case <-logEvery:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-				pe.progress.Log("Paralell Exec", pe.rs.StateV3, pe.in, pe.rws, pe.rs.DoneCount(), executedGas, lastBlockResult.BlockNum, lastTxNum, mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangesets, pe.inMemExec)
+				pe.Log("Parallel Exec", stepsInDB)
 				if pe.agg.HasBackgroundFilesBuild() {
 					logger.Info(fmt.Sprintf("[%s] Background files build", pe.execStage.LogPrefix()), "progress", pe.agg.BackgroundProgress())
 				}
 			case <-pruneEvery:
-				if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > lastCommitedBlockNum {
+				if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > pe.lastCommittedBlockNum {
 					rhash, err := pe.doms.ComputeCommitment(ctx, true, lastBlockResult.BlockNum, pe.execStage.LogPrefix())
 
 					if err != nil {
@@ -693,9 +704,10 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 
 					fmt.Println("BC DONE", lastBlockResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(lastBlockResult.StateRoot.Bytes())) //Temp Done
 
-					lastCommitedBlockNum = lastBlockResult.BlockNum
-					commitedGas += uncommitedGas
-					uncommitedGas = 0
+					pe.lastCommittedBlockNum = lastBlockResult.BlockNum
+					pe.lastCommittedTxNum = lastBlockResult.lastTxNum
+					pe.committedGas += uncommittedGas
+					uncommittedGas = 0
 
 					if !pe.inMemExec {
 						err = tx.ApplyRw(func(tx kv.RwTx) error {
@@ -714,7 +726,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 					break
 				}
 
-				if pe.inMemExec {
+				if pe.inMemExec || tx == pe.applyTx {
 					break
 				}
 
