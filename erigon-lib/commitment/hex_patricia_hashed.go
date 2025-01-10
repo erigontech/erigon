@@ -1575,7 +1575,12 @@ const (
 
 	// updateKindPropagate is an update operation ended up with a single nibble which is leaf or extension node.
 	// We do not store keys with only one cell as a value in db, instead we copy them upwards to the parent branch.
-	// IF updated prefix was present before, operation produces a delete write for it.
+	//
+	// In case current prefix existed before and node is fused to upper level, this causes deletion for current prefix
+	// and update of branch value on upper level.
+	// 	e.g.: leaf was at prefix 0xbeef, but we fuse it in level above, so
+	//  - delete 0xbeef
+	//  - update 0xbee
 	updateKindPropagate updateKind = 0b01
 
 	// updateKindBranch is an update operation ended up as a branch of 2+ cells.
