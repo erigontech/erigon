@@ -101,6 +101,7 @@ type blockResult struct {
 	BlockHash common.Hash
 	StateRoot common.Hash
 	Err       error
+	GasUsed   uint64
 	lastTxNum uint64
 	complete  bool
 	TxIO      *state.VersionedIO
@@ -113,6 +114,7 @@ type txResult struct {
 	blockNum   uint64
 	blockTime  uint64
 	txNum      uint64
+	gasUsed    uint64
 	logs       []*types.Log
 	traceFroms map[libcommon.Address]struct{}
 	traceTos   map[libcommon.Address]struct{}
@@ -129,7 +131,7 @@ type execResult struct {
 	*exec.Result
 }
 
-func (result *execResult) finalize(prev *types.Receipt, engine consensus.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
+func (result *execResult) finalize(prevReceipt *types.Receipt, engine consensus.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -199,31 +201,37 @@ func (result *execResult) finalize(prev *types.Receipt, engine consensus.Engine,
 	}
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
-	receipt := &types.Receipt{Type: txTask.Tx.Type(), PostState: nil, CumulativeGasUsed: result.ExecutionResult.UsedGas}
-	if result.ExecutionResult.Failed() {
-		receipt.Status = types.ReceiptStatusFailed
-	} else {
-		receipt.Status = types.ReceiptStatusSuccessful
+	result.Receipt = &types.Receipt{
+		Type:              txTask.Tx.Type(),
+		PostState:         nil,
+		CumulativeGasUsed: result.ExecutionResult.UsedGas,
+		GasUsed:           result.ExecutionResult.UsedGas,
+		TxHash:            txHash,
+		// Set the receipt logs and create the bloom filter.
+		Logs:             ibs.GetLogs(txTask.TxIndex, txHash, blockNum, blockHash),
+		BlockHash:        blockHash,
+		BlockNumber:      new(big.Int).SetUint64(blockNum),
+		TransactionIndex: uint(txTask.TxIndex),
 	}
 
-	receipt.TxHash = txHash
-	receipt.GasUsed = result.ExecutionResult.UsedGas
+	if result.ExecutionResult.Failed() {
+		result.Receipt.Status = types.ReceiptStatusFailed
+	} else {
+		result.Receipt.Status = types.ReceiptStatusSuccessful
+	}
+
+	if prevReceipt != nil {
+		result.Receipt.CumulativeGasUsed += prevReceipt.CumulativeGasUsed
+	}
 
 	// If the transaction created a contract, store the creation address in the receipt.
 	if task.TxMessage().To() == nil {
-		receipt.ContractAddress = crypto.CreateAddress(task.TxMessage().From(), txTask.Tx.GetNonce())
+		result.Receipt.ContractAddress = crypto.CreateAddress(task.TxMessage().From(), txTask.Tx.GetNonce())
 	}
 
-	// Set the receipt logs and create the bloom filter.
-	receipt.Logs = ibs.GetLogs(txTask.TxIndex, txHash, blockNum, blockHash)
-	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-	receipt.BlockHash = blockHash
-	receipt.BlockNumber = new(big.Int).SetUint64(blockNum)
-	receipt.TransactionIndex = uint(txTask.TxIndex)
+	result.Receipt.Bloom = types.CreateBloom(types.Receipts{result.Receipt})
 
-	result.Receipt = receipt
-
-	return receipt, nil
+	return result.Receipt, nil
 }
 
 type taskVersion struct {
@@ -396,6 +404,9 @@ type blockExecStatus struct {
 
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
+
+	// cummulative gas for this block
+	gasUsed uint64
 
 	diagExecSuccess, diagExecAbort []int
 
@@ -618,7 +629,10 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 		pruneEvery = pe.pruneEvery.C
 	}
 
-	var lastBlockNum uint64
+	var lastBlockResult blockResult
+	var executedGas uint64
+	var uncommitedGas uint64
+	var commitedGas uint64
 
 	err := func() error {
 		var lastTxNum uint64
@@ -630,8 +644,9 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 				switch applyResult := applyResult.(type) {
 				case *txResult:
 					blockComplete = false
-					pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
+					executedGas += applyResult.gasUsed
 
+					pe.rs.SetTxNum(applyResult.txNum, applyResult.blockNum)
 					if err := pe.rs.ApplyState4(ctx,
 						applyResult.blockNum, applyResult.txNum, applyResult.writeSet,
 						nil, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
@@ -641,22 +656,12 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 					}
 
 				case *blockResult:
-					if applyResult.BlockNum > lastBlockNum {
+					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						pe.doms.SetTxNum(applyResult.lastTxNum)
 						pe.doms.SetBlockNum(applyResult.BlockNum)
-						lastBlockNum = applyResult.BlockNum
+						lastBlockResult = *applyResult
 						lastTxNum = applyResult.lastTxNum
-						//Temp
-						rhash, err := pe.doms.ComputeCommitment(ctx, false, applyResult.BlockNum, pe.execStage.LogPrefix())
-						if err != nil {
-							return err
-						}
-						if !bytes.Equal(rhash, applyResult.StateRoot.Bytes()) {
-							logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x",
-								pe.execStage.LogPrefix(), applyResult.BlockNum, rhash, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
-							return errors.New("wrong trie root")
-						}
-						fmt.Println("BC DONE", applyResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(applyResult.StateRoot.Bytes())) //Temp Done
+						uncommitedGas += applyResult.GasUsed
 					}
 
 					if (applyResult.complete || applyResult.Err != nil) && pe.blockResults != nil {
@@ -668,17 +673,30 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 				return ctx.Err()
 			case <-logEvery:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-				pe.progress.Log("", pe.rs.StateV3, pe.in, pe.rws, pe.rs.DoneCount(), 0 /* TODO logGas*/, lastBlockNum, lastTxNum, mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangesets, pe.inMemExec)
+				pe.progress.Log("Paralell Exec", pe.rs.StateV3, pe.in, pe.rws, pe.rs.DoneCount(), executedGas, lastBlockResult.BlockNum, lastTxNum, mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangesets, pe.inMemExec)
 				if pe.agg.HasBackgroundFilesBuild() {
 					logger.Info(fmt.Sprintf("[%s] Background files build", pe.execStage.LogPrefix()), "progress", pe.agg.BackgroundProgress())
 				}
 			case <-pruneEvery:
-				if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() && lastBlockNum > lastCommitedBlockNum {
-					_, err := pe.doms.ComputeCommitment(ctx, true, lastBlockNum, pe.execStage.LogPrefix())
+				if pe.rs.SizeEstimate() < pe.cfg.batchSize.Bytes() && lastBlockResult.BlockNum > lastCommitedBlockNum {
+					rhash, err := pe.doms.ComputeCommitment(ctx, true, lastBlockResult.BlockNum, pe.execStage.LogPrefix())
+
 					if err != nil {
 						return err
 					}
-					lastCommitedBlockNum = lastBlockNum
+
+					if !bytes.Equal(rhash, lastBlockResult.StateRoot.Bytes()) {
+						logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x",
+							pe.execStage.LogPrefix(), lastBlockResult.BlockNum, rhash, lastBlockResult.StateRoot.Bytes(), lastBlockResult.BlockHash))
+						return errors.New("wrong trie root")
+					}
+
+					fmt.Println("BC DONE", lastBlockResult.BlockNum, hex.EncodeToString(rhash), hex.EncodeToString(lastBlockResult.StateRoot.Bytes())) //Temp Done
+
+					lastCommitedBlockNum = lastBlockResult.BlockNum
+					commitedGas += uncommitedGas
+					uncommitedGas = 0
+
 					if !pe.inMemExec {
 						err = tx.ApplyRw(func(tx kv.RwTx) error {
 							ac := pe.agg.BeginFilesRo()
@@ -711,16 +729,6 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 					pe.Lock() // This is to prevent workers from starting work on any new txTask
 					defer pe.Unlock()
 
-					// Drain results channel because read sets do not carry over
-					pe.rws.DropResults(ctx, func(result *exec.Result) {
-						pe.in.Add(ctx, result.Task)
-					})
-
-					//lastTxNumInDb, _ := txNumsReader.Max(tx, outputBlockNum.Get())
-					//if lastTxNumInDb != outputTxNum.Load()-1 {
-					//	panic(fmt.Sprintf("assert: %d != %d", lastTxNumInDb, outputTxNum.Load()))
-					//}
-
 					t1 = time.Since(commitStart)
 					tt := time.Now()
 					t2 = time.Since(tt)
@@ -733,7 +741,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 					t3 = time.Since(tt)
 
 					if pe.execStage != nil {
-						if err := pe.execStage.Update(tx, lastBlockNum); err != nil {
+						if err := pe.execStage.Update(tx, lastBlockResult.BlockNum); err != nil {
 							return err
 						}
 					}
@@ -783,7 +791,7 @@ func (pe *parallelExecutor) rwLoop(ctx context.Context, logger log.Logger) error
 		return err
 	}
 	if pe.execStage != nil {
-		if err := pe.execStage.Update(tx, lastBlockNum); err != nil {
+		if err := pe.execStage.Update(tx, lastBlockResult.BlockNum); err != nil {
 			return err
 		}
 	}
@@ -1075,11 +1083,13 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 			}
 
 			applyResult.txNum = txTask.TxNum
+			applyResult.gasUsed = txResult.Receipt.GasUsed
 			applyResult.blockTime = txTask.Header.Time
 			applyResult.logs = append(applyResult.logs, txResult.Logs...)
 			maps.Copy(applyResult.traceFroms, txResult.TraceFroms)
 			maps.Copy(applyResult.traceTos, txResult.TraceTos)
 			blockStatus.cntFinalized++
+			blockStatus.gasUsed += txResult.Receipt.GasUsed
 		}
 
 		if applyResult.txNum > 0 {
@@ -1108,6 +1118,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 			txTask.BlockHash(),
 			txTask.Header.Root,
 			nil,
+			blockStatus.gasUsed,
 			txTask.TxNum,
 			true,
 			blockStatus.blockIO,
@@ -1185,6 +1196,7 @@ func (pe *parallelExecutor) nextResult(ctx context.Context, applyResults chan ap
 		txTask.BlockHash(),
 		txTask.Header.Root,
 		nil,
+		blockStatus.gasUsed,
 		lastTxNum,
 		false,
 		blockStatus.blockIO,

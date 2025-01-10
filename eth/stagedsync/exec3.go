@@ -71,24 +71,31 @@ const (
 	changesetSafeRange = 32 // Safety net for long-sync, keep last 32 changesets
 )
 
-func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
-	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
+func NewProgress(prevExecutedBlockNum, prevCommitedBlockNum, commitThreshold uint64, workersCount int, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
+	return &Progress{prevTime: time.Now(), prevExecutedBlockNum: prevExecutedBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
 }
 
 type Progress struct {
-	prevTime           time.Time
-	prevTxCount        uint64
-	prevGasUsed        uint64
-	prevOutputBlockNum uint64
-	prevRepeatCount    uint64
-	commitThreshold    uint64
+	prevTime              time.Time
+	prevExecutedBlockNum  uint64
+	prevExecutedTxCount   uint64
+	prevExecutedGas       uint64
+	prevCommittedBlockNum uint64
+	prevCommittedTxCount  uint64
+	prevCommittedGas      uint64
+	prevRepeatCount       uint64
+	commitThreshold       uint64
 
 	workersCount int
 	logPrefix    string
 	logger       log.Logger
 }
 
-func (p *Progress) Log(suffix string, rs *state.StateV3, in *exec.QueueWithRetry, rws *exec.ResultsQueue, txCount uint64, gas uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
+func (p *Progress) Log(suffix string, rs *state.StateV3, in *exec.QueueWithRetry, rws *exec.ResultsQueue,
+	executedBlockNum uint64, executedTxCount uint64, executedGas uint64,
+	committedBlockNum uint64, committedTxCount uint64, committedGas, outTxNum uint64,
+	repeatCount uint64, idxStepsAmountInDB float64, shouldGenerateChangesets bool, inMemExec bool) {
+
 	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -108,17 +115,27 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *exec.QueueWithRetry
 		suffix += " Commit every block"
 	}
 
-	gasSec := uint64(float64(gas-p.prevGasUsed) / interval.Seconds())
-	txSec := uint64(float64(txCount-p.prevTxCount) / interval.Seconds())
-	diffBlocks := max(int(outputBlockNum)-int(p.prevOutputBlockNum)+1, 0)
+	executedGasSec := uint64(float64(executedGas-p.prevExecutedGas) / interval.Seconds())
+	executedTxSec := uint64(float64(executedTxCount-p.prevExecutedTxCount) / interval.Seconds())
+	executedDiffBlocks := max(int(executedBlockNum)-int(p.prevExecutedBlockNum)+1, 0)
+
+	committedGasSec := uint64(float64(committedGas-p.prevCommittedGas) / interval.Seconds())
+	committedTxSec := uint64(float64(committedTxCount-p.prevCommittedTxCount) / interval.Seconds())
+	committedDiffBlocks := max(int(committedBlockNum)-int(p.prevCommittedBlockNum)+1, 0)
 
 	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
-		"blk", outputBlockNum,
-		"blks", diffBlocks,
-		"blk/s", fmt.Sprintf("%.1f", float64(diffBlocks)/interval.Seconds()),
-		"txs", txCount-p.prevTxCount,
-		"tx/s", common.PrettyCounter(txSec),
-		"gas/s", common.PrettyCounter(gasSec),
+		"exec blk", executedBlockNum,
+		"exec blks", executedDiffBlocks,
+		"exec blk/s", fmt.Sprintf("%.1f", float64(executedDiffBlocks)/interval.Seconds()),
+		"exec txs", executedTxCount-p.prevExecutedTxCount,
+		"exec tx/s", common.PrettyCounter(executedTxSec),
+		"exec gas/s", common.PrettyCounter(executedGasSec),
+		"com blk", committedBlockNum,
+		"com blks", committedDiffBlocks,
+		"com blk/s", fmt.Sprintf("%.1f", float64(committedDiffBlocks)/interval.Seconds()),
+		"com txs", committedTxCount-p.prevCommittedTxCount,
+		"com tx/s", common.PrettyCounter(committedTxSec),
+		"com gas/s", common.PrettyCounter(committedGasSec),
 		//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
 		//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		//"workers", p.workersCount,
@@ -130,9 +147,12 @@ func (p *Progress) Log(suffix string, rs *state.StateV3, in *exec.QueueWithRetry
 	)
 
 	p.prevTime = currentTime
-	p.prevTxCount = txCount
-	p.prevGasUsed = gas
-	p.prevOutputBlockNum = outputBlockNum
+	p.prevExecutedTxCount = executedTxCount
+	p.prevExecutedGas = executedGas
+	p.prevExecutedBlockNum = executedBlockNum
+	p.prevCommittedTxCount = committedTxCount
+	p.prevCommittedGas = committedGas
+	p.prevCommittedBlockNum = committedBlockNum
 	p.prevRepeatCount = repeatCount
 }
 
