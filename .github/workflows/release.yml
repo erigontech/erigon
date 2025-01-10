@@ -37,9 +37,9 @@ on:
 jobs:
 
   build-release:
-    #runs-on: ubuntu-latest
-    runs-on: ubuntu-latest-devops-large
-    timeout-minutes: 75
+    runs-on: ubuntu-latest
+    #runs-on: ubuntu-latest-devops-large
+    timeout-minutes: 300
     name: Create git tag, build and publish Release Artifacts
     outputs:
       commit-id: ${{ steps.getCommitId.outputs.id }}
