@@ -2085,11 +2085,13 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	stats.BytesDownload = uint64(downloadedBytes)
 
-	var webTransfers int32
+	var webTransfers int
 
-	//Calculate web download stats (not used at the moment)
+	// Calculate web download stats (not used at the moment)
 	if d.webDownloadClient != nil {
-		d.collectWebDownloadClientStats(&downloading, &stats, &zeroProgress, &webTransfers)
+		var zp []string
+		webTransfers, zp = d.collectWebDownloadClientStats(&downloading, &stats)
+		zeroProgress = append(zeroProgress, zp...)
 	}
 
 	if len(downloading) > 0 {
@@ -2214,7 +2216,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	stats.PeersUnique = int32(len(peers))
-	stats.FilesTotal = int32(len(torrents)) + webTransfers
+	stats.FilesTotal = int32(len(torrents)) + int32(webTransfers)
 
 	d.lock.Lock()
 	d.stats = stats
@@ -2905,7 +2907,9 @@ func (d *Downloader) CompletedTorrents() map[string]completedTorrentInfo {
 	return d.completedTorrents
 }
 
-func (d *Downloader) collectWebDownloadClientStats(downloading *map[string]*downloadInfo, stats *AggStats, zeroProgress *[]string, webTransfers *int32) {
+func (d *Downloader) collectWebDownloadClientStats(downloading *map[string]*downloadInfo, stats *AggStats) (int, []string) {
+	zeroProgress := make([]string, 0)
+	webTransfers := 0
 	webDownloadClient := d.webDownloadClient
 	ctx := d.ctx
 	logger := d.logger
@@ -2920,13 +2924,11 @@ func (d *Downloader) collectWebDownloadClientStats(downloading *map[string]*down
 
 		for _, transfer := range webStats.Transferring {
 			stats.MetadataReady++
-			(*webTransfers)++
+			webTransfers++
 
 			bytesCompleted := transfer.Bytes
 			tLen := transfer.Size
 			transferName := transfer.Name
-
-			delete(*downloading, transferName)
 
 			if bytesCompleted > tLen {
 				bytesCompleted = tLen
@@ -2937,7 +2939,7 @@ func (d *Downloader) collectWebDownloadClientStats(downloading *map[string]*down
 			stats.BytesCompleted += bytesCompleted
 
 			if transfer.Percentage == 0 {
-				*zeroProgress = append(*zeroProgress, transferName)
+				zeroProgress = append(zeroProgress, transferName)
 			}
 
 			var seeds []diagnostics.SegmentPeer
@@ -2970,5 +2972,7 @@ func (d *Downloader) collectWebDownloadClientStats(downloading *map[string]*down
 		}
 	}
 
-	*webTransfers += int32(len(*downloading))
+	webTransfers += len(*downloading)
+
+	return webTransfers, zeroProgress
 }
