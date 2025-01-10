@@ -176,7 +176,7 @@ func (ec *Client) getBlock(ctx context.Context, method string, args ...interface
 	for i, tx := range body.Transactions {
 		if tx.From != nil {
 			tx.tx.SetSender(*tx.From)
-			setSenderFromServer(tx.tx, *tx.From, body.Hash)
+			// setSenderFromServer(tx.tx, *tx.From, body.Hash)
 		}
 		txs[i] = tx.tx
 	}
@@ -238,9 +238,19 @@ func (ec *Client) TransactionByHash(ctx context.Context, hash common.Hash) (tx t
 		return nil, false, errors.New("server returned transaction without signature")
 	}
 	if json.From != nil && json.BlockHash != nil {
-		setSenderFromServer(json.tx, *json.From, *json.BlockHash)
+		json.tx.SetSender(*json.From)
+		// setSenderFromServer(json.tx, *json.From, *json.BlockHash)
 	}
 	return json.tx, json.BlockNumber == nil, nil
+}
+
+// FeeHistory provides recent fee market data that consumers can use to determine
+// a reasonable maxPriorityFeePerGas value.
+type FeeHistory struct {
+	OldestBlock  *big.Int     // block corresponding to first response value
+	Reward       [][]*big.Int // list every txs priority fee per block
+	BaseFee      []*big.Int   // list of each block's base fee
+	GasUsedRatio []float64    // ratio of gas used out of the total available limit
 }
 
 // TransactionSender returns the sender address of the given transaction. The transaction
@@ -251,7 +261,13 @@ func (ec *Client) TransactionByHash(ctx context.Context, hash common.Hash) (tx t
 // TransactionInBlock. Getting their sender address can be done without an RPC interaction.
 func (ec *Client) TransactionSender(ctx context.Context, tx types.Transaction, block common.Hash, index uint) (common.Address, error) {
 	// Try to load the address from the cache.
-	sender, err := tx.Sender(&senderFromServer{blockhash: block})
+	cid, err := ec.ChainID(ctx)
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	signer := types.LatestSignerForChainID(cid)
+	sender, err := tx.Sender(*signer)
 	if err == nil {
 		return sender, nil
 	}
@@ -290,7 +306,8 @@ func (ec *Client) TransactionInBlock(ctx context.Context, blockHash common.Hash,
 		return nil, errors.New("server returned transaction without signature")
 	}
 	if json.From != nil && json.BlockHash != nil {
-		setSenderFromServer(json.tx, *json.From, *json.BlockHash)
+		json.tx.SetSender(*json.From)
+		// setSenderFromServer(json.tx, *json.From, *json.BlockHash)
 	}
 	return json.tx, err
 }
@@ -568,7 +585,7 @@ type feeHistoryResultMarshaling struct {
 }
 
 // FeeHistory retrieves the fee market history.
-func (ec *Client) FeeHistory(ctx context.Context, blockCount uint64, lastBlock *big.Int, rewardPercentiles []float64) (*ethereum.FeeHistory, error) {
+func (ec *Client) FeeHistory(ctx context.Context, blockCount uint64, lastBlock *big.Int, rewardPercentiles []float64) (*FeeHistory, error) {
 	var res feeHistoryResultMarshaling
 	if err := ec.c.CallContext(ctx, &res, "eth_feeHistory", hexutil.Uint(blockCount), toBlockNumArg(lastBlock), rewardPercentiles); err != nil {
 		return nil, err
@@ -584,7 +601,7 @@ func (ec *Client) FeeHistory(ctx context.Context, blockCount uint64, lastBlock *
 	for i, b := range res.BaseFee {
 		baseFee[i] = (*big.Int)(b)
 	}
-	return &ethereum.FeeHistory{
+	return &FeeHistory{
 		OldestBlock:  (*big.Int)(res.OldestBlock),
 		Reward:       reward,
 		BaseFee:      baseFee,

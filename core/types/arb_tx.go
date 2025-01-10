@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
 )
@@ -79,6 +80,14 @@ func NewArbTx(inner Transaction) *ArbTx {
 func (tx *ArbTx) encodeTyped(w *bytes.Buffer) error {
 	w.WriteByte(tx.Type())
 	return tx.inner.EncodeRLP(w)
+}
+
+func (tx *ArbTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
+	msg, err := tx.Tx.AsMessage(s, baseFee, rules)
+	if err == nil {
+		msg.Tx = tx
+	}
+	return msg, err
 }
 
 // MarshalBinary returns the canonical encoding of the transaction.

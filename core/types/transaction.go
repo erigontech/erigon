@@ -386,6 +386,7 @@ type Message struct {
 	// This field might be set to true for operations like RPC eth_call.
 	SkipL1Charging bool
 	TxRunMode      MessageRunMode // deprecated (shoudl be)
+	Tx             Transaction
 }
 
 type MessageRunMode uint8
