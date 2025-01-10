@@ -415,6 +415,11 @@ var (
 		Usage: "L2 datastreamer endpoint",
 		Value: "",
 	}
+	L2DataStreamerMaxEntryChanFlag = cli.Uint64Flag{
+		Name:  "zkevm.l2-datastreamer-max-entrychan",
+		Usage: "L2 datastreamer max entry channel size",
+		Value: 1000000,
+	}
 	L2DataStreamerUseTLSFlag = cli.BoolFlag{
 		Name:  "zkevm.l2-datastreamer-use-tls",
 		Usage: "Use TLS connection to L2 datastreamer endpoint",

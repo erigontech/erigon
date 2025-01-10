@@ -54,6 +54,9 @@ func (c *TestDatastreamClient) ReadAllEntriesToChannel() error {
 func (c *TestDatastreamClient) RenewEntryChannel() {
 }
 
+func (c *TestDatastreamClient) RenewMaxEntryChannel() {
+}
+
 func (c *TestDatastreamClient) StopReadingToChannel() {
 	c.stopReadingToChannel.Store(true)
 }

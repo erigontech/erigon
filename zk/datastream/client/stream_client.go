@@ -30,7 +30,8 @@ type EntityDefinition struct {
 const (
 	versionProto         = 2 // converted to proto
 	versionAddedBlockEnd = 3 // Added block end
-	entryChannelSize     = 100000
+
+	DefaultEntryChannelSize = 100000
 )
 
 var (
@@ -58,7 +59,8 @@ type StreamClient struct {
 	stopReadingToChannel atomic.Bool
 
 	// Channels
-	entryChan chan interface{}
+	entryChan        chan interface{}
+	maxEntryChanSize uint64
 
 	// keeps track of the latest fork from the stream to assign to l2 blocks
 	currentFork uint64
@@ -89,18 +91,19 @@ const (
 
 // Creates a new client fo datastream
 // server must be in format "url:port"
-func NewClient(ctx context.Context, server string, useTLS bool, version int, checkTimeout time.Duration, latestDownloadedForkId uint16) *StreamClient {
+func NewClient(ctx context.Context, server string, useTLS bool, version int, checkTimeout time.Duration, latestDownloadedForkId uint16, maxEntryChanSize uint64) *StreamClient {
 	c := &StreamClient{
-		ctx:          ctx,
-		checkTimeout: checkTimeout,
-		server:       server,
-		version:      version,
-		streamType:   StSequencer,
-		entryChan:    make(chan interface{}, 100000),
-		currentFork:  uint64(latestDownloadedForkId),
-		mtxStreaming: &sync.Mutex{},
-		useTLS:       useTLS,
-		tlsConfig:    &tls.Config{},
+		ctx:              ctx,
+		checkTimeout:     checkTimeout,
+		server:           server,
+		version:          version,
+		streamType:       StSequencer,
+		entryChan:        make(chan interface{}, 100000),
+		maxEntryChanSize: maxEntryChanSize,
+		currentFork:      uint64(latestDownloadedForkId),
+		mtxStreaming:     &sync.Mutex{},
+		useTLS:           useTLS,
+		tlsConfig:        &tls.Config{},
 	}
 
 	// Extract hostname from server address (removing port if present)
@@ -430,7 +433,14 @@ func (c *StreamClient) clearEntryCHannel() {
 // close old entry chan and read all elements before opening a new one
 func (c *StreamClient) RenewEntryChannel() {
 	c.clearEntryCHannel()
-	c.entryChan = make(chan interface{}, entryChannelSize)
+	c.entryChan = make(chan interface{}, DefaultEntryChannelSize)
+}
+
+// close old entry chan and read all elements before opening a new one
+func (c *StreamClient) RenewMaxEntryChannel() {
+	c.clearEntryCHannel()
+	log.Warn(fmt.Sprintf("[datastream_client] Renewing max entry channel:%v", c.maxEntryChanSize))
+	c.entryChan = make(chan interface{}, c.maxEntryChanSize)
 }
 
 func (c *StreamClient) ReadAllEntriesToChannel() (err error) {
