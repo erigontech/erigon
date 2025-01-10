@@ -282,13 +282,12 @@ func _shortArrayHandle(b1, b2, b3 *bytes.Buffer, fieldName string, size int) { /
 
 func _shortArrayPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string, size int) error {
 	// arr sizes < 56
-
 	var typ string
 	if ptr, ok := fieldType.(*types.Pointer); !ok {
 		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
 	} else {
 		if named, ok := ptr.Elem().(*types.Named); !ok {
-			_exit("blockNoncePtrHandle: expected filedType to be Named")
+			_exit("blockNoncePtrHandle: expected filedType to be Pointer Named")
 		} else {
 			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
 				_imports[named.Obj().Pkg().Path()] = true
@@ -384,7 +383,23 @@ func bloomHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
 	fmt.Fprintf(b3, "    copy(obj.%s[:], b)\n", fieldName)
 }
 
-func bloomPtrHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
+func bloomPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	var typ string
+	if ptr, ok := fieldType.(*types.Pointer); !ok {
+		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
+	} else {
+		if named, ok := ptr.Elem().(*types.Named); !ok {
+			_exit("blockNoncePtrHandle: expected filedType to be Pointer Named")
+		} else {
+			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
+				_imports[named.Obj().Pkg().Path()] = true
+				typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
+			} else {
+				typ = named.Obj().Name()
+			}
+		}
+	}
+
 	// size
 	fmt.Fprintf(b1, "    size += 1\n")
 	fmt.Fprintf(b1, "    if obj.%s != nil {\n", fieldName)
@@ -420,7 +435,7 @@ func bloomPtrHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
 	fmt.Fprintf(b3, "    if len(b) > 0 && len(b) != 256 {\n")
 	fmt.Fprintf(b3, "        %s\n", decodeLenMismatch(256))
 	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    obj.%s = &Bloom{}\n", fieldName)
+	fmt.Fprintf(b3, "    obj.%s = &%s{}\n", fieldName, typ)
 	fmt.Fprintf(b3, "    copy((*obj.%s)[:], b)\n", fieldName)
 }
 
