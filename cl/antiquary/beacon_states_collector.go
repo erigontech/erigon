@@ -387,7 +387,9 @@ func (i *beaconStatesCollector) close() {
 	i.activeValidatorIndiciesCollector.Close()
 	i.balancesDumpsCollector.Close()
 	i.effectiveBalancesDumpCollector.Close()
-
+	for _, b := range i.buffers {
+		b.Reset()
+	}
 	for _, b := range i.buffers {
 		etlBufferPool.Put(b)
 	}
