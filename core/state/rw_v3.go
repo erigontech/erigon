@@ -84,7 +84,7 @@ func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
 	}()
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
-	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
+	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender()]
 	if deferral {
 		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
 		// So we add this data dependency as a trigger
@@ -92,7 +92,7 @@ func (rs *StateV3) RegisterSender(txTask *TxTask) bool {
 		rs.triggers[lastTxNum] = txTask
 	}
 	//fmt.Printf("senderTxNums[%x]=%d\n", *txTask.Sender, txTask.TxNum)
-	rs.senderTxNums[*txTask.Sender] = txTask.TxNum
+	rs.senderTxNums[*txTask.Sender()] = txTask.TxNum
 	return !deferral
 }
 
@@ -210,30 +210,19 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 }
 
 func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains libstate.JointDomains) error {
-	shouldPruneNonEssentials := txTask.PruneNonEssentials && txTask.Config != nil
-
 	for addr := range txTask.TraceFroms {
-		if shouldPruneNonEssentials && addr != txTask.Config.DepositContract {
-			continue
-		}
 		if err := domains.IndexAdd(kv.TblTracesFromIdx, addr[:]); err != nil {
 			return err
 		}
 	}
 
 	for addr := range txTask.TraceTos {
-		if shouldPruneNonEssentials && addr != txTask.Config.DepositContract {
-			continue
-		}
 		if err := domains.IndexAdd(kv.TblTracesToIdx, addr[:]); err != nil {
 			return err
 		}
 	}
 
 	for _, lg := range txTask.Logs {
-		if shouldPruneNonEssentials && lg.Address != txTask.Config.DepositContract {
-			continue
-		}
 		if err := domains.IndexAdd(kv.TblLogAddressIdx, lg.Address[:]); err != nil {
 			return err
 		}

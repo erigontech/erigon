@@ -57,14 +57,9 @@ func (a *Aggregator) Sqeeze(ctx context.Context, domain kv.Domain) error {
 			strings.ReplaceAll(to, ".kv", ".bt"),
 			strings.ReplaceAll(to, ".kv", ".bt.torrent"),
 			strings.ReplaceAll(to, ".kv", ".kvei"),
-			strings.ReplaceAll(to, ".kv", ".kvei.torrent"))
-
-		// _ = os.Remove(tempFileCopy)
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".bt.torrent"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".kvei.torrent"))
-		// _ = os.Remove(strings.ReplaceAll(to, ".kv", ".kv.torrent"))
+			strings.ReplaceAll(to, ".kv", ".kvei.torrent"),
+			strings.ReplaceAll(to, ".kv", ".kvi"),
+			strings.ReplaceAll(to, ".kv", ".kvi.torrent"))
 	}
 
 	for _, f := range filesToRemove {
@@ -380,7 +375,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, rwDb kv.RwDB, t
 
 		fromTxNumRange, toTxNumRange := r.FromTo()
 		lastTxnumInShard := toTxNumRange
-		if acRo.minimaxTxNumInDomainFiles() >= toTxNumRange {
+		if acRo.TxNumsInFiles(kv.StateDomains...) >= toTxNumRange {
 			a.logger.Info("skipping existing range", "range", r.String("", a.StepSize()))
 			continue
 		}

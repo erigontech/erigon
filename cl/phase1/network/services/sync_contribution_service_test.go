@@ -45,12 +45,12 @@ func setupSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (Sy
 	return s, syncedDataManager, ethClock
 }
 
-func getObjectsForSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (*state.CachingBeaconState, *cltypes.SignedContributionAndProofWithGossipData) {
+func getObjectsForSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (*state.CachingBeaconState, *SignedContributionAndProofForGossip) {
 	_, _, state := tests.GetBellatrixRandom()
 	br, _ := state.BlockRoot()
 	aggBits := make([]byte, 16)
 	aggBits[0] = 1
-	msg := &cltypes.SignedContributionAndProofWithGossipData{
+	msg := &SignedContributionAndProofForGossip{
 		SignedContributionAndProof: &cltypes.SignedContributionAndProof{
 			Message: &cltypes.ContributionAndProof{
 				AggregatorIndex: 0,
@@ -62,7 +62,6 @@ func getObjectsForSyncContributionServiceTest(t *testing.T, ctrl *gomock.Control
 				},
 			},
 		},
-		GossipData:            nil,
 		ImmediateVerification: true,
 	}
 

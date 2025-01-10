@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -71,14 +70,14 @@ func (tx *SetCodeTransaction) copy() *SetCodeTransaction {
 func (tx *SetCodeTransaction) EncodingSize() int {
 	payloadSize, _, _, _, _ := tx.payloadSize()
 	// Add envelope size and type size
-	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *SetCodeTransaction) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen int) {
 	payloadSize, nonceLen, gasLen, accessListLen = tx.DynamicFeeTransaction.payloadSize()
 	// size of Authorizations
 	authorizationsLen = authorizationsSize(tx.Authorizations)
-	payloadSize += rlp2.ListPrefixLen(authorizationsLen) + authorizationsLen
+	payloadSize += rlp.ListPrefixLen(authorizationsLen) + authorizationsLen
 
 	return
 }
@@ -203,7 +202,7 @@ func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 
 func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen, authorizationsLen := tx.payloadSize()
-	envelopSize := 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode envelope size
@@ -288,7 +287,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, _, _, accessListLen, authorizationsLen int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -324,7 +323,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// prefix
-	if err := EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -332,7 +331,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// prefix
-	if err := EncodeStructSizePrefix(authorizationsLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(authorizationsLen, w, b); err != nil {
 		return err
 	}
 	// encode Authorizations

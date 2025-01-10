@@ -229,6 +229,11 @@ type Closer interface {
 	Close()
 }
 
+type OnFreezeFunc func(frozenFileNames []string)
+type SnapshotNotifier interface {
+	OnFreeze(f OnFreezeFunc)
+}
+
 // RoDB - Read-only version of KV.
 type RoDB interface {
 	Closer
@@ -464,6 +469,9 @@ type TemporalTx interface {
 	Tx
 	TemporalGetter
 
+	// return the earliest known txnum in history of a given domain
+	HistoryStartFrom(domainName Domain) uint64
+
 	// DomainGetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
 	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
@@ -513,6 +521,7 @@ type TemporalPutDel interface {
 
 type TemporalRoDB interface {
 	RoDB
+	SnapshotNotifier
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
 }

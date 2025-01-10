@@ -155,6 +155,13 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 	return tx.Commit()
 }
 
+func (db *DB) Close() {
+	db.RwDB.Close()
+	db.agg.Close()
+}
+
+func (db *DB) OnFreeze(f kv.OnFreezeFunc) { db.agg.OnFreeze(f) }
+
 type Tx struct {
 	*mdbx.MdbxTx
 	db               *DB
@@ -195,6 +202,10 @@ func (tx *Tx) Commit() error {
 	mdbxTx := tx.MdbxTx
 	tx.MdbxTx = nil
 	return mdbxTx.Commit()
+}
+
+func (tx *Tx) HistoryStartFrom(name kv.Domain) uint64 {
+	return tx.filesTx.HistoryStartFrom(name)
 }
 
 func (tx *Tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (stream.KV, error) {

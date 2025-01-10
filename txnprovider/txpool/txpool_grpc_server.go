@@ -103,14 +103,14 @@ type GrpcServer struct {
 	ctx             context.Context
 	txPool          txPool
 	db              kv.RoDB
-	NewSlotsStreams *NewSlotsStreams
+	newSlotsStreams *NewSlotsStreams
 
 	chainID uint256.Int
 	logger  log.Logger
 }
 
-func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, chainID uint256.Int, logger log.Logger) *GrpcServer {
-	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, NewSlotsStreams: &NewSlotsStreams{}, chainID: chainID, logger: logger}
+func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, newSlotsStreams *NewSlotsStreams, chainID uint256.Int, logger log.Logger) *GrpcServer {
+	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, newSlotsStreams: newSlotsStreams, chainID: chainID, logger: logger}
 }
 
 func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
@@ -248,7 +248,7 @@ func mapDiscardReasonToProto(reason txpoolcfg.DiscardReason) txpool_proto.Import
 func (s *GrpcServer) OnAdd(req *txpool_proto.OnAddRequest, stream txpool_proto.Txpool_OnAddServer) error {
 	s.logger.Info("New txns subscriber joined")
 	//txpool.Loop does send messages to this streams
-	remove := s.NewSlotsStreams.Add(stream)
+	remove := s.newSlotsStreams.Add(stream)
 	defer remove()
 	select {
 	case <-stream.Context().Done():

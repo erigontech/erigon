@@ -78,7 +78,7 @@ func TestPrimitives(t *testing.T) {
 	for i, tt := range parseU64Tests {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
 			assert := assert.New(t)
-			pos, res, err := U64(tt.payload, 0)
+			pos, res, err := ParseU64(tt.payload, 0)
 			assert.Equal(tt.expectErr, err)
 			assert.Equal(tt.expectPos, pos)
 			assert.Equal(tt.expectRes, res)
@@ -87,7 +87,7 @@ func TestPrimitives(t *testing.T) {
 	for i, tt := range parseU32Tests {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
 			assert := assert.New(t)
-			pos, res, err := U32(tt.payload, 0)
+			pos, res, err := ParseU32(tt.payload, 0)
 			assert.Equal(tt.expectErr, err)
 			assert.Equal(tt.expectPos, pos)
 			assert.Equal(tt.expectRes, res)
@@ -97,7 +97,7 @@ func TestPrimitives(t *testing.T) {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
 			assert := assert.New(t)
 			res := new(uint256.Int)
-			pos, err := U256(tt.payload, 0, res)
+			pos, err := ParseU256(tt.payload, 0, res)
 			assert.Equal(tt.expectErr, err)
 			assert.Equal(tt.expectPos, pos)
 			if err == nil {

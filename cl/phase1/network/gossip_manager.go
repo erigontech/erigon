@@ -131,12 +131,9 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 	if errors.Is(err, services.ErrIgnore) || errors.Is(err, synced_data.ErrNotSynced) {
 		return nil
 	}
-	if err != nil {
+	if err != nil { //nolint:govet
 		g.sentinel.BanPeer(ctx, data.Peer)
 		return err
-	}
-	if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-		log.Debug("failed to publish gossip", "err", err)
 	}
 	return nil
 }
@@ -145,24 +142,18 @@ func (g *GossipManager) isReadyToProcessOperations() bool {
 	return g.forkChoice.HighestSeen()+8 >= g.ethClock.GetCurrentSlot()
 }
 
-func copyOfSentinelData(in *sentinel.GossipData) *sentinel.GossipData {
-	ret := &sentinel.GossipData{
-		Data: common.Copy(in.Data),
-		Name: in.Name,
+func copyOfPeerData(in *sentinel.GossipData) *sentinel.Peer {
+	if in == nil || in.Peer == nil {
+		return nil
 	}
-	if in.SubnetId != nil {
-		ret.SubnetId = new(uint64)
-		*ret.SubnetId = *in.SubnetId
-	}
-	if in.Peer != nil {
-		ret.Peer = new(sentinel.Peer)
-		ret.Peer.State = in.Peer.State
-		ret.Peer.Pid = in.Peer.Pid
-		ret.Peer.Enr = in.Peer.Enr
-		ret.Peer.Direction = in.Peer.Direction
-		ret.Peer.AgentVersion = in.Peer.AgentVersion
-		ret.Peer.Address = in.Peer.Address
-	}
+	ret := new(sentinel.Peer)
+	ret.State = in.Peer.State
+	ret.Pid = in.Peer.Pid
+	ret.Enr = in.Peer.Enr
+	ret.Direction = in.Peer.Direction
+	ret.AgentVersion = in.Peer.AgentVersion
+	ret.Address = in.Peer.Address
+
 	return ret
 }
 
@@ -183,8 +174,8 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		log.Debug("Received block via gossip", "slot", obj.Block.Slot)
 		return g.blockService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
-		obj := &cltypes.SignedContributionAndProofWithGossipData{
-			GossipData:                 copyOfSentinelData(data),
+		obj := &services.SignedContributionAndProofForGossip{
+			Receiver:                   copyOfPeerData(data),
 			SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
 		}
 		if err := obj.SignedContributionAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
@@ -192,8 +183,8 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.syncContributionService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameVoluntaryExit:
-		obj := &cltypes.SignedVoluntaryExitWithGossipData{
-			GossipData:          copyOfSentinelData(data),
+		obj := &services.SignedVoluntaryExitForGossip{
+			Receiver:            copyOfPeerData(data),
 			SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
 		}
 		if err := obj.SignedVoluntaryExit.DecodeSSZ(data.Data, int(version)); err != nil {
@@ -217,13 +208,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			return err
 		}
 
-		if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
-			log.Debug("failed to publish gossip", "err", err)
-		}
 		return nil
 	case gossip.TopicNameBlsToExecutionChange:
-		obj := &cltypes.SignedBLSToExecutionChangeWithGossipData{
-			GossipData:                 copyOfSentinelData(data),
+		obj := &services.SignedBLSToExecutionChangeForGossip{
+			Receiver:                   copyOfPeerData(data),
 			SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{},
 		}
 		if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data.Data, int(version)); err != nil {
@@ -231,11 +219,10 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 		}
 		return g.blsToExecutionChangeService.ProcessMessage(ctx, data.SubnetId, obj)
 	case gossip.TopicNameBeaconAggregateAndProof:
-		obj := &cltypes.SignedAggregateAndProofData{
-			GossipData:              copyOfSentinelData(data),
+		obj := &services.SignedAggregateAndProofForGossip{
+			Receiver:                copyOfPeerData(data),
 			SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
 		}
-
 		if err := obj.SignedAggregateAndProof.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 			return err
 		}
@@ -252,17 +239,17 @@ func (g *GossipManager) routeAndProcess(ctx context.Context, data *sentinel.Goss
 			// The background checks above are enough for now.
 			return g.blobService.ProcessMessage(ctx, data.SubnetId, blobSideCar)
 		case gossip.IsTopicSyncCommittee(data.Name):
-			msg := &cltypes.SyncCommitteeMessageWithGossipData{
-				GossipData:           copyOfSentinelData(data),
+			obj := &services.SyncCommitteeMessageForGossip{
+				Receiver:             copyOfPeerData(data),
 				SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
 			}
-			if err := msg.SyncCommitteeMessage.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+			if err := obj.SyncCommitteeMessage.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 				return err
 			}
-			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, msg)
+			return g.syncCommitteeMessagesService.ProcessMessage(ctx, data.SubnetId, obj)
 		case gossip.IsTopicBeaconAttestation(data.Name):
-			obj := &services.AttestationWithGossipData{
-				GossipData:        copyOfSentinelData(data),
+			obj := &services.AttestationForGossip{
+				Receiver:          copyOfPeerData(data),
 				Attestation:       &solid.Attestation{},
 				SingleAttestation: &solid.SingleAttestation{},
 				ImmediateProcess:  false,
@@ -311,7 +298,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 					return
 				case data := <-ch:
 					l := log.Ctx{}
-					if err := g.onRecv(ctx, data, l); err != nil && !errors.Is(err, services.ErrIgnore) {
+					if err := g.onRecv(ctx, data, l); err != nil && !errors.Is(err, services.ErrIgnore) && !errors.Is(err, synced_data.ErrNotSynced) {
 						log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 					}
 				}
