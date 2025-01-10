@@ -89,6 +89,14 @@ func applyPendingDeposit(s abstract.BeaconState, d *solid.PendingDeposit) {
 		}
 	} else {
 		// increase balance
-		state.IncreaseBalance(s, vindex, d.Amount)
+		//state.IncreaseBalance(s, vindex, d.Amount)
+		return
 	}
+	s.AppendPendingDeposit(&solid.PendingDeposit{
+		PubKey:                d.PubKey,
+		WithdrawalCredentials: d.WithdrawalCredentials,
+		Amount:                d.Amount,
+		Signature:             d.Signature,
+		Slot:                  s.BeaconConfig().GenesisSlot,
+	})
 }
