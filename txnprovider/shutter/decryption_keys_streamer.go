@@ -19,6 +19,7 @@ package shutter
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
@@ -103,7 +104,7 @@ func (s DecryptionKeysStreamer) Next(ctx context.Context) (*proto.DecryptionKeys
 }
 
 func (s DecryptionKeysStreamer) initP2pHost() (host.Host, error) {
-	listenAddr, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", s.config.ListenPort))
+	listenAddr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/" + strconv.FormatUint(s.config.ListenPort, 10))
 	if err != nil {
 		return nil, err
 	}
