@@ -60,6 +60,8 @@ const (
 	ContractCode = "HashedCodeHash"
 )
 
+const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness ( see: docs/programmers_guide/witness_format.md )
+
 // Mapping [block number] => [Verkle Root]
 const VerkleRoots = "VerkleRoots"
 
@@ -71,8 +73,8 @@ const (
 	DatabaseInfo = "DbInfo"
 
 	// Naming:
-	//   NeaderNumber - Ethereum-specific block number. All nodes have same BlockNum.
-	//   NeaderID - auto-increment ID. Depends on order in which node see headers.
+	//   HeaderNumber - Ethereum-specific block number. All nodes have same BlockNum.
+	//   HeaderID - auto-increment ID. Depends on order in which node see headers.
 	//      Invariant: for all headers in snapshots Number == ID. It means no reason to store Num/ID for this headers in DB.
 	//   Same about: TxNum/TxID, BlockNum/BlockID
 	HeaderNumber    = "HeaderNumber"           // header_hash -> header_num_u64
@@ -127,6 +129,8 @@ const (
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
+
+	PreimagePrefix = "SecureKey" // preimagePrefix + hash -> preima
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
@@ -287,8 +291,6 @@ const (
 	InactivityScores     = "InactivityScores"
 	NextSyncCommittee    = "NextSyncCommittee"
 	CurrentSyncCommittee = "CurrentSyncCommittee"
-	HistoricalRoots      = "HistoricalRoots"
-	HistoricalSummaries  = "HistoricalSummaries"
 	Eth1DataVotes        = "Eth1DataVotes"
 
 	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
@@ -430,8 +432,6 @@ var ChaindataTables = []string{
 	// Blob Storage
 	BlockRootToKzgCommitments,
 	// State Reconstitution
-	ValidatorPublicKeys,
-	InvertedValidatorPublicKeys,
 	ValidatorEffectiveBalance,
 	ValidatorBalance,
 	ValidatorSlashings,
@@ -448,14 +448,11 @@ var ChaindataTables = []string{
 	InactivityScores,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
-	HistoricalRoots,
-	HistoricalSummaries,
 	Eth1DataVotes,
 	IntraRandaoMixes,
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
-
 	AccountChangeSetDeprecated,
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,
@@ -582,7 +579,11 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesFromIdx:         {Flags: DupSort},
 	TblTracesToKeys:          {Flags: DupSort},
 	TblTracesToIdx:           {Flags: DupSort},
-	TblPruningProgress:       {Flags: DupSort},
+}
+
+var AuRaTablesCfg = TableCfg{
+	Epoch:        {},
+	PendingEpoch: {},
 }
 
 var BorTablesCfg = TableCfg{
@@ -730,6 +731,8 @@ const (
 	ReceiptDomain    Domain = 4
 	DomainLen        Domain = 5
 )
+
+var StateDomains = []Domain{AccountsDomain, StorageDomain, CodeDomain, CommitmentDomain}
 
 const (
 	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"

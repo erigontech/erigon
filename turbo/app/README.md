@@ -10,7 +10,7 @@
 
 This command connects erigon to diagnostics tools by establishing websocket connection.
 
-In order to conect diagnostics run
+In order to connect diagnostics run
 
 ```
 ./build/bin/erigon support --debug.addrs <value> --diagnostics.addr <value> --diagnostics.sessions <PINs>
@@ -46,7 +46,7 @@ in the rclone config file.
 The **uploader** is configured to minimize disk usage by doing the following:
 
 * It removes snapshots once they are loaded
-* It agressively prunes the database once entites are transferred to snapshots
+* It agressively prunes the database once entities are transferred to snapshots
 
 in addition to this it has the following performance related features:
 

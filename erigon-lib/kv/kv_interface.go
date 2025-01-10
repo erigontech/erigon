@@ -229,6 +229,11 @@ type Closer interface {
 	Close()
 }
 
+type OnFreezeFunc func(frozenFileNames []string)
+type SnapshotNotifier interface {
+	OnFreeze(f OnFreezeFunc)
+}
+
 // RoDB - Read-only version of KV.
 type RoDB interface {
 	Closer
@@ -458,17 +463,20 @@ type (
 )
 
 type TemporalGetter interface {
-	GetLatest(name Domain, k, k2 []byte) (v []byte, step uint64, err error)
+	GetLatest(name Domain, k []byte) (v []byte, step uint64, err error)
 }
 type TemporalTx interface {
 	Tx
 	TemporalGetter
 
+	// return the earliest known txnum in history of a given domain
+	HistoryStartFrom(domainName Domain) uint64
+
 	// DomainGetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - retuns account's value before `txNum` transaction changed it
 	// Means if you want re-execute `txNum` on historical state - do `DomainGetAsOf(key, txNum)` to read state
 	// `ok = false` means: key not found. or "future txNum" passed.
-	GetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
+	GetAsOf(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
 	RangeAsOf(name Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
@@ -509,6 +517,18 @@ type TemporalPutDel interface {
 	//   - if `val == nil` it will call DomainDel
 	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
+}
+
+type TemporalRoDB interface {
+	RoDB
+	SnapshotNotifier
+	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
+	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
+}
+type TemporalRwDB interface {
+	RwDB
+	TemporalRoDB
+	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 }
 
 // ---- non-importnt utilites

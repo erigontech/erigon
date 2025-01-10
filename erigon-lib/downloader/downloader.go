@@ -1569,7 +1569,7 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 				return
 			case <-t.Complete.On():
 				downloadTime := time.Since(downloadStarted)
-				downloaded := t.Stats().BytesReadUsefulData
+				downloaded := t.Stats().BytesCompleted
 
 				diagnostics.Send(diagnostics.FileDownloadedStatisticsUpdate{
 					FileName:    t.Name(),
@@ -1973,6 +1973,15 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesDownload = uint64(connStats.BytesReadData.Int64())
 	stats.BytesCompleted = uint64(connStats.BytesCompleted.Int64())
 
+	// if we have no previous stats, it means that node was restarted and need to set initial values
+	if prevStats.BytesDownload == 0 {
+		prevStats.BytesDownload = stats.BytesCompleted
+	}
+
+	if prevStats.BytesCompleted == 0 {
+		prevStats.BytesCompleted = stats.BytesCompleted
+	}
+
 	lastMetadataReady := stats.MetadataReady
 
 	stats.BytesTotal, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0
@@ -2221,52 +2230,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 	}
 
-	decay := func(prev uint64) uint64 {
-		switch {
-		case prev < 1000:
-			return prev / 16
-		case stats.FlushRate < 10000:
-			return prev / 8
-		case stats.FlushRate < 100000:
-			return prev / 4
-		default:
-			return prev / 2
-		}
-	}
-
-	if stats.BytesDownload > prevStats.BytesDownload {
-		stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
-	} else {
-		stats.DownloadRate = decay(prevStats.DownloadRate)
-	}
-
-	if stats.BytesHashed > prevStats.BytesHashed {
-		stats.HashRate = (stats.BytesHashed - prevStats.BytesHashed) / uint64(interval.Seconds())
-	} else {
-		stats.HashRate = decay(prevStats.HashRate)
-	}
-
-	if stats.BytesCompleted > stats.BytesTotal {
-		stats.BytesCompleted = stats.BytesTotal
-	}
-
-	if stats.BytesCompleted > prevStats.BytesCompleted {
-		stats.CompletionRate = (stats.BytesCompleted - prevStats.BytesCompleted) / uint64(interval.Seconds())
-	} else {
-		stats.CompletionRate = decay(prevStats.CompletionRate)
-	}
-
-	if stats.BytesFlushed > prevStats.BytesFlushed {
-		stats.FlushRate = (stats.BytesFlushed - prevStats.BytesFlushed) / uint64(interval.Seconds())
-	} else {
-		stats.FlushRate = decay(prevStats.FlushRate)
-	}
-
-	if stats.BytesUpload > prevStats.BytesUpload {
-		stats.UploadRate = (stats.BytesUpload - prevStats.BytesUpload) / uint64(interval.Seconds())
-	} else {
-		stats.UploadRate = decay(prevStats.UploadRate)
-	}
+	stats.DownloadRate = calculateRate(stats.BytesDownload, prevStats.BytesDownload, prevStats.DownloadRate, interval)
+	stats.HashRate = calculateRate(stats.BytesHashed, prevStats.BytesHashed, prevStats.HashRate, interval)
+	stats.FlushRate = calculateRate(stats.BytesFlushed, prevStats.BytesFlushed, prevStats.FlushRate, interval)
+	stats.UploadRate = calculateRate(stats.BytesUpload, prevStats.BytesUpload, prevStats.UploadRate, interval)
+	stats.CompletionRate = calculateRate(stats.BytesCompleted, prevStats.BytesCompleted, prevStats.CompletionRate, interval)
 
 	if stats.BytesTotal == 0 {
 		stats.Progress = 0
@@ -2293,7 +2261,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.lock.Unlock()
 
 	if !stats.Completed {
-		logger.Debug("[snapshots] downloading",
+		log.Debug("[snapshots] downloading",
 			"len", len(torrents),
 			"webTransfers", webTransfers,
 			"torrent", torrentInfo,
@@ -2305,6 +2273,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.CompletionRate)),
 			"flushed", common.ByteCount(stats.BytesFlushed),
 			"flush-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.FlushRate)),
+			"downloaded", common.ByteCount(stats.BytesDownload),
+			"download-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.DownloadRate)),
 			"webseed-trips", stats.WebseedTripCount.Load(),
 			"webseed-active", stats.WebseedActiveTrips.Load(),
 			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
@@ -2312,6 +2282,24 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			"webseed-fails", stats.WebseedServerFails.Load(),
 			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())),
 			"localHashes", stats.LocalFileHashes, "localHashTime", stats.LocalFileHashTime)
+	}
+}
+
+// Calculating rate with decay in order to avoid rate spikes
+func calculateRate(current, previous uint64, prevRate uint64, interval time.Duration) uint64 {
+	if current > previous {
+		return (current - previous) / uint64(interval.Seconds())
+	}
+
+	switch {
+	case prevRate < 1000:
+		return prevRate / 16
+	case prevRate < 10000:
+		return prevRate / 8
+	case prevRate < 100000:
+		return prevRate / 4
+	default:
+		return prevRate / 2
 	}
 }
 
@@ -2374,10 +2362,16 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 		if peerUrl, err := webPeerUrl(peer); err == nil {
 			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
 				rate := uint64(peer.DownloadRate())
+				upRate := uint64(peer.UploadRate())
 				if !finished {
 					seed := diagnostics.SegmentPeer{
 						Url:          peerUrl.Host,
 						DownloadRate: rate,
+						UploadRate:   upRate,
+						RemoteAddr:   peer.RemoteAddr.String(),
+						PeerId:       [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+						PiecesCount:  0,
+						TorrentName:  fName,
 					}
 					seeds = append(seeds, seed)
 				}
@@ -2401,11 +2395,17 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 
 	for _, peer := range peersOfThisFile {
 		dr := uint64(peer.DownloadRate())
+		ur := uint64(peer.UploadRate())
 		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
 
 		segPeer := diagnostics.SegmentPeer{
 			Url:          url,
 			DownloadRate: dr,
+			UploadRate:   ur,
+			PiecesCount:  peer.PeerPieces().GetCardinality(),
+			RemoteAddr:   peer.RemoteAddr.String(),
+			PeerId:       peer.PeerID,
+			TorrentName:  fName,
 		}
 		peers = append(peers, segPeer)
 		rates = append(rates, url, fmt.Sprintf("%s/s", common.ByteCount(dr)))
@@ -2904,22 +2904,22 @@ func (d *Downloader) logProgress() {
 			"completion-rate", fmt.Sprintf("%s/s", common.ByteCount(d.stats.CompletionRate)),
 			"alloc", common.ByteCount(m.Alloc),
 			"sys", common.ByteCount(m.Sys))
-
-		diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
-			Downloaded:           bytesDone,
-			Total:                d.stats.BytesTotal,
-			TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
-			DownloadRate:         d.stats.DownloadRate,
-			UploadRate:           d.stats.UploadRate,
-			Peers:                d.stats.PeersUnique,
-			Files:                d.stats.FilesTotal,
-			Connections:          d.stats.ConnectionsTotal,
-			Alloc:                m.Alloc,
-			Sys:                  m.Sys,
-			DownloadFinished:     d.stats.Completed,
-			TorrentMetadataReady: d.stats.MetadataReady,
-		})
 	}
+
+	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
+		Downloaded:           bytesDone,
+		Total:                d.stats.BytesTotal,
+		TotalTime:            time.Since(d.startTime).Round(time.Second).Seconds(),
+		DownloadRate:         d.stats.DownloadRate,
+		UploadRate:           d.stats.UploadRate,
+		Peers:                d.stats.PeersUnique,
+		Files:                d.stats.FilesTotal,
+		Connections:          d.stats.ConnectionsTotal,
+		Alloc:                m.Alloc,
+		Sys:                  m.Sys,
+		DownloadFinished:     d.stats.Completed,
+		TorrentMetadataReady: d.stats.MetadataReady,
+	})
 }
 
 func calculateTime(amountLeft, rate uint64) string {

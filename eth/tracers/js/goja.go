@@ -28,7 +28,6 @@ import (
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -75,7 +74,7 @@ func fromBuf(vm *goja.Runtime, bufType goja.Value, buf goja.Value, allowString b
 		if !allowString {
 			break
 		}
-		return common.FromHex(obj.String()), nil
+		return libcommon.FromHex(obj.String()), nil
 
 	case "Array":
 		var b []byte

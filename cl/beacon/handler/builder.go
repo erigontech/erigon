@@ -70,7 +70,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		var expectedWithdrawals []*cltypes.Withdrawal
 
 		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-			expectedWithdrawals = state.ExpectedWithdrawals(headState, state.Epoch(headState))
+			expectedWithdrawals, _ = state.ExpectedWithdrawals(headState, state.Epoch(headState))
 			return nil
 		}); err != nil {
 			return nil, err

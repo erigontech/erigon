@@ -138,7 +138,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	default:
 
 		trie := NewHexPatriciaHashed(length.Addr, nil, tmpdir)
-		tree := NewUpdates(mode, tmpdir, trie.hashAndNibblizeKey)
+		tree := NewUpdates(mode, tmpdir, trie.HashAndNibblizeKey)
 		return trie, tree
 	}
 }
@@ -348,11 +348,8 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 		}
 		bitset ^= bit
 	}
-	res := make([]byte, be.buf.Len())
-	copy(res, be.buf.Bytes())
-
 	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
-	return res, lastNibble, nil
+	return be.buf.Bytes(), lastNibble, nil
 }
 
 func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }

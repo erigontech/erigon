@@ -38,13 +38,20 @@ type attesterDutyResponse struct {
 	Slot                    uint64            `json:"slot,string"`
 }
 
-func (a *ApiHandler) getDependentRoot(epoch uint64) (libcommon.Hash, error) {
+func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (libcommon.Hash, error) {
 	var (
 		dependentRoot libcommon.Hash
 		err           error
 	)
 	return dependentRoot, a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-		dependentRootSlot := ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 3
+		dependentRootSlot := (epoch * a.beaconChainCfg.SlotsPerEpoch) - 1
+		if attester {
+			dependentRootSlot = ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 1
+		}
+		if !a.syncedData.Syncing() && dependentRootSlot == a.syncedData.HeadSlot() {
+			dependentRoot = a.syncedData.HeadRoot()
+			return nil
+		}
 		maxIterations := 2048
 		for i := 0; i < maxIterations; i++ {
 			if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
@@ -68,7 +75,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 
-	dependentRoot, err := a.getDependentRoot(epoch)
+	dependentRoot, err := a.getDependentRoot(epoch, true)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +201,8 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 				if _, ok := idxSet[int(idx)]; !ok {
 					continue
 				}
-				publicKey, err := state_accessors.ReadPublicKeyByIndex(tx, idx)
+
+				publicKey, err := a.syncedData.ValidatorPublicKeyByIndex(int(idx))
 				if err != nil {
 					return nil, err
 				}

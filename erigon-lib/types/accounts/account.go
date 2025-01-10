@@ -27,7 +27,6 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
-	rlp2 "github.com/erigontech/erigon-lib/rlp2"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -96,7 +95,7 @@ func (a *Account) EncodingLengthForHashing() uint {
 
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
-	return uint(rlp2.ListPrefixLen(structLength) + structLength)
+	return uint(rlp.ListPrefixLen(structLength) + structLength)
 }
 
 func (a *Account) EncodeForStorage(buffer []byte) {
@@ -195,6 +194,13 @@ func (a *Account) EncodeRLP(w io.Writer) error {
 	a.EncodeForHashing(buf)
 	_, err := w.Write(buf)
 	return err
+}
+
+// returns the RLP encoding of the account directly as a []byte
+func (a *Account) RLP() []byte {
+	accRlp := make([]byte, a.EncodingLengthForHashing())
+	a.EncodeForHashing(accRlp)
+	return accRlp
 }
 
 func (a *Account) EncodeForHashing(buffer []byte) {
