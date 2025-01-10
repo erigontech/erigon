@@ -1585,15 +1585,15 @@ const (
 
 // Kind defines how exactly given update should be folded upwards to the parent branch or root.
 // It also returns number of nibbles that left in branch after the operation.
-func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesUpdated int) {
-	nibblesUpdated = bits.OnesCount16(afterMap)
-	switch nibblesUpdated {
+func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate int) {
+	nibblesAfterUpdate = bits.OnesCount16(afterMap)
+	switch nibblesAfterUpdate {
 	case 0:
-		return updateKindDelete, nibblesUpdated
+		return updateKindDelete, nibblesAfterUpdate
 	case 1:
-		return updateKindPropagate, nibblesUpdated
+		return updateKindPropagate, nibblesAfterUpdate
 	default:
-		return updateKindBranch, nibblesUpdated
+		return updateKindBranch, nibblesAfterUpdate
 	}
 }
 
