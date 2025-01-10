@@ -1,9 +1,9 @@
 package engineapi
 
 import (
-	"fmt"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math/big"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
