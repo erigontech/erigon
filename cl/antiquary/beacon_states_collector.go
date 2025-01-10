@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/klauspost/compress/zstd"
@@ -40,6 +41,17 @@ import (
 var stateAntiquaryBufSz = etl.BufferOptimalSize / 16 // 18 collectors * 256mb / 16 = 256mb in worst case
 
 const EnabledPreAllocate = true
+
+var etlBufferPool = &sync.Pool{
+	New: func() interface{} {
+		buf := etl.NewSortableBuffer(stateAntiquaryBufSz)
+		// preallocate 20_000 items with a 2MB overflow buffer
+		if EnabledPreAllocate {
+			buf.Prealloc(20_000, int(stateAntiquaryBufSz+2*datasize.MB))
+		}
+		return buf
+	},
+}
 
 // RATIONALE: MDBX locks the entire database when writing to it, so we need to minimize the time spent in the write lock.
 // so instead of writing the historical states on write transactions, we accumulate them in memory and write them in a single  write transaction.
@@ -66,6 +78,8 @@ type beaconStatesCollector struct {
 	balancesDumpsCollector           *etl.Collector
 	effectiveBalancesDumpCollector   *etl.Collector
 
+	buffers []etl.Buffer
+
 	buf        *bytes.Buffer
 	compressor *zstd.Encoder
 
@@ -80,13 +94,11 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		panic(err)
 	}
 
+	var buffers []etl.Buffer
 	makeETLBuffer := func() etl.Buffer {
-		buf := etl.NewSortableBuffer(stateAntiquaryBufSz)
-		// preallocate 20_000 items with a 2MB overflow buffer
-		if EnabledPreAllocate {
-			buf.Prealloc(20_000, int(stateAntiquaryBufSz+2*datasize.MB))
-		}
-		return buf
+		b := bufferPool.Get().(etl.Buffer)
+		buffers = append(buffers, b)
+		return b
 	}
 
 	return &beaconStatesCollector{
@@ -113,6 +125,7 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 
 		buf:        buf,
 		compressor: compressor,
+		buffers:    buffers,
 	}
 }
 
@@ -374,6 +387,10 @@ func (i *beaconStatesCollector) close() {
 	i.activeValidatorIndiciesCollector.Close()
 	i.balancesDumpsCollector.Close()
 	i.effectiveBalancesDumpCollector.Close()
+
+	for _, b := range i.buffers {
+		etlBufferPool.Put(b)
+	}
 }
 
 // antiquateFullUint64List goes on mdbx as it is full of common repeated patter always and thus fits with 16KB pages.
