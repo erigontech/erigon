@@ -1,5 +1,5 @@
 ﻿<#
-   Copyright 2021 The Erigon Authors
+   Copyright 2025 The Erigon Authors
    This file is part of Erigon.
 
    Erigon is free software: you can redistribute it and/or modify
