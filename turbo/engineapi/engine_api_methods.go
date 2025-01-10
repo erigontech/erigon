@@ -140,17 +140,18 @@ func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *en
 	if callerVersion != nil {
 		e.logger.Info("[GetClientVersionV1] Received request from" + callerVersion.String())
 	}
-	commitBytes := [4]byte{}
-	c := []byte(params.GitCommit)
-	if len(c) >= 4 {
-		copy(commitBytes[:], c[0:4])
+	commitString := params.GitCommit
+	if len(commitString) >= 8 {
+		commitString = commitString[:8]
+	} else {
+		commitString = "00000000" // shouldn't be triggered
 	}
 	result := make([]engine_types.ClientVersionV1, 1)
 	result[0] = engine_types.ClientVersionV1{
 		Code:    params.ClientCode,
 		Name:    params.ClientName,
-		Version: params.Version,
-		Commit:  commitBytes,
+		Version: params.VersionWithCommit(params.GitCommit),
+		Commit:  "0x" + commitString,
 	}
 	return result, nil
 }
