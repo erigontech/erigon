@@ -135,11 +135,11 @@ jobs:
           ls -lao ${GITHUB_WORKSPACE}/build-arm64-check/
           echo "End of content"
 
-          cd ${GITHUB_WORKSPACE}/build-arm64/; sha256sum erigon | awk '{print $1}' > erigon-1-arm64.sha256; cd -
-          cd ${GITHUB_WORKSPACE}/build-arm64-check/; sha256sum erigon | awk '{print $1}' > erigon-2-arm64.sha256; cd -
+          cd ${GITHUB_WORKSPACE}/build-arm64/; sha256sum erigon | awk '{print $1}' > ${GITHUB_WORKSPACE}/erigon-1-arm64.sha256; cd -
+          cd ${GITHUB_WORKSPACE}/build-arm64-check/; sha256sum erigon | awk '{print $1}' > ${GITHUB_WORKSPACE}/erigon-2-arm64.sha256; cd -
           sha256sum ${GITHUB_WORKSPACE}/build-arm64/erigon ${GITHUB_WORKSPACE}/build-arm64-check/erigon
           sha384sum ${GITHUB_WORKSPACE}/build-arm64/erigon ${GITHUB_WORKSPACE}/build-arm64-check/erigon
-          if ! cmp -s erigon-1-arm64.sha256 erigon-2-arm64.sha256; then
+          if ! cmp -s ${GITHUB_WORKSPACE}/erigon-1-arm64.sha256 ${GITHUB_WORKSPACE}/erigon-2-arm64.sha256; then
             echo >&2 "ERROR: Reproducible build broken on linux/arm64";
             cat erigon-1-arm64.sha256;
             cat erigon-2-arm64.sha256;
