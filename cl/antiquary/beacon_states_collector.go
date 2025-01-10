@@ -97,6 +97,7 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 	var buffers []etl.Buffer
 	makeETLBuffer := func() etl.Buffer {
 		b := bufferPool.Get().(etl.Buffer)
+		b.Reset()
 		buffers = append(buffers, b)
 		return b
 	}
