@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 type DynamicFeeTransaction struct {
@@ -62,6 +63,10 @@ func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint2
 
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 	return tx
+}
+
+func (*DynamicFeeTransaction) RollupCostData() opstack.RollupCostData {
+	return opstack.RollupCostData{}
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 type CommonTx struct {
@@ -444,4 +445,8 @@ func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 	}
 	tx.from.Store(&addr)
 	return addr, nil
+}
+
+func (tx *LegacyTx) RollupCostData() opstack.RollupCostData {
+	return opstack.RollupCostData{}
 }

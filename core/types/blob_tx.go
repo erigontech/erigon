@@ -28,6 +28,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 type BlobTx struct {
@@ -113,6 +114,10 @@ func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
 	}
 	stx.from.Store(&addr)
 	return addr, nil
+}
+
+func (*BlobTx) RollupCostData() opstack.RollupCostData {
+	return opstack.RollupCostData{}
 }
 
 func (stx *BlobTx) Hash() libcommon.Hash {

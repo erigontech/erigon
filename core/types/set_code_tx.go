@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 	"github.com/erigontech/erigon/params"
 )
 
@@ -160,6 +161,10 @@ func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	}
 	tx.from.Store(&addr)
 	return addr, nil
+}
+
+func (*SetCodeTransaction) RollupCostData() opstack.RollupCostData {
+	return opstack.RollupCostData{}
 }
 
 func (tx *SetCodeTransaction) Hash() libcommon.Hash {

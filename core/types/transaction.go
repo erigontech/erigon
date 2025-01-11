@@ -95,6 +95,7 @@ type Transaction interface {
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
+	RollupCostData() opstack.RollupCostData
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 }
 
