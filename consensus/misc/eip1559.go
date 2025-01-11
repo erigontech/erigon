@@ -43,7 +43,7 @@ func VerifyEip1559Header(config *chain.Config, parent, header *types.Header, ski
 		// Verify that the gas limit remains within allowed bounds
 		parentGasLimit := parent.GasLimit
 		if !config.IsLondon(parent.Number.Uint64()) {
-			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+			parentGasLimit = parent.GasLimit * config.ElasticityMultiplier(params.ElasticityMultiplier)
 		}
 		if err := VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
 			return err
@@ -54,7 +54,7 @@ func VerifyEip1559Header(config *chain.Config, parent, header *types.Header, ski
 		return errors.New("header is missing baseFee")
 	}
 	// Verify the baseFee is correct based on the parent header.
-	expectedBaseFee := CalcBaseFee(config, parent)
+	expectedBaseFee := CalcBaseFee(config, parent, header.Time)
 	if header.BaseFee.Cmp(expectedBaseFee) != 0 {
 		return fmt.Errorf("invalid baseFee: have %s, want %s, parentBaseFee %s, parentGasUsed %d",
 			header.BaseFee, expectedBaseFee, parent.BaseFee, parent.GasUsed)
@@ -83,7 +83,9 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 
 	if chainConfig != nil {
 		if currentHeader.BaseFee != nil {
-			baseFee = CalcBaseFee(chainConfig, currentHeader).Uint64()
+			// Block time of every OP superchains is 2sec for now.
+			// Add 2 for next block. TODO: support custom block time for OP chain
+			baseFee = CalcBaseFee(chainConfig, currentHeader, currentHeader.Time+2).Uint64()
 		}
 
 		if currentHeader.ExcessBlobGas != nil {
@@ -102,16 +104,16 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 }
 
 // CalcBaseFee calculates the basefee of the header.
-func CalcBaseFee(config *chain.Config, parent *types.Header) *big.Int {
+func CalcBaseFee(config *chain.Config, parent *types.Header, time uint64) *big.Int {
 	// If the current block is the first EIP-1559 block, return the InitialBaseFee.
 	if !config.IsLondon(parent.Number.Uint64()) {
 		return new(big.Int).SetUint64(params.InitialBaseFee)
 	}
 
 	var (
-		parentGasTarget          = parent.GasLimit / params.ElasticityMultiplier
+		parentGasTarget          = parent.GasLimit / config.ElasticityMultiplier(params.ElasticityMultiplier)
 		parentGasTargetBig       = new(big.Int).SetUint64(parentGasTarget)
-		baseFeeChangeDenominator = new(big.Int).SetUint64(getBaseFeeChangeDenominator(config.Bor, parent.Number.Uint64()))
+		baseFeeChangeDenominator = new(big.Int).SetUint64(getBaseFeeChangeDenominator(config, parent.Number.Uint64(), time))
 	)
 	// If the parent gasUsed is the same as the target, the baseFee remains unchanged.
 	if parent.GasUsed == parentGasTarget {
@@ -142,10 +144,16 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *big.Int {
 	}
 }
 
-func getBaseFeeChangeDenominator(borConfig chain.BorConfig, number uint64) uint64 {
+func getBaseFeeChangeDenominator(config *chain.Config, number, time uint64) uint64 {
 	// If we're running bor based chain post delhi hardfork, return the new value
-	if borConfig, ok := borConfig.(*borcfg.BorConfig); ok && borConfig.IsDelhi(number) {
+	if borConfig, ok := config.Bor.(*borcfg.BorConfig); ok && borConfig.IsDelhi(number) {
 		return params.BaseFeeChangeDenominatorPostDelhi
+	}
+	if config.IsOptimism() {
+		if config.IsCanyon(time) {
+			return config.Optimism.EIP1559DenominatorCanyon
+		}
+		return config.Optimism.EIP1559Denominator
 	}
 
 	// Return the original once for other chains and pre-fork cases

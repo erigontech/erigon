@@ -244,7 +244,7 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	if !config.IsLondon(header.Number.Uint64() + 1) {
 		return (*hexutil.Big)(common.Big0), nil
 	}
-	return (*hexutil.Big)(misc.CalcBaseFee(config, header)), nil
+	return (*hexutil.Big)(misc.CalcBaseFee(config, header, header.Time+1)), nil
 }
 
 type GasPriceOracleBackend struct {

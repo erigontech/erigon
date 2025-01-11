@@ -562,7 +562,7 @@ func newRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, block
 func newRPCPendingTransaction(txn types.Transaction, current *types.Header, config *chain.Config) *RPCTransaction {
 	var baseFee *big.Int
 	if current != nil {
-		baseFee = misc.CalcBaseFee(config, current)
+		baseFee = misc.CalcBaseFee(config, current, current.Time+1)
 	}
 	return NewRPCTransaction(txn, common.Hash{}, 0, 0, baseFee)
 }

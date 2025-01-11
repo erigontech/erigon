@@ -94,7 +94,7 @@ var (
 )
 
 type StateGetter interface {
-	GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int)
+	GetState(addr libcommon.Address, key *libcommon.Hash, value *uint256.Int) error
 }
 
 // RollupCostData is a transaction structure that caches data for quickly computing the data

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/opstack"
 	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -107,6 +108,7 @@ type Message interface {
 	Mint() *uint256.Int
 	IsOptimismDepositTx() bool
 	IsOptimismSystemTx() bool
+	RollupCostData() opstack.RollupCostData
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
@@ -603,6 +605,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
 				st.state.AddBalance(*burntContractAddress, st.evm.BlobFee, tracing.BalanceChangeUnspecified)
 			}
+		}
+	}
+
+	if optimismConfig := st.evm.ChainConfig().Optimism; optimismConfig != nil {
+		l1CostFn := opstack.NewL1CostFunc(st.evm.ChainConfig(), st.state)
+		st.state.AddBalance(params.OptimismBaseFeeRecipient, new(uint256.Int).Mul(uint256.NewInt(st.gasUsed()), st.evm.Context.BaseFee), tracing.BalanceIncreaseRewardTransactionFee)
+		if l1CostFn == nil { // Erigon EVM context is used in many unexpected/hacky ways, let's panic if it's misconfigured
+			panic("missing L1 cost func in block context, please configure l1 cost when using optimism config to run EVM")
+		}
+		if cost := l1CostFn(st.msg.RollupCostData(), st.evm.Context.Time); cost != nil {
+			st.state.AddBalance(params.OptimismL1FeeRecipient, cost, tracing.BalanceIncreaseRewardTransactionFee)
 		}
 	}
 

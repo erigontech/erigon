@@ -23,6 +23,14 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
+	libcommon "github.com/erigontech/erigon-lib/common"
+)
+
+var (
+	// The base fee portion of the transaction fee accumulates at this predeploy
+	OptimismBaseFeeRecipient = libcommon.HexToAddress("0x4200000000000000000000000000000000000019")
+	// The L1 portion of the transaction fee accumulates at this predeploy
+	OptimismL1FeeRecipient = libcommon.HexToAddress("0x420000000000000000000000000000000000001A")
 )
 
 const (

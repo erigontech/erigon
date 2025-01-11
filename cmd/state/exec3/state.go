@@ -204,7 +204,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 
 	rw.ibs.Reset()
 	ibs := rw.ibs
-	//ibs.SetTrace(true)
 
 	rules := txTask.Rules
 	var err error

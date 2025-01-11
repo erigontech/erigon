@@ -133,6 +133,14 @@ func (c *Config) IsFjord(time uint64) bool {
 	return isForked(c.FjordTime, time)
 }
 
+// ElasticityMultiplier bounds the maximum gas limit an EIP-1559 block may have.
+func (c *Config) ElasticityMultiplier(defaultParam int) uint64 {
+	if c.IsOptimism() {
+		return c.Optimism.EIP1559Elasticity
+	}
+	return uint64(defaultParam)
+}
+
 func (c *Config) IsGranite(time uint64) bool {
 	return isForked(c.GraniteTime, time)
 }
