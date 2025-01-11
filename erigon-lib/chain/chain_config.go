@@ -601,6 +601,10 @@ type Rules struct {
 	IsCancun, IsNapoli                                bool
 	IsPrague, IsOsaka                                 bool
 	IsAura                                            bool
+
+	IsOptimismBedrock, IsOptimismRegolith                bool
+	IsOptimismCanyon, IsOptimismEcotone, IsOptimismFjord bool
+	IsOptimismGranite, IsOptimismHolocene                bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -627,6 +631,14 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsPrague:           c.IsPrague(time),
 		IsOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
+
+		IsOptimismBedrock:  c.IsOptimismBedrock(num),
+		IsOptimismRegolith: c.IsOptimismRegolith(time),
+		IsOptimismCanyon:   c.IsOptimismCanyon(time),
+		IsOptimismEcotone:  c.IsOptimismEcotone(time),
+		IsOptimismFjord:    c.IsOptimismFjord(time),
+		IsOptimismGranite:  c.IsOptimismGranite(time),
+		IsOptimismHolocene: c.IsOptimismHolocene(time),
 	}
 }
 
