@@ -37,6 +37,7 @@ import (
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 var (
@@ -377,7 +378,7 @@ type Message struct {
 	isOptimismSystemTx  bool
 	isOptimismDepositTx bool
 	mint                *uint256.Int
-	l1CostGas           RollupCostData
+	l1CostGas           opstack.RollupCostData
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,

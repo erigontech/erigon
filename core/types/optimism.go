@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 	"github.com/holiman/uint256"
 	// "github.com/ledgerwatch/erigon-lib/chain"
 	// libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -466,8 +467,8 @@ func (tx *OptimismDepositTx) Sender(signer Signer) (libcommon.Address, error) {
 	return tx.From, nil
 }
 
-func (tx OptimismDepositTx) RollupCostData() RollupCostData {
-	return RollupCostData{}
+func (tx OptimismDepositTx) RollupCostData() opstack.RollupCostData {
+	return opstack.RollupCostData{}
 }
 
 func (tx *OptimismDepositTx) GetDataHashes() []libcommon.Hash {

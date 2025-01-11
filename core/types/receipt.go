@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/hexutility"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 //(go:generate gencodec -type Receipt -field-override receiptMarshaling -out gen_receipt_json.go)
@@ -535,10 +536,14 @@ func (r Receipts) DeriveFields(config *chain.Config, hash libcommon.Hash, number
 
 		// The contract address can be derived from the transaction itself
 		if txs[i].GetTo() == nil {
+			nonce := txs[i].GetNonce()
+			if r[i].DepositNonce != nil {
+				nonce = *r[i].DepositNonce
+			}
 			// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
 			// and then the address of the contract one is creating this way will depend on the `tx.From`
 			// and the nonce of the creating account (which is `tx.From`).
-			r[i].ContractAddress = crypto.CreateAddress(senders[i], txs[i].GetNonce())
+			r[i].ContractAddress = crypto.CreateAddress(senders[i], nonce)
 		}
 		// The used gas can be calculated based on previous r
 		if i == 0 {
