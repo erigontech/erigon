@@ -104,6 +104,9 @@ type Message interface {
 	Authorizations() []types.Authorization
 
 	IsFree() bool
+	Mint() *uint256.Int
+	IsOptimismDepositTx() bool
+	IsOptimismSystemTx() bool
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
@@ -246,6 +249,41 @@ func CheckEip1559TxGasFeeCap(from libcommon.Address, gasFeeCap, tip, baseFee *ui
 
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck(gasBailout bool) error {
+	if st.msg.IsOptimismDepositTx() {
+		// Check clause 6: caller has enough balance to cover asset transfer for **topmost** call
+		// buyGas method originally handled balance check, but deposit tx does not use it
+		// Therefore explicit check required for separating consensus error and evm internal error.
+		// If not check it here, it will trigger evm internal error and break consensus.
+		have, err := st.state.GetBalance(st.msg.From())
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
+		if want := st.msg.Value(); have.Cmp(want) < 0 {
+			if !gasBailout {
+				return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
+			}
+		}
+		// No fee fields to check, no nonce to check, and no need to check if EOA (L1 already verified it for us)
+		// Gas is free, but no refunds!
+		st.initialGas = st.msg.Gas()
+		st.gasRemaining += st.msg.Gas() // Add gas here in order to be able to execute calls.
+		st.evm.BlobFee = new(uint256.Int)
+		// Don't touch the gas pool for system transactions
+		if st.msg.IsOptimismSystemTx() {
+			if st.evm.ChainConfig().IsOptimismRegolith(st.evm.Context.Time) {
+				return fmt.Errorf("%w: address %v", ErrSystemTxNotSupported,
+					st.msg.From().Hex())
+			}
+			return nil
+		}
+		// gas used by deposits may not be used by other txs
+		if err := st.gp.SubGas(st.msg.Gas()); err != nil {
+			if !gasBailout {
+				return err
+			}
+		}
+		return nil
+	}
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
 		stNonce, err := st.state.GetNonce(st.msg.From())
@@ -324,6 +362,10 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
+	if mint := st.msg.Mint(); mint != nil {
+		st.state.AddBalance(st.msg.From(), mint, tracing.BalanceIncreaseDaoContract) // TODO: change to mint.
+	}
+
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {

@@ -434,6 +434,13 @@ func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
 
+func (m Message) IsOptimismSystemTx() bool  { return m.isOptimismSystemTx }
+func (m Message) IsOptimismDepositTx() bool { return m.isOptimismDepositTx }
+func (m Message) Mint() *uint256.Int        { return m.mint }
+func (m Message) L1CostGas() opstack.RollupCostData {
+	return m.l1CostGas
+}
+
 func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	gas := globalGasCap
 	if gas == 0 {

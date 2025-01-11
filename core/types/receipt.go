@@ -52,6 +52,9 @@ const (
 
 	// ReceiptStatusSuccessful is the status code of a transaction if execution succeeded.
 	ReceiptStatusSuccessful = uint64(1)
+
+	// The version number for post-canyon deposit receipts.
+	CanyonDepositReceiptVersion = uint64(1)
 )
 
 // Receipt represents the results of a transaction.
