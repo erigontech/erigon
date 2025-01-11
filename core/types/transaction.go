@@ -53,6 +53,7 @@ const (
 	DynamicFeeTxType
 	BlobTxType
 	SetCodeTxType
+	OptimismDepositTxType = 0x7E
 )
 
 // Transaction is an Ethereum transaction.
@@ -371,6 +372,12 @@ type Message struct {
 	isFree           bool
 	blobHashes       []libcommon.Hash
 	authorizations   []Authorization
+
+	// Optimism
+	isOptimismSystemTx  bool
+	isOptimismDepositTx bool
+	mint                *uint256.Int
+	l1CostGas           RollupCostData
 }
 
 func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,

@@ -92,6 +92,28 @@ type Config struct {
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
+
+	// Optimism configurations
+	Optimism *OptimismConfig `json:"optimism,omitempty"`
+
+	BedrockBlock *big.Int `json:"bedrockBlock,omitempty"` // Bedrock switch block (nil = no fork, 0 = already on optimism bedrock)
+	RegolithTime *big.Int `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
+	CanyonTime   *big.Int `json:"canyonTime,omitempty"`   // Canyon switch time (nil = no fork, 0 = already on optimism canyon)
+	EcotoneTime  *big.Int `json:"ecotoneTime,omitempty"`  // Ecotone switch time (nil = no fork, 0 = already on optimism ecotone)
+	FjordTime    *big.Int `json:"fjordTime,omitempty"`    // Fjord switch time (nil = no fork, 0 = already on optimism fjord)
+	GraniteTime  *big.Int `json:"graniteTime,omitempty"`  // Granite switch time (nil = no fork, 0 = already on optimism granite)
+	HoloceneTime *big.Int `json:"holoceneTime,omitempty"`
+}
+
+// OptimismConfig is the optimism config.
+type OptimismConfig struct {
+	EIP1559Elasticity        uint64 `json:"eip1559Elasticity"`
+	EIP1559Denominator       uint64 `json:"eip1559Denominator"`
+	EIP1559DenominatorCanyon uint64 `json:"eip1559DenominatorCanyon"`
+}
+
+func (c *Config) IsOptimism() bool {
+	return c.Optimism != nil
 }
 
 type BorConfig interface {

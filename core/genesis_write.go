@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 	"slices"
 
 	"github.com/c2h5oh/datasize"
@@ -173,6 +174,18 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overridePragueTime *b
 		newCfg = storedCfg
 		applyOverrides(newCfg)
 	}
+
+	if newCfg.IsOptimism() {
+		if !reflect.DeepEqual(newCfg, storedCfg) {
+			log.Info("Update latest chain config from superchain registry")
+		}
+		// rewrite using superchain config just in case
+		if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {
+			return newCfg, nil, err
+		}
+		return newCfg, storedBlock, nil
+	}
+
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))

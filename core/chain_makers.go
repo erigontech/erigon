@@ -590,7 +590,11 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 		}
 	}
 	if targetGasLimit != nil {
-		header.GasLimit = CalcGasLimit(parentGasLimit, *targetGasLimit)
+		if chainConfig.IsOptimism() {
+			header.GasLimit = *targetGasLimit
+		} else {
+			header.GasLimit = CalcGasLimit(parentGasLimit, *targetGasLimit)
+		}
 	} else {
 		header.GasLimit = parentGasLimit
 	}
