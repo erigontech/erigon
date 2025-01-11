@@ -112,8 +112,71 @@ type OptimismConfig struct {
 	EIP1559DenominatorCanyon uint64 `json:"eip1559DenominatorCanyon"`
 }
 
+// IsBedrock returns whether num is either equal to the Bedrock fork block or greater.
+func (c *Config) IsBedrock(num uint64) bool {
+	return isForked(c.BedrockBlock, num)
+}
+
+func (c *Config) IsRegolith(time uint64) bool {
+	return isForked(c.RegolithTime, time)
+}
+
+func (c *Config) IsCanyon(time uint64) bool {
+	return isForked(c.CanyonTime, time)
+}
+
+func (c *Config) IsEcotone(time uint64) bool {
+	return isForked(c.EcotoneTime, time)
+}
+
+func (c *Config) IsFjord(time uint64) bool {
+	return isForked(c.FjordTime, time)
+}
+
+func (c *Config) IsGranite(time uint64) bool {
+	return isForked(c.GraniteTime, time)
+}
+
+func (c *Config) IsHolocene(time uint64) bool {
+	return isForked(c.HoloceneTime, time)
+}
+
 func (c *Config) IsOptimism() bool {
 	return c.Optimism != nil
+}
+
+// IsOptimismBedrock returns true iff this is an optimism node & bedrock is active
+func (c *Config) IsOptimismBedrock(num uint64) bool {
+	return c.IsOptimism() && c.IsBedrock(num)
+}
+
+func (c *Config) IsOptimismRegolith(time uint64) bool {
+	return c.IsOptimism() && c.IsRegolith(time)
+}
+
+func (c *Config) IsOptimismCanyon(time uint64) bool {
+	return c.IsOptimism() && c.IsCanyon(time)
+}
+
+func (c *Config) IsOptimismEcotone(time uint64) bool {
+	return c.IsOptimism() && c.IsEcotone(time)
+}
+
+func (c *Config) IsOptimismFjord(time uint64) bool {
+	return c.IsOptimism() && c.IsFjord(time)
+}
+
+func (c *Config) IsOptimismGranite(time uint64) bool {
+	return c.IsOptimism() && c.IsGranite(time)
+}
+
+func (c *Config) IsOptimismHolocene(time uint64) bool {
+	return c.IsOptimism() && c.IsHolocene(time)
+}
+
+// IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
+func (c *Config) IsOptimismPreBedrock(num uint64) bool {
+	return c.IsOptimism() && !c.IsBedrock(num)
 }
 
 type BorConfig interface {
