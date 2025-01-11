@@ -104,20 +104,20 @@ func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libco
 		}
 	}
 
-	o := make(Logs, 0, len(logs))
+	filtered := make(Logs, 0, len(logs))
 	var logCount uint64
 	logCount = 0
-	for _, v := range logs {
+	for _, log := range logs {
 		// check address if addrMap is not empty
 		if len(addrMap) != 0 {
-			if _, ok := addrMap[v.Address]; !ok {
+			if _, ok := addrMap[log.Address]; !ok {
 				// not there? skip this log
 				continue
 			}
 		}
 
-		// If the to filtered topics is greater than the amount of topics in logs, skip.
-		if len(topics) > len(v.Topics) {
+		// If the amount of filtered topics is greater than the amount of topics in logs, skip.
+		if len(topics) > len(log.Topics) {
 			continue
 		}
 		// the default state is to include the log
@@ -129,14 +129,14 @@ func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libco
 				continue
 			}
 			// the topicSet isnt empty, so the topic must be included.
-			if _, ok := topicSet[v.Topics[idx]]; !ok {
+			if _, ok := topicSet[log.Topics[idx]]; !ok {
 				// the topic wasn't found, so we should skip this log
 				found = false
 				break
 			}
 		}
 		if found {
-			o = append(o, v)
+			filtered = append(filtered, log)
 		}
 
 		logCount += 1
@@ -144,7 +144,7 @@ func (logs Logs) Filter(addrMap map[libcommon.Address]struct{}, topics [][]libco
 			break
 		}
 	}
-	return o
+	return filtered
 }
 
 func (logs Logs) CointainTopics(addrMap map[libcommon.Address]struct{}, topicsMap map[libcommon.Hash]struct{}, maxLogs uint64) Logs {

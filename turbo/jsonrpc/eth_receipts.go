@@ -144,17 +144,17 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, err
 	}
 	logs = make(types.Logs, len(erigonLogs))
-	for i, log := range erigonLogs {
+	for i, elog := range erigonLogs {
 		logs[i] = &types.Log{
-			Address:     log.Address,
-			Topics:      log.Topics,
-			Data:        log.Data,
-			BlockNumber: log.BlockNumber,
-			TxHash:      log.TxHash,
-			TxIndex:     log.TxIndex,
-			BlockHash:   log.BlockHash,
-			Index:       log.Index,
-			Removed:     log.Removed,
+			Address:     elog.Address,
+			Topics:      elog.Topics,
+			Data:        elog.Data,
+			BlockNumber: elog.BlockNumber,
+			TxHash:      elog.TxHash,
+			TxIndex:     elog.TxIndex,
+			BlockHash:   elog.BlockHash,
+			Index:       elog.Index,
+			Removed:     elog.Removed,
 		}
 	}
 	return logs, nil
@@ -327,7 +327,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		rawLogs := exec.GetRawLogs(txIndex)
 
-		// `ReadReceipt` does fill `rawLogs` calulated fields. but we don't need it anymore.
+		// `ReadReceipt` does fill `rawLogs` calculated fields. but we don't need it anymore.
 		r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
 		if err != nil {
 			return nil, err
