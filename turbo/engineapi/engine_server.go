@@ -465,6 +465,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		s.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
 	}
+	if s.config.IsOptimism() {
+		return nil, &rpc.UnsupportedForkError{Message: "Optimism is unsupported on block building"}
+	}
 	s.engineLogSpamer.RecordRequest()
 
 	if !s.proposing {
@@ -588,6 +591,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	if !s.proposing {
 		return nil, errors.New("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
+	}
+	if s.config.IsOptimism() {
+		return nil, &rpc.UnsupportedForkError{Message: "Optimism is unsupported for block building"}
 	}
 
 	headHeader := s.chainRW.GetHeaderByHash(ctx, forkchoiceState.HeadHash)

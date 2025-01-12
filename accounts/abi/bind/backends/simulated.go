@@ -860,3 +860,5 @@ func (m callMsg) IsFree() bool                          { return false }
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }
 func (m callMsg) BlobHashes() []libcommon.Hash   { return m.CallMsg.BlobHashes }
+func (m callMsg) IsOptimismDepositTx() bool      { return false }
+func (m callMsg) IsOptimismSystemTx() bool       { return false }
