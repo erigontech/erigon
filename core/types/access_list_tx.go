@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/opstack"
 )
 
 // AccessTuple is the element type of an access list.
@@ -433,6 +434,10 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (Mes
 	var err error
 	msg.from, err = tx.Sender(s)
 	return msg, err
+}
+
+func (tx *AccessListTx) RollupCostData() opstack.RollupCostData {
+	return tx.computeRollupGas(tx)
 }
 
 func (tx *AccessListTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
