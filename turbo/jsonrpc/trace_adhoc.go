@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon-lib/kv/rawdbv3"
+	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 	"math"
 	"strings"
 
@@ -817,7 +819,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 	}
 
 	var isBorStateSyncTxn bool
-	blockNum, _, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -851,14 +853,18 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		return nil, nil
 	}
 
-	var txnIndex int
-	for idx := 0; idx < block.Transactions().Len() && !isBorStateSyncTxn; idx++ {
-		txn := block.Transactions()[idx]
-		if txn.Hash() == txHash {
-			txnIndex = idx
-			break
-		}
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
+	txNumMin, err := txNumsReader.Min(tx, blockNum)
+	if err != nil {
+		return nil, err
 	}
+
+	if txNumMin+2 > txNum {
+		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+	}
+
+	var txnIndex = int(txNum - txNumMin - 2)
 
 	if isBorStateSyncTxn {
 		txnIndex = block.Transactions().Len()
@@ -1407,8 +1413,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, stateReader
 
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
-	msgs []types.Message, callParams []TraceCallParam,
-	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndexNeeded int,
+	msg types.Message, callParam TraceCallParam,
+	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1447,7 +1453,6 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	// Make sure the context is cancelled when the call has completed
 	// this makes sure resources are cleaned up.
 	defer cancel()
-	results := make([]*TraceCallResult, 0, len(msgs))
 
 	useParent := false
 	if header == nil {
@@ -1463,145 +1468,145 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 
 	blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 
-	for txIndex, msg := range msgs {
-		if isHistoricalStateReader {
-			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
-		}
-		if err := libcommon.Stopped(ctx.Done()); err != nil {
-			return nil, err
-		}
+	if isHistoricalStateReader {
+		historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
+	}
+	if err := libcommon.Stopped(ctx.Done()); err != nil {
+		return nil, err
+	}
 
-		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
-		args := callParams[txIndex]
-		for _, traceType := range args.traceTypes {
-			switch traceType {
-			case TraceTypeTrace:
-				traceTypeTrace = true
-			case TraceTypeStateDiff:
-				traceTypeStateDiff = true
-			case TraceTypeVmTrace:
-				traceTypeVmTrace = true
-			default:
-				return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
-			}
-		}
-
-		traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
-		vmConfig := vm.Config{}
-		if (traceTypeTrace && txIndex == txIndexNeeded) || traceTypeVmTrace {
-			var ot OeTracer
-			ot.config, err = parseOeTracerConfig(traceConfig)
-			if err != nil {
-				return nil, err
-			}
-			ot.compat = api.compatibility
-			ot.r = traceResult
-			ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
-			if traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded) {
-				ot.traceAddr = []int{}
-			}
-			if traceTypeVmTrace {
-				traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
-			}
-			vmConfig.Debug = true
-			vmConfig.Tracer = &ot
-		}
-
-		if useParent {
-			blockCtx.GasLimit = math.MaxUint64
-			blockCtx.MaxGasLimit = true
-		}
-
-		// Clone the state cache before applying the changes for diff after transaction execution, clone is discarded
-		var cloneReader state.StateReader
-		var sd *StateDiff
-		if traceTypeStateDiff {
-			cloneCache := stateCache.Clone()
-			cloneReader = state.NewCachedReader(stateReader, cloneCache)
-			//cloneReader = stateReader
-			if isHistoricalStateReader {
-				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
-			}
-			sdMap := make(map[libcommon.Address]*StateDiffAccount)
-			traceResult.StateDiff = sdMap
-			sd = &StateDiff{sdMap: sdMap}
-		}
-
-		ibs.Reset()
-		var finalizeTxStateWriter state.StateWriter
-		if sd != nil {
-			finalizeTxStateWriter = sd
-		} else {
-			finalizeTxStateWriter = noop
-		}
-
-		var txFinalized bool
-		var execResult *evmtypes.ExecutionResult
-		if args.isBorStateSyncTxn {
-			txFinalized = true
-			var stateSyncEvents []*types.Message
-			stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
-			if err != nil {
-				return nil, err
-			}
-
-			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
-				ctx,
-				&vmConfig,
-				chainConfig,
-				ibs,
-				finalizeTxStateWriter,
-				blockCtx,
-				header.Hash(),
-				header.Number.Uint64(),
-				header.Time,
-				stateSyncEvents,
-			)
-		} else {
-			ibs.SetTxContext(txIndex)
-			txCtx := core.NewEVMTxContext(msg)
-			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-
-			execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
-		}
-
-		chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
-		traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
-		if traceTypeStateDiff {
-			initialIbs := state.New(cloneReader)
-			if !txFinalized {
-				if err = ibs.FinalizeTx(chainRules, sd); err != nil {
-					return nil, err
-				}
-			}
-			sd.CompareStates(initialIbs, ibs)
-			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-				return nil, err
-			}
-		} else {
-			if !txFinalized {
-				if err = ibs.FinalizeTx(chainRules, noop); err != nil {
-					return nil, err
-				}
-			}
-			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-				return nil, err
-			}
-		}
-		if !traceTypeTrace {
-			traceResult.Trace = []*ParityTrace{}
-		}
-		results = append(results, traceResult)
-		if txIndex == txIndexNeeded {
-			break
+	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
+	args := callParam
+	for _, traceType := range args.traceTypes {
+		switch traceType {
+		case TraceTypeTrace:
+			traceTypeTrace = true
+		case TraceTypeStateDiff:
+			traceTypeStateDiff = true
+		case TraceTypeVmTrace:
+			traceTypeVmTrace = true
+		default:
+			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
 		}
 	}
 
-	return results[len(results)-1], nil
+	traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
+	vmConfig := vm.Config{}
+	if traceTypeTrace || traceTypeVmTrace {
+		var ot OeTracer
+		ot.config, err = parseOeTracerConfig(traceConfig)
+		if err != nil {
+			return nil, err
+		}
+		ot.compat = api.compatibility
+		ot.r = traceResult
+		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
+		if traceTypeTrace {
+			ot.traceAddr = []int{}
+		}
+		if traceTypeVmTrace {
+			traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
+		}
+		vmConfig.Debug = true
+		vmConfig.Tracer = &ot
+	}
+
+	if useParent {
+		blockCtx.GasLimit = math.MaxUint64
+		blockCtx.MaxGasLimit = true
+	}
+
+	// Clone the state cache before applying the changes for diff after transaction execution, clone is discarded
+	var cloneReader state.StateReader
+	var sd *StateDiff
+	if traceTypeStateDiff {
+		cloneCache := stateCache.Clone()
+		cloneReader = state.NewCachedReader(stateReader, cloneCache)
+		//cloneReader = stateReader
+		if isHistoricalStateReader {
+			historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
+		}
+		sdMap := make(map[libcommon.Address]*StateDiffAccount)
+		traceResult.StateDiff = sdMap
+		sd = &StateDiff{sdMap: sdMap}
+	}
+
+	ibs.Reset()
+	var finalizeTxStateWriter state.StateWriter
+	if sd != nil {
+		finalizeTxStateWriter = sd
+	} else {
+		finalizeTxStateWriter = noop
+	}
+
+	var txFinalized bool
+	var execResult *evmtypes.ExecutionResult
+	if args.isBorStateSyncTxn {
+		txFinalized = true
+		var stateSyncEvents []*types.Message
+		stateSyncEvents, err = api.stateSyncEvents(ctx, dbtx, header.Hash(), blockNumber, chainConfig)
+		if err != nil {
+			return nil, err
+		}
+
+		execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
+			ctx,
+			&vmConfig,
+			chainConfig,
+			ibs,
+			finalizeTxStateWriter,
+			blockCtx,
+			header.Hash(),
+			header.Number.Uint64(),
+			header.Time,
+			stateSyncEvents,
+		)
+	} else {
+		ibs.SetTxContext(txIndex)
+		txCtx := core.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
+	}
+
+	chainRules := chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time)
+	traceResult.Output = libcommon.CopyBytes(execResult.ReturnData)
+	if traceTypeStateDiff {
+		initialIbs := state.New(cloneReader)
+		if !txFinalized {
+			if err = ibs.FinalizeTx(chainRules, sd); err != nil {
+				return nil, err
+			}
+		}
+
+		if sd != nil {
+			if err = sd.CompareStates(initialIbs, ibs); err != nil {
+				return nil, err
+			}
+		}
+
+		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+			return nil, err
+		}
+	} else {
+		if !txFinalized {
+			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
+				return nil, err
+			}
+		}
+		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+			return nil, err
+		}
+	}
+	if !traceTypeTrace {
+		traceResult.Trace = []*ParityTrace{}
+	}
+
+	return traceResult, nil
 }
 
 // RawTransaction implements trace_rawTransaction.

@@ -876,8 +876,6 @@ func (api *TraceAPIImpl) callTransaction(
 		}
 	}
 
-	callParams := make([]TraceCallParam, 0, len(txs))
-
 	parentHash := block.ParentHash()
 	parentNrOrHash := rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
@@ -907,41 +905,35 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, nil, err
 	}
 
-	msgs := make([]types.Message, len(txs))
-	for i, txn := range txs {
-		isBorStateSyncTxn := txn == borStateSyncTxn
-		var txnHash common.Hash
-		var msg types.Message
-		var err error
-		if isBorStateSyncTxn {
-			txnHash = borStateSyncTxnHash
-			// we use an empty message for bor state sync txn since it gets handled differently
-		} else {
-			txnHash = txn.Hash()
-			msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
-			if err != nil {
-				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
-			}
-
-			// gnosis might have a fee free account here
-			if msg.FeeCap().IsZero() && engine != nil {
-				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
-				}
-				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-			}
+	isBorStateSyncTxn := txs[txIndex] == borStateSyncTxn
+	var txnHash common.Hash
+	var msg types.Message
+	if isBorStateSyncTxn {
+		txnHash = borStateSyncTxnHash
+		// we use an empty message for bor state sync txn since it gets handled differently
+	} else {
+		txnHash = txs[txIndex].Hash()
+		msg, err = txs[txIndex].AsMessage(*signer, header.BaseFee, rules)
+		if err != nil {
+			return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 		}
 
-		callParams = append(callParams, TraceCallParam{
-			txHash:            &txnHash,
-			traceTypes:        traceTypes,
-			isBorStateSyncTxn: isBorStateSyncTxn,
-		})
-
-		msgs[i] = msg
+		// gnosis might have a fee free account here
+		if msg.FeeCap().IsZero() && engine != nil {
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
+			}
+			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		}
 	}
 
-	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msgs, callParams,
+	callParam := TraceCallParam{
+		txHash:            &txnHash,
+		traceTypes:        traceTypes,
+		isBorStateSyncTxn: isBorStateSyncTxn,
+	}
+
+	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
 		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
