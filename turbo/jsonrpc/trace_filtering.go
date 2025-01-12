@@ -122,25 +122,20 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	hash := block.Hash()
 	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, _, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig, traceConfig)
+	trace, _, err := api.callTransaction(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]ParityTrace, 0, len(traces))
+	out := make([]ParityTrace, 0, len(trace.Trace))
 	blockno := uint64(bn)
-	for txno, trace := range traces {
-		// We're only looking for a specific transaction
-		if txno == txIndex {
-			for _, pt := range trace.Trace {
-				pt.BlockHash = &hash
-				pt.BlockNumber = &blockno
-				pt.TransactionHash = trace.TransactionHash
-				txpos := uint64(txno)
-				pt.TransactionPosition = &txpos
-				out = append(out, *pt)
-			}
-		}
+	for _, pt := range trace.Trace {
+		pt.BlockHash = &hash
+		pt.BlockNumber = &blockno
+		pt.TransactionHash = trace.TransactionHash
+		txpos := uint64(txIndex)
+		pt.TransactionPosition = &txpos
+		out = append(out, *pt)
 	}
 
 	return out, err
@@ -215,7 +210,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	signer := types.MakeSigner(cfg, blockNum, block.Time())
-	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, -1 /* all txn indices */, *gasBailOut /* gasBailOut */, signer, cfg, traceConfig)
+	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, signer, cfg, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -716,7 +711,6 @@ func (api *TraceAPIImpl) callManyTransactions(
 	dbtx kv.TemporalTx,
 	block *types.Block,
 	traceTypes []string,
-	txIndex int,
 	gasBailOut bool,
 	signer *types.Signer,
 	cfg *chain.Config,
@@ -823,7 +817,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	traces, cmErr := api.doCallMany(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msgs, callParams,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
+		&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
 
 	if cmErr != nil {
 		return nil, nil, cmErr
@@ -834,6 +828,131 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 
 	return traces, syscall, nil
+}
+
+func (api *TraceAPIImpl) callTransaction(
+	ctx context.Context,
+	dbtx kv.TemporalTx,
+	block *types.Block,
+	traceTypes []string,
+	txIndex int,
+	gasBailOut bool,
+	signer *types.Signer,
+	cfg *chain.Config,
+	traceConfig *config.TraceConfig,
+) (*TraceCallResult, consensus.SystemCall, error) {
+	blockNumber := block.NumberU64()
+	pNo := blockNumber
+	if pNo > 0 {
+		pNo -= 1
+	}
+
+	parentNo := rpc.BlockNumber(pNo)
+	rules := cfg.Rules(blockNumber, block.Time())
+	header := block.Header()
+	txs := block.Transactions()
+	var borStateSyncTxn types.Transaction
+	var borStateSyncTxnHash common.Hash
+	if cfg.Bor != nil {
+		// check if this block has state sync txn
+		blockHash := block.Hash()
+		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
+
+		var ok bool
+		var err error
+
+		if api.useBridgeReader {
+			_, ok, err = api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
+
+		} else {
+			_, ok, err = api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if ok {
+			borStateSyncTxn = bortypes.NewBorTransaction()
+			txs = append(txs, borStateSyncTxn)
+		}
+	}
+
+	callParams := make([]TraceCallParam, 0, len(txs))
+
+	parentHash := block.ParentHash()
+	parentNrOrHash := rpc.BlockNumberOrHash{
+		BlockNumber:      &parentNo,
+		BlockHash:        &parentHash,
+		RequireCanonical: true,
+	}
+
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, cfg.ChainName)
+	if err != nil {
+		return nil, nil, err
+	}
+	stateCache := shards.NewStateCache(
+		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+	cachedReader := state.NewCachedReader(stateReader, stateCache)
+	noop := state.NewNoopWriter()
+	cachedWriter := state.NewCachedWriter(noop, stateCache)
+	ibs := state.New(cachedReader)
+
+	engine := api.engine()
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
+	logger := log.New("trace_filtering")
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
+		return nil, nil, err
+	}
+
+	msgs := make([]types.Message, len(txs))
+	for i, txn := range txs {
+		isBorStateSyncTxn := txn == borStateSyncTxn
+		var txnHash common.Hash
+		var msg types.Message
+		var err error
+		if isBorStateSyncTxn {
+			txnHash = borStateSyncTxnHash
+			// we use an empty message for bor state sync txn since it gets handled differently
+		} else {
+			txnHash = txn.Hash()
+			msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
+			if err != nil {
+				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
+			}
+
+			// gnosis might have a fee free account here
+			if msg.FeeCap().IsZero() && engine != nil {
+				syscall := func(contract common.Address, data []byte) ([]byte, error) {
+					return core.SysCallContract(contract, data, cfg, ibs, header, engine, true /* constCall */)
+				}
+				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+			}
+		}
+
+		callParams = append(callParams, TraceCallParam{
+			txHash:            &txnHash,
+			traceTypes:        traceTypes,
+			isBorStateSyncTxn: isBorStateSyncTxn,
+		})
+
+		msgs[i] = msg
+	}
+
+	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msgs, callParams,
+		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
+
+	if cmErr != nil {
+		return nil, nil, cmErr
+	}
+
+	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+		return core.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */)
+	}
+
+	return trace, syscall, nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter
