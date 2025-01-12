@@ -28,6 +28,12 @@ const (
 	BorE2ETestChain2Val = "bor-e2e-test-2Val"
 	Chiado              = "chiado"
 	Test                = "test"
+
+	OPDevnetChainName  = "op-devnet"
+	OPMainnetChainName = "op-mainnet"
+
+	LegacyOPDevnetChainName  = "optimism-devnet"
+	LegacyOPMainnetChainName = "optimism-mainnet"
 )
 
 var All = []string{
@@ -40,6 +46,8 @@ var All = []string{
 	Gnosis,
 	Chiado,
 	Test,
+	OPDevnetChainName,
+	OPMainnetChainName,
 }
 
 func IsKnownNetwork(s string) bool {
@@ -49,4 +57,15 @@ func IsKnownNetwork(s string) bool {
 		}
 	}
 	return false
+}
+
+func HandleLegacyName(name string) string {
+	switch name {
+	case LegacyOPDevnetChainName:
+		return OPDevnetChainName
+	case LegacyOPMainnetChainName:
+		return OPMainnetChainName
+	default:
+		return name
+	}
 }
