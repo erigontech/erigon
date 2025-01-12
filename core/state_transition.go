@@ -406,12 +406,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		if st.msg.IsOptimismSystemTx() && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
 			gasUsed = 0
 		}
-		result = &evmtypes.ExecutionResult{
+		return &evmtypes.ExecutionResult{
 			UsedGas:    gasUsed,
 			Err:        fmt.Errorf("failed deposit: %w", err),
 			ReturnData: nil,
-		}
-		err = nil
+		}, nil
 	}
 	return result, err
 }
