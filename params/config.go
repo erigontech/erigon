@@ -257,6 +257,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &ChiadoGenesisHash
 	case networkname.Test:
 		return &TestGenesisHash
+	case networkname.OPMainnetChainName:
+		return &OPMainnetGenesisHash
 	default:
 		return nil
 	}

@@ -29,7 +29,6 @@ const (
 	Chiado              = "chiado"
 	Test                = "test"
 
-	OPDevnetChainName  = "op-devnet"
 	OPMainnetChainName = "op-mainnet"
 
 	LegacyOPDevnetChainName  = "optimism-devnet"
@@ -46,7 +45,6 @@ var All = []string{
 	Gnosis,
 	Chiado,
 	Test,
-	OPDevnetChainName,
 	OPMainnetChainName,
 }
 
@@ -61,8 +59,6 @@ func IsKnownNetwork(s string) bool {
 
 func HandleLegacyName(name string) string {
 	switch name {
-	case LegacyOPDevnetChainName:
-		return OPDevnetChainName
 	case LegacyOPMainnetChainName:
 		return OPMainnetChainName
 	default:
