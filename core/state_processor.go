@@ -20,6 +20,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -73,10 +75,12 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 	if err != nil {
 		return nil, nil, err
 	}
+	fmt.Println("S")
 	// Update the state with pending changes
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
 	}
+	fmt.Println(err)
 	*usedGas += result.UsedGas
 	if usedBlobGas != nil {
 		*usedBlobGas += txn.GetBlobGas()
