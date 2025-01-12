@@ -701,7 +701,7 @@ func loadOPStackGenesisByChainName(name string) (*types.Genesis, error) {
 		ParentHash: libcommon.Hash(gen.ParentHash),
 		BaseFee:    (*big.Int)(gen.BaseFee),
 	}
-	fmt.Println(len(gen.Alloc))
+	fmt.Println(len(gen.Alloc), gen.Number)
 
 	for addr, acc := range gen.Alloc {
 		var code []byte
