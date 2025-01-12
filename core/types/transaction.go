@@ -246,6 +246,13 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		}
 	case SetCodeTxType:
 		t = &SetCodeTransaction{}
+	case OptimismDepositTxType:
+		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
+		t := &OptimismDepositTx{}
+		if err := t.DecodeRLP(s); err != nil {
+			return nil, err
+		}
+		return t, nil
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
