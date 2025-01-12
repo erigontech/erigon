@@ -29,9 +29,9 @@ const (
 	Chiado              = "chiado"
 	Test                = "test"
 
-	OPMainnetChainName = "op-mainnet"
+	OPMainnetChainName   = "op-mainnet"
+	BaseMainnetChainName = "base-mainnet"
 
-	LegacyOPDevnetChainName  = "optimism-devnet"
 	LegacyOPMainnetChainName = "optimism-mainnet"
 )
 
@@ -46,6 +46,7 @@ var All = []string{
 	Chiado,
 	Test,
 	OPMainnetChainName,
+	BaseMainnetChainName,
 }
 
 func IsKnownNetwork(s string) bool {

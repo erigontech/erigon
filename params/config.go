@@ -75,8 +75,8 @@ var (
 	ChiadoGenesisHash     = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
 	TestGenesisHash       = libcommon.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc")
 
-	OPMainnetGenesisHash = libcommon.HexToHash("0x7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b")
-	OPDevnetGenesisHash  = libcommon.HexToHash("0x1c16b5a055ff0197544b96f1375bf6be35ec478e23a95093cfe01902d821c22a")
+	OPMainnetGenesisHash   = libcommon.HexToHash("0x7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b")
+	BaseMainnetGenesisHash = libcommon.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 )
 
 var (
@@ -259,6 +259,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &TestGenesisHash
 	case networkname.OPMainnetChainName:
 		return &OPMainnetGenesisHash
+	case networkname.BaseMainnetChainName:
+		return &BaseMainnetGenesisHash
 	default:
 		return nil
 	}
