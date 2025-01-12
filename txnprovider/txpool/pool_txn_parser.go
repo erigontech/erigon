@@ -43,6 +43,8 @@ const (
 	DynamicFeeTxnType byte = 2 // EIP-1559
 	BlobTxnType       byte = 3 // EIP-4844
 	SetCodeTxnType    byte = 4 // EIP-7702
+
+	OptimismDepositTxnType byte = 126 // EIP-3074
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -153,7 +155,10 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// If it is non-legacy transaction, the transaction type follows, and then the list
 	if !legacy {
 		slot.Type = payload[p]
-		if slot.Type > SetCodeTxnType {
+
+		// TODO: make this escape only when we run an optimism node
+		isOptimismDepositTx := slot.Type == OptimismDepositTxnType
+		if slot.Type > SetCodeTxnType && !isOptimismDepositTx {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
