@@ -1388,7 +1388,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 					return nil, err
 				}
 			}
-			sd.CompareStates(initialIbs, ibs)
+			if sd != nil {
+				if err = sd.CompareStates(initialIbs, ibs); err != nil {
+					return nil, err
+				}
+			}
 			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 				return nil, err
 			}
