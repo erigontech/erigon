@@ -45,8 +45,11 @@ func VerifyEip1559Header(config *chain.Config, parent, header *types.Header, ski
 		if !config.IsLondon(parent.Number.Uint64()) {
 			parentGasLimit = parent.GasLimit * config.ElasticityMultiplier(params.ElasticityMultiplier)
 		}
-		if err := VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
-			return err
+		// Skip gas limit check for optimism chain
+		if !config.IsOptimism() {
+			if err := VerifyGaslimit(parentGasLimit, header.GasLimit); err != nil {
+				return err
+			}
 		}
 	}
 	// Verify the header is not malformed

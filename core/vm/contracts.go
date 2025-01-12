@@ -191,6 +191,8 @@ var (
 	PrecompiledAddressesIstanbul  []libcommon.Address
 	PrecompiledAddressesByzantium []libcommon.Address
 	PrecompiledAddressesHomestead []libcommon.Address
+	PrecompiledAddressesFjord     []libcommon.Address
+	PrecompiledAddressesGranite   []libcommon.Address
 )
 
 func init() {
@@ -215,6 +217,13 @@ func init() {
 	for k := range PrecompiledContractsPrague {
 		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
 	}
+	for k := range PrecompiledContractsFjord {
+		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
+	}
+	for k := range PrecompiledContractsGranite {
+		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
+	}
+
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
@@ -232,6 +241,10 @@ func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 		return PrecompiledAddressesIstanbul
 	case rules.IsByzantium:
 		return PrecompiledAddressesByzantium
+	case rules.IsOptimismGranite:
+		return PrecompiledAddressesGranite
+	case rules.IsOptimismFjord:
+		return PrecompiledAddressesFjord
 	default:
 		return PrecompiledAddressesHomestead
 	}
