@@ -1211,11 +1211,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	return api.doCallMany(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs,
+	return api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs,
 		msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, traceConfig)
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
+func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	msgs []types.Message, callParams []TraceCallParam,
 	parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header, gasBailout bool,
