@@ -604,14 +604,14 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 		return nil, nil, err
 	}
 
-	head.Root = root
-
 	if g.StateHash != nil {
 		if len(g.Alloc) > 0 {
 			return nil, nil, fmt.Errorf("chain definition unexpectedly contains both allocation (%d) and state-hash %s", len(g.Alloc), *g.StateHash)
 		}
-		g.StateHash = (*libcommon.Hash)(g.StateHash)
+		root = *g.StateHash
 	}
+
+	head.Root = root
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
 }
