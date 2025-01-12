@@ -462,9 +462,14 @@ Loop:
 			aggTx.RestrictSubsetFileDeletions(true)
 			start := time.Now()
 			executor.domains().SetChangesetAccumulator(nil) // Make sure we don't have an active changeset accumulator
+			var rh []byte
 			// First compute and commit the progress done so far
-			if _, err := executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
+			if rh, err = executor.domains().ComputeCommitment(ctx, true, blockNum, execStage.LogPrefix()); err != nil {
 				return err
+			}
+			if !bytes.Equal(rh, b.Root().Bytes()) {
+				logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), b.NumberU64(), rh, b.Root().Bytes(), b.Hash()))
+				return errors.New("wrong trie root")
 			}
 			ts += time.Since(start)
 			aggTx.RestrictSubsetFileDeletions(false)
