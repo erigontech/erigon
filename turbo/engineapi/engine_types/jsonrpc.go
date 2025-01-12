@@ -30,6 +30,7 @@ import (
 	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
 	types2 "github.com/erigontech/erigon-lib/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/params"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
@@ -277,4 +278,9 @@ func ConvertPayloadId(payloadId uint64) *hexutility.Bytes {
 	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
 	ret := hexutility.Bytes(encodedPayloadId)
 	return &ret
+}
+
+type SuperchainSignal struct {
+	Recommended params.ProtocolVersion `json:"recommended"`
+	Required    params.ProtocolVersion `json:"required"`
 }

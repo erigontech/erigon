@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"time"
 
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/consensus/merge"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/params"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/turbo/engineapi/engine_helpers"
@@ -904,4 +906,68 @@ func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+func (e *EngineServer) SignalSuperchainV1(ctx context.Context, signal *engine_types.SuperchainSignal) (params.ProtocolVersion, error) {
+	if signal == nil {
+		log.Info("Received empty superchain version signal", "local", params.OPStackSupport)
+		return params.OPStackSupport, nil
+	}
+
+	// log any warnings/info
+	logger := log.New("local", params.OPStackSupport, "required", signal.Required, "recommended", signal.Recommended)
+	LogProtocolVersionSupport(logger, params.OPStackSupport, signal.Recommended, "recommended")
+	LogProtocolVersionSupport(logger, params.OPStackSupport, signal.Required, "required")
+
+	if err := e.HandleRequiredProtocolVersion(signal.Required); err != nil {
+		log.Error("Failed to handle required protocol version", "err", err, "required", signal.Required)
+		return params.OPStackSupport, err
+	}
+
+	return params.OPStackSupport, nil
+}
+
+// HandleRequiredProtocolVersion handles the protocol version signal. This implements opt-in halting,
+// the protocol version data is already logged and metered when signaled through the Engine API.
+func (e *EngineServer) HandleRequiredProtocolVersion(required params.ProtocolVersion) error {
+	needLevel := 3
+	haveLevel := 0
+	switch params.OPStackSupport.Compare(required) {
+	case params.OutdatedMajor:
+		haveLevel = 3
+	case params.OutdatedMinor:
+		haveLevel = 2
+	case params.OutdatedPatch:
+		haveLevel = 1
+	}
+	if haveLevel >= needLevel { // halt if we opted in to do so at this granularity
+		log.Error("Opted to halt, unprepared for protocol change", "required", required, "local", params.OPStackSupport)
+		os.Exit(1) // halt
+	}
+	return nil
+}
+
+func LogProtocolVersionSupport(logger log.Logger, local, other params.ProtocolVersion, name string) {
+	switch local.Compare(other) {
+	case params.AheadMajor:
+		logger.Info(fmt.Sprintf("Ahead with major %s protocol version change", name))
+	case params.AheadMinor, params.AheadPatch, params.AheadPrerelease:
+		logger.Debug(fmt.Sprintf("Ahead with compatible %s protocol version change", name))
+	case params.Matching:
+		logger.Debug(fmt.Sprintf("Latest %s protocol version is supported", name))
+	case params.OutdatedMajor:
+		logger.Error(fmt.Sprintf("Outdated with major %s protocol change", name))
+	case params.OutdatedMinor:
+		logger.Warn(fmt.Sprintf("Outdated with minor backward-compatible %s protocol change", name))
+	case params.OutdatedPatch:
+		logger.Info(fmt.Sprintf("Outdated with support backward-compatible %s protocol change", name))
+	case params.OutdatedPrerelease:
+		logger.Debug(fmt.Sprintf("New %s protocol pre-release is available", name))
+	case params.DiffBuild:
+		logger.Debug(fmt.Sprintf("Ignoring %s protocolversion signal, local build is different", name))
+	case params.DiffVersionType:
+		logger.Warn(fmt.Sprintf("Failed to recognize %s protocol version signal version-type", name))
+	case params.EmptyVersion:
+		logger.Debug(fmt.Sprintf("No %s protocol version available to check", name))
+	}
 }
