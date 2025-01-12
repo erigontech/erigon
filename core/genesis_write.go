@@ -606,6 +606,13 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 
 	head.Root = root
 
+	if g.StateHash != nil {
+		if len(g.Alloc) > 0 {
+			return nil, nil, fmt.Errorf("chain definition unexpectedly contains both allocation (%d) and state-hash %s", len(g.Alloc), *g.StateHash)
+		}
+		g.StateHash = (*libcommon.Hash)(g.StateHash)
+	}
+
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
 }
 
@@ -730,10 +737,19 @@ func loadOPStackGenesisByChainName(name string) (*types.Genesis, error) {
 		}
 	}
 
+	if gen.StateHash != nil {
+		if len(gen.Alloc) > 0 {
+			return nil, fmt.Errorf("chain definition unexpectedly contains both allocation (%d) and state-hash %s", len(gen.Alloc), *gen.StateHash)
+		}
+		genesis.StateHash = (*libcommon.Hash)(gen.StateHash)
+	}
+
 	genesisBlock, _, err := GenesisToBlock(genesis, datadir.New("/tmp/lol"), log.Root())
 	if err != nil {
 		return nil, fmt.Errorf("failed to build genesis block: %w", err)
 	}
+	s, _ := genesisBlock.Header().MarshalJSON()
+	fmt.Println(string(s))
 	genesisBlockHash := genesisBlock.Hash()
 	expectedHash := libcommon.Hash([32]byte(opStackChainCfg.Genesis.L2.Hash))
 
