@@ -387,10 +387,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	snap := st.state.Snapshot()
 
 	result, err := st.innerTransitionDB(refunds, gasBailout)
-	fmt.Println(err, st.msg.IsOptimismDepositTx())
 	// Failed deposits must still be included. Unless we cannot produce the block at all due to the gas limit.
 	// On deposit failure, we rewind any state changes from after the minting, and increment the nonce.
 	if err != nil && err != ErrGasLimitReached && st.msg.IsOptimismDepositTx() {
+		fmt.Println("A")
 		st.state.RevertToSnapshot(snap)
 		nonce, err := st.state.GetNonce(st.msg.From())
 		if err != nil {
