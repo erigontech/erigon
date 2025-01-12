@@ -245,7 +245,7 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 	}
 }
 
-func BenchmarkDecodingAccount(b *testing.B) { //TODO: it just stucks
+func BenchmarkDecodingAccount(b *testing.B) {
 	accountCases := []struct {
 		name string
 		acc  *Account
@@ -287,6 +287,7 @@ func BenchmarkDecodingAccount(b *testing.B) { //TODO: it just stucks
 		test := test
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
+				println(test.name, i, b.N) //TODO: it just stucks w/o that print
 				b.StopTimer()
 				test.acc.Nonce = uint64(i)
 				test.acc.Balance.SetUint64(uint64(i))
@@ -355,6 +356,7 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 		test := test
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
+				println(test.name, i, b.N) //TODO: it just stucks w/o that print
 				b.StopTimer()
 
 				test.acc.Nonce = uint64(i)
