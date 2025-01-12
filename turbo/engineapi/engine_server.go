@@ -908,25 +908,6 @@ func waitForStuff(waitCondnF func() (bool, error)) (bool, error) {
 	return true, nil
 }
 
-func (e *EngineServer) SignalSuperchainV1(ctx context.Context, signal *engine_types.SuperchainSignal) (params.ProtocolVersion, error) {
-	if signal == nil {
-		log.Info("Received empty superchain version signal", "local", params.OPStackSupport)
-		return params.OPStackSupport, nil
-	}
-
-	// log any warnings/info
-	logger := log.New("local", params.OPStackSupport, "required", signal.Required, "recommended", signal.Recommended)
-	LogProtocolVersionSupport(logger, params.OPStackSupport, signal.Recommended, "recommended")
-	LogProtocolVersionSupport(logger, params.OPStackSupport, signal.Required, "required")
-
-	if err := e.HandleRequiredProtocolVersion(signal.Required); err != nil {
-		log.Error("Failed to handle required protocol version", "err", err, "required", signal.Required)
-		return params.OPStackSupport, err
-	}
-
-	return params.OPStackSupport, nil
-}
-
 // HandleRequiredProtocolVersion handles the protocol version signal. This implements opt-in halting,
 // the protocol version data is already logged and metered when signaled through the Engine API.
 func (e *EngineServer) HandleRequiredProtocolVersion(required params.ProtocolVersion) error {
