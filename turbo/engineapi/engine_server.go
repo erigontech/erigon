@@ -539,11 +539,17 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, errCaplinEnabled
 	}
 	s.engineLogSpamer.RecordRequest()
-
-	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
-	if err != nil {
-		return nil, err
+	var (
+		status *engine_types.PayloadStatus
+		err    error
+	)
+	if !s.config.IsOptimism() {
+		status, err = s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, libcommon.Hash{}, forkchoiceState, false)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
