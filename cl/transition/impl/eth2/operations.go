@@ -1122,7 +1122,6 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 			vbalance-s.BeaconConfig().MinActivationBalance-pendingBalanceToWithdraw,
 			amount,
 		)
-		//exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(validator.EffectiveBalance()) mekong alpha9
 		exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(toWithdraw)
 		withdrawableEpoch := exitQueueEpoch + s.BeaconConfig().MinValidatorWithdrawabilityDelay
 		s.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{
