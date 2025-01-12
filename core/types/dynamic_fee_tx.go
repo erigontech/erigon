@@ -65,8 +65,8 @@ func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 	return tx
 }
 
-func (*DynamicFeeTransaction) RollupCostData() opstack.RollupCostData {
-	return opstack.RollupCostData{}
+func (tx *DynamicFeeTransaction) RollupCostData() opstack.RollupCostData {
+	return tx.computeRollupGas(tx)
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -345,6 +345,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+		l1CostGas:  tx.RollupCostData(),
 	}
 	if !rules.IsLondon {
 		return msg, errors.New("eip-1559 transactions require London")

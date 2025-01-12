@@ -18,6 +18,7 @@ package exec3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -175,6 +176,12 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 }
 
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
+	// Optimism Ecotone does not support blob txs
+	if txTask.Tx.Type() == types.BlobTxType && txTask.Rules.IsOptimismEcotone {
+		txTask.Error = errors.New("blob txs are not supported in ecotone")
+		return
+	}
+
 	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.

@@ -99,12 +99,59 @@ type Transaction interface {
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 }
 
+type rollupGasCounter struct {
+	zeroes     uint64
+	ones       uint64
+	fastLzSize uint64
+}
+
+func (r *rollupGasCounter) Write(p []byte) (int, error) {
+	for _, byt := range p {
+		if byt == 0 {
+			r.zeroes++
+		} else {
+			r.ones++
+		}
+	}
+	r.fastLzSize = uint64(opstack.FlzCompressLen(p))
+	return len(p), nil
+}
+
 // TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
 // implementations of different transaction types
 type TransactionMisc struct {
 	// caches
 	hash atomic.Pointer[libcommon.Hash]
 	from atomic.Pointer[libcommon.Address]
+
+	// cache how much gas the tx takes on L1 for its share of rollup data (Optimism only)
+	rollupGas atomic.Pointer[opstack.RollupCostData]
+}
+
+// computeRollupGas is a helper method to compute and cache the rollup gas cost for any tx type
+func (tm *TransactionMisc) computeRollupGas(tx interface {
+	MarshalBinary(w io.Writer) error
+	Type() byte
+}) opstack.RollupCostData {
+	if tx.Type() == OptimismDepositTxType {
+		return opstack.RollupCostData{}
+	}
+	if v := tm.rollupGas.Load(); v != nil {
+		return *v
+	}
+	var c rollupGasCounter
+	var buf bytes.Buffer
+	err := tx.MarshalBinary(&buf)
+	if err != nil { // Silent error, invalid txs will not be marshalled/unmarshalled for batch submission anyway.
+		log.Error("failed to encode tx for L1 cost computation", "err", err)
+	}
+	_, err = c.Write(buf.Bytes())
+	if err != nil {
+		log.Error("failed to compute rollup cost data", "err", err)
+	}
+	total := opstack.RollupCostData{Zeroes: c.zeroes, Ones: c.ones, FastLzSize: c.fastLzSize}
+	tm.rollupGas.Store(&total)
+	return total
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -438,7 +485,7 @@ func (m *Message) SetIsFree(isFree bool) {
 func (m Message) IsOptimismSystemTx() bool  { return m.isOptimismSystemTx }
 func (m Message) IsOptimismDepositTx() bool { return m.isOptimismDepositTx }
 func (m Message) Mint() *uint256.Int        { return m.mint }
-func (m Message) L1CostGas() opstack.RollupCostData {
+func (m Message) RollupCostData() opstack.RollupCostData {
 	return m.l1CostGas
 }
 

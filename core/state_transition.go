@@ -270,6 +270,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		st.initialGas = st.msg.Gas()
 		st.gasRemaining += st.msg.Gas() // Add gas here in order to be able to execute calls.
 		st.evm.BlobFee = new(uint256.Int)
+
 		// Don't touch the gas pool for system transactions
 		if st.msg.IsOptimismSystemTx() {
 			if st.evm.ChainConfig().IsOptimismRegolith(st.evm.Context.Time) {
@@ -278,6 +279,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 			return nil
 		}
+
 		// gas used by deposits may not be used by other txs
 		if err := st.gp.SubGas(st.msg.Gas()); err != nil {
 			if !gasBailout {
@@ -365,9 +367,40 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	if mint := st.msg.Mint(); mint != nil {
-		st.state.AddBalance(st.msg.From(), mint, tracing.BalanceIncreaseDaoContract) // TODO: change to mint.
+		st.state.AddBalance(st.msg.From(), mint, tracing.BalanceIncreaseDaoContract)
 	}
+	snap := st.state.Snapshot()
 
+	result, err := st.innerTransitionDB(refunds, gasBailout)
+	// Failed deposits must still be included. Unless we cannot produce the block at all due to the gas limit.
+	// On deposit failure, we rewind any state changes from after the minting, and increment the nonce.
+	if err != nil && err != ErrGasLimitReached && st.msg.IsOptimismDepositTx() {
+		st.state.RevertToSnapshot(snap)
+		nonce, err := st.state.GetNonce(st.msg.From())
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
+		// Even though we revert the state changes, always increment the nonce for the next deposit transaction
+		st.state.SetNonce(st.msg.From(), nonce)
+		// Record deposits as using all their gas (matches the gas pool)
+		// System Transactions are special & are not recorded as using any gas (anywhere)
+		gasUsed := st.msg.Gas()
+		// Regolith changes this behaviour so the actual gas used is reported.
+		// In this case the tx is invalid so is recorded as using all gas.
+		if st.msg.IsOptimismSystemTx() && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
+			gasUsed = 0
+		}
+		result = &evmtypes.ExecutionResult{
+			UsedGas:    gasUsed,
+			Err:        fmt.Errorf("failed deposit: %w", err),
+			ReturnData: nil,
+		}
+		err = nil
+	}
+	return result, err
+}
+
+func (st *StateTransition) innerTransitionDB(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
 	senderInitBalance, err := st.state.GetBalance(st.msg.From())
 	if err != nil {
@@ -555,6 +588,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// Record deposits as using all their gas (matches the gas pool)
 		// System Transactions are special & are not recorded as using any gas (anywhere)
 		gasUsed := st.msg.Gas()
+		// Regolith changes this behaviour so the actual gas used is reported.
+		// In this case the tx is invalid so is recorded as using all gas.
 		if st.msg.IsOptimismSystemTx() {
 			gasUsed = 0
 		}

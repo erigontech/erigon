@@ -423,6 +423,7 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (Mes
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+		l1CostGas:  tx.RollupCostData(),
 	}
 
 	if !rules.IsBerlin {

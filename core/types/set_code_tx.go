@@ -124,6 +124,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+		l1CostGas:  tx.RollupCostData(),
 	}
 	if !rules.IsPrague {
 		return msg, errors.New("SetCodeTransaction is only supported in Prague")
@@ -163,8 +164,8 @@ func (tx *SetCodeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	return addr, nil
 }
 
-func (*SetCodeTransaction) RollupCostData() opstack.RollupCostData {
-	return opstack.RollupCostData{}
+func (tx *SetCodeTransaction) RollupCostData() opstack.RollupCostData {
+	return tx.computeRollupGas(tx)
 }
 
 func (tx *SetCodeTransaction) Hash() libcommon.Hash {
