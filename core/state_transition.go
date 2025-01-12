@@ -217,6 +217,10 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			if overflow {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 			}
+
+			if l1Cost != nil {
+				balanceCheck.Add(balanceCheck, l1Cost)
+			}
 			if st.evm.ChainRules().IsCancun {
 				maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))
 				if overflow {
