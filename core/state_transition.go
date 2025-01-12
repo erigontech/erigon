@@ -178,6 +178,17 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 	}
 
+	var l1Cost *uint256.Int
+
+	if st.evm.ChainConfig().IsOptimism() {
+		fn := opstack.NewL1CostFunc(st.evm.ChainConfig(), st.evm.IntraBlockState())
+		l1Cost = fn(st.msg.RollupCostData(), st.evm.Context.Time)
+	}
+
+	if l1Cost != nil {
+		gasVal = gasVal.Add(gasVal, l1Cost)
+	}
+
 	// compute blob fee for eip-4844 data blobs if any
 	blobGasVal := new(uint256.Int)
 	if st.evm.ChainRules().IsCancun {

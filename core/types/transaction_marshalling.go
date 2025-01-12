@@ -65,6 +65,12 @@ type txJSON struct {
 
 	// Only used for encoding:
 	Hash libcommon.Hash `json:"hash"`
+
+	// Optimism Deposit transaction fields
+	SourceHash *libcommon.Hash    `json:"sourceHash,omitempty"`
+	From       *libcommon.Address `json:"from,omitempty"`
+	Mint       *hexutil.Big       `json:"mint,omitempty"`
+	IsSystemTx *bool              `json:"isSystemTx,omitempty"`
 }
 
 type JsonAuthorization struct {
@@ -242,6 +248,12 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 	case BlobTxType:
 		tx, err := UnmarshalBlobTxJSON(input)
 		if err != nil {
+			return nil, err
+		}
+		return tx, nil
+	case OptimismDepositTxType:
+		tx := &OptimismDepositTx{}
+		if err = tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
 		return tx, nil
@@ -505,6 +517,59 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (tx *OptimismDepositTx) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+	if dec.AccessList != nil || dec.FeeCap != nil || dec.Tip != nil {
+		return errors.New("unexpected field(s) in deposit transaction")
+	}
+	if dec.GasPrice != nil && dec.GasPrice.ToInt().Cmp(libcommon.Big0) != 0 {
+		return errors.New("deposit transaction GasPrice must be 0")
+	}
+	if (dec.V != nil && dec.V.ToInt().Cmp(libcommon.Big0) != 0) ||
+		(dec.R != nil && dec.R.ToInt().Cmp(libcommon.Big0) != 0) ||
+		(dec.S != nil && dec.S.ToInt().Cmp(libcommon.Big0) != 0) {
+		return errors.New("deposit transaction signature must be 0 or unset")
+	}
+	if dec.To != nil {
+		tx.To = dec.To
+	}
+	tx.Gas = uint64(*dec.Gas)
+	if dec.Value == nil {
+		return errors.New("missing required field 'value' in transaction")
+	}
+	var overflow bool
+	tx.Value, overflow = uint256.FromBig(dec.Value.ToInt())
+	if overflow {
+		return errors.New("'value' in transaction does not fit in 256 bits")
+	}
+	// mint may be omitted or nil if there is nothing to mint.
+	tx.Mint, overflow = uint256.FromBig(dec.Mint.ToInt())
+	if overflow {
+		return errors.New("'mint' in transaction does not fit in 256 bits")
+	}
+	if dec.Data == nil {
+		return errors.New("missing required field 'input' in transaction")
+	}
+	tx.Data = *dec.Data
+	if dec.From == nil {
+		return errors.New("missing required field 'from' in transaction")
+	}
+	tx.From = *dec.From
+	if dec.SourceHash == nil {
+		return errors.New("missing required field 'sourceHash' in transaction")
+	}
+	tx.SourceHash = *dec.SourceHash
+	// IsSystemTx may be omitted. Defaults to false.
+	if dec.IsSystemTx != nil {
+		tx.IsSystemTransaction = *dec.IsSystemTx
+	}
+	// nonce is not checked becaues depositTx has no nonce field.
 	return nil
 }
 
