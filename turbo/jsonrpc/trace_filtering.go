@@ -209,7 +209,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	signer := types.MakeSigner(cfg, blockNum, block.Time())
-	traces, syscall, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, signer, cfg, traceConfig)
+	traces, syscall, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, signer, cfg, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -705,7 +705,7 @@ func filterTrace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toA
 	}
 }
 
-func (api *TraceAPIImpl) callManyTransactions(
+func (api *TraceAPIImpl) callBlock(
 	ctx context.Context,
 	dbtx kv.TemporalTx,
 	block *types.Block,

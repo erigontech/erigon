@@ -946,7 +946,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 
 	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, _, err := api.callManyTransactions(ctx, tx, block, traceTypes, *gasBailOut, signer, chainConfig, traceConfig)
+	traces, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, signer, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
