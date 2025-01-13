@@ -379,13 +379,10 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
-	fmt.Println(st.evm.Context.BlockNumber, "A")
 	if mint := st.msg.Mint(); mint != nil {
-		fmt.Println("mint", st.msg.From(), mint.Uint64())
 		if err := st.state.AddBalance(st.msg.From(), mint, tracing.BalanceChangeUnspecified); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
-		fmt.Println("end mint")
 	}
 	snap := st.state.Snapshot()
 
@@ -393,7 +390,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	// Failed deposits must still be included. Unless we cannot produce the block at all due to the gas limit.
 	// On deposit failure, we rewind any state changes from after the minting, and increment the nonce.
 	if err != nil && err != ErrGasLimitReached && st.msg.IsOptimismDepositTx() {
-		fmt.Println(err)
 		st.state.RevertToSnapshot(snap)
 		nonce, err := st.state.GetNonce(st.msg.From())
 		if err != nil {
@@ -402,12 +398,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// Even though we revert the state changes, always increment the nonce for the next deposit transaction
 		st.state.SetNonce(st.msg.From(), nonce+1)
 
-		a, _ := st.state.GetBalance(st.msg.From())
-		fmt.Println(st.msg.From(), nonce+1, a, st.evm.ChainConfig().IsRegolith(st.evm.Context.Time))
 		// Record deposits as using all their gas (matches the gas pool)
 		// System Transactions are special & are not recorded as using any gas (anywhere)
 		gasUsed := st.msg.Gas()
-		//fmt.Println("UH", st.evm.ChainConfig().IsRegolith(st.evm.Context.Time), st.evm.Context.Time)
 		// Regolith changes this behaviour so the actual gas used is reported.
 		// In this case the tx is invalid so is recorded as using all gas.
 		if st.msg.IsOptimismSystemTx() && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
