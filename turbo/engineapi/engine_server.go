@@ -209,9 +209,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if version >= clparams.ElectraVersion {
 		requests = make(types.FlatRequests, 0)
-		for _, r := range executionRequests {
-			if len(r) == 0 {
-				continue
+		for i, r := range executionRequests {
+			if len(r) <= 1 {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("Invalid Request at index %d", i)}
 			}
 			requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r})
 		}
