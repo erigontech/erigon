@@ -688,7 +688,7 @@ type TxnSlot struct {
 
 	// EIP-7702: set code tx
 	Authorizations []Signature
-	AuthRaw        [][]byte // rlp encoded chainID+address+nonce
+	AuthRaw        [][]byte // rlp encoded chainID+address+nonce, used to recover authorization address in txpool
 }
 
 // nolint
