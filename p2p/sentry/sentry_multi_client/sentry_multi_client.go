@@ -43,12 +43,12 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	libsentry "github.com/erigontech/erigon-lib/p2p/sentry"
 
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/consensus"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/eth/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/jsonrpc/receipts"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/stages/bodydownload"
@@ -144,7 +144,7 @@ type MultiClient struct {
 	IsMock                            bool
 	sentries                          []proto_sentry.SentryClient
 	ChainConfig                       *chain.Config
-	db                                kv.RwDB
+	db                                kv.TemporalRoDB
 	Engine                            consensus.Engine
 	blockReader                       services.FullBlockReader
 	statusDataProvider                *sentry.StatusDataProvider
@@ -164,7 +164,7 @@ type MultiClient struct {
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
 func NewMultiClient(
-	db kv.RwDB,
+	db kv.TemporalRoDB,
 	chainConfig *chain.Config,
 	engine consensus.Engine,
 	sentries []proto_sentry.SentryClient,
@@ -202,8 +202,7 @@ func NewMultiClient(
 	if !disableBlockDownload {
 		bd = bodydownload.NewBodyDownload(engine, blockBufferSize, int(syncCfg.BodyCacheLimit), blockReader, logger)
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			_, _, _, _, err := bd.UpdateFromDb(tx)
-			return err
+			return bd.UpdateFromDb(tx)
 		}); err != nil {
 			return nil, err
 		}
@@ -226,7 +225,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receipts.NewGenerator(32, blockReader, engine),
+		ethApiWrapper:                     receipts.NewGenerator(blockReader, engine),
 	}
 
 	return cs, nil
@@ -342,7 +341,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 	//cs.logger.Debug("Delivered headers", "peer",  fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8], "blockNums", fmt.Sprintf("%d", blockNums))
 	if cs.Hd.POSSync() {
 		sort.Sort(headerdownload.HeadersReverseSort(csHeaders)) // Sorting by reverse order of block heights
-		tx, err := cs.db.BeginRo(ctx)
+		tx, err := cs.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
 		}
@@ -569,7 +568,7 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry
 }
 
 var (
-	EnableP2PReceipts = dbg.EnvBool("P2P_RECEIPTS", false)
+	EnableP2PReceipts = dbg.EnvBool("P2P_RECEIPTS", true)
 )
 
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentryClient proto_sentry.SentryClient) error {
@@ -595,7 +594,7 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *proto_sentry.In
 		}
 		defer cs.getReceiptsActiveGoroutineNumber.Release(1)
 
-		tx, err := cs.db.BeginRo(ctx)
+		tx, err := cs.db.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
 		}

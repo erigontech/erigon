@@ -36,8 +36,7 @@ import (
 	"github.com/erigontech/erigon-lib/common/math"
 	libcrypto "github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/log/v3"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
 var (
@@ -220,7 +219,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if blobTxRlp[0] != BlobTxType {
 		return blobTxRlp, nil
 	}
-	dataposPrev, _, isList, err := rlp2.Prefix(blobTxRlp[1:], 0)
+	dataposPrev, _, isList, err := rlp.Prefix(blobTxRlp[1:], 0)
 	if err != nil || dataposPrev < 1 {
 		return nil, err
 	}
@@ -230,7 +229,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 
 	blobTxRlp = blobTxRlp[1:]
 	// Get to the wrapper list
-	datapos, datalen, err := rlp2.List(blobTxRlp, dataposPrev)
+	datapos, datalen, err := rlp.ParseList(blobTxRlp, dataposPrev)
 	if err != nil {
 		return nil, err
 	}

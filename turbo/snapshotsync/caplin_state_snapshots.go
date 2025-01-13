@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/common/dbg"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -52,8 +53,8 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 	num := make([]byte, binary.MaxVarintLen64)
 	cfg := recsplit.RecSplitArgs{
 		Enums:      true,
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     tmpDir,
 		Salt:       &salt,
 		BaseDataID: sn.From,
@@ -81,7 +82,7 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 		var err error
 		if err := db.View(context.TODO(), func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
-			value, err = tx.GetOne(tableName, base_encoding.Encode64ToBytes4(numId))
+			value, err = tx.GetOne(tableName, key)
 			value = libcommon.Copy(value)
 			return err
 		}); err != nil {
@@ -166,6 +167,10 @@ type SnapshotTypes struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, snapshotTypes SnapshotTypes, logger log.Logger) *CaplinStateSnapshots {
+	if cfg.ChainName == "" {
+		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
+	}
+
 	// BeaconBlocks := &segments{
 	// 	DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 	// }
@@ -642,8 +647,8 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 	num := make([]byte, binary.MaxVarintLen64)
 	cfg := recsplit.RecSplitArgs{
 		Enums:      true,
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     tmpDir,
 		Salt:       &salt,
 		BaseDataID: sn.From,

@@ -56,7 +56,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
-	tx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	}
 
 	var isBorStateSyncTxn bool
-	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNumber, _, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
-	tx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +311,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		//nolint
 		gasBailOut = new(bool) // false by default
 	}
-	dbtx, err1 := api.kv.BeginRo(ctx)
+	dbtx, err1 := api.kv.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
 	}
@@ -338,7 +338,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
-	return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
+	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
@@ -713,7 +713,7 @@ func filterTrace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toA
 
 func (api *TraceAPIImpl) callManyTransactions(
 	ctx context.Context,
-	dbtx kv.Tx,
+	dbtx kv.TemporalTx,
 	block *types.Block,
 	traceTypes []string,
 	txIndex int,
@@ -780,7 +780,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, logger, nil)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}

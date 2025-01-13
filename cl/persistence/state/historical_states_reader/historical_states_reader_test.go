@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -40,9 +41,11 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	db := memdb.NewTestDB(t, kv.ChainDB)
 	reader := tests.LoadChain(blocks, postState, db, t)
 
+	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	sn.OnHeadState(postState)
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, nil, reader, log.New(), true, true, true, false, nil)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// Now lets test it against the reader
 	tx, err := db.BeginRw(ctx)
@@ -51,7 +54,7 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 
 	vt = state_accessors.NewStaticValidatorTable()
 	require.NoError(t, state_accessors.ReadValidatorsTable(tx, vt))
-	hr := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, vt, preState, nil)
+	hr := historical_states_reader.NewHistoricalStatesReader(&clparams.MainnetBeaconConfig, reader, vt, preState, nil, sn)
 	s, err := hr.ReadHistoricalState(ctx, tx, blocks[len(blocks)-1].Block.Slot)
 	require.NoError(t, err)
 

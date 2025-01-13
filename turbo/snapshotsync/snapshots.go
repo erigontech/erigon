@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon-lib/common/background"
 	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/common/dbg"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
 	"github.com/erigontech/erigon-lib/diagnostics"
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -56,6 +55,10 @@ type SortedRange interface {
 
 // NoOverlaps - keep largest ranges and avoid overlap
 func NoOverlaps[T SortedRange](in []T) (res []T) {
+	if len(in) == 1 {
+		return in
+	}
+
 	for i := 0; i < len(in); i++ {
 		r := in[i]
 		iFrom, iTo := r.GetRange()
@@ -83,6 +86,10 @@ func NoGaps[T SortedRange](in []T) (out []T, missingRanges []Range) {
 	if len(in) == 0 {
 		return nil, nil
 	}
+	if len(in) == 1 {
+		return in, nil
+	}
+
 	prevTo, _ := in[0].GetRange()
 	for _, f := range in {
 		from, to := f.GetRange()
@@ -542,6 +549,9 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 }
 
 func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, alignMin bool, logger log.Logger) *RoSnapshots {
+	if cfg.ChainName == "" {
+		log.Debug("[dbg] newRoSnapshots created with empty ChainName", "stack", dbg.Stack())
+	}
 	enums := make([]snaptype.Enum, len(types))
 	for i, t := range types {
 		enums[i] = t.Enum()
@@ -977,10 +987,6 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 }
 
 func TypedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	segmentsTypeCheck := func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
-		return typeOfSegmentsMustExist(dir, in, types)
-	}
-
 	list, err := snaptype.Segments(dir)
 
 	if err != nil {
@@ -999,10 +1005,11 @@ func TypedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps
 			}
 
 			if allowGaps {
-				l = NoOverlaps(segmentsTypeCheck(dir, l))
+				l = NoOverlaps(l)
 			} else {
-				l, m = NoGaps(NoOverlaps(segmentsTypeCheck(dir, l)))
+				l, m = NoGaps(NoOverlaps(l))
 			}
+
 			if len(m) > 0 {
 				lst := m[len(m)-1]
 				log.Debug("[snapshots] see gap", "type", segType, "from", lst.from)
@@ -1019,8 +1026,12 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 
+	wg := &errgroup.Group{}
+	wg.SetLimit(64)
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
+
+	snConfig := snapcfg.KnownCfg(s.cfg.ChainName)
 
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
@@ -1054,7 +1065,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snapcfg.IsFrozen(s.cfg.ChainName, f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snConfig.IsFrozen(f)}
 		}
 
 		if open {
@@ -1081,9 +1092,12 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		}
 
 		if open {
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
-			}
+			wg.Go(func() error {
+				if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+					return err
+				}
+				return nil
+			})
 		}
 
 		if f.To > 0 {
@@ -1095,6 +1109,9 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	}
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
+	}
+	if err := wg.Wait(); err != nil {
+		return err
 	}
 
 	return nil
@@ -1278,9 +1295,6 @@ func (s *RoSnapshots) delete(fileName string) error {
 					continue
 				}
 				sn.canDelete.Store(true)
-				if sn.refcount.Load() == 0 {
-					sn.closeAndRemoveFiles()
-				}
 				delSeg = sn
 				dirtySegments = s.dirty[t]
 				findDelSeg = false
@@ -1301,6 +1315,10 @@ func (s *RoSnapshots) Delete(fileName string) error {
 	if s == nil {
 		return nil
 	}
+
+	v := s.View()
+	defer v.Close()
+
 	defer s.recalcVisibleFiles()
 	if err := s.delete(fileName); err != nil {
 		return fmt.Errorf("can't delete file: %w", err)
@@ -1603,28 +1621,6 @@ func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, a
 		Segments:    segmentsStats,
 		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
 	})
-}
-
-func typeOfSegmentsMustExist(dir string, in []snaptype.FileInfo, types []snaptype.Type) (res []snaptype.FileInfo) {
-MainLoop:
-	for _, f := range in {
-		if f.From == f.To {
-			continue
-		}
-		for _, t := range types {
-			p := filepath.Join(dir, snaptype.SegmentFileName(f.Version, f.From, f.To, t.Enum()))
-			exists, err := dir2.FileExist(p)
-			if err != nil {
-				log.Debug("[snapshots] FileExist error", "err", err, "path", p)
-				continue MainLoop
-			}
-			if !exists {
-				continue MainLoop
-			}
-			res = append(res, f)
-		}
-	}
-	return res
 }
 
 func removeOldFiles(toDel []string, snapDir string) {

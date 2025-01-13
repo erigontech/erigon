@@ -30,14 +30,9 @@ import (
 const maxBlobsThroughoutputPerRequest = 72
 
 func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
 
 	req := &cltypes.BlobsByRangeRequest{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.DenebVersion); err != nil {
-		return err
-	}
-	if err := c.checkRateLimit(peerId, "blobSidecar", rateLimits.blobSidecarsLimit, int(req.Count)); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
 
@@ -85,15 +80,9 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error 
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
 
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.DenebVersion); err != nil {
-		return err
-	}
-
-	if err := c.checkRateLimit(peerId, "blobSidecar", rateLimits.blobSidecarsLimit, req.Len()); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
 

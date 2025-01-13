@@ -28,10 +28,10 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 )
 
-const RUNS = 100 // for local tests increase this number
+const RUNS = 10000 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -50,6 +50,11 @@ func (tr *TRand) RandIntInRange(_min, _max int) int {
 func (tr *TRand) RandUint64() *uint64 {
 	a := tr.rnd.Uint64()
 	return &a
+}
+
+func (tr *TRand) RandUint256() *uint256.Int {
+	a := new(uint256.Int).SetBytes(tr.RandBytes(tr.RandIntInRange(1, 32)))
+	return a
 }
 
 func (tr *TRand) RandBig() *big.Int {
@@ -140,15 +145,20 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
 			YParity: uint8(*tr.RandUint64()),
-			R:       *uint256.NewInt(*tr.RandUint64()),
-			S:       *uint256.NewInt(*tr.RandUint64()),
+			R:       *tr.RandUint256(),
+			S:       *tr.RandUint256(),
 		}
 	}
 	return auths
 }
 
-func (tr *TRand) RandTransaction() Transaction {
-	txType := tr.RandIntInRange(0, 5) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType
+func (tr *TRand) RandTransaction(_type int) Transaction {
+	var txType int
+	if _type == -1 {
+		txType = tr.RandIntInRange(0, 5) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType
+	} else {
+		txType = _type
+	}
 	to := tr.RandAddress()
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
@@ -156,9 +166,9 @@ func (tr *TRand) RandTransaction() Transaction {
 		To:    &to,
 		Value: uint256.NewInt(*tr.RandUint64()), // wei amount
 		Data:  tr.RandBytes(tr.RandIntInRange(128, 1024)),
-		V:     *uint256.NewInt(*tr.RandUint64()),
-		R:     *uint256.NewInt(*tr.RandUint64()),
-		S:     *uint256.NewInt(*tr.RandUint64()),
+		V:     *tr.RandUint256(),
+		R:     *tr.RandUint256(),
+		S:     *tr.RandUint256(),
 	}
 	switch txType {
 	case LegacyTxType:
@@ -224,7 +234,7 @@ func (tr *TRand) RandHashes(size int) []libcommon.Hash {
 func (tr *TRand) RandTransactions(size int) []Transaction {
 	txns := make([]Transaction, size)
 	for i := 0; i < size; i++ {
-		txns[i] = tr.RandTransaction()
+		txns[i] = tr.RandTransaction(-1)
 	}
 	return txns
 }
@@ -232,7 +242,18 @@ func (tr *TRand) RandTransactions(size int) []Transaction {
 func (tr *TRand) RandRawTransactions(size int) [][]byte {
 	txns := make([][]byte, size)
 	for i := 0; i < size; i++ {
-		txns[i] = tr.RandBytes(tr.RandIntInRange(1, 1023))
+		txns[i] = tr.RandBytes(tr.RandIntInRange(1, 512))
+	}
+	return txns
+}
+
+func (tr *TRand) RandRLPTransactions(size int) [][]byte {
+	txns := make([][]byte, size)
+	for i := 0; i < size; i++ {
+		txn := make([]byte, 512)
+		txSize := tr.RandIntInRange(1, 500)
+		encodedSize := rlp.EncodeString2(tr.RandBytes(txSize), txn)
+		txns[i] = txn[:encodedSize]
 	}
 	return txns
 }
@@ -255,7 +276,7 @@ func (tr *TRand) RandWithdrawals(size int) []*Withdrawal {
 
 func (tr *TRand) RandRawBody() *RawBody {
 	return &RawBody{
-		Transactions: tr.RandRawTransactions(tr.RandIntInRange(1, 6)),
+		Transactions: tr.RandRLPTransactions(tr.RandIntInRange(1, 6)),
 		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
 		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
 	}
@@ -413,29 +434,71 @@ func compareBodies(t *testing.T, a, b *Body) error {
 	return nil
 }
 
-// func TestRawBodyEncodeDecodeRLP(t *testing.T) {
-// 	tr := NewTRand()
-// 	var buf bytes.Buffer
-// 	for i := 0; i < RUNS; i++ {
-// 		enc := tr.RandRawBody()
-// 		buf.Reset()
-// 		if err := enc.EncodeRLP(&buf); err != nil {
-// 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
-// 		}
+func TestTransactionEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandTransaction(-1)
+		buf.Reset()
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+		}
 
-// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
 
-// 		dec := &RawBody{}
-// 		if err := dec.DecodeRLP(s); err != nil {
-// 			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
-// 			panic(err)
-// 		}
+		dec, err := DecodeRLPTransaction(s, false)
+		if err != nil {
+			t.Errorf("error: DecodeRLPTransaction: %v", err)
+		}
+		compareTransactions(t, enc, dec)
+	}
+}
 
-// 		if err := compareRawBodies(t, enc, dec); err != nil {
-// 			t.Errorf("error: compareRawBodies: %v", err)
-// 		}
-// 	}
-// }
+func TestHeaderEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandHeader()
+		buf.Reset()
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: Header.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+		dec := &Header{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: Header.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		checkHeaders(t, enc, dec)
+	}
+}
+
+func TestRawBodyEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandRawBody()
+		buf.Reset()
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+
+		dec := &RawBody{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		if err := compareRawBodies(t, enc, dec); err != nil {
+			t.Errorf("error: compareRawBodies: %v", err)
+		}
+	}
+}
 
 func TestBodyEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
@@ -457,5 +520,107 @@ func TestBodyEncodeDecodeRLP(t *testing.T) {
 		if err := compareBodies(t, enc, dec); err != nil {
 			t.Errorf("error: compareBodies: %v", err)
 		}
+	}
+}
+
+func TestWithdrawalEncodeDecodeRLP(t *testing.T) {
+	tr := NewTRand()
+	var buf bytes.Buffer
+	for i := 0; i < RUNS; i++ {
+		enc := tr.RandWithdrawal()
+		buf.Reset()
+		if err := enc.EncodeRLP(&buf); err != nil {
+			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+		}
+
+		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+		dec := &Withdrawal{}
+		if err := dec.DecodeRLP(s); err != nil {
+			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
+			panic(err)
+		}
+
+		checkWithdrawals(t, enc, dec)
+	}
+}
+
+/*
+	Benchmarks
+*/
+
+func BenchmarkHeaderRLP(b *testing.B) {
+	tr := NewTRand()
+	header := tr.RandHeader()
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		header.EncodeRLP(&buf)
+	}
+}
+
+func BenchmarkLegacyTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(LegacyTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
+	}
+}
+
+func BenchmarkAccessListTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(AccessListTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
+	}
+}
+
+func BenchmarkDynamicFeeTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(DynamicFeeTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
+	}
+}
+
+func BenchmarkBlobTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(BlobTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
+	}
+}
+
+func BenchmarkSetCodeTxRLP(b *testing.B) {
+	tr := NewTRand()
+	txn := tr.RandTransaction(SetCodeTxType)
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		txn.EncodeRLP(&buf)
+	}
+}
+
+func BenchmarkWithdrawalRLP(b *testing.B) {
+	tr := NewTRand()
+	w := tr.RandWithdrawal()
+	var buf bytes.Buffer
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		w.EncodeRLP(&buf)
 	}
 }

@@ -28,8 +28,6 @@ import (
 	"time"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
-
-	"github.com/erigontech/erigon/common"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -106,8 +104,8 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 		t.Parallel()
 		if res, _, err := RunPrecompiledContract(p, in, gas); err != nil {
 			t.Error(err)
-		} else if common.Bytes2Hex(res) != test.Expected {
-			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
+		} else if libcommon.Bytes2Hex(res) != test.Expected {
+			t.Errorf("Expected %v, got %v", test.Expected, libcommon.Bytes2Hex(res))
 		}
 		if expGas := test.Gas; expGas != gas {
 			t.Errorf("%v: gas wrong, expected %d, got %d", test.Name, expGas, gas)
@@ -194,8 +192,8 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 			bench.Error(err)
 			return
 		}
-		if common.Bytes2Hex(res) != test.Expected {
-			bench.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
+		if libcommon.Bytes2Hex(res) != test.Expected {
+			bench.Errorf("Expected %v, got %v", test.Expected, libcommon.Bytes2Hex(res))
 			return
 		}
 	})

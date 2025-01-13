@@ -15,11 +15,8 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/fixedgas"
 	emath "github.com/erigontech/erigon-lib/common/math"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/accounts/abi"
-	libcommon "github.com/erigontech/erigon/common"
-
-	"github.com/erigontech/erigon/rlp"
 )
 
 const (
@@ -263,7 +260,7 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, nonceLen, g
 	payloadSize += gasLen
 
 	accessListLen = accessListSize(tx.AccessList)
-	payloadSize += rlp2.ListPrefixLen(accessListLen) + accessListLen
+	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen
 
 	payloadSize++
 	if tx.SenderAddress != nil {
@@ -271,10 +268,10 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, nonceLen, g
 	}
 
 	authorizationsLen := authorizationsSize(tx.AuthorizationData)
-	payloadSize += rlp2.ListPrefixLen(authorizationsLen) + authorizationsLen
+	payloadSize += rlp.ListPrefixLen(authorizationsLen) + authorizationsLen
 
 	payloadSize++
-	payloadSize += rlp2.StringLen(tx.ExecutionData)
+	payloadSize += rlp.StringLen(tx.ExecutionData)
 
 	payloadSize++
 	if tx.Paymaster != nil {
@@ -282,7 +279,7 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, nonceLen, g
 	}
 
 	payloadSize++
-	payloadSize += rlp2.StringLen(tx.PaymasterData)
+	payloadSize += rlp.StringLen(tx.PaymasterData)
 
 	payloadSize++
 	if tx.Deployer != nil {
@@ -290,7 +287,7 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, nonceLen, g
 	}
 
 	payloadSize++
-	payloadSize += rlp2.StringLen(tx.DeployerData)
+	payloadSize += rlp.StringLen(tx.DeployerData)
 
 	payloadSize++
 	payloadSize += rlp.Uint256LenExcludingHead(tx.BuilderFee)
@@ -313,7 +310,7 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, nonceLen, g
 func (tx *AccountAbstractionTransaction) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
 	// Add envelope size and type size
-	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
@@ -715,8 +712,8 @@ func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionEvent(
 		return nil, nil, error
 	}
 	topics = []common.Hash{id, {}, {}}
-	topics[1] = [32]byte(libcommon.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
-	topics[2] = [32]byte(libcommon.LeftPadBytes(paymaster.Bytes()[:], 32))
+	topics[1] = [32]byte(common.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
+	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes()[:], 32))
 	return topics, data, nil
 }
 
@@ -731,9 +728,9 @@ func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560AccountDeployedEvent() 
 		deployer = &common.Address{}
 	}
 	topics = []common.Hash{id, {}, {}, {}}
-	topics[1] = [32]byte(libcommon.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
-	topics[2] = [32]byte(libcommon.LeftPadBytes(paymaster.Bytes()[:], 32))
-	topics[3] = [32]byte(libcommon.LeftPadBytes(deployer.Bytes()[:], 32))
+	topics[1] = [32]byte(common.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
+	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes()[:], 32))
+	topics[3] = [32]byte(common.LeftPadBytes(deployer.Bytes()[:], 32))
 	return topics, make([]byte, 0), nil
 }
 
@@ -751,7 +748,7 @@ func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionRevertReason
 		return nil, nil, error
 	}
 	topics = []common.Hash{id, {}}
-	topics[1] = [32]byte(libcommon.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
+	topics[1] = [32]byte(common.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
 	return topics, data, nil
 }
 
@@ -773,7 +770,7 @@ func (tx *AccountAbstractionTransaction) AbiEncodeRIP7560TransactionPostOpRevert
 		return nil, nil, error
 	}
 	topics = []common.Hash{id, {}, {}}
-	topics[1] = [32]byte(libcommon.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
-	topics[2] = [32]byte(libcommon.LeftPadBytes(paymaster.Bytes()[:], 32))
+	topics[1] = [32]byte(common.LeftPadBytes(tx.SenderAddress.Bytes()[:], 32))
+	topics[2] = [32]byte(common.LeftPadBytes(paymaster.Bytes()[:], 32))
 	return topics, data, nil
 }

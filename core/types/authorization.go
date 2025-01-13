@@ -11,9 +11,8 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon-lib/crypto"
-	rlp2 "github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 )
 
 type Authorization struct {
@@ -37,11 +36,11 @@ func (ath *Authorization) copy() *Authorization {
 }
 
 func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommon.Address, error) {
-	authLen := rlp2.U64Len(ath.ChainID)
+	authLen := rlp.U64Len(ath.ChainID)
 	authLen += (1 + length.Addr)
-	authLen += rlp2.U64Len(ath.Nonce)
+	authLen += rlp.U64Len(ath.Nonce)
 
-	if err := EncodeStructSizePrefix(authLen, data, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(authLen, data, b); err != nil {
 		return nil, err
 	}
 
@@ -95,11 +94,11 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, b []byte) (*libcommo
 }
 
 func authorizationSize(auth Authorization) (authLen int) {
-	authLen = rlp2.U64Len(auth.ChainID)
-	authLen += rlp2.U64Len(auth.Nonce)
+	authLen = rlp.U64Len(auth.ChainID)
+	authLen += rlp.U64Len(auth.Nonce)
 	authLen += (1 + length.Addr)
 
-	authLen += rlp2.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
+	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(&auth.R)) + (1 + rlp.Uint256LenExcludingHead(&auth.S))
 
 	return
 }
@@ -107,7 +106,7 @@ func authorizationSize(auth Authorization) (authLen int) {
 func authorizationsSize(authorizations []Authorization) (totalSize int) {
 	for _, auth := range authorizations {
 		authLen := authorizationSize(auth)
-		totalSize += rlp2.ListPrefixLen(authLen) + authLen
+		totalSize += rlp.ListPrefixLen(authLen) + authLen
 	}
 
 	return
@@ -182,36 +181,34 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 }
 
 func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte) error {
-	for _, auth := range authorizations {
-		// 0. encode length of individual Authorization
-		authLen := authorizationSize(auth)
-		if err := EncodeStructSizePrefix(authLen, w, b); err != nil {
+	for i := 0; i < len(authorizations); i++ {
+		authLen := authorizationSize(authorizations[i])
+		if err := rlp.EncodeStructSizePrefix(authLen, w, b); err != nil {
 			return err
 		}
 
 		// 1. encode ChainId
-		if err := rlp.EncodeInt(auth.ChainID, w, b); err != nil {
+		if err := rlp.EncodeInt(authorizations[i].ChainID, w, b); err != nil {
 			return err
 		}
 		// 2. encode Address
-		if err := rlp.EncodeOptionalAddress(&auth.Address, w, b); err != nil {
+		if err := rlp.EncodeOptionalAddress(&authorizations[i].Address, w, b); err != nil {
 			return err
 		}
 		// 3. encode Nonce
-		if err := rlp.EncodeInt(auth.Nonce, w, b); err != nil {
+		if err := rlp.EncodeInt(authorizations[i].Nonce, w, b); err != nil {
 			return err
 		}
 		// 4. encode YParity, R, S
-		if err := rlp.EncodeInt(uint64(auth.YParity), w, b); err != nil {
+		if err := rlp.EncodeInt(uint64(authorizations[i].YParity), w, b); err != nil {
 			return err
 		}
-		if err := auth.R.EncodeRLP(w); err != nil {
+		if err := rlp.EncodeUint256(&authorizations[i].R, w, b); err != nil {
 			return err
 		}
-		if err := auth.S.EncodeRLP(w); err != nil {
+		if err := rlp.EncodeUint256(&authorizations[i].S, w, b); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }

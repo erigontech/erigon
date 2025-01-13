@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
-	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/RoaringBitmap/roaring/v2"
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
@@ -55,7 +55,7 @@ type OverlayAPI interface {
 // OverlayAPIImpl is implementation of the OverlayAPIImpl interface based on remote Db access
 type OverlayAPIImpl struct {
 	*BaseAPI
-	db                        kv.RoDB
+	db                        kv.TemporalRoDB
 	GasCap                    uint64
 	OverlayGetLogsTimeout     time.Duration
 	OverlayReplayBlockTimeout time.Duration
@@ -78,7 +78,7 @@ type blockReplayResult struct {
 }
 
 // NewOverlayAPI returns OverlayAPIImpl instance
-func NewOverlayAPI(base *BaseAPI, db kv.RoDB, gascap uint64, overlayGetLogsTimeout time.Duration, overlayReplayBlockTimeout time.Duration, otsApi OtterscanAPI) *OverlayAPIImpl {
+func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64, overlayGetLogsTimeout time.Duration, overlayReplayBlockTimeout time.Duration, otsApi OtterscanAPI) *OverlayAPIImpl {
 	return &OverlayAPIImpl{
 		BaseAPI:                   base,
 		db:                        db,
@@ -98,7 +98,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		overrideBlockHash  map[uint64]common.Hash
 	)
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	blockNum, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +237,10 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if err != nil {
 			return nil, err
 		}
-		code := evm.IntraBlockState().GetCode(address)
+		code, err := evm.IntraBlockState().GetCode(address)
+		if err != nil {
+			return nil, err
+		}
 		if len(code) > 0 {
 			c := hexutility.Bytes(code)
 			resultCode.Code = &c
@@ -264,7 +267,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +299,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		pend.Add(1)
 		go func() {
 			defer pend.Done()
-			tx, err := api.db.BeginRo(ctx)
+			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
 				log.Error("Error", "error", err.Error())
 				return
@@ -405,7 +408,7 @@ func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.H
 	return logs.Filter(addrMap, topics, 0)
 }
 
-func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.Tx) ([]*types.Log, error) {
+func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx) ([]*types.Log, error) {
 	log.Debug("[replayBlock] begin", "block", blockNum)
 	var (
 		hash               common.Hash
@@ -506,7 +509,16 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			if !contractCreation {
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())
-				statedb.SetNonce(msg.From(), statedb.GetNonce(sender.Address())+1)
+				nonce, err := statedb.GetNonce(sender.Address())
+				if err != nil {
+					log.Error(err.Error())
+					return nil, err
+				}
+				err = statedb.SetNonce(msg.From(), nonce+1)
+				if err != nil {
+					log.Error(err.Error())
+					return nil, err
+				}
 				continue
 			}
 		}

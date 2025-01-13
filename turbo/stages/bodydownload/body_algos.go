@@ -19,7 +19,6 @@ package bodydownload
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -33,19 +32,18 @@ import (
 	"github.com/erigontech/erigon/eth/stagedsync/stages"
 	"github.com/erigontech/erigon/turbo/adapter"
 	"github.com/erigontech/erigon/turbo/services"
-	"github.com/holiman/uint256"
 )
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
-func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, headHash libcommon.Hash, headTd256 *uint256.Int, err error) {
+func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (err error) {
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
-		return 0, 0, libcommon.Hash{}, nil, err
+		return err
 	}
 	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
-		return 0, 0, libcommon.Hash{}, nil, err
+		return err
 	}
 	bd.maxProgress = headerProgress + 1
 	// Resetting for requesting a new range of blocks
@@ -58,37 +56,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	clear(bd.requests)
 	clear(bd.peerMap)
 	bd.ClearBodyCache()
-	headHeight = bodyProgress
-	var ok bool
-	headHash, ok, err = bd.br.CanonicalHash(context.Background(), db, headHeight)
-	if err != nil {
-		return 0, 0, libcommon.Hash{}, nil, err
-	}
-	if !ok {
-		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("canonical marker not found: %d", headHeight)
-	}
-	var headTd *big.Int
-	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
-	if err != nil {
-		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
-	}
-	if headTd == nil {
-		headTd = new(big.Int)
-	}
-	headTd256 = new(uint256.Int)
-	overflow := headTd256.SetFromBig(headTd)
-	if overflow {
-		return 0, 0, libcommon.Hash{}, nil, errors.New("headTd higher than 2^256-1")
-	}
-	headTime = 0
-	headHeader, err := bd.br.Header(context.Background(), db, headHash, headHeight)
-	if err != nil {
-		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading header for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
-	}
-	if headHeader != nil {
-		headTime = headHeader.Time
-	}
-	return headHeight, headTime, headHash, headTd256, nil
+	return nil
 }
 
 // RequestMoreBodies - returns nil if nothing to request
@@ -259,7 +227,7 @@ func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, 
 	}
 }
 
-// RawTransaction implements core/types.DerivableList interface for hashing
+// RawTransactions implements core/types.DerivableList interface for hashing
 type RawTransactions [][]byte
 
 func (rt RawTransactions) Len() int {

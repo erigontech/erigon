@@ -36,9 +36,9 @@ import (
 	"github.com/erigontech/erigon-lib/downloader/snaptype"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -117,8 +117,8 @@ var (
 
 				cfg := recsplit.RecSplitArgs{
 					Enums:              true,
-					BucketSize:         2000,
-					LeafSize:           8,
+					BucketSize:         recsplit.DefaultBucketSize,
+					LeafSize:           recsplit.DefaultLeafSize,
 					TmpDir:             tmpDir,
 					Salt:               &salt,
 					BaseDataID:         info.From,
@@ -159,8 +159,8 @@ var (
 
 				cfg := recsplit.RecSplitArgs{
 					Enums:      true,
-					BucketSize: 2000,
-					LeafSize:   8,
+					BucketSize: recsplit.DefaultBucketSize,
+					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					Salt:       &salt,
 					BaseDataID: info.From,
@@ -231,8 +231,8 @@ var (
 					Enums:              true,
 					LessFalsePositives: true,
 
-					BucketSize: 2000,
-					LeafSize:   8,
+					BucketSize: recsplit.DefaultBucketSize,
+					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
 					BaseDataID: baseTxnID.U64(),
@@ -244,8 +244,8 @@ var (
 				txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 					KeyCount:   d.Count(),
 					Enums:      false,
-					BucketSize: 2000,
-					LeafSize:   8,
+					BucketSize: recsplit.DefaultBucketSize,
+					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
 					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, Indexes.TxnHash2BlockNum)),
 					BaseDataID: firstBlockNum,

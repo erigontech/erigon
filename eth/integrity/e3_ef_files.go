@@ -43,7 +43,7 @@ func E3EfFiles(ctx context.Context, chainDB kv.RwDB, agg *state.Aggregator, fail
 			}
 			defer tx.Rollback()
 
-			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).DebugEFAllValuesAreInRange(ctx, idx, failFast, fromStep)
+			err = tx.(state.HasAggTx).AggTx().(*state.AggregatorRoTx).IntegrityInvertedIndexAllValuesAreInRange(ctx, idx, failFast, fromStep)
 			if err != nil {
 				return err
 			}

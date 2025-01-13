@@ -130,6 +130,10 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	return res, isStateFile, isStateFile
 }
 
+func isSaltFile(name string) bool {
+	return strings.HasPrefix(name, "salt")
+}
+
 func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
@@ -139,11 +143,14 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if len(parts) < 2 {
 		return res, ok
 	}
-
-	res.Type, ok = ParseFileType(parts[len(parts)-1])
-
-	if !ok {
+	if isSaltFile(fileName) {
+		// format for salt files is different: salt-<type>.txt
 		res.Type, ok = ParseFileType(parts[0])
+		res.TypeString = parts[0]
+	} else {
+		res.Type, ok = ParseFileType(parts[len(parts)-1])
+		// This is a caplin hack - it is because with caplin state snapshots ok is always false
+		res.TypeString = parts[len(parts)-1]
 	}
 
 	if ok {
@@ -225,7 +232,7 @@ func SeedableV3Extensions() []string {
 }
 
 func AllV3Extensions() []string {
-	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt"}
+	return []string{".kv", ".v", ".ef", ".kvei", ".vi", ".efi", ".bt", ".kvi"}
 }
 
 func IsSeedableExtension(name string) bool {

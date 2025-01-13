@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/go-chi/chi/v5"
 	"github.com/prysmaticlabs/go-bitfield"
 
@@ -38,8 +39,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
-	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
 
 	"github.com/erigontech/erigon-lib/crypto"
 	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
@@ -94,6 +93,7 @@ type Sentinel struct {
 
 	blockReader freezeblocks.BeaconSnapshotReader
 	blobStorage blob_storage.BlobStorage
+	bwc         *metrics.BandwidthCounter
 
 	indiciesDB kv.RoDB
 
@@ -148,25 +148,20 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	)
 
 	ip := net.ParseIP(ipAddr)
-	if ip.To4() == nil {
-		return nil, fmt.Errorf("IPV4 address not provided instead %s was provided", ipAddr)
+	if ip == nil {
+		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
 	}
 
 	var bindIP net.IP
 	var networkVersion string
 
-	// check for our network version
-	switch {
-	// if we have 16 byte and 4 byte representation then we are in using udp6
-	case ip.To16() != nil && ip.To4() == nil:
-		bindIP = net.IPv6zero
-		networkVersion = "udp6"
-		// only 4 bytes then we are using udp4
-	case ip.To4() != nil:
+	// If the IP is an IPv4 address, bind to the correct zero address.
+	if ip.To4() != nil {
 		bindIP = net.IPv4zero
 		networkVersion = "udp4"
-	default:
-		return nil, fmt.Errorf("bad ip address provided, %s was provided", ipAddr)
+	} else {
+		bindIP = net.IPv6zero
+		networkVersion = "udp6"
 	}
 
 	udpAddr := &net.UDPAddr{
@@ -239,35 +234,14 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	str, err := rcmgrObs.NewStatsTraceReporter()
-	if err != nil {
-		return nil, err
-	}
-
-	subnetCount := cfg.NetworkConfig.AttestationSubnetCount +
-		cfg.BeaconConfig.SyncCommitteeSubnetCount +
-		cfg.BeaconConfig.MaxBlobsPerBlock
-
-	defaultLimits := rcmgr.DefaultLimits.AutoScale()
-	newLimit := rcmgr.PartialLimitConfig{
-		System: rcmgr.ResourceLimits{
-			StreamsOutbound: rcmgr.LimitVal(subnetCount * 4),
-			StreamsInbound:  rcmgr.LimitVal(subnetCount * 4),
-		},
-	}.Build(defaultLimits)
-	rmgr, err := rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(newLimit), rcmgr.WithTraceReporter(str))
-	if err != nil {
-		return nil, err
-	}
-	opts = append(opts, libp2p.ResourceManager(rmgr))
 
 	gater, err := NewGater(cfg)
 	if err != nil {
 		return nil, err
 	}
-	bwc := metrics.NewBandwidthCounter()
+	s.bwc = metrics.NewBandwidthCounter()
 
-	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(bwc))
+	opts = append(opts, libp2p.ConnectionGater(gater), libp2p.BandwidthReporter(s.bwc))
 
 	host, err := libp2p.New(opts...)
 	signal.Reset(syscall.SIGINT)
@@ -275,7 +249,6 @@ func New(
 		return nil, err
 	}
 	s.host = host
-	go reportMetrics(ctx, bwc)
 	s.peers = peers.NewPool()
 
 	mux := chi.NewRouter()
@@ -294,16 +267,70 @@ func New(
 	return s, nil
 }
 
-func reportMetrics(ctx context.Context, bwc *metrics.BandwidthCounter) {
-	ticker := time.NewTicker(1 * time.Second)
+func (s *Sentinel) observeBandwidth(ctx context.Context) {
+	ticker := time.NewTicker(200 * time.Millisecond)
 	for {
+		countSubnetsSubscribed := func() int {
+			count := 0
+			if s.subManager == nil {
+				return count
+			}
+			s.GossipManager().subscriptions.Range(func(key, value any) bool {
+				sub := value.(*GossipSubscription)
+				if sub.topic == nil {
+					return true
+				}
+				if strings.Contains(sub.topic.String(), "beacon_attestation") && sub.subscribed.Load() {
+					count++
+				}
+				return true
+			})
+			return count
+		}()
+
+		multiplierForAdaptableTraffic := 1.0
+		if s.cfg.AdaptableTrafficRequirements {
+			multiplierForAdaptableTraffic = ((float64(countSubnetsSubscribed) / float64(s.cfg.NetworkConfig.AttestationSubnetCount)) * 8) + 1
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			totals := bwc.GetBandwidthTotals()
+			totals := s.bwc.GetBandwidthTotals()
 			monitor.ObserveTotalInBytes(totals.TotalIn)
 			monitor.ObserveTotalOutBytes(totals.TotalOut)
+			minBound := datasize.KB
+			// define rate cap
+			maxRateIn := float64(max(s.cfg.MaxInboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
+			maxRateOut := float64(max(s.cfg.MaxOutboundTrafficPerPeer, minBound)) * multiplierForAdaptableTraffic
+			peers := s.host.Network().Peers()
+			maxPeersToBan := 16
+			// do not ban peers if we have less than 1/8 of max peer count
+			if len(peers) <= maxPeersToBan {
+				continue
+			}
+			maxPeersToBan = min(maxPeersToBan, len(peers)-maxPeersToBan)
+
+			peersToBan := make([]peer.ID, 0, len(peers))
+			// Check which peers should be banned
+			for _, p := range peers {
+				// get peer bandwidth
+				peerBandwidth := s.bwc.GetBandwidthForPeer(p)
+				// check if peer is over limit
+				if peerBandwidth.RateIn > maxRateIn || peerBandwidth.RateOut > maxRateOut {
+					peersToBan = append(peersToBan, p)
+				}
+			}
+			// if we have more than 1/8 of max peer count to ban, limit to maxPeersToBan
+			if len(peersToBan) > maxPeersToBan {
+				peersToBan = peersToBan[:maxPeersToBan]
+			}
+			// ban hammer
+			for _, p := range peersToBan {
+				s.Peers().SetBanStatus(p, true)
+				s.Host().Peerstore().RemovePeer(p)
+				s.Host().Network().ClosePeer(p)
+			}
 		}
 	}
 }
@@ -342,6 +369,7 @@ func (s *Sentinel) Start() error {
 
 	go s.listenForPeers()
 	go s.forkWatcher()
+	go s.observeBandwidth(s.ctx)
 
 	return nil
 }

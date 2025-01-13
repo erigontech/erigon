@@ -31,14 +31,14 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/u256"
 	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon-lib/kv/memdb"
 	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 )
 
@@ -460,99 +460,6 @@ func TestHeadStorage(t *testing.T) {
 	}
 }
 
-// Tests that receipts associated with a single block can be stored and retrieved.
-func TestBlockReceiptStorage(t *testing.T) {
-	t.Parallel()
-	m := mock.Mock(t)
-	tx, err := m.DB.BeginRw(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	br := m.BlockReader
-	require := require.New(t)
-	ctx := m.Ctx
-
-	// Create a live block since we need metadata to reconstruct the receipt
-	tx1 := types.NewTransaction(1, libcommon.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
-	tx2 := types.NewTransaction(2, libcommon.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
-
-	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
-
-	// Create the two receipts to manage afterwards
-	receipt1 := &types.Receipt{
-		Status:            types.ReceiptStatusFailed,
-		CumulativeGasUsed: 1,
-		Logs: []*types.Log{
-			{Address: libcommon.BytesToAddress([]byte{0x11})},
-			{Address: libcommon.BytesToAddress([]byte{0x01, 0x11})},
-		},
-		TxHash:          tx1.Hash(),
-		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
-		GasUsed:         111111,
-	}
-	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
-
-	receipt2 := &types.Receipt{
-		PostState:         libcommon.Hash{2}.Bytes(),
-		CumulativeGasUsed: 2,
-		Logs: []*types.Log{
-			{Address: libcommon.BytesToAddress([]byte{0x22})},
-			{Address: libcommon.BytesToAddress([]byte{0x02, 0x22})},
-		},
-		TxHash:          tx2.Hash(),
-		ContractAddress: libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
-		GasUsed:         222222,
-	}
-	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
-	receipts := []*types.Receipt{receipt1, receipt2}
-	header := &types.Header{Number: big.NewInt(1)}
-
-	// Check that no receipt entries are in a pristine database
-	hash := header.Hash() //libcommon.BytesToHash([]byte{0x03, 0x14})
-
-	rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64())
-	rawdb.WriteHeader(tx, header)
-	// Insert the body that corresponds to the receipts
-	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
-	require.NoError(rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
-
-	// Insert the receipt slice into the database and check presence
-	require.NoError(rawdb.WriteReceipts(tx, 1, receipts))
-
-	b, senders, err := br.BlockWithSenders(ctx, tx, hash, 1)
-	require.NoError(err)
-	require.NotNil(b)
-	if rs := rawdb.ReadReceipts(tx, b, senders); len(rs) == 0 {
-		t.Fatalf("no receipts returned")
-	} else {
-		if err := checkReceiptsRLP(rs, receipts); err != nil {
-			t.Fatal(err.Error())
-		}
-	}
-	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
-	rawdb.DeleteHeader(tx, hash, 1)
-	rawdb.DeleteBody(tx, hash, 1)
-	b, senders, err = br.BlockWithSenders(ctx, tx, hash, 1)
-	require.NoError(err)
-	require.Nil(b)
-	if rs := rawdb.ReadReceipts(tx, b, senders); rs != nil {
-		t.Fatalf("receipts returned when body was deleted: %v", rs)
-	}
-	// Ensure that receipts without metadata can be returned without the block body too
-	if err := checkReceiptsRLP(rawdb.ReadRawReceipts(tx, 1), receipts); err != nil {
-		t.Fatal(err)
-	}
-	rawdb.WriteHeader(tx, header)
-	// Sanity check that body alone without the receipt is a full purge
-	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
-	require.NoError(rawdb.TruncateReceipts(tx, 1))
-	b, senders, err = br.BlockWithSenders(ctx, tx, hash, 1)
-	require.NoError(err)
-	require.NotNil(b)
-	if rs := rawdb.ReadReceipts(tx, b, senders); len(rs) != 0 {
-		t.Fatalf("deleted receipts returned: %v", rs)
-	}
-}
-
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
 	t.Parallel()
@@ -756,6 +663,72 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	require.NotNil(body.Withdrawals)
 	require.Equal(0, len(body.Withdrawals))
 	require.Equal(uint32(2), body.TxCount)
+}
+
+func TestBadBlocks(t *testing.T) {
+	t.Parallel()
+	m := mock.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require := require.New(t)
+	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+
+	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
+		r, err := types.SignTx(tx, s, testKey)
+		require.NoError(err)
+		return r
+	}
+
+	putBlock := func(number uint64) libcommon.Hash {
+		// prepare db so it works with our test
+		signer1 := types.MakeSigner(params.MainnetChainConfig, number, number-1)
+		body := &types.Body{
+			Transactions: []types.Transaction{
+				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+			},
+			Uncles: []*types.Header{{Extra: []byte("test header")}},
+		}
+
+		header := &types.Header{Number: big.NewInt(int64(number))}
+		require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), number))
+		require.NoError(rawdb.WriteHeader(tx, header))
+		require.NoError(rawdb.WriteBody(tx, header.Hash(), number, body))
+
+		return header.Hash()
+	}
+	rawdb.ResetBadBlockCache(tx, 4)
+
+	// put some blocks
+	for i := 1; i <= 6; i++ {
+		putBlock(uint64(i))
+	}
+	hash1 := putBlock(7)
+	hash2 := putBlock(8)
+	hash3 := putBlock(9)
+	hash4 := putBlock(10)
+
+	// mark some blocks as bad
+	require.NoError(rawdb.TruncateCanonicalHash(tx, 7, true))
+	badBlks, err := rawdb.GetLatestBadBlocks(tx)
+	require.NoError(err)
+	require.Len(badBlks, 4)
+
+	require.Equal(badBlks[0].Hash(), hash4)
+	require.Equal(badBlks[1].Hash(), hash3)
+	require.Equal(badBlks[2].Hash(), hash2)
+	require.Equal(badBlks[3].Hash(), hash1)
+
+	// testing the "limit"
+	rawdb.ResetBadBlockCache(tx, 2)
+	badBlks, err = rawdb.GetLatestBadBlocks(tx)
+	require.NoError(err)
+	require.Len(badBlks, 2)
+	require.Equal(badBlks[0].Hash(), hash4)
+	require.Equal(badBlks[1].Hash(), hash3)
 }
 
 func checkReceiptsRLP(have, want types.Receipts) error {

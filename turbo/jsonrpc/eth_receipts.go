@@ -21,8 +21,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/RoaringBitmap/roaring"
-
+	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/erigontech/erigon-lib/chain"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv"
@@ -43,7 +42,7 @@ import (
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
-func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Block) (types.Receipts, error) {
+func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -52,8 +51,12 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, block *types.Bloc
 	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
 }
 
-func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Tx, block *types.Block, index int, optimize bool) (*types.Receipt, error) {
-	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, block, index, optimize)
+func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64) (*types.Receipt, error) {
+	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum)
+}
+
+func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
+	return api.receiptsGenerator.GetCachedReceipt(ctx, hash)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -65,7 +68,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	var begin, end uint64
 	logs := types.Logs{}
 
-	tx, beginErr := api.db.BeginRo(ctx)
+	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
 		return logs, beginErr
 	}
@@ -103,6 +106,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				}
 			}
 
+			if uint64(fromBlock) > latest {
+				return types.Logs{}, nil
+			}
 		}
 		end = latest
 		if crit.ToBlock != nil {
@@ -133,7 +139,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = latest
 	}
 
-	erigonLogs, err := api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
+	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit)
 	if err != nil {
 		return nil, err
 	}
@@ -370,6 +376,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
 func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (res stream.U64, err error) {
 	for _, sub := range topics {
+		if len(sub) == 0 {
+			continue
+		}
 
 		var topicsUnion stream.U64
 		for _, topic := range sub {
@@ -402,24 +411,28 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	var blockNum uint64
+	var blockNum, txNum uint64
 	var ok bool
-
-	blockNum, ok, err = api.txnLookup(ctx, tx, txnHash)
-	if err != nil {
-		return nil, err
-	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
+
+	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	if err != nil {
+		return nil, err
+	}
+	if !ok && chainConfig.Bor == nil {
+		return nil, nil
+	}
+
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
 		if api.useBridgeReader {
@@ -436,25 +449,37 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
+	txNumMin, err := txNumsReader.Min(tx, blockNum)
+	if err != nil {
+		return nil, err
 	}
 
-	var txnIndex uint64
-	var txn types.Transaction
-	for idx, transaction := range block.Transactions() {
-		if transaction.Hash() == txnHash {
-			txn = transaction
-			txnIndex = uint64(idx)
-			break
+	if txNumMin+2 > txNum { //TODO: what a magic is this "2" and how to avoid it
+		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+	}
+
+	var txnIndex = int(txNum - txNumMin - 2)
+
+	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	if txn == nil && chainConfig.Bor != nil { //TODO: add tx gran here to.
+		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+		if err != nil {
+			return nil, err
 		}
-	}
-
-	if txn == nil && chainConfig.Bor != nil {
+		if block == nil {
+			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		}
 		receipts, err := api.getReceipts(ctx, tx, block)
 		if err != nil {
 			return nil, fmt.Errorf("getReceipts error: %w", err)
@@ -477,23 +502,21 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	receipt, err := api.getReceipt(ctx, chainConfig, tx, block, int(txnIndex), false)
+	receipt, err := api.getReceipt(ctx, chainConfig, tx, header, txn, txnIndex, txNum)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipt error: %w", err)
 	}
 
-	return ethutils.MarshalReceipt(receipt, block.Transactions()[txnIndex], chainConfig, block.HeaderNoCopy(), txnHash, true), nil
-
+	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
 func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]interface{}, error) {
-	tx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err

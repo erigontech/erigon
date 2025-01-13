@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/metrics"
 	"github.com/erigontech/erigon-lib/recsplit"
+	"github.com/erigontech/erigon-lib/rlp"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon/core/rawdb"
 	"github.com/erigontech/erigon/core/rawdb/blockio"
@@ -59,7 +60,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/bordb"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/snapshotsync"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -901,12 +901,12 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	for _, sn := range view.Headers() {
 		if err := sn.Src().WithReadAhead(func() error {
 			g := sn.Src().MakeGetter()
-			for g.HasNext() {
+			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
 				var header types.Header
 				r.Reset(word[1:])
 				if err := rlp.Decode(r, &header); err != nil {
-					return err
+					return fmt.Errorf("%w, file=%s, record=%d", err, sn.Src().FileName(), i)
 				}
 				if err := walker(&header); err != nil {
 					return err

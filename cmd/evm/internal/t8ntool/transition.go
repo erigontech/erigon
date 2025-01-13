@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon-lib/rlp"
 	libstate "github.com/erigontech/erigon-lib/state"
 	"github.com/erigontech/erigon/consensus/ethash"
 	"github.com/erigontech/erigon/consensus/merge"
@@ -53,7 +54,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/eth/consensuschain"
 	trace_logger "github.com/erigontech/erigon/eth/tracers/logger"
-	"github.com/erigontech/erigon/rlp"
 	"github.com/erigontech/erigon/tests"
 	"github.com/erigontech/erigon/turbo/jsonrpc"
 )
@@ -301,7 +301,7 @@ func Main(ctx *cli.Context) error {
 	defer db.Close()
 	defer agg.Close()
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -627,6 +627,7 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer c.Close()
 	h := libcommon.NewHasher()
 	defer libcommon.ReturnHasherToPool(h)
 	domains, err := libstate.NewSharedDomains(tx, log.New())
@@ -657,11 +658,11 @@ func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 			h.Sha.Write(k[length.Addr+length.Incarnation:])
 			//nolint:errcheck
 			h.Sha.Read(newK[length.Hash+length.Incarnation:])
-			if err = tx.Put(kv.HashedStorage, newK, libcommon.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedStorageDeprecated, newK, libcommon.CopyBytes(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(kv.HashedAccounts, newK, libcommon.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedAccountsDeprecated, newK, libcommon.CopyBytes(v)); err != nil {
 				return nil, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}
