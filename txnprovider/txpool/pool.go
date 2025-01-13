@@ -904,7 +904,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 			return txpoolcfg.InvalidAA // TODO: choose correct discard reason
 		}
 
-		err = aaStaticvalidation(
+		err = AAStaticValidation(
 			txn.Paymaster, txn.Deployer, txn.SenderAddress,
 			txn.PaymasterData, txn.DeployerData,
 			txn.PaymasterValidationGasLimit,
@@ -991,7 +991,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 }
 
 // TODO: duplicated code from aa_exec
-func aaStaticvalidation(
+func AAStaticValidation(
 	paymasterAddress, deployerAddress, senderAddress *common.Address,
 	paymasterData, deployerData []byte,
 	paymasterValidationGasLimit uint64,

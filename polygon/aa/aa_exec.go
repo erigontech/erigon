@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 func ValidateAATransaction(
@@ -370,7 +371,7 @@ func PerformTxnStaticValidation(
 	paymasterAddress, deployerAddress, senderAddress := txn.Paymaster, txn.Deployer, txn.SenderAddress
 	paymasterData, deployerData, paymasterValidationGasLimit := txn.PaymasterData, txn.DeployerData, txn.PaymasterValidationGasLimit
 
-	return PerformStaticValidation(
+	return txpool.AAStaticValidation(
 		paymasterAddress, deployerAddress, senderAddress,
 		paymasterData, deployerData,
 		paymasterValidationGasLimit,

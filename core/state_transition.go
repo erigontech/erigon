@@ -322,8 +322,16 @@ type EntryPointCall struct {
 
 func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlockState, epc *EntryPointCall) error) (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
-	senderInitBalance := st.state.GetBalance(st.msg.From()).Clone()
-	coinbaseInitBalance := st.state.GetBalance(coinbase).Clone()
+	senderInitBalance, err := st.state.GetBalance(st.msg.From())
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
+	senderInitBalance = senderInitBalance.Clone()
+	coinbaseInitBalance, err := st.state.GetBalance(coinbase)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+	}
+	coinbaseInitBalance = coinbaseInitBalance.Clone()
 
 	epc := &EntryPointCall{}
 	st.state.SetHooks(&tracing.Hooks{
@@ -380,37 +388,57 @@ func (st *StateTransition) ApplyFrame(validateFrame func(ibs evmtypes.IntraBlock
 			// authority is added to accessed_address in prepare step
 
 			// 4. authority code should be empty or already delegated
-			if codeHash := st.state.GetCodeHash(authority); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+			codeHash, err := st.state.GetCodeHash(authority)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+			if codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
 				// check for delegation
-				if _, ok := st.state.GetDelegatedDesignation(authority); ok {
-					// noop: has delegated designation
-				} else {
+				_, ok, err := st.state.GetDelegatedDesignation(authority)
+				if err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				}
+				if !ok {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
 					continue
 				}
+				// noop: has delegated designation
 			}
 
 			// 5. nonce check
-			authorityNonce := st.state.GetNonce(authority)
+			authorityNonce, err := st.state.GetNonce(authority)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
 			if authorityNonce != auth.Nonce {
 				log.Debug("invalid nonce, skipping", "auth index", i)
 				continue
 			}
 
 			// 6. Add PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST gas to the global refund counter if authority exists in the trie.
-			if st.state.Exist(authority) {
+			exists, err := st.state.Exist(authority)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+			if exists {
 				st.state.AddRefund(fixedgas.PerEmptyAccountCost - fixedgas.PerAuthBaseCost)
 			}
 
 			// 7. set authority code
 			if auth.Address == (libcommon.Address{}) {
-				st.state.SetCode(authority, nil)
+				if err := st.state.SetCode(authority, nil); err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				}
 			} else {
-				st.state.SetCode(authority, types.AddressToDelegation(auth.Address))
+				if err := st.state.SetCode(authority, types.AddressToDelegation(auth.Address)); err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				}
 			}
 
 			// 8. increase the nonce of authority
-			st.state.SetNonce(authority, authorityNonce+1)
+			if err := st.state.SetNonce(authority, authorityNonce+1); err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
 		}
 	}
 
