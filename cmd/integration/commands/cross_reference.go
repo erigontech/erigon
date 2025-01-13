@@ -21,7 +21,7 @@ var cmdCrossReferenceBlockHashes = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		if err := crossReferenceBlockHashes(logger, startBlockNum, endBlockNum); err != nil {
+		if err := crossReferenceBlockHashes(cmd.Context(), logger, startBlockNum, endBlockNum); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -30,7 +30,7 @@ var cmdCrossReferenceBlockHashes = &cobra.Command{
 	},
 }
 
-func crossReferenceBlockHashes(logger log.Logger, startBlockNum, endBlockNum uint64) error {
+func crossReferenceBlockHashes(ctx context.Context, logger log.Logger, startBlockNum, endBlockNum uint64) error {
 	if startBlockNum > endBlockNum || (startBlockNum == 0 && endBlockNum == 0) {
 		panic("invalid startBlockNum > endBlockNum || (startBlockNum == 0 && endBlockNum == 0)")
 	}
@@ -46,6 +46,8 @@ func crossReferenceBlockHashes(logger log.Logger, startBlockNum, endBlockNum uin
 
 	for blockNum := startBlockNum; blockNum < endBlockNum; blockNum++ {
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-logTicker.C:
 			logger.Info(
 				"Cross reference block hashes progress",
@@ -72,6 +74,11 @@ func crossReferenceBlockHashes(logger log.Logger, startBlockNum, endBlockNum uin
 		hash, goldenHash := resultMap["hash"].(string), goldenResultMap["hash"].(string)
 		if hash != goldenHash {
 			return fmt.Errorf("header hash mismatch: blockNum=%d, hash=%s, goldenHash=%s", blockNum, hash, goldenHash)
+		}
+
+		transactionsRootHash, goldenTransactionsRootHash := resultMap["transactionsRoot"].(string), goldenResultMap["transactionsRoot"].(string)
+		if transactionsRootHash != goldenTransactionsRootHash {
+			return fmt.Errorf("transactionsRoot hash mismatch: blockNum=%d, transactionsRootHash=%s, goldenTransactionsRootHash=%s", blockNum, transactionsRootHash, goldenTransactionsRootHash)
 		}
 	}
 
