@@ -357,7 +357,7 @@ func TestSetCodeAuthRawParsing(t *testing.T) {
 	require.Equal(t, address, actualAddress)
 
 	p += 20
-	p, nonce, err = rlp.ParseU64(payload, p)
+	_, nonce, err = rlp.ParseU64(payload, p)
 	require.NoError(t, err)
 	require.Equal(t, nonce, uint64(10))
 }
