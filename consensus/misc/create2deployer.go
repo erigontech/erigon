@@ -2,7 +2,6 @@ package misc
 
 import (
 	"encoding/hex"
-	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -28,7 +27,6 @@ func IsCanyonActivationBlock(c *chain.Config, timestamp uint64) bool {
 }
 
 func EnsureCreate2Deployer(c *chain.Config, timestamp uint64, statedb *state.IntraBlockState) bool {
-	fmt.Println(timestamp, c.CanyonTime.Int64())
 	if !IsCanyonActivationBlock(c, timestamp) {
 		return false
 	}
