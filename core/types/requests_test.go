@@ -1,7 +1,4 @@
-// Copyright 2014 The go-ethereum Authors
-// (original work)
-// Copyright 2024 The Erigon Authors
-// (modifications)
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -20,17 +17,13 @@
 package types
 
 import (
-	"crypto/sha256"
 	"testing"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func TestEmptyRequestsHashCalculation(t *testing.T) {
 	reqs := make(FlatRequests, 0)
 	h := reqs.Hash()
-	testHArr := sha256.Sum256([]byte(""))
-	testH := libcommon.BytesToHash(testHArr[:])
+	testH := EmptyRequestsHash
 	if *h != testH {
 		t.Errorf("Requests Hash calculation error for empty hash, expected: %v, got: %v", testH, h)
 	}

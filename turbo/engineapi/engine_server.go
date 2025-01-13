@@ -210,6 +210,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if version >= clparams.ElectraVersion {
 		requests = make(types.FlatRequests, 0)
 		for _, r := range executionRequests {
+			if len(r) == 0 {
+				continue
+			}
 			requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r})
 		}
 		rh := requests.Hash()

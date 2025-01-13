@@ -30,8 +30,8 @@ func DequeueConsolidationRequests7251(syscall consensus.SystemCall) *types.FlatR
 		return nil
 	}
 	if res != nil {
+		// Just append the contract output as the request data
 		return &types.FlatRequest{Type: types.ConsolidationRequestType, RequestData: res}
 	}
 	return nil
-	// Just append the contract outputs as the encoded request data
 }
