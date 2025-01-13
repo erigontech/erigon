@@ -53,6 +53,7 @@ func crossReferenceBlockHashes(logger log.Logger, startBlockNum, endBlockNum uin
 				"endBlockNum", endBlockNum,
 				"startBlockNum", startBlockNum,
 			)
+		default: // no-op
 		}
 
 		blockFields, err := fetchBlockViaRpc(logger, rpcUrl, blockNum)
