@@ -21,10 +21,13 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -787,7 +790,16 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
+type slts struct {
+	Slots []TxnSlots `json:"slots"`
+}
+
+var slots = slts{
+	Slots: make([]TxnSlots, 0),
+}
+
 func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
+	slots.Slots = append(slots.Slots, newTxns)
 	if p.cfg.NoGossip {
 		// if no gossip, then
 		// disable adding remote transactions
@@ -1745,6 +1757,30 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	}
 }
 
+func writeJSONToFile(data interface{}, filePath string) error {
+	// Create the directory if it doesn't exist
+	dir := filepath.Dir(filePath)
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create directory: %v", err)
+	}
+
+	// Open the file for writing (create if it doesn't exist)
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %v", err)
+	}
+	defer file.Close()
+
+	// Encode the data to JSON and write to the file
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ") // Optional: pretty print with indentation
+	if err := encoder.Encode(data); err != nil {
+		return fmt.Errorf("failed to encode JSON: %v", err)
+	}
+
+	return nil
+}
+
 // MainLoop - does:
 // send pending byHash to p2p:
 //   - new byHash
@@ -1763,6 +1799,9 @@ func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
 
+	saveToFile := time.NewTicker(100 * time.Second)
+	defer saveToFile.Stop()
+
 	if err := p.Start(ctx); err != nil {
 		p.logger.Error("[txpool] Failed to start", "err", err)
 		return
@@ -1773,6 +1812,8 @@ func MainLoop(ctx context.Context, p *TxPool, newTxns chan Announcements, send *
 		case <-ctx.Done():
 			_, _ = p.flush(ctx)
 			return
+		case <-saveToFile.C:
+			writeJSONToFile(slots, "/Volumes/DATA/all.json")
 		case <-logEvery.C:
 			p.logStats()
 		case <-processRemoteTxnsEvery.C:
