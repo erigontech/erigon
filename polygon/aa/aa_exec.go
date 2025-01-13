@@ -380,7 +380,7 @@ func PerformTxnStaticValidation(
 }
 
 // ValidationPhaseError is an API error that encompasses an EVM revert with JSON error
-// code and a binary data blob.
+// code and a binary data blob. Only used for debug, can remove.
 type ValidationPhaseError struct {
 	error
 	reason string // revert reason hex encoded

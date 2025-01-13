@@ -990,7 +990,6 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	return txpoolcfg.Success
 }
 
-// TODO: duplicated code from aa_exec
 func AAStaticValidation(
 	paymasterAddress, deployerAddress, senderAddress *common.Address,
 	paymasterData, deployerData []byte,
