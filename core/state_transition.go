@@ -380,6 +380,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	if mint := st.msg.Mint(); mint != nil {
+		fmt.Println(mint.Uint64())
 		st.state.AddBalance(st.msg.From(), mint, tracing.BalanceIncreaseDaoContract)
 	}
 	snap := st.state.Snapshot()
@@ -398,6 +399,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		// Record deposits as using all their gas (matches the gas pool)
 		// System Transactions are special & are not recorded as using any gas (anywhere)
 		gasUsed := st.msg.Gas()
+		//fmt.Println("UH", st.evm.ChainConfig().IsRegolith(st.evm.Context.Time), st.evm.Context.Time)
 		// Regolith changes this behaviour so the actual gas used is reported.
 		// In this case the tx is invalid so is recorded as using all gas.
 		if st.msg.IsOptimismSystemTx() && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
