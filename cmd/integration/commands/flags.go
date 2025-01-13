@@ -54,6 +54,8 @@ var (
 
 	dbWriteMap bool
 
+	startBlockNum, endBlockNum uint64
+
 	chainTipMode bool
 	syncCfg      = ethconfig.Defaults.Sync
 )
@@ -196,4 +198,12 @@ func withChaosMonkey(cmd *cobra.Command) {
 }
 func withChainTipMode(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
+}
+
+func withStartBlockNum(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&startBlockNum, "start.block.num", 0, "start from block num")
+}
+
+func withEndBlockNum(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&endBlockNum, "end.block.num", 0, "finish at block num")
 }
