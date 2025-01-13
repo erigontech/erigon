@@ -275,10 +275,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
-		if want := st.msg.Value(); have.Cmp(want) < 0 {
-			if !gasBailout {
-				return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
-			}
+		if have.Cmp(st.msg.Value()) < 0 && !gasBailout {
+			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, st.msg.Value())
 		}
 		// No fee fields to check, no nonce to check, and no need to check if EOA (L1 already verified it for us)
 		// Gas is free, but no refunds!
