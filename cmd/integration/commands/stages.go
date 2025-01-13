@@ -637,9 +637,11 @@ func init() {
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
 
-	withDataDir(cmdHeadersExport)
-	withStartBlockNum(cmdHeadersExport)
-	withEndBlockNum(cmdHeadersExport)
+	withStartBlockNum(cmdCrossReferenceBlockHashes)
+	withEndBlockNum(cmdCrossReferenceBlockHashes)
+	withRpcUrl(cmdCrossReferenceBlockHashes)
+	withSecondaryRpcUrl(cmdCrossReferenceBlockHashes)
+	rootCmd.AddCommand(cmdCrossReferenceBlockHashes)
 }
 
 func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {

@@ -55,6 +55,7 @@ var (
 	dbWriteMap bool
 
 	startBlockNum, endBlockNum uint64
+	rpcUrl, secondaryRpcUrl    string
 
 	chainTipMode bool
 	syncCfg      = ethconfig.Defaults.Sync
@@ -206,4 +207,12 @@ func withStartBlockNum(cmd *cobra.Command) {
 
 func withEndBlockNum(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&endBlockNum, "end.block.num", 0, "finish at block num")
+}
+
+func withRpcUrl(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&rpcUrl, "rpc.url", "", "rpc url")
+}
+
+func withSecondaryRpcUrl(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&secondaryRpcUrl, "rpc.url.secondary", "", "secondary rpc url")
 }
