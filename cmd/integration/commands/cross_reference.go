@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -40,7 +41,20 @@ func crossReferenceBlockHashes(logger log.Logger, startBlockNum, endBlockNum uin
 		panic("secondaryRpcUrl is empty")
 	}
 
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
+
 	for blockNum := startBlockNum; blockNum < endBlockNum; blockNum++ {
+		select {
+		case <-logTicker.C:
+			logger.Info(
+				"Cross reference block hashes progress",
+				"blockNum", blockNum,
+				"endBlockNum", endBlockNum,
+				"startBlockNum", startBlockNum,
+			)
+		}
+
 		blockFields, err := fetchBlockViaRpc(logger, rpcUrl, blockNum)
 		if err != nil {
 			return err
