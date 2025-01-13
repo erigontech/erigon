@@ -28,7 +28,7 @@ import (
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
-// typeWithoutStringer is a alias for the Type type which simply doesn't implement
+// typeWithoutStringer is an alias for the Type type which simply doesn't implement
 // the stringer interface to allow printing type details in the tests below.
 type typeWithoutStringer Type
 

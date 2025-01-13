@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon-lib/chain/networkname"
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/cmp"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -207,8 +208,12 @@ func ExecV3(ctx context.Context,
 	initialCycle bool,
 	isMining bool,
 ) (execErr error) {
+	inMemExec := txc.Doms != nil
 	// TODO: e35 doesn't support parallel-exec yet
 	parallel = false //nolint
+	if parallel && cfg.chainConfig.ChainName == networkname.Gnosis {
+		panic("gnosis consensus doesn't support parallel exec yet: https://github.com/erigontech/erigon/issues/12054")
+	}
 
 	blockReader := cfg.blockReader
 	chainConfig := cfg.chainConfig
@@ -237,18 +242,17 @@ func ExecV3(ctx context.Context,
 
 	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: applyTx, blockReader: blockReader, logger: logger}
 	agg := cfg.db.(state2.HasAgg).Agg().(*state2.Aggregator)
-	if initialCycle {
-		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	} else {
-		agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1)
+	if !inMemExec && !isMining {
+		if initialCycle {
+			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+			agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		} else {
+			agg.SetCompressWorkers(1)
+			agg.SetCollateAndBuildWorkers(1)
+		}
 	}
 
-	pruneNonEssentials := cfg.prune.History.Enabled() && cfg.prune.History.PruneTo(execStage.BlockNumber) == execStage.BlockNumber
-
 	var err error
-	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
 	if inMemExec {
 		doms = txc.Doms
@@ -548,21 +552,20 @@ Loop:
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
-				BlockNum:           blockNum,
-				Header:             header,
-				Coinbase:           b.Coinbase(),
-				Uncles:             b.Uncles(),
-				Rules:              rules,
-				Txs:                txs,
-				TxNum:              inputTxNum,
-				TxIndex:            txIndex,
-				BlockHash:          b.Hash(),
-				SkipAnalysis:       skipAnalysis,
-				Final:              txIndex == len(txs),
-				GetHashFn:          getHashFn,
-				EvmBlockContext:    blockContext,
-				Withdrawals:        b.Withdrawals(),
-				PruneNonEssentials: pruneNonEssentials,
+				BlockNum:        blockNum,
+				Header:          header,
+				Coinbase:        b.Coinbase(),
+				Uncles:          b.Uncles(),
+				Rules:           rules,
+				Txs:             txs,
+				TxNum:           inputTxNum,
+				TxIndex:         txIndex,
+				BlockHash:       b.Hash(),
+				SkipAnalysis:    skipAnalysis,
+				Final:           txIndex == len(txs),
+				GetHashFn:       getHashFn,
+				EvmBlockContext: blockContext,
+				Withdrawals:     b.Withdrawals(),
 
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
@@ -601,20 +604,6 @@ Loop:
 						hooks.OnBlockEnd(err)
 					}
 					return err
-				}
-
-				if sender, ok := txs[txIndex].GetSender(); ok {
-					txTask.Sender = &sender
-				} else {
-					sender, err := signer.Sender(txTask.Tx)
-					if err != nil {
-						if b.NumberU64() > 0 && hooks != nil && hooks.OnBlockEnd != nil {
-							hooks.OnBlockEnd(err)
-						}
-						return err
-					}
-					txTask.Sender = &sender
-					logger.Warn("[Execution] expensive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
 			}
 

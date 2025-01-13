@@ -464,7 +464,7 @@ func checkSeekReverse(t *testing.T, j int, ef *EliasFano, vals []uint64) {
 	require.Equal(t, bits.TrailingZeros64(prevUpperMask), bits.TrailingZeros64(efi.upperMask))
 }
 
-func BenchmarkName(b *testing.B) {
+func BenchmarkEF(b *testing.B) {
 	count := uint64(1_000_000)
 	maxOffset := (count - 1) * 123
 	ef := NewEliasFano(count, maxOffset)

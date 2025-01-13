@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,4 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package exec3
+package txpoolcfg
+
+import (
+	"testing"
+
+	"github.com/erigontech/erigon-lib/common/fixedgas"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestZeroDataIntrinsicGas(t *testing.T) {
+	assert := assert.New(t)
+	gas, floorGas7623, discardReason := CalcIntrinsicGas(0, 0, 0, nil, false, true, true, true, true)
+	assert.Equal(discardReason, Success)
+	assert.Equal(gas, fixedgas.TxGas)
+	assert.Equal(floorGas7623, fixedgas.TxGas)
+}

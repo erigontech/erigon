@@ -56,11 +56,11 @@ type CallArgs struct {
 }
 
 // from retrieves the transaction sender address.
-func (arg *CallArgs) from() libcommon.Address {
-	if arg.From == nil {
+func (args *CallArgs) from() libcommon.Address {
+	if args.From == nil {
 		return libcommon.Address{}
 	}
-	return *arg.From
+	return *args.From
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
