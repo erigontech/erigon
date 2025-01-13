@@ -92,7 +92,7 @@ func (dkl DecryptionKeysListener) Run(ctx context.Context) error {
 }
 
 func (dkl DecryptionKeysListener) initP2pHost() (host.Host, error) {
-	listenAddr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/%d" + strconv.FormatUint(dkl.config.ListenPort, 10))
+	listenAddr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/" + strconv.FormatUint(dkl.config.ListenPort, 10))
 	if err != nil {
 		return nil, err
 	}
