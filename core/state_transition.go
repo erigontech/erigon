@@ -382,7 +382,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 	fmt.Println(st.evm.Context.BlockNumber, "A")
 	if mint := st.msg.Mint(); mint != nil {
 		fmt.Println(mint.Uint64())
-		st.state.AddBalance(st.msg.From(), mint, tracing.BalanceIncreaseDaoContract)
+		if err := st.state.AddBalance(st.msg.From(), mint, tracing.BalanceIncreaseDaoContract); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		}
 	}
 	snap := st.state.Snapshot()
 
