@@ -398,6 +398,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		}
 		// Even though we revert the state changes, always increment the nonce for the next deposit transaction
 		st.state.SetNonce(st.msg.From(), nonce+1)
+
+		a, _ := st.state.GetBalance(st.msg.From())
+		fmt.Println(st.msg.From(), nonce+1, a)
 		// Record deposits as using all their gas (matches the gas pool)
 		// System Transactions are special & are not recorded as using any gas (anywhere)
 		gasUsed := st.msg.Gas()
