@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/core/vm"
 	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/params"
-	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -118,8 +117,8 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 		}
 	}
 
-	gas, floorGas7623, status := txpoolcfg.CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860, isPrague, isAATxn)
-	if status != txpoolcfg.Success {
+	gas, floorGas7623, overflow := fixedgas.CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, uint64(len(accessList)), uint64(accessList.StorageKeys()), isContractCreation, isHomestead, isEIP2028, isEIP3860, isPrague, isAATxn)
+	if overflow != false {
 		return 0, 0, ErrGasUintOverflow
 	}
 	return gas, floorGas7623, nil

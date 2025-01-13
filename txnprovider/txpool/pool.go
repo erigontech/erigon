@@ -727,7 +727,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// this stage
 		authorizationLen := uint64(len(mt.TxnSlot.Authorizations))
 		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
-		intrinsicGas, floorGas, _ := txpoolcfg.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, nil, mt.TxnSlot.Creation, true, true, isShanghai, isPrague, isAATxn)
+		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, 0, 0, mt.TxnSlot.Creation, true, true, isShanghai, isPrague, isAATxn)
 		if isPrague && floorGas > intrinsicGas {
 			intrinsicGas = floorGas
 		}
@@ -938,7 +938,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	isAATxn := txn.Type == types.AccountAbstractionTxType
-	gas, floorGas, reason := txpoolcfg.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), nil, txn.Creation, true, true, isShanghai, p.isPrague(), isAATxn)
+	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), 0, 0, txn.Creation, true, true, isShanghai, p.isPrague(), isAATxn)
 	if p.isPrague() && floorGas > gas {
 		gas = floorGas
 	}
@@ -946,11 +946,11 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	if txn.Traced {
 		p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
-	if reason != txpoolcfg.Success {
+	if overflow != false {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed idHash=%x reason=%s", txn.IDHash, reason))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed due to overflow idHash=%x", txn.IDHash))
 		}
-		return reason
+		return txpoolcfg.GasUintOverflow
 	}
 	if gas > txn.Gas {
 		if txn.Traced {
