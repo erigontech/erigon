@@ -15,6 +15,7 @@ frontier.
 
 - [Erigon](#erigon)
 - [System Requirements](#system-requirements)
+- [Sync Times](#sync-times)
 - [Usage](#usage)
     - [Getting Started](#getting-started)
     - [Datadir structure](#datadir-structure)
@@ -97,6 +98,18 @@ on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-fil
 
 🔬 More details on what type of data stored [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)
 
+Sync Times
+==========
+
+These are the  approximate sync times syncing from scratch to the tip of the chain (results may vary depending on hardware and bandwidth).
+
+
+| Chain      | Archive         | Full           | Minimal        |
+|------------|-----------------|----------------|----------------|
+| Ethereum   | 7 Hours, 55 Minutes | 4 Hours, 23 Minutes | 1 Hour, 41 Minutes |
+| Gnosis     | 2 Hours, 10 Minutes | 1 Hour, 5 Minutes  | 33 Minutes      |
+| Polygon    | 1 Day, 21 Hours    | 21 Hours, 41 Minutes | 11 Hours, 54 Minutes |
+
 Usage
 =====
 
@@ -134,7 +147,7 @@ datadir
         domain    # Latest State
         history   # Historical values 
         idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
-        accessors # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
+        accessor # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
     txpool        # pending transactions. safe to remove.
     nodes         # p2p peers. safe to remove.
     temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
@@ -155,11 +168,11 @@ datadir
         domain    # link to fast disk
         history   
         idx       
-        accessors 
+        accessor 
     temp # buffers to sort data >> RAM. sequential-buffered IO - is slow-disk-friendly   
 
 # Example: how to speedup history access: 
-#   - go step-by-step - first try store `accessors` on fast disk
+#   - go step-by-step - first try store `accessor` on fast disk
 #   - if speed is not good enough: `idx`
 #   - if still not enough: `history` 
 ```

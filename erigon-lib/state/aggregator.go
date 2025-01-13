@@ -31,7 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/tidwall/btree"
 	rand2 "golang.org/x/exp/rand"
@@ -82,7 +82,7 @@ type Aggregator struct {
 
 	wg sync.WaitGroup // goroutines spawned by Aggregator, to ensure all of them are finish at agg.Close
 
-	onFreeze OnFreezeFunc
+	onFreeze kv.OnFreezeFunc
 
 	ps *background.ProgressSet
 
@@ -95,25 +95,45 @@ type Aggregator struct {
 	produce bool
 }
 
-type OnFreezeFunc func(frozenFileNames []string)
-
 const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
-func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
-	tmpdir := dirs.Tmp
-	salt, err := getStateIndicesSalt(dirs.Snap)
+func commitmentFileMustExist(dirs datadir.Dirs, fromStep, toStep uint64) bool {
+	fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", kv.CommitmentDomain, fromStep, toStep))
+	exists, err := dir.FileExist(fPath)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
+	return exists
+}
 
+func domainIntegrityCheck(name kv.Domain, dirs datadir.Dirs, fromStep, toStep uint64) bool {
+	// case1: `kill -9` during building new .kv
+	//  - `accounts` domain may be at step X and `commitment` domain at step X-1
+	//  - not a problem because `commitment` domain still has step X in DB
+	// case2: `kill -9` during building new .kv and `rm -rf chaindata`
+	//  - `accounts` domain may be at step X and `commitment` domain at step X-1
+	//  - problem! `commitment` domain doesn't have step X in DB
+	// solution: ignore step X files in both cases
+	switch name {
+	case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
+		if toStep-fromStep > 1 { // only recently built files
+			return true
+		}
+		return commitmentFileMustExist(dirs, fromStep, toStep)
+	default:
+		return true
+	}
+}
+
+func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
-	a := &Aggregator{
+	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
 		onFreeze:               func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		tmpdir:                 tmpdir,
+		tmpdir:                 dirs.Tmp,
 		aggregationStep:        aggregationStep,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -125,152 +145,7 @@ func NewAggregator(ctx context.Context, dirs datadir.Dirs, aggregationStep uint6
 		commitmentValuesTransform: AggregatorSqueezeCommitmentValues,
 
 		produce: true,
-	}
-	commitmentFileMustExist := func(fromStep, toStep uint64) bool {
-		fPath := filepath.Join(dirs.SnapDomain, fmt.Sprintf("v1-%s.%d-%d.kv", kv.CommitmentDomain, fromStep, toStep))
-		exists, err := dir.FileExist(fPath)
-		if err != nil {
-			panic(err)
-		}
-		return exists
-	}
-
-	integrityCheck := func(name kv.Domain, fromStep, toStep uint64) bool {
-		// case1: `kill -9` during building new .kv
-		//  - `accounts` domain may be at step X and `commitment` domain at step X-1
-		//  - not a problem because `commitment` domain still has step X in DB
-		// case2: `kill -9` during building new .kv and `rm -rf chaindata`
-		//  - `accounts` domain may be at step X and `commitment` domain at step X-1
-		//  - problem! `commitment` domain doesn't have step X in DB
-		// solution: ignore step X files in both cases
-		switch name {
-		case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
-			if toStep-fromStep > 1 { // only recently built files
-				return true
-			}
-			return commitmentFileMustExist(fromStep, toStep)
-		default:
-			return true
-		}
-	}
-
-	cfg := domainCfg{
-		name: kv.AccountsDomain, valuesTable: kv.TblAccountVals,
-		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-
-		integrity:   integrityCheck,
-		compression: seg.CompressNone,
-
-		hist: histCfg{
-			valuesTable: kv.TblAccountHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblAccountHistoryKeys, valuesTable: kv.TblAccountIdx},
-		},
-	}
-	if a.d[kv.AccountsDomain], err = NewDomain(cfg, logger); err != nil {
-		return nil, err
-	}
-	cfg = domainCfg{
-		name: kv.StorageDomain, valuesTable: kv.TblStorageVals,
-		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-
-		integrity:   integrityCheck,
-		compression: seg.CompressKeys,
-
-		hist: histCfg{
-			valuesTable: kv.TblStorageHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblStorageHistoryKeys, valuesTable: kv.TblStorageIdx},
-		},
-	}
-	if a.d[kv.StorageDomain], err = NewDomain(cfg, logger); err != nil {
-		return nil, err
-	}
-	cfg = domainCfg{
-		name: kv.CodeDomain, valuesTable: kv.TblCodeVals,
-		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-
-		integrity:   integrityCheck,
-		compression: seg.CompressVals, // compress Code with keys doesn't show any profit. compress of values show 4x ratio on eth-mainnet and 2.5x ratio on bor-mainnet
-		largeValues: true,
-
-		hist: histCfg{
-			valuesTable: kv.TblCodeHistoryVals,
-			compression: seg.CompressKeys | seg.CompressVals,
-
-			historyLargeValues: true,
-
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblCodeHistoryKeys, valuesTable: kv.TblCodeIdx},
-		},
-	}
-	if a.d[kv.CodeDomain], err = NewDomain(cfg, logger); err != nil {
-		return nil, err
-	}
-	cfg = domainCfg{
-		name: kv.CommitmentDomain, valuesTable: kv.TblCommitmentVals,
-		restrictSubsetFileDeletions: a.commitmentValuesTransform,
-
-		replaceKeysInValues: a.commitmentValuesTransform,
-		integrity:           integrityCheck,
-		compression:         seg.CompressKeys,
-
-		hist: histCfg{
-			valuesTable: kv.TblCommitmentHistoryVals,
-			compression: seg.CompressNone,
-
-			snapshotsDisabled:  true,
-			historyLargeValues: false,
-
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblCommitmentHistoryKeys, valuesTable: kv.TblCommitmentIdx},
-		},
-	}
-	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, logger); err != nil {
-		return nil, err
-	}
-	cfg = domainCfg{
-		name: kv.ReceiptDomain, valuesTable: kv.TblReceiptVals,
-		compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-		integrity:   integrityCheck,
-
-		hist: histCfg{
-			valuesTable: kv.TblReceiptHistoryVals,
-			compression: seg.CompressNone,
-
-			historyLargeValues: false,
-
-			iiCfg: iiCfg{salt: salt, dirs: dirs, db: db, withExistence: false, compressorCfg: seg.DefaultCfg,
-				aggregationStep: aggregationStep, keysTable: kv.TblReceiptHistoryKeys, valuesTable: kv.TblReceiptIdx},
-		},
-	}
-	if a.d[kv.ReceiptDomain], err = NewDomain(cfg, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.LogAddrIdxPos, salt, dirs, db, aggregationStep, kv.FileLogAddressIdx, kv.TblLogAddressKeys, kv.TblLogAddressIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.LogTopicIdxPos, salt, dirs, db, aggregationStep, kv.FileLogTopicsIdx, kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.TracesFromIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesFromIdx, kv.TblTracesFromKeys, kv.TblTracesFromIdx, logger); err != nil {
-		return nil, err
-	}
-	if err := a.registerII(kv.TracesToIdxPos, salt, dirs, db, aggregationStep, kv.FileTracesToIdx, kv.TblTracesToKeys, kv.TblTracesToIdx, logger); err != nil {
-		return nil, err
-	}
-	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
-	a.recalcVisibleFiles(a.DirtyFilesEndTxNumMinimax())
-
-	return a, nil
+	}, nil
 }
 
 // getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -317,9 +192,26 @@ func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
 	return salt, nil
 }
 
-func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, db kv.RoDB, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
+func (a *Aggregator) registerDomain(name kv.Domain, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, logger log.Logger) (err error) {
+	cfg := Schema[name]
+	//TODO: move dynamic part of config to InvertedIndex
+	cfg.restrictSubsetFileDeletions = a.commitmentValuesTransform
+	if name == kv.CommitmentDomain {
+		cfg.replaceKeysInValues = a.commitmentValuesTransform
+	}
+	cfg.hist.iiCfg.salt = salt
+	cfg.hist.iiCfg.dirs = dirs
+	cfg.hist.iiCfg.aggregationStep = aggregationStep
+	a.d[name], err = NewDomain(cfg, logger)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadir.Dirs, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, logger log.Logger) error {
 	idxCfg := iiCfg{
-		salt: salt, dirs: dirs, db: db,
+		salt: salt, dirs: dirs,
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
 		keysTable:       indexKeysTable,
@@ -334,8 +226,8 @@ func (a *Aggregator) registerII(idx kv.InvertedIdxPos, salt *uint32, dirs datadi
 	return nil
 }
 
-func (a *Aggregator) StepSize() uint64        { return a.aggregationStep }
-func (a *Aggregator) OnFreeze(f OnFreezeFunc) { a.onFreeze = f }
+func (a *Aggregator) StepSize() uint64           { return a.aggregationStep }
+func (a *Aggregator) OnFreeze(f kv.OnFreezeFunc) { a.onFreeze = f }
 func (a *Aggregator) DisableFsync() {
 	for _, d := range a.d {
 		d.DisableFsync()
@@ -422,7 +314,7 @@ func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers
 func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
-		d.compressCfg.Workers = i
+		d.CompressCfg.Workers = i
 		d.History.compressorCfg.Workers = i
 		d.History.InvertedIndex.compressorCfg.Workers = i
 	}
@@ -439,6 +331,10 @@ func (a *Aggregator) DiscardHistory(name kv.Domain) *Aggregator {
 func (a *Aggregator) EnableHistory(name kv.Domain) *Aggregator {
 	a.d[name].historyDisabled = false
 	return a
+}
+
+func (a *Aggregator) HasBackgroundFilesBuild2() bool {
+	return a.buildingFiles.Load() || a.mergingFiles.Load()
 }
 
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
@@ -608,7 +504,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 }
 
 func (a *Aggregator) buildFiles(ctx context.Context, step uint64) error {
-	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
+	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
@@ -794,7 +690,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep uint64) e
 }
 
 func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
-	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressCfg.Workers)
+	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
@@ -877,14 +773,25 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (ac *AggregatorRoTx) minimaxTxNumInDomainFiles() uint64 {
-	m := min(
-		ac.d[kv.AccountsDomain].files.EndTxNum(),
-		ac.d[kv.CodeDomain].files.EndTxNum(),
-		ac.d[kv.StorageDomain].files.EndTxNum(),
-		ac.d[kv.CommitmentDomain].files.EndTxNum(),
-	)
-	return m
+func (ac *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) uint64 {
+	txNumInFiles := ac.TxNumsInFiles(entitySet...)
+	if txNumInFiles > 0 {
+		txNumInFiles--
+	}
+	return txNumInFiles / ac.a.StepSize()
+}
+
+func (ac *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
+	if len(entitySet) == 0 {
+		panic("assert: missed arguments")
+	}
+	for i, domain := range entitySet {
+		domainEnd := ac.d[domain].files.EndTxNum()
+		if i == 0 || domainEnd < minTxNum {
+			minTxNum = domainEnd
+		}
+	}
+	return minTxNum
 }
 
 func (ac *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
@@ -932,96 +839,6 @@ func (ac *AggregatorRoTx) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx) (un
 		return _minUnwindableBlockNum, false, nil
 	}
 	return blockNum, true, nil
-}
-
-func (ac *AggregatorRoTx) PruneSmallBatchesDb(ctx context.Context, timeout time.Duration, db kv.RwDB) (haveMore bool, err error) {
-	// On tip-of-chain timeout is about `3sec`
-	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
-	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
-
-	furiousPrune := timeout > 5*time.Hour
-	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
-
-	var pruneLimit uint64 = 1_000
-	if furiousPrune {
-		pruneLimit = 10_000_000
-		/* disabling this feature for now - seems it doesn't cancel even after prune finished
-		// start from a bit high limit to give time for warmup
-		// will disable warmup after first iteration and will adjust pruneLimit based on `time`
-		withWarmup = true
-		*/
-	}
-
-	started := time.Now()
-	localTimeout := time.NewTicker(timeout)
-	defer localTimeout.Stop()
-	logPeriod := 30 * time.Second
-	logEvery := time.NewTicker(logPeriod)
-	defer logEvery.Stop()
-	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
-	defer aggLogEvery.Stop()
-
-	fullStat := newAggregatorPruneStat()
-	innerCtx := context.Background()
-	goExit := false
-
-	for {
-		err = db.Update(innerCtx, func(tx kv.RwTx) error {
-			iterationStarted := time.Now()
-			// `context.Background()` is important here!
-			//     it allows keep DB consistent - prune all keys-related data or noting
-			//     can't interrupt by ctrl+c and leave dirt in DB
-			stat, err := ac.Prune(innerCtx, tx, pruneLimit, aggLogEvery)
-			if err != nil {
-				ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
-				return err
-			}
-			if stat == nil {
-				if fstat := fullStat.String(); fstat != "" {
-					ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
-				}
-				goExit = true
-				return nil
-			}
-			fullStat.Accumulate(stat)
-
-			if aggressivePrune {
-				took := time.Since(iterationStarted)
-				if took < 2*time.Second {
-					pruneLimit *= 10
-				}
-				if took > logPeriod {
-					pruneLimit /= 10
-				}
-			}
-
-			select {
-			case <-logEvery.C:
-				ac.a.logger.Info("[snapshots] pruning state",
-					"until commit", time.Until(started.Add(timeout)).String(),
-					"pruneLimit", pruneLimit,
-					"aggregatedStep", (ac.minimaxTxNumInDomainFiles()-1)/ac.a.StepSize(),
-					"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
-					"pruned", fullStat.String(),
-				)
-			default:
-			}
-			return nil
-		})
-		if err != nil {
-			return false, err
-		}
-		select {
-		case <-localTimeout.C: //must be first to improve responsivness
-			return true, nil
-		case <-ctx.Done():
-			return false, ctx.Err()
-		default:
-		}
-		if goExit {
-			return false, nil
-		}
-	}
 }
 
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
@@ -1094,7 +911,7 @@ func (ac *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			ac.a.logger.Info("[snapshots] pruning state",
 				"until commit", time.Until(started.Add(timeout)).String(),
 				"pruneLimit", pruneLimit,
-				"aggregatedStep", (ac.minimaxTxNumInDomainFiles()-1)/ac.a.StepSize(),
+				"aggregatedStep", ac.StepsInFiles(kv.StateDomains...),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
@@ -1272,7 +1089,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 }
 
 func (ac *AggregatorRoTx) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) (uint64, error)) {
-	maxTxNum := ac.minimaxTxNumInDomainFiles()
+	maxTxNum := ac.TxNumsInFiles(kv.StateDomains...)
 	if maxTxNum == 0 {
 		return
 	}
@@ -1410,7 +1227,7 @@ func (a *Aggregator) recalcVisibleFiles(toTxNum uint64) {
 func (a *Aggregator) recalcVisibleFilesMinimaxTxNum() {
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
-	a.visibleFilesMinimaxTxNum.Store(aggTx.minimaxTxNumInDomainFiles())
+	a.visibleFilesMinimaxTxNum.Store(aggTx.TxNumsInFiles(kv.StateDomains...))
 }
 
 type RangesV3 struct {

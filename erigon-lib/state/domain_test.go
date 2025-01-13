@@ -34,10 +34,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/background"
 	datadir2 "github.com/erigontech/erigon-lib/common/datadir"
@@ -51,6 +47,8 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon-lib/seg"
 	"github.com/erigontech/erigon-lib/types"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
 
 type rndGen struct {
@@ -75,35 +73,16 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
-	keysTable := "Keys"
-	valsTable := "Vals"
-	historyKeysTable := "HistoryKeys"
-	historyValsTable := "HistoryVals"
-	settingsTable := "Settings" //nolint
-	indexTable := "Index"
-	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		tcfg := kv.TableCfg{
-			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
-			historyKeysTable:      kv.TableCfgItem{Flags: kv.DupSort},
-			historyValsTable:      kv.TableCfgItem{Flags: kv.DupSort},
-			settingsTable:         kv.TableCfgItem{},
-			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
-			kv.TblPruningProgress: kv.TableCfgItem{},
-		}
-		return tcfg
-	}).MustOpen()
+	cfg := Schema[kv.AccountsDomain]
+	cfg.crossDomainIntegrity = nil //no other domains
+
+	db := mdbx.New(kv.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := domainCfg{
-		name: kv.AccountsDomain, valuesTable: valsTable,
-		hist: histCfg{
-			valuesTable: historyValsTable,
-			compression: seg.CompressNone, historyLargeValues: true,
 
-			iiCfg: iiCfg{salt: &salt, dirs: dirs, db: db, withExistence: false,
-				aggregationStep: aggStep, keysTable: historyKeysTable, valuesTable: indexTable},
-		}}
+	cfg.hist.iiCfg.aggregationStep = aggStep
+	cfg.hist.iiCfg.dirs = dirs
+	cfg.hist.iiCfg.salt = &salt
 	d, err := NewDomain(cfg, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
@@ -156,7 +135,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	ctx := context.Background()
 
 	if compressDomainVals {
-		d.compression = seg.CompressKeys | seg.CompressVals
+		d.Compression = seg.CompressKeys | seg.CompressVals
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -227,7 +206,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		defer sf.CleanupOnError()
 		c.Close()
 
-		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.compression)
+		g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
 		g.Reset(0)
 		var words []string
 		for g.HasNext() {
@@ -532,9 +511,9 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			valuesOuts, indexOuts, historyOuts := dc.staticFilesInRange(r)
 			valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
 			require.NoError(t, err)
-			if valuesIn != nil && valuesIn.decompressor != nil {
-				fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
-			}
+			//if valuesIn != nil && valuesIn.decompressor != nil {
+			//fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
+			//}
 			d.integrateMergedDirtyFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
 			d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 			return false
@@ -1044,28 +1023,38 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	dom.Close()
 }
 
+func emptyTestDomain(aggStep uint64) *Domain {
+	cfg := Schema[kv.AccountsDomain]
+	cfg.crossDomainIntegrity = nil
+
+	salt := uint32(1)
+	cfg.hist.iiCfg.salt = &salt
+	cfg.hist.iiCfg.dirs = datadir2.New(os.TempDir())
+	cfg.hist.iiCfg.aggregationStep = aggStep
+
+	d, err := NewDomain(cfg, log.New())
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
 func TestScanStaticFilesD(t *testing.T) {
 	t.Parallel()
 
-	ii := &Domain{
-		History: &History{
-			histCfg: histCfg{
-				filenameBase: "test",
-			},
-			InvertedIndex: emptyTestInvertedIndex(1)},
-		dirtyFiles: btree2.NewBTreeG[*filesItem](filesItemLess),
-	}
+	d := emptyTestDomain(1)
+
 	files := []string{
-		"v1-test.0-1.kv",
-		"v1-test.1-2.kv",
-		"v1-test.0-4.kv",
-		"v1-test.2-3.kv",
-		"v1-test.3-4.kv",
-		"v1-test.4-5.kv",
+		"v1-accounts.0-1.kv",
+		"v1-accounts.1-2.kv",
+		"v1-accounts.0-4.kv",
+		"v1-accounts.2-3.kv",
+		"v1-accounts.3-4.kv",
+		"v1-accounts.4-5.kv",
 	}
-	ii.scanDirtyFiles(files)
+	d.scanDirtyFiles(files)
 	var found []string
-	ii.dirtyFiles.Walk(func(items []*filesItem) bool {
+	d.dirtyFiles.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
 		}
@@ -1133,7 +1122,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer sf.CleanupOnError()
 	c.Close()
 
-	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.compression)
+	g := seg.NewReader(sf.valuesDecomp.MakeGetter(), d.Compression)
 	g.Reset(0)
 	var words []string
 	for g.HasNext() {
@@ -1470,7 +1459,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1540,7 +1529,7 @@ func TestDomainRange(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileAccountDomain
 
 	dc := d.BeginFilesRo()
@@ -1635,7 +1624,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
 	d.filenameBase = kv.FileCommitmentDomain
 
 	dc := d.BeginFilesRo()
@@ -1731,7 +1720,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -1874,7 +1863,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 	d.historyLargeValues = false
 	d.History.compression = seg.CompressKeys | seg.CompressVals
-	d.compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
 
 	dc := d.BeginFilesRo()
 	defer dc.Close()
@@ -2490,7 +2479,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		lastFile := findFile(st, en)
 		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
 
-		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.compression)
+		lf := seg.NewReader(lastFile.decompressor.MakeGetter(), d.Compression)
 
 		shortenedKey, found := dc.findShortenedKey([]byte(key), lf, lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())

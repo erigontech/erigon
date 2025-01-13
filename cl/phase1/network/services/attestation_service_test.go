@@ -346,7 +346,7 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 		log.Printf("test case: %s", tt.name)
 		t.SetupTest()
 		tt.mock()
-		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationWithGossipData{Attestation: tt.args.msg, GossipData: nil, ImmediateProcess: true})
+		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationForGossip{Attestation: tt.args.msg, ImmediateProcess: true})
 		time.Sleep(time.Millisecond * 60)
 		if tt.wantErr {
 			t.Require().Error(err)

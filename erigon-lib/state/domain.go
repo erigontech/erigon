@@ -95,13 +95,13 @@ type domainCfg struct {
 	hist histCfg
 
 	name        kv.Domain
-	compression seg.FileCompression
-	compressCfg seg.Cfg
-	indexList   idxList // list of indexes for given domain
-	valuesTable string  // bucket to store domain values; key -> inverted_step + values (Dupsort)
+	Compression seg.FileCompression
+	CompressCfg seg.Cfg
+	IndexList   Accessors // list of indexes for given domain
+	valuesTable string    // bucket to store domain values; key -> inverted_step + values (Dupsort)
 	largeValues bool
 
-	integrity rangeDomainIntegrityChecker
+	crossDomainIntegrity rangeDomainIntegrityChecker
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
@@ -129,12 +129,11 @@ var DomainCompressCfg = seg.Cfg{
 
 func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	if cfg.hist.iiCfg.dirs.SnapDomain == "" {
-		panic("empty `dirs` variable")
+		panic("assert: empty `dirs`")
 	}
-	if cfg.indexList == 0 {
-		cfg.indexList = withBTree | withExistence
+	if cfg.hist.filenameBase == "" {
+		panic("assert: emtpy `filenameBase`" + cfg.name.String())
 	}
-	cfg.compressCfg = DomainCompressCfg
 
 	d := &Domain{
 		domainCfg:  cfg,
@@ -143,10 +142,6 @@ func NewDomain(cfg domainCfg, logger log.Logger) (*Domain, error) {
 	}
 
 	var err error
-	if cfg.hist.filenameBase == "" {
-		cfg.hist.filenameBase = cfg.name.String()
-		cfg.hist.iiCfg.filenameBase = cfg.hist.filenameBase
-	}
 	if d.History, err = NewHistory(cfg.hist, logger); err != nil {
 		return nil, err
 	}
@@ -298,10 +293,18 @@ func (d *Domain) closeFilesAfterStep(lowerBound uint64) {
 }
 
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*filesItem) {
-	for _, dirtyFile := range scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger) {
+	if d.filenameBase == "" {
+		panic("assert: empty `filenameBase`")
+	}
+	if d.aggregationStep == 0 {
+		panic("assert: empty `aggregationStep`")
+	}
+
+	l := scanDirtyFiles(fileNames, d.aggregationStep, d.filenameBase, "kv", d.logger)
+	for _, dirtyFile := range l {
 		startStep, endStep := dirtyFile.startTxNum/d.aggregationStep, dirtyFile.endTxNum/d.aggregationStep
 		domainName, _ := kv.String2Domain(d.filenameBase)
-		if d.integrity != nil && !d.integrity(domainName, startStep, endStep) {
+		if d.crossDomainIntegrity != nil && !d.crossDomainIntegrity(domainName, d.dirs, startStep, endStep) {
 			d.logger.Debug("[agg] skip garbage file", "name", d.filenameBase, "startStep", startStep, "endStep", endStep)
 			continue
 		}
@@ -355,7 +358,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 			}
 
-			if item.index == nil && d.indexList&withHashMap != 0 {
+			if item.index == nil && d.IndexList&AccessorHashMap != 0 {
 				fPath := d.kvAccessorFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -370,7 +373,7 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 				}
 			}
-			if item.bindex == nil && d.indexList&withBTree != 0 {
+			if item.bindex == nil && d.IndexList&AccessorBTree != 0 {
 				fPath := d.kvBtFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -382,14 +385,14 @@ func (d *Domain) openDirtyFiles() (err error) {
 					if toStep == 0 && d.filenameBase == "commitment" {
 						btM = 128
 					}
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, btM, item.decompressor, d.compression); err != nil {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, btM, item.decompressor, d.Compression); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
 				}
 			}
-			if item.existence == nil && d.indexList&withExistence != 0 {
+			if item.existence == nil && d.IndexList&AccessorExistence != 0 {
 				fPath := d.kvExistenceIdxFilePath(fromStep, toStep)
 				exists, err := dir.FileExist(fPath)
 				if err != nil {
@@ -440,7 +443,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcVisibleFiles(toTxNum uint64) {
-	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.indexList, false, toTxNum))
+	d._visible = newDomainVisible(d.name, calcVisibleFiles(d.dirtyFiles, d.IndexList, false, toTxNum))
 	d.History.reCalcVisibleFiles(toTxNum)
 }
 
@@ -671,7 +674,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 	}
 
 	g := dt.statelessGetter(i)
-	if dt.d.indexList&withBTree != 0 {
+	if dt.d.IndexList&AccessorBTree != 0 {
 		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, g)
 		if err != nil || !ok {
 			return nil, false, 0, err
@@ -679,19 +682,19 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
 		return v, true, offset, nil
 	}
-	if dt.d.indexList&withHashMap != 0 {
+	if dt.d.IndexList&AccessorHashMap != 0 {
 		reader := dt.statelessIdxReader(i)
 		if reader.Empty() {
 			return nil, false, 0, nil
 		}
-		offset, ok := reader.Lookup(filekey)
+		offset, ok := reader.TwoLayerLookup(filekey)
 		if !ok {
 			return nil, false, 0, nil
 		}
 		g.Reset(offset)
 
 		k, _ := g.Next(nil)
-		if !bytes.Equal(filekey, k) {
+		if !bytes.Equal(filekey, k) { // MPH false-positives protection
 			return nil, false, 0, nil
 		}
 		v, _ := g.Next(nil)
@@ -771,7 +774,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 	}()
 
 	coll.valuesPath = d.kvFilePath(stepFrom, stepTo)
-	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.compressCfg, log.LvlTrace, d.logger); err != nil {
+	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 
@@ -780,7 +783,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo uint64, wal *e
 	//comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
 	compress := seg.CompressNone
 	if stepTo-stepFrom > DomainMinStepsToCompress {
-		compress = d.compression
+		compress = d.Compression
 	}
 	comp := seg.NewWriter(coll.valuesComp, compress)
 
@@ -883,7 +886,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}()
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
-	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.compressCfg, log.LvlTrace, d.logger); err != nil {
+	if coll.valuesComp, err = seg.NewCompressor(ctx, d.filenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 
@@ -1048,29 +1051,29 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo uint64, co
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
-	if d.indexList&withHashMap != 0 {
+	if d.IndexList&AccessorHashMap != 0 {
 		if err = d.buildAccessor(ctx, stepFrom, stepTo, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.efAccessorFilePath(stepFrom, stepTo))
+		valuesIdx, err = recsplit.OpenIndex(d.kvAccessorFilePath(stepFrom, stepTo))
 		if err != nil {
 			return StaticFiles{}, err
 		}
 	}
 
-	if d.indexList&withBTree != 0 {
+	if d.IndexList&AccessorBTree != 0 {
 		btPath := d.kvBtFilePath(stepFrom, stepTo)
 		btM := DefaultBtreeM
 		if stepFrom == 0 && d.filenameBase == "commitment" {
 			btM = 128
 		}
 
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.Compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	if d.indexList&withExistence != 0 {
+	if d.IndexList&AccessorExistence != 0 {
 		fPath := d.kvExistenceIdxFilePath(stepFrom, stepTo)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
@@ -1151,28 +1154,28 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
-	if d.indexList&withHashMap != 0 {
+	if d.IndexList&AccessorHashMap != 0 {
 		if err = d.buildAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 		}
-		valuesIdx, err = recsplit.OpenIndex(d.efAccessorFilePath(step, step+1))
+		valuesIdx, err = recsplit.OpenIndex(d.kvAccessorFilePath(step, step+1))
 		if err != nil {
 			return StaticFiles{}, err
 		}
 	}
 
-	if d.indexList&withBTree != 0 {
+	if d.IndexList&AccessorBTree != 0 {
 		btPath := d.kvBtFilePath(step, step+1)
 		btM := DefaultBtreeM
 		if step == 0 && d.filenameBase == "commitment" {
 			btM = 128
 		}
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, btM, valuesDecomp, d.Compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.filenameBase, err)
 		}
 	}
-	if d.indexList&withExistence != 0 {
+	if d.IndexList&AccessorExistence != 0 {
 		fPath := d.kvExistenceIdxFilePath(step, step+1)
 		exists, err := dir.FileExist(fPath)
 		if err != nil {
@@ -1198,17 +1201,17 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 func (d *Domain) buildAccessor(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kvAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums:              false,
-		LessFalsePositives: false,
+		Enums:              true,
+		LessFalsePositives: true,
 
-		BucketSize: 2000,
-		LeafSize:   8,
+		BucketSize: recsplit.DefaultBucketSize,
+		LeafSize:   recsplit.DefaultLeafSize,
 		TmpDir:     d.dirs.Tmp,
 		IndexFile:  idxPath,
 		Salt:       d.salt,
 		NoFsync:    d.noFsync,
 	}
-	return buildAccessor(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger)
+	return buildAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
 }
 
 func (d *Domain) missedBtreeAccessors() (l []*filesItem) {
@@ -1260,7 +1263,7 @@ func (d *Domain) missedAccessors() (l []*filesItem) {
 func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	d.History.BuildMissedAccessors(ctx, g, ps)
 	for _, item := range d.missedBtreeAccessors() {
-		if d.indexList&withBTree == 0 {
+		if d.IndexList&AccessorBTree == 0 {
 			continue
 		}
 		if item.decompressor == nil {
@@ -1271,14 +1274,14 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		g.Go(func() error {
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			idxPath := d.kvBtFilePath(fromStep, toStep)
-			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, d.compression, ps, d.dirs.Tmp, *d.salt, d.logger, d.noFsync); err != nil {
+			if err := BuildBtreeIndexWithDecompressor(idxPath, item.decompressor, d.Compression, ps, d.dirs.Tmp, *d.salt, d.logger, d.noFsync); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil
 		})
 	}
 	for _, item := range d.missedAccessors() {
-		if d.indexList&withHashMap == 0 {
+		if d.IndexList&AccessorHashMap == 0 {
 			continue
 		}
 		if item.decompressor == nil {
@@ -1448,7 +1451,7 @@ func (dt *DomainRoTx) getFromFiles(filekey []byte, maxTxNum uint64) (v []byte, f
 	if maxTxNum == 0 {
 		maxTxNum = math.MaxUint64
 	}
-	useExistenceFilter := dt.d.indexList&withExistence != 0
+	useExistenceFilter := dt.d.IndexList&AccessorExistence != 0
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
 	hi, _ := dt.ht.iit.hashKey(filekey)
@@ -1610,7 +1613,7 @@ func (dt *DomainRoTx) statelessGetter(i int) *seg.Reader {
 	}
 	r := dt.getters[i]
 	if r == nil {
-		r = seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.compression)
+		r = seg.NewReader(dt.files[i].src.decompressor.MakeGetter(), dt.d.Compression)
 		dt.getters[i] = r
 	}
 	return r

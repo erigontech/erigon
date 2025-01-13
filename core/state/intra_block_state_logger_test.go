@@ -20,17 +20,16 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/kv/rawdbv3"
 	"github.com/erigontech/erigon-lib/log/v3"
 	stateLib "github.com/erigontech/erigon-lib/state"
-
 	"github.com/erigontech/erigon/core/tracing"
 	"github.com/erigontech/erigon/core/tracing/mocks"
-
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
-	gomock "go.uber.org/mock/gomock"
 )
 
 func TestStateLogger(t *testing.T) {
