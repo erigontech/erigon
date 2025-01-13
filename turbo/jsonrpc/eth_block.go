@@ -248,9 +248,20 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
-		if borTx != nil {
-			borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTxHash = possibleBorTxnHash
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, b.NumberU64())
+			if borTx != nil {
+				borTxHash = bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
+			}
 		}
 	}
 
@@ -318,9 +329,20 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	var borTx types.Transaction
 	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
-		borTx = rawdb.ReadBorTransactionForBlock(tx, number)
-		if borTx != nil {
-			borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
+		if api.useBridgeReader {
+			possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				borTxHash = possibleBorTxnHash
+			}
+		} else {
+			borTx = rawdb.ReadBorTransactionForBlock(tx, number)
+			if borTx != nil {
+				borTxHash = bortypes.ComputeBorTxHash(number, block.Hash())
+			}
 		}
 	}
 
