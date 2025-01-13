@@ -384,6 +384,7 @@ func (w *StateWriterBufferedV3) UpdateAccountData(address common.Address, origin
 		}
 	}
 	value := accounts.SerialiseV3(account)
+	fmt.Println(address, "prev", original.Balance, "after", account.Balance, "nonce", original.Nonce, account.Nonce)
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
