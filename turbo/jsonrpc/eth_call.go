@@ -464,6 +464,55 @@ func verifyExecResult(execResult *core.EphemeralExecResult, block *types.Block) 
 	return nil
 }
 
+// verify the state consistency between the history state reader and the hph.Ctx reader
+func verifyStateConsistency(touchedPlainKeys [][]byte, stateReader state.StateReader, hph *commitment.HexPatriciaHashed) (bool, error) {
+	ctx := hph.GetPatriciaContext()
+	for _, key := range touchedPlainKeys {
+		if len(key) == 20 { //account address
+			address := libcommon.Address(key)
+			accountInStateReader, err := stateReader.ReadAccountData(address)
+			if err != nil {
+				return false, err
+			}
+			accountDataInTrie, err := ctx.Account(key)
+			if err != nil {
+				return false, err
+			}
+			accountInTrie := accounts.Account{
+				Nonce:           accountDataInTrie.Nonce,
+				Balance:         accountDataInTrie.Balance,
+				Root:            accountDataInTrie.Storage,
+				CodeHash:        accountDataInTrie.CodeHash,
+				Incarnation:     accountInStateReader.Incarnation, // these 2 are copied over since they don't affect the RLP encoding
+				PrevIncarnation: accountInStateReader.PrevIncarnation,
+			}
+			if !accountInStateReader.Equals(&accountInTrie) {
+				err := fmt.Errorf("accountInStateReader(%+v) != accountInPatriciaContext(%+v)", accountInStateReader, accountInTrie)
+				return false, err
+			}
+
+		} else {
+			address := libcommon.Address(key[:20])
+			storageKey := libcommon.Hash(key[20:])
+			storageValInStateReader, err := stateReader.ReadAccountStorage(address, 0, &storageKey)
+			if err != nil {
+				return false, err
+			}
+
+			storageDataInTrie, err := ctx.Storage(storageKey[:])
+			if err != nil {
+				return false, err
+			}
+			storageValInPatriciaContext := storageDataInTrie.Storage[:]
+			if !bytes.Equal(storageValInStateReader, storageDataInTrie.Storage[:]) {
+				return false, fmt.Errorf("storageValInStateReader(%x) != storageValInPatriciaContext(%x)", storageValInStateReader, storageValInPatriciaContext)
+			}
+
+		}
+	}
+	return true, nil
+}
+
 func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutility.Bytes, error) {
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -573,6 +622,19 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// gather touched keys from ephemeral block execution
 	touchedPlainKeys, touchedHashedKeys := store.Tds.GetTouchedPlainKeys()
 	codeReads := store.Tds.BuildCodeTouches()
+
+	// Verify that consistency of account and storage data for touched keys between the state reader
+	// and the patricia context (hph.ctx)
+	// If there is any inconsistency there will inevitably be a root hash mismatch later on when
+	// we try to construct the witness trie
+	isStateConsistent, err := verifyStateConsistency(touchedPlainKeys, store.Tds.StateReader, hph)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isStateConsistent {
+		return nil, fmt.Errorf("state is inconsistent: %w", err)
+	}
 
 	// define these keys as "updates", but we are not really updating anything, we just want to load them into the grid,
 	// so this is just to satisfy the current hex patricia trie api.

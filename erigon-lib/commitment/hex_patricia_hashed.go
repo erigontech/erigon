@@ -1131,6 +1131,10 @@ func (c *cell) String() string {
 	return s
 }
 
+func (hph *HexPatriciaHashed) GetPatriciaContext() PatriciaContext {
+	return hph.ctx
+}
+
 func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("GRID:\n")
 	for row := 0; row < hph.activeRows; row++ {
