@@ -15,6 +15,7 @@ frontier.
 
 - [Erigon](#erigon)
 - [System Requirements](#system-requirements)
+- [Sync Times](#sync-times)
 - [Usage](#usage)
     - [Getting Started](#getting-started)
     - [Datadir structure](#datadir-structure)
@@ -96,6 +97,18 @@ on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-fil
 🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
 
 🔬 More details on what type of data stored [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)
+
+Sync Times
+==========
+
+These are the sync times syncing from scratch to the tip of the chain.
+
+
+| Chain      | Archive         | Full           | Minimal        |
+|------------|-----------------|----------------|----------------|
+| Ethereum   | 7 Hours, 55 Minutes | 4 Hours, 23 Minutes | 1 Hour, 41 Minutes |
+| Gnosis     | 2 Hours, 10 Minutes | 1 Hour, 5 Minutes  | 33 Minutes      |
+| Polygon    | 1 Day, 21 Hours    | 21 Hours, 41 Minutes | 11 Hours, 54 Minutes |
 
 Usage
 =====
