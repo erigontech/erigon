@@ -25,9 +25,21 @@ func ValidateAATransaction(
 	evm *vm.EVM,
 	chainConfig *chain.Config,
 ) (paymasterContext []byte, validationGasUsed uint64, err error) {
-	senderCodeSize := ibs.GetCodeSize(*tx.SenderAddress)
-	paymasterCodeSize := ibs.GetCodeSize(*tx.Paymaster)
-	deployerCodeSize := ibs.GetCodeSize(*tx.Deployer)
+	senderCodeSize, err := ibs.GetCodeSize(*tx.SenderAddress)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	paymasterCodeSize, err := ibs.GetCodeSize(*tx.Paymaster)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	deployerCodeSize, err := ibs.GetCodeSize(*tx.Deployer)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	if err := PerformTxnStaticValidation(tx, senderCodeSize, paymasterCodeSize, deployerCodeSize); err != nil {
 		return nil, 0, err
 	}
@@ -47,7 +59,14 @@ func ValidateAATransaction(
 	// Deployer frame
 	msg := tx.DeployerFrame()
 	validateDeployer := func(ibs evmtypes.IntraBlockState, epc *core.EntryPointCall) error {
-		if ibs.GetCodeSize(*tx.SenderAddress) == 0 {
+		senderCodeSize, err := ibs.GetCodeSize(*tx.SenderAddress)
+		if err != nil {
+			return wrapError(fmt.Errorf(
+				"error getting code for sender:%s err:%s",
+				tx.SenderAddress.String(), err,
+			))
+		}
+		if senderCodeSize == 0 {
 			return wrapError(fmt.Errorf(
 				"sender not deployed by the deployer, sender:%s deployer:%s",
 				tx.SenderAddress.String(), tx.Deployer.String(),
@@ -357,88 +376,6 @@ func PerformTxnStaticValidation(
 		paymasterValidationGasLimit,
 		senderCodeSize, paymasterCodeSize, deployerCodeSize,
 	)
-}
-
-func PerformStaticValidation(
-	paymasterAddress, deployerAddress, senderAddress *common.Address,
-	paymasterData, deployerData []byte,
-	paymasterValidationGasLimit uint64,
-	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
-) error {
-	hasPaymaster := paymasterAddress != nil
-	hasPaymasterData := paymasterData != nil && len(paymasterData) != 0
-	hasPaymasterGasLimit := paymasterValidationGasLimit != 0
-	hasDeployer := deployerAddress != nil
-	hasDeployerData := deployerData != nil && len(deployerData) != 0
-	hasCodeSender := senderCodeSize != 0
-	hasCodeDeployer := deployerCodeSize != 0
-
-	if !hasDeployer && hasDeployerData {
-		return wrapError(
-			fmt.Errorf(
-				"deployer data of size %d is provided but deployer address is not set",
-				len(deployerData),
-			),
-		)
-	}
-	if !hasPaymaster && (hasPaymasterData || hasPaymasterGasLimit) {
-		return wrapError(
-			fmt.Errorf(
-				"paymaster data of size %d (or a gas limit: %d) is provided but paymaster address is not set",
-				len(deployerData),
-				paymasterValidationGasLimit,
-			),
-		)
-	}
-
-	if hasPaymaster {
-		if !hasPaymasterGasLimit {
-			return wrapError(
-				fmt.Errorf(
-					"paymaster address  %s is provided but 'paymasterVerificationGasLimit' is zero",
-					paymasterAddress.String(),
-				),
-			)
-		}
-		hasCodePaymaster := paymasterCodeSize != 0
-		if !hasCodePaymaster {
-			return wrapError(
-				fmt.Errorf(
-					"paymaster address %s is provided but contract has no code deployed",
-					paymasterAddress.String(),
-				),
-			)
-		}
-	}
-
-	if hasDeployer {
-		if !hasCodeDeployer {
-			return wrapError(
-				fmt.Errorf(
-					"deployer address %s is provided but contract has no code deployed",
-					deployerAddress.String(),
-				),
-			)
-		}
-		if hasCodeSender {
-			return wrapError(
-				fmt.Errorf(
-					"sender address %s and deployer address %s are provided but sender is already deployed",
-					senderAddress.String(),
-					deployerAddress.String(),
-				))
-		}
-	}
-
-	if !hasDeployer && !hasCodeSender {
-		return wrapError(
-			fmt.Errorf(
-				"account is not deployed and no deployer is specified, account:%s", txn.SenderAddress.String(),
-			),
-		)
-	}
-
-	return nil
 }
 
 // ValidationPhaseError is an API error that encompasses an EVM revert with JSON error

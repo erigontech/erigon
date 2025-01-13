@@ -56,7 +56,6 @@ import (
 	"github.com/erigontech/erigon-lib/kv/order"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
-	"github.com/erigontech/erigon/polygon/aa"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -905,7 +904,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 			return txpoolcfg.InvalidAA // TODO: choose correct discard reason
 		}
 
-		err = aa.PerformStaticValidation(
+		err = aaStaticvalidation(
 			txn.Paymaster, txn.Deployer, txn.SenderAddress,
 			txn.PaymasterData, txn.DeployerData,
 			txn.PaymasterValidationGasLimit,
@@ -989,6 +988,80 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.InsufficientFunds
 	}
 	return txpoolcfg.Success
+}
+
+// TODO: duplicated code from aa_exec
+func aaStaticvalidation(
+	paymasterAddress, deployerAddress, senderAddress *common.Address,
+	paymasterData, deployerData []byte,
+	paymasterValidationGasLimit uint64,
+	senderCodeSize, paymasterCodeSize, deployerCodeSize int,
+) error {
+	hasPaymaster := paymasterAddress != nil
+	hasPaymasterData := paymasterData != nil && len(paymasterData) != 0
+	hasPaymasterGasLimit := paymasterValidationGasLimit != 0
+	hasDeployer := deployerAddress != nil
+	hasDeployerData := deployerData != nil && len(deployerData) != 0
+	hasCodeSender := senderCodeSize != 0
+	hasCodeDeployer := deployerCodeSize != 0
+
+	if !hasDeployer && hasDeployerData {
+		return fmt.Errorf(
+			"deployer data of size %d is provided but deployer address is not set",
+			len(deployerData),
+		)
+
+	}
+	if !hasPaymaster && (hasPaymasterData || hasPaymasterGasLimit) {
+		return fmt.Errorf(
+			"paymaster data of size %d (or a gas limit: %d) is provided but paymaster address is not set",
+			len(deployerData), paymasterValidationGasLimit,
+		)
+
+	}
+
+	if hasPaymaster {
+		if !hasPaymasterGasLimit {
+			return fmt.Errorf(
+				"paymaster address  %s is provided but 'paymasterVerificationGasLimit' is zero",
+				paymasterAddress.String(),
+			)
+
+		}
+		hasCodePaymaster := paymasterCodeSize != 0
+		if !hasCodePaymaster {
+			return fmt.Errorf(
+				"paymaster address %s is provided but contract has no code deployed",
+				paymasterAddress.String(),
+			)
+
+		}
+	}
+
+	if hasDeployer {
+		if !hasCodeDeployer {
+			return fmt.Errorf(
+				"deployer address %s is provided but contract has no code deployed",
+				deployerAddress.String(),
+			)
+
+		}
+		if hasCodeSender {
+			return fmt.Errorf(
+				"sender address %s and deployer address %s are provided but sender is already deployed",
+				senderAddress.String(), deployerAddress.String(),
+			)
+		}
+	}
+
+	if !hasDeployer && !hasCodeSender {
+		return fmt.Errorf(
+			"account is not deployed and no deployer is specified",
+		)
+
+	}
+
+	return nil
 }
 
 var maxUint256 = new(uint256.Int).SetAllOne()
