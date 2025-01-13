@@ -346,9 +346,11 @@ func TestSetCodeAuthRawParsing(t *testing.T) {
 	actualAddress := common.HexToAddress("0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe")
 
 	p, err = rlp.ParseU256(payload, p, &chainID)
+	require.NoError(t, err)
 	require.Equal(t, chainID.Uint64(), uint64(1))
 
 	p, datalen, err := rlp.ParseString(payload, p)
+	require.NoError(t, err)
 	require.Equal(t, datalen, 20)
 
 	address = common.BytesToAddress(payload[p : p+datalen])
@@ -356,6 +358,7 @@ func TestSetCodeAuthRawParsing(t *testing.T) {
 
 	p += 20
 	p, nonce, err = rlp.ParseU64(payload, p)
+	require.NoError(t, err)
 	require.Equal(t, nonce, uint64(10))
 }
 
