@@ -2,7 +2,7 @@ package appendables
 
 import (
 	"context"
-	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/kv"
 )
@@ -10,83 +10,81 @@ import (
 // stores only canonical values (either canonicity known beforehand; or unwind removes non-canonical values)
 // examples: bor events/spans/milestones/checkpoints; caplin beaconblocks; receipts (only for canonical blocks)
 type CanonicalAppendable struct {
-	*BaseAppendable
+	*ProtoAppendable
 	valsTbl string
 	mp      TsNumMapper
 }
 
-func NewCanonicalAppendable() *CanonicalAppendable {
-	return &CanonicalAppendable{BaseAppendable: &BaseAppendable{}}
+func NewCanonicalAppendable() Appendable {
+	return &CanonicalAppendable{ProtoAppendable: &ProtoAppendable{}}
 }
 
-func (a *CanonicalAppendable) SetTsNumMapper(mapper TsNumMapper) {
-	a.mp = mapper
-}
+func (a *CanonicalAppendable) SetTsNumMapper(mapper TsNumMapper) { a.mp = mapper }
 
-func (a *CanonicalAppendable) Get(tsNum uint64, tx kv.Tx) (VVType, error) {
+func (a *CanonicalAppendable) Get(tsNum TsNum, tx kv.Tx) (VVType, error) {
 	// first look into snapshots..
 	lastTsNum := a.VisibleSegmentsMaxTsNum()
+	itsNum := uint64(tsNum)
 	if tsNum <= lastTsNum {
 		if a.baseKeySameAsTsNum {
-			// can do binary search or loop over visible segments and find which segment contains tsNum
+			// TODO: can do binary search or loop over visible segments and find which segment contains tsNum
 			// and then get from there
 			var v *VisibleSegment
-			return v.Get(tsNum)
+
+			// Note: Get assumes that the first index allows ordinal lookup on tsNum. Is this valid assumption?
+			// for borevents this is not a valid assumption
+			if a.indexBuilders[0].AllowsOrdinalLookupByTsNum() {
+				return v.Get(itsNum)
+			} else {
+				return nil, fmt.Errorf("ordinal lookup by tsNum not supported for %s", a.enum)
+			}
 		} else {
 			// TODO: loop over all visible segments and find which segment contains tsNum
 		}
 	}
 
 	// then db
-	key := make([]byte, 8)
-	binary.BigEndian.PutUint64(key, tsNum)
-	return tx.GetOne(a.valsTbl, key)
+	return tx.GetOne(a.valsTbl, a.encTs(itsNum))
 }
 
-func (a *CanonicalAppendable) Put(tsNum uint64, value VVType, tx kv.RwTx) error {
-	key := make([]byte, 8)
-	binary.BigEndian.PutUint64(key, tsNum)
-	return tx.Append(a.valsTbl, key, value)
+func (a *CanonicalAppendable) Put(tsNum TsNum, value VVType, tx kv.RwTx) error {
+	return tx.Append(a.valsTbl, a.encTs(uint64(tsNum)), value)
 }
 
-func (a *CanonicalAppendable) Prune(ctx context.Context, baseKeyTo, limit uint64, rwTx kv.RwTx) error {
-	// similar to unwind, but with a limit and going reverse
-	return nil
+func (a *CanonicalAppendable) Prune(ctx context.Context, baseKeyTo TsNum, limit uint64, rwTx kv.RwTx) error {
+	// probably fromKey value needs to be in configuration...it is 1 because we want to keep genesis block
+	// but this might start from 0 as well.
+	stre := a.mp.Get(1, baseKeyTo, rwTx)
+	defer stre.Close()
+	fromKey, err := stre.Next()
+	if err != nil {
+		return err
+	}
+	stre.Close()
+
+	stre = a.mp.Get(baseKeyTo, TsNum(MaxUint64), rwTx)
+	defer stre.Close()
+	toKey, err := stre.Next()
+	if err != nil {
+		return err
+	}
+	stre.Close()
+
+	return DeleteRangeFromTbl(a.valsTbl, fromKey, toKey, limit, rwTx)
 }
 
-func (a *CanonicalAppendable) Unwind(ctx context.Context, baseKeyFrom uint64, rwTx kv.RwTx) error {
-	stre := a.mp.Get(baseKeyFrom, MaxUint64, rwTx)
+func (a *CanonicalAppendable) Unwind(ctx context.Context, baseKeyFrom TsNum, rwTx kv.RwTx) error {
+	stre := a.mp.Get(baseKeyFrom, TsNum(MaxUint64), rwTx)
 	defer stre.Close()
 	vkey, err := stre.Next()
 	if err != nil {
 		return err
 	}
-
 	stre.Close()
 
-	c, err := rwTx.Cursor(a.valsTbl)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
+	return DeleteRangeFromTbl(a.valsTbl, vkey, nil, MaxUint64, rwTx)
+}
 
-	firstK, _, err := c.Seek(vkey)
-	if err != nil {
-		return err
-	}
-	if firstK == nil {
-		return nil
-	}
-
-	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
-		if err != nil {
-			return err
-		}
-
-		if err := rwTx.Delete(a.valsTbl, k); err != nil {
-			return err
-		}
-	}
-
-	return nil
+func (a *CanonicalAppendable) encTs(ts uint64) []byte {
+	return Encode64ToBytes(ts, true)
 }

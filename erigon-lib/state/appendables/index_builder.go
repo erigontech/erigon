@@ -30,12 +30,13 @@ type IndexKeyFactory interface {
 }
 
 type IndexBuilder[IndexType any] interface {
-	Build(ctx context.Context, stepKeyFrom, stepKeyTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (IndexType, error)
+	Build(ctx context.Context, baseTsNumFrom, baseTsNumTo TsNum, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (IndexType, error)
 }
 
 type AccessorIndexBuilder interface {
 	IndexBuilder[*recsplit.Index]
 	SetAccessorArgs(*AccessorArgs)
+	AllowsOrdinalLookupByTsNum() bool
 }
 
 type AccessorArgs struct {
@@ -71,6 +72,7 @@ func NewSimpleAccessorBuilder(args *AccessorArgs, enum ApEnum, indexPos uint64) 
 		args:     args,
 		enum:     enum,
 		indexPos: indexPos,
+		kf:       simpleIndexKeyFactoryInstance,
 		//version:
 	}
 }
@@ -88,6 +90,10 @@ func (s *SimpleAccessorBuilder) GetInputDataQuery(stepKeyFrom, stepKeyTo uint64)
 
 func (s *SimpleAccessorBuilder) SetIndexKeyFactory(factory IndexKeyFactory) {
 	s.kf = factory
+}
+
+func (s *SimpleAccessorBuilder) AllowsOrdinalLookupByTsNum() bool {
+	return s.args.enums
 }
 
 func (s *SimpleAccessorBuilder) Build(ctx context.Context, stepFrom, stepTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (*recsplit.Index, error) {
@@ -192,15 +198,15 @@ func (s *seg_stream) Close() {
 	s.g = nil
 }
 
+// index key factory "manufactoring" index keys only
+var simpleIndexKeyFactoryInstance = &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
+
 type SimpleIndexKeyFactory struct {
 	num []byte
 }
 
-func NewNoopIndexKeyFactory() IndexKeyFactory {
-	return &SimpleIndexKeyFactory{num: make([]byte, binary.MaxVarintLen64)}
-}
-
 func (n *SimpleIndexKeyFactory) Make(_ []byte, index uint64) []byte {
+	// everywhere except heimdall indexes, which use BigIndian format
 	nm := binary.PutUvarint(n.num, index)
 	return n.num[:nm]
 }

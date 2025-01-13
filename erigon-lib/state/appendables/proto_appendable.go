@@ -14,7 +14,7 @@ import (
 	"github.com/tidwall/btree"
 )
 
-type BaseAppendable struct {
+type ProtoAppendable struct {
 	freezer Freezer
 
 	enum          ApEnum
@@ -32,33 +32,44 @@ type BaseAppendable struct {
 	logger log.Logger
 }
 
-func (a *BaseAppendable) SetFreezer(freezer Freezer) {
+func NewProtoAppendable(enum ApEnum, stepSize uint64) *ProtoAppendable {
+	return &ProtoAppendable{
+		enum:     enum,
+		stepSize: stepSize,
+	}
+}
+
+func (a *ProtoAppendable) SetFreezer(freezer Freezer) {
 	a.freezer = freezer
 }
 
-func (a *BaseAppendable) SetIndexBuilders(indexBuilders []AccessorIndexBuilder) {
+func (a *ProtoAppendable) SetIndexBuilders(indexBuilders []AccessorIndexBuilder) {
 	a.indexBuilders = indexBuilders
 }
 
-func (a *BaseAppendable) VisibleSegmentsMaxTsNum() uint64 {
-	// if snapshots store the last tsNum
-	latest := a._visible[len(a._visible)-1]
-	return latest.GetLastTsNum()
+func (a *ProtoAppendable) BaseKeySameAsTsNum() {
+	a.baseKeySameAsTsNum = true
 }
 
-func (a *BaseAppendable) DirtySegmentsMaxTsNum() uint64 {
+func (a *ProtoAppendable) VisibleSegmentsMaxTsNum() TsNum {
+	// if snapshots store the last tsNum
+	latest := a._visible[len(a._visible)-1]
+	return TsNum(latest.GetLastTsNum())
+}
+
+func (a *ProtoAppendable) DirtySegmentsMaxTsNum() TsNum {
 	// if snapshots store the last tsNum
 	latest, ok := a.dirtyFiles.Max()
 	if !ok {
 		return 0
 	}
-	return latest.GetLastTsNum()
+	return TsNum(latest.GetLastTsNum())
 }
 
-func (a *BaseAppendable) BuildFiles(ctx context.Context, baseTsNumFrom, baseTsNumTo uint64, db kv.RoDB, ps *background.ProgressSet) error {
-	stepFrom, stepTo := baseTsNumFrom/a.stepSize, baseTsNumTo/a.stepSize
+func (a *ProtoAppendable) BuildFiles(ctx context.Context, baseTsNumFrom, baseTsNumTo TsNum, db kv.RoDB, ps *background.ProgressSet) error {
+	stepFrom, stepTo := uint64(baseTsNumFrom)/a.stepSize, uint64(baseTsNumTo)/a.stepSize
 	for step := stepFrom; step <= stepTo; step++ {
-		from, to := step*a.stepSize, (step+1)*a.stepSize
+		from, to := TsNum(step*a.stepSize), TsNum((step+1)*a.stepSize)
 
 		// can it freeze? just follow base appendable
 		if to > a.baseAppendable.DirtySegmentsMaxTsNum() {
@@ -96,7 +107,7 @@ func (a *BaseAppendable) BuildFiles(ctx context.Context, baseTsNumFrom, baseTsNu
 		}
 
 		dseg := &DirtySegment{
-			Range:        Range{from, to},
+			Range:        Range{uint64(from), uint64(to)},
 			Decompressor: valuesDecomp,
 			filePath:     path,
 			enum:         a.enum,
@@ -121,7 +132,7 @@ func (a *BaseAppendable) BuildFiles(ctx context.Context, baseTsNumFrom, baseTsNu
 	return nil
 }
 
-func (a *BaseAppendable) BuildMissedIndexes(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+func (a *ProtoAppendable) BuildMissedIndexes(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	// use indexbuilders
 	// caller must "refresh" like OpenFolder to refresh the dirty files
 }

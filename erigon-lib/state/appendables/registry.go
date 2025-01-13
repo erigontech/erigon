@@ -16,7 +16,7 @@ type ApConfig struct {
 }
 
 func AppeFileName(baseName string, version snaptype.Version, stepFrom, stepTo uint64) string {
-	return fmt.Sprintf("v%d-%06d-%06d-%s", version, stepFrom, stepTo)
+	return fmt.Sprintf("v%d-%06d-%06d-%s", version, stepFrom, stepTo, baseName)
 }
 
 func AppeSegName(aenum ApEnum, version snaptype.Version, stepFrom, stepTo uint64) string {
