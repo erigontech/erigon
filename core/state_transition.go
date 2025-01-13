@@ -400,7 +400,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtype
 		st.state.SetNonce(st.msg.From(), nonce+1)
 
 		a, _ := st.state.GetBalance(st.msg.From())
-		fmt.Println(st.msg.From(), nonce+1, a)
+		fmt.Println(st.msg.From(), nonce+1, a, st.evm.ChainConfig().IsRegolith(st.evm.Context.Time))
 		// Record deposits as using all their gas (matches the gas pool)
 		// System Transactions are special & are not recorded as using any gas (anywhere)
 		gasUsed := st.msg.Gas()
