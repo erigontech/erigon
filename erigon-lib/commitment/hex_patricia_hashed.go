@@ -1566,6 +1566,42 @@ func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row, 
 	}
 }
 
+// updateKind is a type of update that is being applied to the trie structure.
+type updateKind uint8
+
+const (
+	// updateKindDelete means after we processed longest common prefix, row ended up empty.
+	updateKindDelete updateKind = 0b0
+
+	// updateKindPropagate is an update operation ended up with a single nibble which is leaf or extension node.
+	// We do not store keys with only one cell as a value in db, instead we copy them upwards to the parent branch.
+	//
+	// In case current prefix existed before and node is fused to upper level, this causes deletion for current prefix
+	// and update of branch value on upper level.
+	// 	e.g.: leaf was at prefix 0xbeef, but we fuse it in level above, so
+	//  - delete 0xbeef
+	//  - update 0xbee
+	updateKindPropagate updateKind = 0b01
+
+	// updateKindBranch is an update operation ended up as a branch of 2+ cells.
+	// That does not necessarily means that branch is NEW, it could be an existing branch that was updated.
+	updateKindBranch updateKind = 0b10
+)
+
+// Kind defines how exactly given update should be folded upwards to the parent branch or root.
+// It also returns number of nibbles that left in branch after the operation.
+func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate int) {
+	nibblesAfterUpdate = bits.OnesCount16(afterMap)
+	switch nibblesAfterUpdate {
+	case 0:
+		return updateKindDelete, nibblesAfterUpdate
+	case 1:
+		return updateKindPropagate, nibblesAfterUpdate
+	default:
+		return updateKindBranch, nibblesAfterUpdate
+	}
+}
+
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
 // until that current key becomes a prefix of hashedKey that we will process next
 // (in other words until the needFolding function returns 0)
@@ -1597,7 +1633,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 	depth := hph.depths[row]
 	updateKey := hexToCompact(hph.currentKey[:updateKeyLen])
-	partsCount := bits.OnesCount16(hph.afterMap[row])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.trace {
@@ -1605,8 +1640,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			row, updatedNibs(hph.touchMap[row]&hph.afterMap[row]), depth, hph.currentKey[:hph.currentKeyLen], hph.touchMap[row], hph.afterMap[row])
 	}
 
-	switch partsCount {
-	case 0: // Everything deleted
+	updateKind, nibblesLeftAfterUpdate := afterMapUpdateKind(hph.afterMap[row])
+	switch updateKind {
+	case updateKindDelete: // Everything deleted
 		if hph.touchMap[row] != 0 {
 			if row == 0 {
 				// Root is deleted because the tree is empty
@@ -1636,7 +1672,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		} else {
 			hph.currentKeyLen = 0
 		}
-	case 1: // Leaf or extension node
+	case updateKindPropagate: // Leaf or extension node
 		if hph.touchMap[row] != 0 {
 			// any modifications
 			if row == 0 {
@@ -1650,9 +1686,10 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		cell := &hph.grid[row][nibble]
 		upCell.extLen = 0
 		upCell.stateHashLen = 0
+		// propagate cell into parent row
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
-		// Delete if it existed
-		if hph.branchBefore[row] {
+
+		if hph.branchBefore[row] { // encode Delete if prefix existed before
 			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
 			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
@@ -1664,7 +1701,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		if hph.trace {
 			fmt.Printf("formed leaf (%d %x, depth=%d) [%x] %s\n", row, nibble, depth, updateKey, cell.FullString())
 		}
-	default: // Branch node
+	case updateKindBranch:
 		if hph.touchMap[row] != 0 { // any modifications
 			if row == 0 {
 				hph.rootTouched = true
@@ -1682,7 +1719,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 
 		// Calculate total length of all hashes
-		totalBranchLen := 17 - partsCount // For every empty cell, one byte
+		totalBranchLen := 17 - nibblesLeftAfterUpdate // For every empty cell, one byte
 		for bitset, j := hph.afterMap[row], 0; bitset != 0; j++ {
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
