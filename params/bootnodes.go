@@ -189,6 +189,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return ChiadoBootnodes
 	case networkname.BaseMainnetChainName:
 		return V5OPBootnodes
+	case networkname.OPMainnetChainName:
+		return V5OPBootnodes
 	default:
 		return []string{}
 	}
