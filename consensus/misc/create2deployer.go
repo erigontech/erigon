@@ -28,6 +28,7 @@ func IsCanyonActivationBlock(c *chain.Config, timestamp uint64) bool {
 }
 
 func EnsureCreate2Deployer(c *chain.Config, timestamp uint64, statedb *state.IntraBlockState) bool {
+	fmt.Println("A")
 	if !IsCanyonActivationBlock(c, timestamp) {
 		return false
 	}
