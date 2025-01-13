@@ -67,7 +67,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	}
 
 	var isBorStateSyncTxn bool
-	blockNumber, _, ok, err := api.txnLookup(ctx, tx, txHash)
+	blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -92,37 +92,36 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		isBorStateSyncTxn = true
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
+	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if header == nil {
 		return nil, nil
 	}
 
-	var txIndex int
+	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
+
+	txNumMin, err := txNumsReader.Min(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	if txNumMin+2 > txNum {
+		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
+	}
+
+	var txIndex = int(txNum - txNumMin - 2)
+
 	if isBorStateSyncTxn {
-		txIndex = block.Transactions().Len()
-	} else {
-		var found bool
-		for idx := 0; idx < block.Transactions().Len(); idx++ {
-			txn := block.Transactions()[idx]
-			if txn.Hash() == txHash {
-				txIndex = idx
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, fmt.Errorf("txn with hash %x belongs to currentely non-canonical block %d. only canonical blocks can be traced", txHash, block.NumberU64())
-		}
+		txIndex = -1
 	}
 
 	bn := hexutil.Uint64(blockNumber)
-	hash := block.Hash()
-	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
+	hash := header.Hash()
+	signer := types.MakeSigner(chainConfig, blockNumber, header.Time)
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, _, err := api.callTransaction(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig, traceConfig)
+	trace, _, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -833,7 +832,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 func (api *TraceAPIImpl) callTransaction(
 	ctx context.Context,
 	dbtx kv.TemporalTx,
-	block *types.Block,
+	header *types.Header,
 	traceTypes []string,
 	txIndex int,
 	gasBailOut bool,
@@ -841,21 +840,19 @@ func (api *TraceAPIImpl) callTransaction(
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, consensus.SystemCall, error) {
-	blockNumber := block.NumberU64()
+	blockNumber := header.Number.Uint64()
 	pNo := blockNumber
 	if pNo > 0 {
 		pNo -= 1
 	}
 
 	parentNo := rpc.BlockNumber(pNo)
-	rules := cfg.Rules(blockNumber, block.Time())
-	header := block.Header()
-	txs := block.Transactions()
-	var borStateSyncTxn types.Transaction
+	rules := cfg.Rules(blockNumber, header.Time)
+	var txn types.Transaction
 	var borStateSyncTxnHash common.Hash
 	if cfg.Bor != nil {
-		// check if this block has state sync txn
-		blockHash := block.Hash()
+		// check if this header has state sync txn
+		blockHash := header.Hash()
 		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
 
 		var ok bool
@@ -871,12 +868,17 @@ func (api *TraceAPIImpl) callTransaction(
 			return nil, nil, err
 		}
 		if ok {
-			borStateSyncTxn = bortypes.NewBorTransaction()
-			txs = append(txs, borStateSyncTxn)
+			txn = bortypes.NewBorTransaction()
+		}
+	} else {
+		var err error
+		txn, err = api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 
-	parentHash := block.ParentHash()
+	parentHash := header.ParentHash
 	parentNrOrHash := rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
@@ -897,7 +899,7 @@ func (api *TraceAPIImpl) callTransaction(
 	engine := api.engine()
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -905,15 +907,14 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, nil, err
 	}
 
-	isBorStateSyncTxn := txs[txIndex] == borStateSyncTxn
 	var txnHash common.Hash
 	var msg types.Message
-	if isBorStateSyncTxn {
+	if cfg.Bor != nil {
 		txnHash = borStateSyncTxnHash
 		// we use an empty message for bor state sync txn since it gets handled differently
 	} else {
-		txnHash = txs[txIndex].Hash()
-		msg, err = txs[txIndex].AsMessage(*signer, header.BaseFee, rules)
+		txnHash = txn.Hash()
+		msg, err = txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 		}
@@ -930,7 +931,7 @@ func (api *TraceAPIImpl) callTransaction(
 	callParam := TraceCallParam{
 		txHash:            &txnHash,
 		traceTypes:        traceTypes,
-		isBorStateSyncTxn: isBorStateSyncTxn,
+		isBorStateSyncTxn: cfg.Bor != nil,
 	}
 
 	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,

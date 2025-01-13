@@ -845,12 +845,9 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		isBorStateSyncTxn = true
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
 	if err != nil {
 		return nil, err
-	}
-	if block == nil {
-		return nil, nil
 	}
 
 	txNumsReader := rawdbv3.TxNums.WithCustomReadTxNumFunc(freezeblocks.ReadTxNumFuncFromBlockReader(ctx, api._blockReader))
@@ -867,12 +864,12 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 	var txnIndex = int(txNum - txNumMin - 2)
 
 	if isBorStateSyncTxn {
-		txnIndex = block.Transactions().Len()
+		txnIndex = -1
 	}
 
-	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
+	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, _, err := api.callTransaction(ctx, tx, block, traceTypes, txnIndex, *gasBailOut, signer, chainConfig, traceConfig)
+	trace, _, err := api.callTransaction(ctx, tx, header, traceTypes, txnIndex, *gasBailOut, signer, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
