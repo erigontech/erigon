@@ -88,8 +88,8 @@ func (t *RecurringL1GasPriceTracker) getLatestPrice() *big.Int {
 }
 
 func (t *RecurringL1GasPriceTracker) getLowestPrice() *big.Int {
-	t.latestMtx.Lock()
-	defer t.latestMtx.Unlock()
+	t.lowestMtx.Lock()
+	defer t.lowestMtx.Unlock()
 
 	return t.lowestPrice
 }
