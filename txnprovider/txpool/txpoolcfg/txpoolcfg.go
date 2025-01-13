@@ -120,6 +120,7 @@ const (
 	BlobTxReplace       DiscardReason = 30 // Cannot replace type-3 blob txn with another type of txn
 	BlobPoolOverflow    DiscardReason = 31 // The total number of blobs (through blob txns) in the pool has reached its limit
 	NoAuthorizations    DiscardReason = 32 // EIP-7702 transactions with an empty authorization list are invalid
+	GasLimitTooHigh     DiscardReason = 33 // Gas limit is too high
 )
 
 func (r DiscardReason) String() string {
@@ -197,6 +198,7 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessL
 		gas = fixedgas.TxGasContractCreation
 	} else {
 		gas = fixedgas.TxGas
+		floorGas7623 = fixedgas.TxGas
 	}
 	// Bump the required gas by the amount of transactional data
 	if dataLen > 0 {
@@ -243,11 +245,11 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen uint64, accessL
 		// EIP-7623
 		if isPrague {
 			tokenLen := dataLen + 3*nz
-			floorGas7623, overflow = emath.SafeMul(tokenLen, fixedgas.TxTotalCostFloorPerToken)
+			dataGas, overflow := emath.SafeMul(tokenLen, fixedgas.TxTotalCostFloorPerToken)
 			if overflow {
 				return 0, 0, GasUintOverflow
 			}
-			floorGas7623, overflow = emath.SafeAdd(floorGas7623, fixedgas.TxGas)
+			floorGas7623, overflow = emath.SafeAdd(floorGas7623, dataGas)
 			if overflow {
 				return 0, 0, GasUintOverflow
 			}

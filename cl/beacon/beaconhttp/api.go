@@ -103,13 +103,21 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		ans, err := h.Handle(w, r)
 		if err != nil {
 			var endpointError *EndpointError
-			var e *EndpointError
-			if errors.As(err, &e) {
+			if e, ok := err.(*EndpointError); ok {
+				// Directly use the error if it's already an *EndpointError
 				endpointError = e
 			} else {
+				// Wrap the error in an EndpointError otherwise
 				endpointError = WrapEndpointError(err)
 			}
-			endpointError.WriteTo(w)
+
+			// Write the endpoint error to the response writer
+			if endpointError != nil {
+				endpointError.WriteTo(w)
+			} else {
+				// Failsafe: If the error is nil, write a generic 500 error
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			}
 			return
 		}
 		// TODO: potentially add a context option to buffer these
