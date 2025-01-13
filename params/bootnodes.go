@@ -20,8 +20,6 @@
 package params
 
 import (
-	"strings"
-
 	"github.com/erigontech/erigon-lib/chain/networkname"
 	libcommon "github.com/erigontech/erigon-lib/common"
 )
@@ -166,13 +164,13 @@ func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 }
 
 func BootnodeURLsOfChain(chain string) []string {
-	if OPStackChainConfigByName(chain) != nil {
-		if strings.Contains(chain, "mainnet") {
-			return V5OPBootnodes
-		} else {
-			return V5OPTestnetBootnodes
-		}
-	}
+	// if OPStackChainConfigByName(chain) != nil || chain == networkname.B {
+	// 	if strings.Contains(chain, "mainnet") {
+	// 		return V5OPBootnodes
+	// 	} else {
+	// 		return V5OPTestnetBootnodes
+	// 	}
+	// }
 
 	switch chain {
 	case networkname.Mainnet:
@@ -189,6 +187,8 @@ func BootnodeURLsOfChain(chain string) []string {
 		return GnosisBootnodes
 	case networkname.Chiado:
 		return ChiadoBootnodes
+	case networkname.BaseMainnetChainName:
+		return V5OPBootnodes
 	default:
 		return []string{}
 	}
