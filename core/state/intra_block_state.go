@@ -487,6 +487,8 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if err != nil {
 		return err
 	}
+
+	fmt.Println("Calling AddBalance", addr, amount, reason)
 	stateObject.AddBalance(amount, reason)
 	return nil
 }
