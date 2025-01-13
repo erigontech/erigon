@@ -522,6 +522,7 @@ func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.I
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetNonce(addr libcommon.Address, nonce uint64) error {
+	fmt.Println("SetNonce", addr, nonce)
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
