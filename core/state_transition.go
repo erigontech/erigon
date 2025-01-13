@@ -379,7 +379,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
-	fmt.Println("A")
+	fmt.Println(st.evm.Context.BlockNumber, "A")
 	if mint := st.msg.Mint(); mint != nil {
 		fmt.Println(mint.Uint64())
 		st.state.AddBalance(st.msg.From(), mint, tracing.BalanceIncreaseDaoContract)
