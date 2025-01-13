@@ -80,6 +80,16 @@ func crossReferenceBlockHashes(ctx context.Context, logger log.Logger, startBloc
 		if transactionsRootHash != goldenTransactionsRootHash {
 			return fmt.Errorf("transactionsRoot hash mismatch: blockNum=%d, transactionsRootHash=%s, goldenTransactionsRootHash=%s", blockNum, transactionsRootHash, goldenTransactionsRootHash)
 		}
+
+		transactions, goldenTransactions := resultMap["transactions"].([]interface{}), goldenResultMap["transactions"].([]interface{})
+		if len(transactions) != len(goldenTransactions) {
+			return fmt.Errorf("transactions length mismatch: blockNum=%d, transactions=%d, goldenTransactions=%d", blockNum, len(transactions), len(goldenTransactions))
+		}
+		for i, transaction := range transactions {
+			if transaction.(string) != goldenTransactions[i].(string) {
+				return fmt.Errorf("transaction mismatch: blockNum=%d, transactionIdx=%d, transaction=%s, goldenTransaction=%s", blockNum, i, transaction, goldenTransactions[i])
+			}
+		}
 	}
 
 	logger.Info("Cross reference block hashes completed successfully.")
