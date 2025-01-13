@@ -448,40 +448,40 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
 
-	// If this account has not been read, add to the balance increment map
-	_, needAccount := sdb.stateObjects[addr]
-	if !needAccount && addr == ripemd && amount.IsZero() {
-		needAccount = true
-	}
-	if !needAccount {
-		sdb.journal.append(balanceIncrease{
-			account:  &addr,
-			increase: *amount,
-		})
+	// // If this account has not been read, add to the balance increment map
+	// _, needAccount := sdb.stateObjects[addr]
+	// if !needAccount && addr == ripemd && amount.IsZero() {
+	// 	needAccount = true
+	// }
+	// if !needAccount {
+	// 	sdb.journal.append(balanceIncrease{
+	// 		account:  &addr,
+	// 		increase: *amount,
+	// 	})
 
-		bi, ok := sdb.balanceInc[addr]
-		if !ok {
-			bi = &BalanceIncrease{}
-			sdb.balanceInc[addr] = bi
-		}
+	// 	bi, ok := sdb.balanceInc[addr]
+	// 	if !ok {
+	// 		bi = &BalanceIncrease{}
+	// 		sdb.balanceInc[addr] = bi
+	// 	}
 
-		if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
-			// TODO: discuss if we should ignore error
-			prev := new(uint256.Int)
-			account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
-			if account != nil {
-				prev.Add(&account.Balance, &bi.increase)
-			} else {
-				prev.Add(prev, &bi.increase)
-			}
+	// 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
+	// 		// TODO: discuss if we should ignore error
+	// 		prev := new(uint256.Int)
+	// 		account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
+	// 		if account != nil {
+	// 			prev.Add(&account.Balance, &bi.increase)
+	// 		} else {
+	// 			prev.Add(prev, &bi.increase)
+	// 		}
 
-			sdb.tracingHooks.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
-		}
+	// 		sdb.tracingHooks.OnBalanceChange(addr, prev, new(uint256.Int).Add(prev, amount), reason)
+	// 	}
 
-		bi.increase.Add(&bi.increase, amount)
-		bi.count++
-		return nil
-	}
+	// 	bi.increase.Add(&bi.increase, amount)
+	// 	bi.count++
+	// 	return nil
+	// }
 
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
