@@ -255,6 +255,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 				return nil, err
 			}
 			if ok {
+				borTx = bortypes.NewBorTransaction()
 				borTxHash = possibleBorTxnHash
 			}
 		} else {
@@ -336,6 +337,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 				return nil, err
 			}
 			if ok {
+				borTx = bortypes.NewBorTransaction()
 				borTxHash = possibleBorTxnHash
 			}
 		} else {
