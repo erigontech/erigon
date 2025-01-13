@@ -56,6 +56,43 @@ func decodeLenMismatch(want int) string {
 	return fmt.Sprintf("return fmt.Errorf(\"error decoded length mismatch, expected: %d, got: %%d\", len(b))", want)
 }
 
+// 1. add package to imports if the to-be encoded field is not in the same package
+// e.g do not import "github.com/erigontech/erigon/core/types" if the field is types.BlockNonce
+func addToImports(named *types.Named) (typ string) {
+	if named.Obj().Pkg().Name() != pkgSrc.Name() {
+		_imports[named.Obj().Pkg().Path()] = true
+		typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
+	} else {
+		typ = named.Obj().Name()
+	}
+	return
+}
+
+func uint64CastTo(kind types.BasicKind) string {
+	var cast string
+	switch kind {
+	case types.Int16:
+		cast = "int16"
+	case types.Int32:
+		cast = "int32"
+	case types.Int:
+		cast = "int"
+	case types.Int64:
+		cast = "int64"
+	case types.Uint16:
+		cast = "uint16"
+	case types.Uint32:
+		cast = "uint32"
+	case types.Uint:
+		cast = "uint"
+	case types.Uint64:
+		return "i := n"
+	default:
+		panic(fmt.Sprintf("unhandled basic kind: %d", kind))
+	}
+	return fmt.Sprintf("i := %s(n)", cast)
+}
+
 func uintHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
 	var kind types.BasicKind
 	if basic, ok := fieldType.(*types.Basic); !ok {
@@ -73,19 +110,8 @@ func uintHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string
 	fmt.Fprintf(b2, "    }\n")
 
 	// decode
-	var cast string
-	switch kind {
-	case types.Int:
-		cast = "i := int(n)"
-	case types.Int64:
-		cast = "i := int64(n)"
-	case types.Uint:
-		cast = "i := uint(n)"
-	case types.Uint64:
-	default:
-		panic(fmt.Sprintf("unhandled basic kind: %d", kind))
-	}
 	if kind != types.Uint64 {
+		cast := uint64CastTo(kind)
 		fmt.Fprintf(b3, "    if n, err := s.Uint(); err != nil {\n")
 		fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 		fmt.Fprintf(b3, "    } else {\n")
@@ -124,20 +150,7 @@ func uintPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	fmt.Fprintf(b2, "    }\n")
 
 	// decode
-	var cast string
-	switch kind {
-	case types.Int:
-		cast = "i := int(n)"
-	case types.Int64:
-		cast = "i := int64(n)"
-	case types.Uint:
-		cast = "i := uint(n)"
-	case types.Uint64:
-		cast = "i := n"
-	default:
-		panic(fmt.Sprintf("unhandled basic kind: %d", kind))
-	}
-
+	cast := uint64CastTo(kind)
 	fmt.Fprintf(b3, "    if n, err := s.Uint(); err != nil {\n")
 	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 	fmt.Fprintf(b3, "    } else {\n")
@@ -148,11 +161,9 @@ func uintPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 
 func bigIntHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
 	if named, ok := fieldType.(*types.Named); !ok {
-		_exit("blockNoncePtrHandle: expected filedType to be Named")
+		_exit("bigIntHandle: expected filedType to be Named")
 	} else {
-		if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-			_imports[named.Obj().Pkg().Path()] = true
-		}
+		_ = addToImports(named)
 	}
 	// size
 	fmt.Fprintf(b1, "    size += rlp.BigIntLenExcludingHead(&obj.%s) + 1\n", fieldName)
@@ -172,16 +183,15 @@ func bigIntHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName stri
 
 func bigIntPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
 	if ptr, ok := fieldType.(*types.Pointer); !ok {
-		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
+		_exit("bigIntPtrHandle: expected fieldType to be Pointer")
 	} else {
 		if named, ok := ptr.Elem().(*types.Named); !ok {
-			_exit("blockNoncePtrHandle: expected filedType to be Named")
+			_exit("bigIntPtrHandle: expected filedType to be Pointer Named")
 		} else {
-			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-				_imports[named.Obj().Pkg().Path()] = true
-			}
+			_ = addToImports(named)
 		}
 	}
+
 	// size
 	fmt.Fprintf(b1, "    size += 1\n")
 	fmt.Fprintf(b1, "    if obj.%s != nil {\n", fieldName)
@@ -203,12 +213,11 @@ func bigIntPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName s
 
 func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
 	if named, ok := fieldType.(*types.Named); !ok {
-		_exit("blockNoncePtrHandle: expected filedType to be Named")
+		_exit("uint256Handle: expected filedType to be Named")
 	} else {
-		if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-			_imports[named.Obj().Pkg().Path()] = true
-		}
+		_ = addToImports(named)
 	}
+
 	// size
 	fmt.Fprintf(b1, "    size += rlp.Uint256LenExcludingHead(&obj.%s) + 1\n", fieldName)
 
@@ -227,14 +236,12 @@ func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 
 func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
 	if ptr, ok := fieldType.(*types.Pointer); !ok {
-		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
+		_exit("uint256PtrHandle: expected fieldType to be Pointer")
 	} else {
 		if named, ok := ptr.Elem().(*types.Named); !ok {
-			_exit("blockNoncePtrHandle: expected filedType to be Named")
+			_exit("uint256PtrHandle: expected filedType to be Pointer Named")
 		} else {
-			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-				_imports[named.Obj().Pkg().Path()] = true
-			}
+			_ = addToImports(named)
 		}
 	}
 
@@ -287,14 +294,9 @@ func _shortArrayPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldN
 		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
 	} else {
 		if named, ok := ptr.Elem().(*types.Named); !ok {
-			_exit("blockNoncePtrHandle: expected filedType to be Pointer Named")
+			_exit("_shortArrayPtrHandle: expected filedType to be Pointer Named")
 		} else {
-			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-				_imports[named.Obj().Pkg().Path()] = true
-				typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
-			} else {
-				typ = named.Obj().Name()
-			}
+			typ = addToImports(named)
 		}
 	}
 
@@ -386,17 +388,12 @@ func bloomHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
 func bloomPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
 	var typ string
 	if ptr, ok := fieldType.(*types.Pointer); !ok {
-		_exit("_shortArrayPtrHandle: expected fieldType to be Pointer")
+		_exit("bloomPtrHandle: expected fieldType to be Pointer")
 	} else {
 		if named, ok := ptr.Elem().(*types.Named); !ok {
-			_exit("blockNoncePtrHandle: expected filedType to be Pointer Named")
+			_exit("bloomPtrHandle: expected filedType to be Pointer Named")
 		} else {
-			if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-				_imports[named.Obj().Pkg().Path()] = true
-				typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
-			} else {
-				typ = named.Obj().Name()
-			}
+			typ = addToImports(named)
 		}
 	}
 
@@ -536,11 +533,7 @@ func _shortArraySliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fiel
 		if named, ok := slc.Elem().(*types.Named); !ok {
 			_exit("_shortArraySliceHandle: expected filedType to be Slice Named")
 		} else {
-			if named.Obj().Pkg().Name() != pkgSrc.Name() {
-				typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
-			} else {
-				typ = named.Obj().Name()
-			}
+			typ = addToImports(named)
 		}
 	}
 
@@ -591,12 +584,7 @@ func _shortArrayPtrSliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, f
 			if named, ok := ptr.Elem().(*types.Named); !ok {
 				_exit("_shortArrayPtrSliceHandle: expected filedType to be Slice Pointer Named")
 			} else {
-				if named.Obj().Pkg().Name() != pkgSrc.Name() { // do not import the package where source type is located
-					_imports[named.Obj().Pkg().Path()] = true
-					typ = named.Obj().Pkg().Name() + "." + named.Obj().Name()
-				} else {
-					typ = named.Obj().Name()
-				}
+				typ = addToImports(named)
 			}
 		}
 	}

@@ -79,7 +79,7 @@ func main() {
 	result = append(result, encodingSize.Bytes()...)
 	result = append(result, encodeRLP.Bytes()...)
 	result = append(result, decodeRLP.Bytes()...)
-	// os.Stdout.Write(result)
+	os.Stdout.Write(result)
 	if *writefile {
 		outfile := fmt.Sprintf("%s/gen_%s_rlp.go", *pkgdir, strings.ToLower(typ.Obj().Name()))
 		fmt.Println("outfile: ", outfile)
@@ -173,6 +173,11 @@ func process(typ *types.Named, b1, b2, b3 *bytes.Buffer) error {
 }
 
 func findType(scope *types.Scope, typename string) (*types.Named, error) {
+	// fmt.Println("TYPENAME: ", typename)
+	// names := scope.Names()
+	// for _, s := range names {
+	// 	fmt.Println("obj: ", s)
+	// }
 	obj := scope.Lookup(typename)
 	if obj == nil {
 		return nil, fmt.Errorf("no such identifier: %s", typename)
@@ -181,22 +186,30 @@ func findType(scope *types.Scope, typename string) (*types.Named, error) {
 	if !ok {
 		return nil, errors.New("not a type")
 	}
-	named := typ.Type().(*types.Named)
-	_, ok = named.Underlying().(*types.Struct)
-	if !ok {
-		return nil, errors.New("not a struct type")
+	if named, ok := typ.Type().(*types.Named); ok {
+		return named, nil
 	}
-	return named, nil
+	return nil, errors.New("not a named type")
 }
 
-func addEncodeLogic(b1, b2, b3 *bytes.Buffer, namedType *types.Named) error {
-	_struct := namedType.Underlying().(*types.Struct)
-	for i := 0; i < _struct.NumFields(); i++ {
+func addEncodeLogic(b1, b2, b3 *bytes.Buffer, named *types.Named) error {
 
-		strTyp := matchTypeToString(_struct.Field(i).Type(), "")
-		// fmt.Println("-+-", strTyp)
+	if _struct, ok := named.Underlying().(*types.Struct); ok {
+		for i := 0; i < _struct.NumFields(); i++ {
 
-		matchStrTypeToFunc(strTyp)(b1, b2, b3, _struct.Field(i).Type(), _struct.Field(i).Name())
+			strTyp := matchTypeToString(_struct.Field(i).Type(), "")
+			// fmt.Println("-+-", strTyp)
+
+			matchStrTypeToFunc(strTyp)(b1, b2, b3, _struct.Field(i).Type(), _struct.Field(i).Name())
+		}
+	} else { // user named types that are not structs, could be:
+		// 1. type aliases
+		//     - type aliases for basic types, e.g type MyInt int
+		//     - type aliases for user named types, e.g type MyHash common.Hash (could be struct as well!)
+		// 2. slice types
+		//     - slice of basice types, e.g type MyInts []int
+		//     - slice of user named types, e.g type ReceiptsForStorage []*ReceiptForStorage
 	}
+
 	return nil
 }

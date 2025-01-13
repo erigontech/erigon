@@ -707,13 +707,13 @@ func TestTestingStruct(t *testing.T) {
 	// 	enc := randTestingStruct(tr)
 	// 	buf.Reset()
 
-	// 	if err := enc.EncodeRLP2(&buf); err != nil {
+	// 	if err := enc.EncodeRLP(&buf); err != nil {
 	// 		t.Errorf("error: TestingStruct.EncodeRLP(): %v", err)
 	// 	}
 
 	// 	s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
 	// 	dec := &TestingStruct{}
-	// 	if err := dec.DecodeRLP2(s); err != nil {
+	// 	if err := dec.DecodeRLP(s); err != nil {
 	// 		t.Errorf("error: TestingStruct.DecodeRLP(): %v", err)
 	// 		panic(err)
 	// 	}

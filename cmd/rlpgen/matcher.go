@@ -57,9 +57,9 @@ func matchTypeToString(fieldType types.Type, in string) string {
 
 func matchStrTypeToFunc(strType string) handle {
 	switch strType {
-	case "int", "int64", "uint", "uint64": // test/add int16, int32, uint16, uint32
+	case "int16", "int32", "int", "int64", "uint16", "uint32", "uint", "uint64":
 		return handlers["uint64"]
-	case "*int", "*int64", "*uint", "*uint64":
+	case "*int16", "*int32", "*int", "*int64", "*uint16", "*uint32", "*uint", "*uint64":
 		return handlers["*uint64"]
 	default:
 		if fn, ok := handlers[strType]; ok {
