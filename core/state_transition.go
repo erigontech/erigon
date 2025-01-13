@@ -381,10 +381,11 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error) {
 	fmt.Println(st.evm.Context.BlockNumber, "A")
 	if mint := st.msg.Mint(); mint != nil {
-		fmt.Println(mint.Uint64())
-		if err := st.state.AddBalance(st.msg.From(), mint, tracing.BalanceIncreaseDaoContract); err != nil {
+		fmt.Println("mint", st.msg.From(), mint.Uint64())
+		if err := st.state.AddBalance(st.msg.From(), mint, tracing.BalanceChangeUnspecified); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
+		fmt.Println("end mint")
 	}
 	snap := st.state.Snapshot()
 
