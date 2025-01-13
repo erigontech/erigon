@@ -695,11 +695,7 @@ func sequencingBatchStep(
 		return err
 	}
 
-	if err = cfg.txPool.RemoveMinedTransactions(ctx, sdb.tx, header.GasLimit, minedTxsToRemove); err != nil {
-		return err
-	}
-
-	return nil
+	return removeMinedTransactionsFromPool(ctx, cfg, header.GasLimit, minedTxsToRemove, logPrefix)
 }
 
 func removeInclusionTransaction(orig []types.Transaction, index int) []types.Transaction {
@@ -712,4 +708,18 @@ func removeInclusionTransaction(orig []types.Transaction, index int) []types.Tra
 func isOkKnownError(err error) bool {
 	return err == nil ||
 		errors.Is(err, core.ErrNonceTooHigh)
+}
+
+func removeMinedTransactionsFromPool(ctx context.Context, cfg SequenceBlockCfg, gasLimit uint64, minedTxsToRemove []common.Hash, logPrefix string) error {
+	roTx, err := cfg.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+
+	if err = cfg.txPool.RemoveMinedTransactions(ctx, roTx, gasLimit, minedTxsToRemove); err != nil {
+		return fmt.Errorf("[%s] removing mined transactions from pool: %w", logPrefix, err)
+	}
+
+	return nil
 }
