@@ -101,7 +101,7 @@ on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-fil
 Sync Times
 ==========
 
-These are the sync times syncing from scratch to the tip of the chain.
+These are the  approximate sync times syncing from scratch to the tip of the chain (results may vary depending on hardware and bandwidth).
 
 
 | Chain      | Archive         | Full           | Minimal        |
