@@ -1589,11 +1589,23 @@ func (s *Ethereum) Start() error {
 		// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
 		// to initialize it properly.
 		// 2) we cannot propose for block 1 regardless.
-		s.bgComponentsEg.Go(func() error { return s.txPool.Run(s.sentryCtx) })
+		s.bgComponentsEg.Go(func() error {
+			err := s.txPool.Run(s.sentryCtx)
+			if err != nil {
+				s.logger.Error("txPool.Run error", "err", err)
+			}
+			return err
+		})
 	}
 
 	if s.shutterPool != nil {
-		s.bgComponentsEg.Go(func() error { return s.shutterPool.Run(s.sentryCtx) })
+		s.bgComponentsEg.Go(func() error {
+			err := s.shutterPool.Run(s.sentryCtx)
+			if err != nil {
+				s.logger.Error("shutterPool.Run error", "err", err)
+			}
+			return err
+		})
 	}
 
 	return nil
