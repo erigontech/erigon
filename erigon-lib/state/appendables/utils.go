@@ -29,7 +29,7 @@ func Decode64FromBytes(buf []byte, x8Bytes bool) (x uint64) {
 }
 
 func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, rwTx kv.RwTx) error {
-	c, err := rwTx.Cursor(tbl)
+	c, err := rwTx.RwCursor(tbl)
 	if err != nil {
 		return err
 	}
@@ -40,13 +40,13 @@ func DeleteRangeFromTbl(tbl string, fromPrefix, toPrefix []byte, limit uint64, r
 			return err
 		}
 
-		if err := rwTx.Delete(tbl, k); err != nil {
-			return err
+		limit--
+		if limit < 0 {
+			break
 		}
 
-		limit--
-		if limit <= 0 {
-			break
+		if err := c.DeleteCurrent(); err != nil {
+			return err
 		}
 	}
 

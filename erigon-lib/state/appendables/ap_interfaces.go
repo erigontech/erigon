@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/stream"
 )
 
 // 3 appendable categories:
@@ -44,10 +43,16 @@ type Appendable interface {
 // appendable extensions...providing different query patterns
 // idea is that aggregator "return" a *Queries interface, and user can do Get/Put/Range on that.
 // alternate is to expose eveything, but that means exposing tsId/forkId etc. even for appendables
-// for which it is not relevant.
-type CanonicalQueries interface {
+// for which it is not relevant. Plus, sometimes base appendable tsNum should also be managed...
+type PointQueries interface {
 	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
 	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
+}
+
+type RangedQueries interface {
+	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
+	Put(tsNum TsNum, value VVType, tx kv.RwTx) error
+	PutEntityEnd(tsNum TsNum, startBaseTsNum TsNum, tx kv.RwTx) error
 }
 
 type MarkedQueries interface {
@@ -56,29 +61,4 @@ type MarkedQueries interface {
 	Put(tsId TsId, forkId []byte, value VVType, tx kv.RwTx) error
 }
 
-type IncrementalQueries interface {
-	Get(tsNum TsNum, tx kv.Tx) (VVType, error)
-	GetNc(tsId TsId, tx kv.Tx) (VVType, error)
-	Put(tsId TsId, value VVType, tx kv.RwTx) error
-}
-
-// type CanonicalAppendableI interface {
-// 	Appendable
-// 	CanonicalQueries
-// }
-
-// type MixedAppendableI interface {
-// 	Appendable
-// 	MixedQueries
-// }
-
-// type MarkedAppendableI interface {
-// 	Appendable
-// 	MarkedQueries
-// }
-
-// converts baseTsNum to tsId of the appendable
-// this should only refer to hot db, and not the snapshot files.
-type TsNumMapper interface {
-	Get(baseTsNumFrom, baseTsNumTo TsNum, tx kv.Tx) stream.Uno[VKType]
-}
+// type BindQueries interface { // 1:many
