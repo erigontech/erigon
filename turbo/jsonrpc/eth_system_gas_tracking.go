@@ -87,11 +87,26 @@ func (t *RecurringL1GasPriceTracker) getLatestPrice() *big.Int {
 	return t.latestPrice
 }
 
-func (t *RecurringL1GasPriceTracker) GetLowestPrice() *big.Int {
-	t.lowestMtx.Lock()
-	defer t.lowestMtx.Unlock()
+func (t *RecurringL1GasPriceTracker) getLowestPrice() *big.Int {
+	t.latestMtx.Lock()
+	defer t.latestMtx.Unlock()
 
 	return t.lowestPrice
+}
+
+func (t *RecurringL1GasPriceTracker) GetLowestPrice() *big.Int {
+	if t.gasLess {
+		return big.NewInt(0)
+	}
+
+	if t.getLowestPrice() == nil {
+		_, err := t.GetLatestPrice()
+		if err != nil {
+			return big.NewInt(0)
+		}
+	}
+
+	return t.getLowestPrice()
 }
 
 func (t *RecurringL1GasPriceTracker) setLowestPrice(price *big.Int) {
