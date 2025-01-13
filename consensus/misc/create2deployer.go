@@ -2,6 +2,7 @@ package misc
 
 import (
 	"encoding/hex"
+	"fmt"
 
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
@@ -30,6 +31,7 @@ func EnsureCreate2Deployer(c *chain.Config, timestamp uint64, statedb *state.Int
 	if !IsCanyonActivationBlock(c, timestamp) {
 		return false
 	}
+	fmt.Println("X")
 	statedb.SetCode(create2DeployerAddress, create2DeployerCode)
 	return true
 }
