@@ -500,7 +500,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 				return 0, fmt.Errorf("%w: authorization signature: %s", ErrParseTxn, err) //nolint
 			}
 			slot.Authorizations = append(slot.Authorizations, sig)
-			slot.AuthRaw = append(slot.AuthRaw, payload[rawStart:rawEnd])
+			slot.AuthRaw = append(slot.AuthRaw, common.CopyBytes(payload[rawStart:rawEnd]))
 			authPos += authLen
 			if authPos != p2 {
 				return 0, fmt.Errorf("%w: authorization: unexpected list items", ErrParseTxn)
