@@ -185,6 +185,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
+		s.logger.Error("[Sentinel] failed Listening for TCP packets", "err", err)
 		return nil, err
 	}
 	s.logger.Info("[Sentinel] Listening for TCP packets", "addr", net.Self().String())
