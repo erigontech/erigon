@@ -20,6 +20,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon-lib/chain"
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/crypto"
@@ -100,6 +102,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 			// The actual nonce for deposit transactions is only recorded from Regolith onwards and
 			// otherwise must be nil.
 			receipt.DepositNonce = &nonce
+			fmt.Println("applyTransaction: deposit nonce", *receipt.DepositNonce)
 
 			if config.IsOptimismCanyon(evm.Context.Time) {
 				receipt.DepositReceiptVersion = new(uint64)
