@@ -536,6 +536,7 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 			if err := rlp.Encode(w, depositData); err != nil {
 				panic(err)
 			}
+			fmt.Println(depositData)
 		} else {
 			if err := rlp.Encode(w, data); err != nil {
 				panic(err)
@@ -672,6 +673,25 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash libcommon
 		r.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
+
+	// TODO: implement properly
+	// if config.IsOptimismBedrock(blockNum) { // need at least an info tx and a non-info tx
+	// 	gasParams, err := opstack.ExtractL1GasParams(config, time, txn.GetData())
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if txn.Type() != OptimismDepositTxType {
+	// 		r.L1GasPrice = gasParams.L1BaseFee.ToBig()
+	// 		l1Fee, l1GasUsed := gasParams.CostFunc(txn.RollupCostData())
+	// 		r.L1Fee = l1Fee.ToBig()
+	// 		r.L1GasUsed = l1GasUsed.ToBig()
+	// 		r.FeeScalar = gasParams.FeeScalar
+	// 		r.L1BlobBaseFee = gasParams.L1BlobBaseFee.ToBig()
+	// 		r.L1BaseFeeScalar = u32ptrTou64ptr(gasParams.L1BaseFeeScalar)
+	// 		r.L1BlobBaseFeeScalar = u32ptrTou64ptr(gasParams.L1BlobBaseFeeScalar)
+	// 	}
+	// }
+
 	return nil
 }
 
