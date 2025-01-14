@@ -169,6 +169,16 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
+	if r.Type == OptimismDepositTxType {
+		buf := new(bytes.Buffer)
+		buf.WriteByte(r.Type)
+		withNonceAndReceiptVersion := &depositReceiptRlp{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs, r.DepositNonce, r.DepositReceiptVersion}
+		if err := rlp.Encode(buf, withNonceAndReceiptVersion); err != nil {
+			return err
+		}
+		return rlp.Encode(w, buf.Bytes())
+	}
+
 	buf := encodeBufferPool.Get().(*bytes.Buffer)
 	defer encodeBufferPool.Put(buf)
 	buf.Reset()
