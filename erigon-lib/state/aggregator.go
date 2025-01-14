@@ -1582,19 +1582,7 @@ func (ac *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 // -- range end
 
 func (ac *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	switch domain {
-	case kv.AccountsDomain:
-		v, ok, err = ac.d[domain].ht.HistorySeek(key, ts, tx)
-		if err != nil {
-			return nil, false, err
-		}
-		if !ok || len(v) == 0 {
-			return v, ok, nil
-		}
-		return v, true, nil
-	default:
-		return ac.d[domain].ht.HistorySeek(key, ts, tx)
-	}
+	return ac.d[domain].ht.HistorySeek(key, ts, tx)
 }
 
 func (ac *AggregatorRoTx) HistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
