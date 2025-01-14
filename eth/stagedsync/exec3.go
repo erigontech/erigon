@@ -551,7 +551,7 @@ Loop:
 
 				Config: chainConfig,
 			}
-			fmt.Println(chainConfig.IsCanyon(header.Time))
+
 			if txTask.HistoryExecution && usedGas == 0 {
 				usedGas, _, _, err = rawtemporaldb.ReceiptAsOf(executor.tx().(kv.TemporalTx), txTask.TxNum)
 				if err != nil {

@@ -536,7 +536,6 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 			if err := rlp.Encode(w, depositData); err != nil {
 				panic(err)
 			}
-			fmt.Println(depositData)
 		} else {
 			if err := rlp.Encode(w, data); err != nil {
 				panic(err)
