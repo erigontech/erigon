@@ -29,13 +29,12 @@ jobs:
         with:
           filters: |
             changed_files:
-              - '**/*'
-              - '!dashboards/**'
-              - '!**/.github/workflows/**'
+              - 'dashboards/**'
+              - '**/.github/workflows/**'
 
   tests-mac-linux:
     needs: source-of-changes
-    if: needs.source-of-changes.outputs.changed_files == 'true'
+    if: needs.source-of-changes.outputs.changed_files != 'true'
     strategy:
       matrix:
         os:
@@ -71,7 +70,7 @@ jobs:
 
   tests-windows:
     needs: source-of-changes
-    if: needs.source-of-changes.outputs.changed_files == 'true'
+    if: needs.source-of-changes.outputs.changed_files != 'true'
     strategy:
       matrix:
         os: [ windows-2022 ]
@@ -106,7 +105,7 @@ jobs:
 
   dummyOK:
     needs: source-of-changes
-    if: needs.source-of-changes.outputs.changed_files != 'true'
+    if: needs.source-of-changes.outputs.changed_files == 'true'
     runs-on: ubuntu-latest
 
     steps:
