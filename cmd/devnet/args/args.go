@@ -60,9 +60,7 @@ func AsArgs(args interface{}) (Args, error) {
 
 			key = strings.TrimLeft(key, " ")
 
-			if pos := strings.Index(key, ":"); pos != -1 {
-				key = key[:pos]
-			}
+			key, _, _ = strings.Cut(key, ":")
 
 			switch {
 			case strings.HasPrefix(key, "---"):
