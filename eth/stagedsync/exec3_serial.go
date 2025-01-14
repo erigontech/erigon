@@ -66,7 +66,6 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 					// The actual nonce for deposit transactions is only recorded from Regolith onwards and
 					// otherwise must be nil.
 					receipt.DepositNonce = txTask.OptimismDepositNonce
-					fmt.Println("applyTransaction: deposit nonce", *receipt.DepositNonce)
 
 					if config.IsOptimismCanyon(txTask.Header.Time) && config.IsOptimismRegolith(txTask.Header.Time) {
 						receipt.DepositReceiptVersion = new(uint64)
