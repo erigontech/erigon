@@ -18,11 +18,15 @@ on:
   workflow_dispatch:
 
 jobs:
+  
   source-of-changes:
     runs-on: ubuntu-latest
     outputs:
       changed_files: ${{ steps.filter.outputs.changed_files }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Check for changes outside specific directories
         id: filter
         uses: dorny/paths-filter@v3
