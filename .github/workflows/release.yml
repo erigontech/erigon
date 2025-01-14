@@ -213,10 +213,10 @@ jobs:
       - name: Setup working directory
         run: |
           echo "DEBUG: Create working directory for workflow:"
-          mkdir "${GITHUB_WORKFLOW}-${GITHUB_RUN_ID}"
+          mkdir "workflow-${GITHUB_WORKFLOW}-run-${GITHUB_RUN_NUMBER}"
           echo "DEBUG: Content of current directory $(pwd) :"
           ls -lao
-          cd "${GITHUB_WORKFLOW}-${GITHUB_RUN_ID}"
+          cd "workflow-${GITHUB_WORKFLOW}-run-${GITHUB_RUN_NUMBER}"
 
       - name: Set up Python
         uses: actions/setup-python@v5
