@@ -36,6 +36,11 @@ func (tr *TRand) RandUint64() *uint64 {
 	return &a
 }
 
+func (tr *TRand) RandUint256() *uint256.Int {
+	a := new(uint256.Int).SetBytes(tr.RandBytes(tr.RandIntInRange(1, 32)))
+	return a
+}
+
 func (tr *TRand) RandBig() *big.Int {
 	return big.NewInt(int64(tr.rnd.Int()))
 }
@@ -120,7 +125,7 @@ func (tr *TRand) RandAuthorizations(size int) []Authorization {
 	auths := make([]Authorization, size)
 	for i := 0; i < size; i++ {
 		auths[i] = Authorization{
-			ChainID: *tr.RandUint64(),
+			ChainID: *tr.RandUint256(),
 			Address: tr.RandAddress(),
 			Nonce:   *tr.RandUint64(),
 			YParity: uint8(*tr.RandUint64()),
