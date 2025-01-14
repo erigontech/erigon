@@ -14,7 +14,7 @@ on:
       - synchronize
       - ready_for_review
     paths:
-      - '!.github/workflows/**'
+      # - '!.github/workflows/**'
       - '!dashboards/**'
 
 jobs:
