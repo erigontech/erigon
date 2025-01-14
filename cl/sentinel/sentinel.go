@@ -172,11 +172,13 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.logger.Info("[Sentinel] Listening for UDP packets", "at", udpAddr.String())
 
 	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort), s.cfg.TmpDir)
 	if err != nil {
 		return nil, err
 	}
+	s.logger.Info("[Sentinel] Listening for TCP packets", "addr", ip, "port", s.cfg.TCPPort)
 
 	// Start stream handlers
 
