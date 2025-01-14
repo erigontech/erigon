@@ -306,6 +306,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining bool) {
 			if msg.IsOptimismDepositTx() && rw.chainConfig.IsOptimismRegolith(rw.evm.Context.Time) {
 				txTask.OptimismDepositNonce = new(uint64)
 				*txTask.OptimismDepositNonce = nonce
+				fmt.Println("OptimismDepositNonce", *txTask.OptimismDepositNonce)
 			}
 		}
 
