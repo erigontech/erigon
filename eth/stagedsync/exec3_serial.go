@@ -68,7 +68,7 @@ func (se *serialExecutor) execute(ctx context.Context, tasks []*state.TxTask) (c
 					receipt.DepositNonce = txTask.OptimismDepositNonce
 					fmt.Println("applyTransaction: deposit nonce", *receipt.DepositNonce)
 
-					if config.IsOptimismCanyon(txTask.Header.Time) {
+					if config.IsOptimismCanyon(txTask.Header.Time) && config.IsOptimismRegolith(txTask.Header.Time) {
 						receipt.DepositReceiptVersion = new(uint64)
 						*receipt.DepositReceiptVersion = types.CanyonDepositReceiptVersion
 					}
