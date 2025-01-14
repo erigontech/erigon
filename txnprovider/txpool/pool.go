@@ -1902,7 +1902,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 	saveToFile := time.NewTicker(100 * time.Second)
 	defer saveToFile.Stop()
 
-	if err := p.Start(ctx); err != nil {
+	if err := p.start(ctx); err != nil {
 		p.logger.Error("[txpool] Failed to start", "err", err)
 		return err
 	}
