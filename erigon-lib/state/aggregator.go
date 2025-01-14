@@ -1075,7 +1075,7 @@ func (ac *AggregatorRoTx) Prune(ctx context.Context, tx kv.RwTx, limit uint64, l
 	}
 
 	stats := make(map[kv.InvertedIdx]*InvertedIndexPruneStat)
-	for iikey, _ := range ac.a.iis {
+	for iikey := range ac.a.iis {
 		stat, err := ac.iis[iikey].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
 		if err != nil {
 			return nil, err
