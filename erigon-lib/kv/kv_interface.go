@@ -458,8 +458,6 @@ type (
 	Appendable  uint16
 	History     string
 	InvertedIdx string
-
-	InvertedIdxPos uint16
 )
 
 type TemporalGetter interface {
