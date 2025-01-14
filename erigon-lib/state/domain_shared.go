@@ -662,19 +662,10 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte, prev
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
-	switch table {
-	case kv.LogAddrIdx, kv.TblLogAddressIdx:
-		err = sd.iiWriters[kv.LogAddrIdx].Add(key)
-	case kv.LogTopicIdx, kv.TblLogTopicsIdx, kv.LogTopicIndex:
-		err = sd.iiWriters[kv.LogTopicIdx].Add(key)
-	case kv.TblTracesToIdx:
-		err = sd.iiWriters[kv.TracesToIdx].Add(key)
-	case kv.TblTracesFromIdx:
-		err = sd.iiWriters[kv.TracesFromIdx].Add(key)
-	default:
-		panic(fmt.Errorf("unknown shared index %s", table))
+	if writer, ok := sd.iiWriters[table]; ok {
+		return writer.Add(key)
 	}
-	return err
+	panic(fmt.Errorf("unknown index %s", table))
 }
 
 func (sd *SharedDomains) SetTx(tx kv.Tx) {
