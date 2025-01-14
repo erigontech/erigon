@@ -36,8 +36,8 @@ type Appendable interface {
 	SetIndexBuilders([]AccessorIndexBuilder)
 	DirtySegmentsMaxTsNum() TsNum
 	VisibleSegmentsMaxTsNum() TsNum
-	Prune(ctx context.Context, baseKeyTo TsNum, limit uint64, rwTx kv.RwTx) error
-	Unwind(ctx context.Context, baseKeyFrom TsNum, rwTx kv.RwTx) error
+	Prune(ctx context.Context, baseTsNumTo TsNum, limit uint64, rwTx kv.RwTx) error
+	Unwind(ctx context.Context, baseTsNumFrom TsNum, rwTx kv.RwTx) error
 }
 
 // appendable extensions...providing different query patterns
