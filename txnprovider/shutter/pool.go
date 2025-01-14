@@ -19,34 +19,49 @@ package shutter
 import (
 	"context"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/core/types"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/shutter/proto"
 )
 
 var _ txnprovider.TxnProvider = (*Pool)(nil)
 
 type Pool struct {
-	logger               log.Logger
-	config               Config
-	secondaryTxnProvider txnprovider.TxnProvider
+	logger                  log.Logger
+	config                  Config
+	secondaryTxnProvider    txnprovider.TxnProvider
+	decryptionKeysListener  DecryptionKeysListener
+	decryptionKeysProcessor DecryptionKeysProcessor
 }
 
 func NewPool(logger log.Logger, config Config, secondaryTxnProvider txnprovider.TxnProvider) *Pool {
+	logger = logger.New("component", "shutter")
+	decryptionKeysListener := NewDecryptionKeysListener(logger, config)
+	decryptionKeysProcessor := NewDecryptionKeysProcessor(logger)
 	return &Pool{
-		logger:               logger.New("component", "shutter"),
-		config:               config,
-		secondaryTxnProvider: secondaryTxnProvider,
+		logger:                  logger,
+		config:                  config,
+		secondaryTxnProvider:    secondaryTxnProvider,
+		decryptionKeysListener:  decryptionKeysListener,
+		decryptionKeysProcessor: decryptionKeysProcessor,
 	}
 }
 
 func (p Pool) Run(ctx context.Context) error {
 	p.logger.Info("running pool")
-	//
-	// TODO - start pool, sentinel listeners for keyper decryption keys and other necessary background goroutines
-	//        blocks until all sub-components have shutdown or have error-ed
-	//
-	return nil
+
+	unregisterDkpObserver := p.decryptionKeysListener.RegisterObserver(func(msg *proto.DecryptionKeys) {
+		p.decryptionKeysProcessor.Enqueue(msg)
+	})
+	defer unregisterDkpObserver()
+
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return p.decryptionKeysListener.Run(ctx) })
+	eg.Go(func() error { return p.decryptionKeysProcessor.Run(ctx) })
+	return eg.Wait()
 }
 
 func (p Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
