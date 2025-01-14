@@ -289,7 +289,7 @@ jobs:
 
 
   publish-docker-image:
-    needs: [ build-release ]
+    needs: [ build-release, test-release ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     name: Docker image        
