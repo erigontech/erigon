@@ -341,6 +341,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.TxHash = txn.Hash()
 			}
 		} else {
+			for i := range r.Logs {
+				println("in receipt:", r.Logs[i].Index, "in raw", rawLogs[i].Index)
+			}
 			filtered = r.Logs.Filter(addrMap, crit.Topics, 0)
 		}
 
