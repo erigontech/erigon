@@ -326,7 +326,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		rawLogs := exec.GetRawLogs(txIndex)
-
+		for i := range rawLogs {
+			println("in raw", rawLogs[i].Index)
+		}
 		// `ReadReceipt` does fill `rawLogs` calculated fields. but we don't need it anymore.
 		r, err := rawtemporaldb.ReceiptAsOfWithApply(tx, txNum, rawLogs, txIndex, blockHash, blockNum, txn)
 		if err != nil {
