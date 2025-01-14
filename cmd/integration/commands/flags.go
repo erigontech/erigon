@@ -60,6 +60,7 @@ var (
 	rpcUrl, secondaryRpcUrl    string
 	rpcMaxRetries              int
 	rpcBackOffDuration         time.Duration
+	maxParallelRequests        int
 
 	chainTipMode bool
 	syncCfg      = ethconfig.Defaults.Sync
@@ -227,4 +228,8 @@ func withRpcMaxRetries(cmd *cobra.Command) {
 
 func withRpcBackOffDuration(cmd *cobra.Command) {
 	cmd.Flags().DurationVar(&rpcBackOffDuration, "rpc.backoff.duration", 30*time.Second, "backoff duration for retry-able rpc request errors")
+}
+
+func withMaxParallelRequests(cmd *cobra.Command) {
+	cmd.Flags().IntVar(&maxParallelRequests, "max.parallel.req", 8, "max parallel requests")
 }

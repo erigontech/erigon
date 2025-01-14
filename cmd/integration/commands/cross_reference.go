@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -45,7 +46,46 @@ func crossReferenceBlockHashes(ctx context.Context, logger log.Logger, startBloc
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
 
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(maxParallelRequests)
 	for blockNum := startBlockNum; blockNum < endBlockNum; blockNum++ {
+		eg.Go(func() error {
+			blockFields, err := fetchBlockViaRpc(logger, rpcUrl, blockNum)
+			if err != nil {
+				return err
+			}
+
+			goldenBlockFields, err := fetchBlockViaRpcWithRetry(ctx, logger, secondaryRpcUrl, blockNum)
+			if err != nil {
+				return err
+			}
+
+			resultMap := blockFields["result"].(map[string]interface{})
+			goldenResultMap := goldenBlockFields["result"].(map[string]interface{})
+
+			hash, goldenHash := resultMap["hash"].(string), goldenResultMap["hash"].(string)
+			if hash != goldenHash {
+				return fmt.Errorf("header hash mismatch: blockNum=%d, hash=%s, goldenHash=%s", blockNum, hash, goldenHash)
+			}
+
+			transactionsRootHash, goldenTransactionsRootHash := resultMap["transactionsRoot"].(string), goldenResultMap["transactionsRoot"].(string)
+			if transactionsRootHash != goldenTransactionsRootHash {
+				return fmt.Errorf("transactionsRoot hash mismatch: blockNum=%d, transactionsRootHash=%s, goldenTransactionsRootHash=%s", blockNum, transactionsRootHash, goldenTransactionsRootHash)
+			}
+
+			transactions, goldenTransactions := resultMap["transactions"].([]interface{}), goldenResultMap["transactions"].([]interface{})
+			if len(transactions) != len(goldenTransactions) {
+				return fmt.Errorf("transactions length mismatch: blockNum=%d, transactions=%d, goldenTransactions=%d", blockNum, len(transactions), len(goldenTransactions))
+			}
+			for i, transaction := range transactions {
+				if transaction.(string) != goldenTransactions[i].(string) {
+					return fmt.Errorf("transaction mismatch: blockNum=%d, transactionIdx=%d, transaction=%s, goldenTransaction=%s", blockNum, i, transaction, goldenTransactions[i])
+				}
+			}
+
+			return nil
+		})
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -58,39 +98,10 @@ func crossReferenceBlockHashes(ctx context.Context, logger log.Logger, startBloc
 			)
 		default: // no-op
 		}
+	}
 
-		blockFields, err := fetchBlockViaRpc(logger, rpcUrl, blockNum)
-		if err != nil {
-			return err
-		}
-
-		goldenBlockFields, err := fetchBlockViaRpcWithRetry(ctx, logger, secondaryRpcUrl, blockNum)
-		if err != nil {
-			return err
-		}
-
-		resultMap := blockFields["result"].(map[string]interface{})
-		goldenResultMap := goldenBlockFields["result"].(map[string]interface{})
-
-		hash, goldenHash := resultMap["hash"].(string), goldenResultMap["hash"].(string)
-		if hash != goldenHash {
-			return fmt.Errorf("header hash mismatch: blockNum=%d, hash=%s, goldenHash=%s", blockNum, hash, goldenHash)
-		}
-
-		transactionsRootHash, goldenTransactionsRootHash := resultMap["transactionsRoot"].(string), goldenResultMap["transactionsRoot"].(string)
-		if transactionsRootHash != goldenTransactionsRootHash {
-			return fmt.Errorf("transactionsRoot hash mismatch: blockNum=%d, transactionsRootHash=%s, goldenTransactionsRootHash=%s", blockNum, transactionsRootHash, goldenTransactionsRootHash)
-		}
-
-		transactions, goldenTransactions := resultMap["transactions"].([]interface{}), goldenResultMap["transactions"].([]interface{})
-		if len(transactions) != len(goldenTransactions) {
-			return fmt.Errorf("transactions length mismatch: blockNum=%d, transactions=%d, goldenTransactions=%d", blockNum, len(transactions), len(goldenTransactions))
-		}
-		for i, transaction := range transactions {
-			if transaction.(string) != goldenTransactions[i].(string) {
-				return fmt.Errorf("transaction mismatch: blockNum=%d, transactionIdx=%d, transaction=%s, goldenTransaction=%s", blockNum, i, transaction, goldenTransactions[i])
-			}
-		}
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 
 	logger.Info("Cross reference block hashes completed successfully.")
